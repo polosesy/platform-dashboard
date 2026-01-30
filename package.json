@@ -1,0 +1,15 @@
+{
+  "name": "azure-unified-dashboard",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
+    "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
+    "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}

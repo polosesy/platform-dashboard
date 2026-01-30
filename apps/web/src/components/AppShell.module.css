@@ -1,0 +1,12 @@
+.shell {
+  min-height: 100vh;
+}
+
+.main {
+  padding: 18px 18px 40px;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
