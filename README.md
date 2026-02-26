@@ -75,6 +75,32 @@ Grant the API app's service principal access to query the workspace:
 - API uses `@azure/identity` `OnBehalfOfCredential` + `@azure/arm-resourcegraph` to query a curated set of resource types.
 - Graph nodes/edges are derived from Resource Graph results (RG containment + vnet/subnet + nic/vm + aks subnet + private endpoint subnet).
 
+## Reservations (Consumption)
+
+UI page: `/architecture`
+
+API endpoint: `/api/reservations/utilization`
+
+- If Azure Reservations is configured, the API queries ARM `Microsoft.Consumption/reservationSummaries` using OBO.
+- Otherwise it serves mock data.
+
+Query params:
+
+- `grain`: `daily` | `monthly`
+- `subscriptionId`: optional; when present, it must be in `AZURE_SUBSCRIPTION_IDS`.
+
+### Required config
+
+Env vars:
+
+- Same API OBO vars: `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`
+- Azure target allow-list: `AZURE_SUBSCRIPTION_IDS`
+- Optional: `AZURE_RESERVATIONS_GRAIN` (default: `monthly`)
+
+### RBAC
+
+The signed-in user (via OBO) must have permission to read reservation summaries on the target subscription(s) (e.g. `Cost Management Reader` or equivalent).
+
 ## ArgoCD
 
 UI page: `/argocd`

@@ -16,5 +16,10 @@ export const msalConfig: Configuration = {
 };
 
 export const loginRequest: PopupRequest = {
-  scopes: ["openid", "profile", "email"]
+  scopes: [
+    "openid",
+    "profile",
+    "email",
+    ...(process.env.NEXT_PUBLIC_AZURE_AD_API_SCOPE ? [process.env.NEXT_PUBLIC_AZURE_AD_API_SCOPE] : [])
+  ]
 };

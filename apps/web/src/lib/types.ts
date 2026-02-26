@@ -87,3 +87,59 @@ export type NetworkSummary = {
   topPorts: NetworkPortSummary[];
   note?: string;
 };
+
+export type ArchitectureFlowEdgeMetric = {
+  source: string;
+  target: string;
+  totalBytes: number;
+  allowedFlows: number;
+  deniedFlows: number;
+};
+
+export type ArchitectureFlowOverlayResponse = {
+  generatedAt: string;
+  lookbackMinutes: number;
+  level: "subnet";
+  edges: ArchitectureFlowEdgeMetric[];
+  unmatchedPairs: NetworkFlowPair[];
+  note?: string;
+};
+
+export type ReservationUtilizationRow = {
+  reservationId?: string;
+  reservationOrderId?: string;
+  skuName?: string;
+  usedHours: number;
+  reservedHours: number;
+  utilizedPercentage?: number;
+};
+
+export type SubscriptionReservationUtilization = {
+  subscriptionId: string;
+  grain: "daily" | "monthly";
+  utilizedPercentage: number;
+  usedHours: number;
+  reservedHours: number;
+  topReservations: ReservationUtilizationRow[];
+};
+
+export type ReservationUtilizationResponse = {
+  generatedAt: string;
+  grain: "daily" | "monthly";
+  utilizedPercentage: number;
+  usedHours: number;
+  reservedHours: number;
+  subscriptions: SubscriptionReservationUtilization[];
+  note?: string;
+};
+
+export type AzureSubscriptionOption = {
+  subscriptionId: string;
+  name?: string;
+};
+
+export type AzureSubscriptionsResponse = {
+  generatedAt: string;
+  subscriptions: AzureSubscriptionOption[];
+  note?: string;
+};

@@ -1,0 +1,614 @@
+.page {
+  display: grid;
+  gap: 12px;
+}
+
+/* ── Header ── */
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.headerLeft {
+  display: grid;
+  gap: 2px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.subTitle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.headerRight {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.statusLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.select {
+  appearance: none;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.66);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  font-size: 12px;
+}
+
+.refreshBtn {
+  padding: 7px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.66);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.refreshBtn:hover {
+  background: rgba(255, 255, 255, 0.90);
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 59, 1, 0.26);
+  background: rgba(216, 59, 1, 0.10);
+  border-radius: var(--radius-md);
+  color: rgba(216, 59, 1, 0.95);
+  font-size: 13px;
+}
+
+/* ── Visualization Mode Buttons ── */
+
+.modeGroup {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.50);
+}
+
+.modeBtn {
+  all: unset;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.modeBtn:last-child {
+  border-right: none;
+}
+
+.modeBtn:hover {
+  background: rgba(255, 255, 255, 0.80);
+}
+
+.modeBtnActive {
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.90);
+}
+
+/* ── Control Bar ── */
+
+.controlBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+}
+
+.overlayToggles {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.overlayToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.50);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms ease;
+}
+
+.overlayToggle:hover {
+  background: rgba(255, 255, 255, 0.80);
+}
+
+.overlayToggle input {
+  width: 12px;
+  height: 12px;
+  accent-color: rgba(0, 120, 212, 0.80);
+}
+
+/* ── Canvas layout ── */
+
+.canvasGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  min-height: calc(100vh - 270px);
+}
+
+.canvasWrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+}
+
+.sidebarStack {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.loadingCenter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ── Live Node ── */
+
+.liveNode {
+  min-width: 200px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1.5px solid;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  transition: box-shadow 600ms ease, border-color 600ms ease;
+}
+
+.handle {
+  width: 6px !important;
+  height: 6px !important;
+  background: rgba(20, 21, 23, 0.20) !important;
+  border: none !important;
+}
+
+.ringWrap {
+  flex: none;
+}
+
+.sparklineWrap {
+  flex: none;
+  margin-left: -4px;
+}
+
+.nodeInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.nodeLabel {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nodeIcon {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.metricBadges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.metricBadge {
+  display: inline-flex;
+  gap: 3px;
+  align-items: baseline;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: rgba(20, 21, 23, 0.04);
+  border: 1px solid rgba(20, 21, 23, 0.06);
+}
+
+.metricKey {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.metricVal {
+  font-family: var(--font-geist-mono);
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(20, 21, 23, 0.82);
+}
+
+/* ── Alert Sidebar ── */
+
+.alertSidebar {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.alertTitle {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alertBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(216, 59, 1, 0.12);
+  color: rgba(216, 59, 1, 0.90);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.alertEmpty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.alertList {
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.alertCard {
+  all: unset;
+  cursor: pointer;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  transition: background 150ms ease;
+}
+
+.alertCard:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.alertHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alertDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.alertSeverity {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.alertTime {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-geist-mono);
+}
+
+.alertName {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.alertSummary {
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.70);
+  line-height: 1.4;
+}
+
+.alertCauses {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.alertCausesLabel {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.alertCause {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(209, 132, 0, 0.08);
+  border: 1px solid rgba(209, 132, 0, 0.18);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(209, 132, 0, 0.85);
+}
+
+.alertAffected {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-geist-mono);
+}
+
+/* ── Topology stats bar ── */
+
+.statsBar {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stat {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.statFault {
+  color: rgba(216, 59, 1, 0.80);
+}
+
+.statVal {
+  font-weight: 800;
+  font-family: var(--font-geist-mono);
+  color: rgba(20, 21, 23, 0.72);
+}
+
+/* ── Canvas Overlays ── */
+
+.particleCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.faultRippleCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.cascadeCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.heatmapCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── 3D Canvas ── */
+
+.canvas3dWrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(10, 12, 16, 0.95);
+}
+
+.canvas3dSelected {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(20, 21, 23, 0.80);
+  border: 1px solid var(--border);
+}
+
+/* ── Fault Timeline ── */
+
+.faultTimeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+}
+
+.faultTimelineTitle {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.faultTimelineBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(216, 59, 1, 0.12);
+  color: rgba(216, 59, 1, 0.90);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.faultTimelineEmpty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.faultTimelineSvg {
+  width: 100%;
+  height: auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.faultTimelineDot {
+  cursor: pointer;
+  transition: r 150ms ease;
+}
+
+.faultTimelineDot:hover {
+  r: 6;
+}
+
+.faultTimelineList {
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.faultTimelineItem {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background 150ms ease;
+}
+
+.faultTimelineItem:hover {
+  background: rgba(20, 21, 23, 0.04);
+}
+
+.faultTimelineSevDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.faultTimelineItemTitle {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.faultTimelineItemTime {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-geist-mono);
+  flex: none;
+}
+
+/* ── D3 Sparkline ── */
+
+.sparklineSvg {
+  display: block;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 1100px) {
+  .canvasGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .controlBar {
+    flex-wrap: wrap;
+  }
+
+  .overlayToggles {
+    flex-wrap: wrap;
+  }
+}

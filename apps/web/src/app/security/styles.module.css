@@ -1,0 +1,347 @@
+.page {
+  display: grid;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.subTitle {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 59, 1, 0.26);
+  background: rgba(216, 59, 1, 0.10);
+  border-radius: var(--radius-md);
+  color: rgba(216, 59, 1, 0.95);
+  font-size: 13px;
+}
+
+.note {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 120, 212, 0.22);
+  background: rgba(0, 120, 212, 0.08);
+  border-radius: var(--radius-md);
+  color: rgba(0, 120, 212, 0.92);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* ── Secure Score Gauge ── */
+
+.gaugeCard {
+  grid-column: span 4;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.gaugeRing {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
+
+.gaugeSvg {
+  transform: rotate(-90deg);
+}
+
+.gaugeTrack {
+  fill: none;
+  stroke: rgba(20, 21, 23, 0.06);
+}
+
+.gaugeFill {
+  fill: none;
+  transition: stroke-dashoffset 800ms ease;
+}
+
+.gaugeLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.gaugeScore {
+  font-weight: 900;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.gaugeMax {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.gaugeTitle {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.gaugePct {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* ── Severity Summary ── */
+
+.severityCard {
+  grid-column: span 8;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.severityHeader {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.severityTitle {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.severityBadge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.sevHigh { background: rgba(216, 59, 1, 0.12); color: rgba(216, 59, 1, 0.90); }
+.sevMedium { background: rgba(209, 132, 0, 0.10); color: rgba(209, 132, 0, 0.90); }
+.sevLow { background: rgba(0, 120, 212, 0.10); color: rgba(0, 120, 212, 0.90); }
+.sevInfo { background: rgba(20, 21, 23, 0.06); color: rgba(20, 21, 23, 0.60); }
+
+.severityStrip {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.sevItem {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  text-align: center;
+}
+
+.sevCount {
+  font-weight: 900;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.sevLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ── Controls table ── */
+
+.card {
+  grid-column: span 6;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.cardWide {
+  grid-column: span 12;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.cardTitle {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.cardBody {
+  padding: 14px;
+}
+
+/* ── Control Row ── */
+
+.controlRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 60px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.controlRow:last-child {
+  border-bottom: none;
+}
+
+.controlName {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.controlBar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(20, 21, 23, 0.06);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.controlFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(16, 137, 62, 0.60), rgba(16, 137, 62, 0.40));
+}
+
+.controlScore {
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+  color: rgba(20, 21, 23, 0.78);
+}
+
+.controlResources {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* ── Alert List ── */
+
+.alertRow {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.alertRow:last-child {
+  margin-bottom: 0;
+}
+
+.alertTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alertDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.alertName {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alertTime {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-geist-mono);
+  flex: none;
+}
+
+.alertDesc {
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.70);
+  line-height: 1.4;
+}
+
+.alertMeta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.alertEntity {
+  font-weight: 700;
+}
+
+.tacticPill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 21, 23, 0.04);
+  border: 1px solid rgba(20, 21, 23, 0.10);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.empty {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed rgba(20, 21, 23, 0.18);
+  border-radius: 14px;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 1100px) {
+  .gaugeCard { grid-column: span 12; }
+  .severityCard { grid-column: span 12; }
+  .card { grid-column: span 12; }
+}

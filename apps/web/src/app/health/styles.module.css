@@ -1,0 +1,300 @@
+.page {
+  display: grid;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.subTitle {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 59, 1, 0.26);
+  background: rgba(216, 59, 1, 0.10);
+  border-radius: var(--radius-md);
+  color: rgba(216, 59, 1, 0.95);
+  font-size: 13px;
+}
+
+.note {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 120, 212, 0.22);
+  background: rgba(0, 120, 212, 0.08);
+  border-radius: var(--radius-md);
+  color: rgba(0, 120, 212, 0.92);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* ── Summary strip ── */
+
+.summaryStrip {
+  grid-column: span 12;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.statCard {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.statDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.statCount {
+  font-weight: 900;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* ── Health Map (donut-style) ── */
+
+.donutCard {
+  grid-column: span 4;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.donutWrap {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
+
+.donutSvg {
+  transform: rotate(-90deg);
+}
+
+.donutCenter {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.donutTotal {
+  font-weight: 900;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.donutLabel {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.donutTitle {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.donutLegend {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+/* ── Resource table ── */
+
+.tableCard {
+  grid-column: span 8;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.cardTitle {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.filterGroup {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.filterBtn {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  transition: background 150ms ease;
+}
+
+.filterBtn:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.filterActive {
+  background: rgba(20, 21, 23, 0.06);
+  border-color: rgba(20, 21, 23, 0.20);
+}
+
+.tableBody {
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.resourceRow {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 140px auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.resDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.resInfo {
+  min-width: 0;
+}
+
+.resName {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resType {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resGroup {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.resState {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.stateAvailable { background: rgba(16, 137, 62, 0.10); color: rgba(16, 137, 62, 0.90); }
+.stateDegraded { background: rgba(209, 132, 0, 0.10); color: rgba(209, 132, 0, 0.90); }
+.stateUnavailable { background: rgba(216, 59, 1, 0.10); color: rgba(216, 59, 1, 0.90); }
+.stateUnknown { background: rgba(20, 21, 23, 0.06); color: rgba(20, 21, 23, 0.50); }
+
+.resSummary {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.65);
+  line-height: 1.4;
+}
+
+.empty {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed rgba(20, 21, 23, 0.18);
+  border-radius: 14px;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 1100px) {
+  .donutCard { grid-column: span 12; }
+  .tableCard { grid-column: span 12; }
+  .summaryStrip { grid-template-columns: repeat(2, 1fr); }
+}

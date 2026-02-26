@@ -1,0 +1,352 @@
+.page {
+  display: grid;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.subTitle {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.controls {
+  display: inline-flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.control {
+  display: grid;
+  gap: 6px;
+}
+
+.controlLabel {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.select {
+  appearance: none;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.66);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 59, 1, 0.26);
+  background: rgba(216, 59, 1, 0.10);
+  border-radius: var(--radius-md);
+  color: rgba(216, 59, 1, 0.95);
+  font-size: 13px;
+}
+
+.note {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 120, 212, 0.22);
+  background: rgba(0, 120, 212, 0.08);
+  border-radius: var(--radius-md);
+  color: rgba(0, 120, 212, 0.92);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* ---------- KPI strip ---------- */
+
+.kpiCard {
+  grid-column: span 12;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.kpis {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kpi {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.kpiLabel {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kpiValue {
+  margin-top: 6px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.kpiChange {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.kpiUp {
+  color: rgba(216, 59, 1, 0.90);
+}
+
+.kpiDown {
+  color: rgba(16, 137, 62, 0.90);
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  grid-column: span 6;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.cardWide {
+  grid-column: span 12;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.cardTitle {
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.cardBody {
+  padding: 14px;
+}
+
+/* ---------- Trend chart (simple bar) ---------- */
+
+.trendWrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+  padding: 14px 14px 10px;
+}
+
+.trendBar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, rgba(0, 120, 212, 0.72), rgba(0, 120, 212, 0.32));
+  position: relative;
+}
+
+.trendBar:hover {
+  background: linear-gradient(180deg, rgba(0, 120, 212, 0.92), rgba(0, 120, 212, 0.50));
+}
+
+.trendBarLabel {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(0, 120, 212, 0.90);
+  white-space: nowrap;
+  display: none;
+  padding-bottom: 2px;
+}
+
+.trendBar:hover .trendBarLabel {
+  display: block;
+}
+
+/* ---------- Budget gauge ---------- */
+
+.budgetRow {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.budgetRow:last-child {
+  border-bottom: none;
+}
+
+.budgetHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.budgetName {
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.budgetPct {
+  font-family: var(--font-geist-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.budgetSafe {
+  color: rgba(16, 137, 62, 0.90);
+}
+
+.budgetWarn {
+  color: rgba(209, 132, 0, 0.90);
+}
+
+.budgetDanger {
+  color: rgba(216, 59, 1, 0.90);
+}
+
+.budgetBar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(20, 21, 23, 0.08);
+  background: rgba(20, 21, 23, 0.04);
+}
+
+.budgetFillSafe {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(16, 137, 62, 0.60), rgba(16, 137, 62, 0.40));
+}
+
+.budgetFillWarn {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(209, 132, 0, 0.60), rgba(209, 132, 0, 0.40));
+}
+
+.budgetFillDanger {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(216, 59, 1, 0.60), rgba(216, 59, 1, 0.40));
+}
+
+.budgetMeta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- Table ---------- */
+
+.table {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.thead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px 100px 100px;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px 100px 100px;
+  gap: 10px;
+  align-items: center;
+}
+
+.resName {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resType {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.num {
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.78);
+  text-align: right;
+}
+
+.empty {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed rgba(20, 21, 23, 0.18);
+  border-radius: 14px;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 1100px) {
+  .card {
+    grid-column: span 12;
+  }
+
+  .kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .thead,
+  .tr {
+    grid-template-columns: minmax(0, 1fr) 80px 80px;
+  }
+}
