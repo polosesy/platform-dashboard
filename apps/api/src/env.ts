@@ -12,6 +12,10 @@ const EnvSchema = z.object({
   AZURE_LOG_ANALYTICS_TABLE: z.string().default("NTANetAnalytics"),
   AZURE_LOG_ANALYTICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
+  // Azure Reservations (Consumption)
+  AZURE_RESERVATIONS_GRAIN: z.enum(["daily", "monthly"]).default("monthly"),
+  AZURE_RESERVATIONS_CACHE_TTL_MS: z.coerce.number().default(10 * 60_000),
+
   // Azure AD (API confidential client) for OBO
   AZURE_AD_TENANT_ID: z.string().optional(),
   AZURE_AD_CLIENT_ID: z.string().optional(),
@@ -19,7 +23,26 @@ const EnvSchema = z.object({
 
   // Azure Resource Graph
   AZURE_RESOURCE_GRAPH_PAGE_SIZE: z.coerce.number().default(1000),
-  AZURE_RESOURCE_GRAPH_CACHE_TTL_MS: z.coerce.number().default(60_000)
+  AZURE_RESOURCE_GRAPH_CACHE_TTL_MS: z.coerce.number().default(60_000),
+
+  // Azure Cost Management
+  AZURE_COST_MANAGEMENT_ENABLED: z.coerce.boolean().default(false),
+  AZURE_COST_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
+
+  // Azure Security (Defender for Cloud)
+  AZURE_SECURITY_ENABLED: z.coerce.boolean().default(false),
+  AZURE_SECURITY_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
+
+  // Azure Resource Health
+  AZURE_HEALTH_ENABLED: z.coerce.boolean().default(false),
+  AZURE_HEALTH_CACHE_TTL_MS: z.coerce.number().default(2 * 60_000),
+
+  // Live Diagram — Azure Monitor real integration
+  AZURE_LIVE_DIAGRAM_ENABLED: z.coerce.boolean().default(false),
+  AZURE_LIVE_METRICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+  AZURE_MONITOR_ALERTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+  AZURE_APP_INSIGHTS_APP_ID: z.string().optional(),
+  AZURE_APP_INSIGHTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

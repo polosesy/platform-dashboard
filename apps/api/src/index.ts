@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { loadEnv } from "./env";
 import { bearerTokenMiddleware } from "./auth";
-import { registerRoutes } from "./routes";
+import { registerAllRoutes } from "./routes/index";
 
 const env = loadEnv(process.env);
 
@@ -17,7 +17,7 @@ app.use(
 );
 app.use(bearerTokenMiddleware);
 
-registerRoutes(app, env);
+registerAllRoutes(app, env);
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console

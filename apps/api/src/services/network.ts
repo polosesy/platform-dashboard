@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { OnBehalfOfCredential } from "@azure/identity";
 import type { Env } from "../env";
 import type { NetworkFlowPair, NetworkPortSummary, NetworkSummary, NetworkTotals } from "../types";
@@ -25,6 +26,10 @@ let cache:
       summary: NetworkSummary;
     }
   | undefined;
+
+function bearerKey(bearerToken: string): string {
+  return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
+}
 
 function clampInt(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.trunc(v)));
@@ -189,7 +194,7 @@ export async function tryGetNetworkSummaryFromLogAnalytics(
   const top = clampInt(params.top, 5, 50);
   const table = env.AZURE_LOG_ANALYTICS_TABLE;
 
-  const key = `${env.AZURE_LOG_ANALYTICS_WORKSPACE_ID}:${table}:${lookbackMinutes}:${top}`;
+  const key = `${bearerKey(bearerToken)}:${env.AZURE_LOG_ANALYTICS_WORKSPACE_ID}:${table}:${lookbackMinutes}:${top}`;
   const now = Date.now();
   if (cache && cache.key === key && cache.expiresAt > now) return cache.summary;
 

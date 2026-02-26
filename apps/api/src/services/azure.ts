@@ -1,7 +1,8 @@
+import { createHash } from "crypto";
 import { OnBehalfOfCredential } from "@azure/identity";
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import type { Env } from "../env";
-import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, GraphNodeKind } from "../types";
+import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "../types";
 
 type AzureResourceRow = {
   id: string;
@@ -29,8 +30,17 @@ type AzureSubscriptionRow = {
 
 let cache:
   | {
+      key: string;
       expiresAt: number;
       graph: ArchitectureGraph;
+    }
+  | undefined;
+
+let subsCache:
+  | {
+      key: string;
+      expiresAt: number;
+      subscriptions: AzureSubscriptionOption[];
     }
   | undefined;
 
@@ -39,6 +49,35 @@ function parseSubscriptionIds(raw: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function bearerKey(bearerToken: string): string {
+  return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
+}
+
+function createOBOClient(env: Env, bearerToken: string): { client: ResourceGraphClient; subscriptions: string[]; pageSize: number } {
+  const tenantId = env.AZURE_AD_TENANT_ID;
+  const clientId = env.AZURE_AD_CLIENT_ID;
+  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
+  const subRaw = env.AZURE_SUBSCRIPTION_IDS;
+
+  if (!tenantId || !clientId || !clientSecret || !subRaw) {
+    throw new Error("Azure OBO not configured (AZURE_AD_* and AZURE_SUBSCRIPTION_IDS required)");
+  }
+
+  const subscriptions = parseSubscriptionIds(subRaw);
+  if (subscriptions.length === 0) {
+    throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
+  }
+
+  const credential = new OnBehalfOfCredential({
+    tenantId,
+    clientId,
+    clientSecret,
+    userAssertionToken: bearerToken,
+  });
+
+  return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
 }
 
 function mapKind(type: string | undefined): GraphNodeKind {
@@ -209,30 +248,7 @@ async function resourceGraphQueryAll<T>(
 }
 
 async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string): Promise<ArchitectureGraph> {
-  const tenantId = env.AZURE_AD_TENANT_ID;
-  const clientId = env.AZURE_AD_CLIENT_ID;
-  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
-  const subRaw = env.AZURE_SUBSCRIPTION_IDS;
-
-  if (!tenantId || !clientId || !clientSecret || !subRaw) {
-    throw new Error("Azure OBO not configured (AZURE_AD_* and AZURE_SUBSCRIPTION_IDS required)");
-  }
-
-  const subscriptions = parseSubscriptionIds(subRaw);
-  if (subscriptions.length === 0) {
-    throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
-  }
-
-  const credential = new OnBehalfOfCredential({
-    tenantId,
-    clientId,
-    clientSecret,
-    userAssertionToken: bearerToken
-  });
-
-  const client = new ResourceGraphClient(credential);
-
-  const pageSize = env.AZURE_RESOURCE_GRAPH_PAGE_SIZE;
+  const { client, subscriptions, pageSize } = createOBOClient(env, bearerToken);
 
   const subsQuery =
     "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
@@ -459,17 +475,58 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string): Pr
   };
 }
 
-export async function tryGetArchitectureGraphFromAzure(
+export async function tryListAzureSubscriptionsFromAzure(
   env: Env,
   bearerToken: string | undefined
+): Promise<AzureSubscriptionOption[] | null> {
+  if (!bearerToken) return null;
+  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
+
+  const cacheKey = `${bearerKey(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const now = Date.now();
+  if (subsCache && subsCache.key === cacheKey && subsCache.expiresAt > now) return subsCache.subscriptions;
+
+  const { client, subscriptions, pageSize } = createOBOClient(env, bearerToken);
+  const subsQuery = "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
+  const rows = await resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize);
+
+  const nameById = new Map<string, string>();
+  for (const r of rows) {
+    if (r.subscriptionId && r.name) nameById.set(r.subscriptionId, r.name);
+  }
+
+  const out: AzureSubscriptionOption[] = subscriptions.map((subscriptionId) => ({
+    subscriptionId,
+    name: nameById.get(subscriptionId),
+  }));
+
+  subsCache = { key: cacheKey, expiresAt: now + env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS, subscriptions: out };
+  return out;
+}
+
+export async function tryGetArchitectureGraphFromAzure(
+  env: Env,
+  bearerToken: string | undefined,
+  opts?: { subscriptionId?: string }
 ): Promise<ArchitectureGraph | null> {
   if (!bearerToken) return null;
   if (!env.AZURE_SUBSCRIPTION_IDS) return null;
 
+  // Optional narrowing to a single subscription (must be in the allow-list env)
+  if (opts?.subscriptionId) {
+    const allowed = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
+    if (!allowed.includes(opts.subscriptionId)) {
+      throw new Error("subscriptionId is not in AZURE_SUBSCRIPTION_IDS allow-list");
+    }
+    env = { ...env, AZURE_SUBSCRIPTION_IDS: opts.subscriptionId };
+  }
+
+  const cacheKey = `${bearerKey(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+
   const now = Date.now();
-  if (cache && cache.expiresAt > now) return cache.graph;
+  if (cache && cache.key === cacheKey && cache.expiresAt > now) return cache.graph;
 
   const graph = await fetchTopologyFromResourceGraph(env, bearerToken);
-  cache = { expiresAt: now + env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS, graph };
+  cache = { key: cacheKey, expiresAt: now + env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS, graph };
   return graph;
 }
