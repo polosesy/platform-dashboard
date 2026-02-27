@@ -2,41 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 import styles from "./Sidebar.module.css";
 
 export type SidebarProps = {
   open: boolean;
   onClose: () => void;
 };
-
-const sections = [
-  {
-    label: "Dashboard",
-    items: [{ href: "/", label: "Overview", icon: "grid" }],
-  },
-  {
-    label: "Visualization",
-    items: [
-      { href: "/architecture", label: "Architecture Map", icon: "sitemap" },
-      { href: "/live-diagram", label: "Live Diagram", icon: "pulse" },
-    ],
-  },
-  {
-    label: "Monitoring",
-    items: [
-      { href: "/health", label: "Resource Health", icon: "heart" },
-      { href: "/network", label: "Network Flow", icon: "network" },
-    ],
-  },
-  {
-    label: "Operations",
-    items: [
-      { href: "/cost", label: "Cost Management", icon: "dollar" },
-      { href: "/security", label: "Security", icon: "shield" },
-      { href: "/argocd", label: "ArgoCD", icon: "git" },
-    ],
-  },
-];
 
 const iconMap: Record<string, string> = {
   grid: "\u25A6",
@@ -47,10 +19,41 @@ const iconMap: Record<string, string> = {
   dollar: "\u0024",
   shield: "\u26E8",
   git: "\u2B60",
+  globe: "\u2B24",
 };
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { t, locale, setLocale } = useI18n();
+
+  const sections = [
+    {
+      label: t("nav.dashboard"),
+      items: [{ href: "/", label: t("common.overview"), icon: "grid" }],
+    },
+    {
+      label: t("nav.visualization"),
+      items: [
+        { href: "/architecture", label: t("common.architecture"), icon: "sitemap" },
+        { href: "/live-diagram", label: t("common.liveDiagram"), icon: "pulse" },
+      ],
+    },
+    {
+      label: t("nav.monitoring"),
+      items: [
+        { href: "/health", label: t("nav.resourceHealth"), icon: "heart" },
+        { href: "/network", label: t("nav.networkFlow"), icon: "network" },
+      ],
+    },
+    {
+      label: t("nav.operations"),
+      items: [
+        { href: "/cost", label: t("nav.costManagement"), icon: "dollar" },
+        { href: "/security", label: t("common.security"), icon: "shield" },
+        { href: "/argocd", label: t("common.argocd"), icon: "git" },
+      ],
+    },
+  ];
 
   return (
     <>
@@ -107,6 +110,31 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               })}
             </div>
           ))}
+
+          {/* Settings section with language selector */}
+          <div className={styles.section}>
+            <div className={styles.sectionLabel}>{t("nav.settings")}</div>
+            <div className={styles.settingRow}>
+              <span className={styles.navIcon} aria-hidden="true">{iconMap.globe}</span>
+              <span className={styles.settingLabel}>{t("settings.language")}</span>
+              <div className={styles.langSwitch}>
+                <button
+                  type="button"
+                  className={`${styles.langBtn} ${locale === "ko" ? styles.langBtnActive : ""}`}
+                  onClick={() => setLocale("ko")}
+                >
+                  {t("settings.korean")}
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.langBtn} ${locale === "en" ? styles.langBtnActive : ""}`}
+                  onClick={() => setLocale("en")}
+                >
+                  {t("settings.english")}
+                </button>
+              </div>
+            </div>
+          </div>
         </nav>
 
         <div className={styles.sidebarFooter}>

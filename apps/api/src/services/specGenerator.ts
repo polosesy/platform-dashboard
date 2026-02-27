@@ -20,6 +20,8 @@ const EXCLUDED_KINDS: Set<GraphNodeKind> = new Set([
   "resourceGroup",
   "nic",
   "nsg",
+  "dns",
+  "logAnalytics",
 ]);
 
 // ── GraphNodeKind → DiagramIconKind ──
@@ -32,12 +34,28 @@ const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
   nsg: "nsg",
   nic: "nic",
   vm: "vm",
+  vmss: "vmss",
   lb: "lb",
   appGateway: "appGateway",
+  frontDoor: "frontDoor",
+  trafficManager: "trafficManager",
   aks: "aks",
+  containerApp: "containerApp",
   privateEndpoint: "privateEndpoint",
   storage: "storage",
   sql: "sql",
+  cosmosDb: "cosmosDb",
+  redis: "redis",
+  postgres: "postgres",
+  keyVault: "keyVault",
+  appInsights: "appInsights",
+  logAnalytics: "logAnalytics",
+  firewall: "firewall",
+  functionApp: "functionApp",
+  appService: "appService",
+  serviceBus: "serviceBus",
+  eventHub: "eventHub",
+  dns: "dns",
   unknown: "custom",
 };
 
@@ -106,6 +124,68 @@ const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
       rules: [{ metric: "dataPath", op: ">", threshold: 90, weight: 1.0 }],
     },
   },
+  redis: {
+    cpu: { source: "monitor", metric: "percentProcessorTime", aggregation: "avg" },
+    memory: { source: "monitor", metric: "usedmemorypercentage", aggregation: "avg" },
+    health: {
+      source: "composite",
+      rules: [
+        { metric: "cpu", op: "<", threshold: 80, weight: 0.5 },
+        { metric: "memory", op: "<", threshold: 80, weight: 0.5 },
+      ],
+    },
+  },
+  cosmosDb: {
+    ru: { source: "monitor", metric: "NormalizedRUConsumption", aggregation: "avg" },
+    requests: { source: "monitor", metric: "TotalRequests", aggregation: "total" },
+    health: {
+      source: "composite",
+      rules: [
+        { metric: "ru", op: "<", threshold: 80, weight: 0.6 },
+        { metric: "requests", op: ">", threshold: 0, weight: 0.4 },
+      ],
+    },
+  },
+  postgres: {
+    cpu: { source: "monitor", metric: "cpu_percent", aggregation: "avg" },
+    storage: { source: "monitor", metric: "storage_percent", aggregation: "avg" },
+    health: {
+      source: "composite",
+      rules: [
+        { metric: "cpu", op: "<", threshold: 80, weight: 0.5 },
+        { metric: "storage", op: "<", threshold: 85, weight: 0.5 },
+      ],
+    },
+  },
+  keyVault: {
+    availability: { source: "monitor", metric: "Availability", aggregation: "avg" },
+    health: {
+      source: "composite",
+      rules: [{ metric: "availability", op: ">", threshold: 99, weight: 1.0 }],
+    },
+  },
+  functionApp: {
+    executions: { source: "monitor", metric: "FunctionExecutionCount", aggregation: "total" },
+    errors: { source: "monitor", metric: "Http5xx", aggregation: "total" },
+    health: {
+      source: "composite",
+      rules: [
+        { metric: "executions", op: ">", threshold: 0, weight: 0.5 },
+        { metric: "errors", op: "<", threshold: 10, weight: 0.5 },
+      ],
+    },
+  },
+  appService: {
+    requests: { source: "monitor", metric: "Requests", aggregation: "total" },
+    errors: { source: "monitor", metric: "Http5xx", aggregation: "total" },
+    health: {
+      source: "composite",
+      rules: [
+        { metric: "requests", op: ">", threshold: 0, weight: 0.5 },
+        { metric: "errors", op: "<", threshold: 10, weight: 0.5 },
+      ],
+    },
+  },
 };
 
 const EDGE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
@@ -123,6 +203,8 @@ const KIND_TIER: Record<string, number> = {
   appGateway: 0,
   lb: 0,
   frontDoor: 0,
+  trafficManager: 0,
+  firewall: 0,
   aks: 1,
   vm: 1,
   vmss: 1,
@@ -136,6 +218,8 @@ const KIND_TIER: Record<string, number> = {
   postgres: 2,
   privateEndpoint: 2,
   keyVault: 2,
+  serviceBus: 2,
+  eventHub: 2,
 };
 
 const X_STEP = 320;
@@ -283,11 +367,11 @@ export function generateDiagramSpec(
 
 function inferGroup(node: ArchitectureNode): string {
   const kind = node.kind;
-  if (kind === "appGateway" || kind === "lb") return "ingress";
-  if (kind === "aks" || kind === "vm") return "compute";
-  if (kind === "sql" || kind === "storage" || kind === "privateEndpoint")
-    return "data";
-  if (kind === "vnet" || kind === "subnet") return "network";
+  if (kind === "appGateway" || kind === "lb" || kind === "frontDoor" || kind === "trafficManager" || kind === "firewall") return "ingress";
+  if (kind === "aks" || kind === "vm" || kind === "vmss" || kind === "containerApp" || kind === "functionApp" || kind === "appService") return "compute";
+  if (kind === "sql" || kind === "storage" || kind === "privateEndpoint" || kind === "cosmosDb" || kind === "redis" || kind === "postgres" || kind === "keyVault" || kind === "serviceBus" || kind === "eventHub") return "data";
+  if (kind === "vnet" || kind === "subnet" || kind === "dns") return "network";
+  if (kind === "appInsights" || kind === "logAnalytics") return "monitoring";
   return "other";
 }
 
@@ -299,6 +383,7 @@ function inferGroups(
     compute: "Compute",
     data: "Data & Storage",
     network: "Networking",
+    monitoring: "Monitoring",
     other: "Other",
   };
 

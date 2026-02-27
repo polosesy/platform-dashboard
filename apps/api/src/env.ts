@@ -43,6 +43,19 @@ const EnvSchema = z.object({
   AZURE_MONITOR_ALERTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
   AZURE_APP_INSIGHTS_APP_ID: z.string().optional(),
   AZURE_APP_INSIGHTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+
+  // NSG Flow Logs (from Azure Blob Storage)
+  AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT: z.string().optional(),
+  AZURE_NSG_FLOW_LOG_CONTAINER: z.string().default("insights-logs-networksecuritygroupflowevent"),
+  AZURE_NSG_FLOW_LOG_CACHE_TTL_MS: z.coerce.number().default(120_000),
+
+  // Traffic Analytics (live diagram edge traffic)
+  AZURE_TRAFFIC_ANALYTICS_ENABLED: z.coerce.boolean().default(false),
+  AZURE_TRAFFIC_ANALYTICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+
+  // Connection Monitor
+  AZURE_CONNECTION_MONITOR_ENABLED: z.coerce.boolean().default(false),
+  AZURE_CONNECTION_MONITOR_CACHE_TTL_MS: z.coerce.number().default(120_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

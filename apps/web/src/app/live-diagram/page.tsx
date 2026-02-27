@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
+import { useI18n } from "@/lib/i18n";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
 import { useLiveSnapshot } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
@@ -19,13 +20,8 @@ const Canvas3D = lazy(() =>
 
 type UpdateMode = "polling" | "sse";
 
-const VIZ_LABELS: Record<VisualizationMode, string> = {
-  "2d": "2D Standard",
-  "2d-animated": "2D Animated",
-  "3d": "3D Topology",
-};
-
 export default function LiveDiagramPage() {
+  const { t } = useI18n();
   const getApiToken = useApiToken();
   const [diagramId, setDiagramId] = useState("prod-infra");
   const [mode, setMode] = useState<UpdateMode>("polling");
@@ -106,10 +102,10 @@ export default function LiveDiagramPage() {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.title}>Live Architecture</div>
+          <div className={styles.title}>{t("live.title")}</div>
           <div className={styles.subTitle}>
-            {spec ? spec.name : specLoading ? "Loading..." : "No diagram"}
-            {snapshot && ` · Updated ${new Date(snapshot.generatedAt).toLocaleTimeString()}`}
+            {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}
+            {snapshot && ` · ${t("live.updated")} ${new Date(snapshot.generatedAt).toLocaleTimeString()}`}
           </div>
         </div>
 
@@ -119,7 +115,7 @@ export default function LiveDiagramPage() {
             className={styles.statusDot}
             style={{ background: connected ? "rgba(16,137,62,0.75)" : "rgba(216,59,1,0.75)" }}
           />
-          <span className={styles.statusLabel}>{connected ? "Live" : "Disconnected"}</span>
+          <span className={styles.statusLabel}>{connected ? t("live.connected") : t("live.disconnected")}</span>
 
           {/* Visualization mode selector */}
           <div className={styles.modeGroup}>
@@ -130,7 +126,7 @@ export default function LiveDiagramPage() {
                 className={`${styles.modeBtn} ${vizMode === m ? styles.modeBtnActive : ""}`}
                 onClick={() => setVizMode(m)}
               >
-                {VIZ_LABELS[m]}
+                {t(`viz.${m}`)}
               </button>
             ))}
           </div>
@@ -141,12 +137,12 @@ export default function LiveDiagramPage() {
             value={mode}
             onChange={(e) => setMode(e.target.value as UpdateMode)}
           >
-            <option value="polling">Polling (30s)</option>
-            <option value="sse">SSE Stream</option>
+            <option value="polling">{t("live.polling")}</option>
+            <option value="sse">{t("live.sse")}</option>
           </select>
 
           <button className={styles.refreshBtn} onClick={refresh} type="button">
-            Refresh
+            {t("live.refresh")}
           </button>
 
           {/* Generate from Azure */}
@@ -156,9 +152,9 @@ export default function LiveDiagramPage() {
               value={subscriptionId}
               onChange={(e) => setSubscriptionId(e.target.value)}
               disabled={subscriptions.length === 0}
-              aria-label="Subscription"
+              aria-label={t("live.subscription")}
             >
-              {subscriptions.length === 0 ? <option value="">Subscription</option> : null}
+              {subscriptions.length === 0 ? <option value="">{t("live.subscription")}</option> : null}
               {subscriptions.map((s) => (
                 <option key={s.subscriptionId} value={s.subscriptionId}>
                   {s.name ? `${s.name}` : s.subscriptionId}
@@ -171,7 +167,7 @@ export default function LiveDiagramPage() {
               disabled={generating}
               type="button"
             >
-              {generating ? "Generating..." : "Generate from Azure"}
+              {generating ? t("live.generating") : t("live.generateFromAzure")}
             </button>
           </div>
         </div>
@@ -187,20 +183,20 @@ export default function LiveDiagramPage() {
           {snapshot?.topology && (
             <>
               <div className={styles.stat}>
-                Nodes <span className={styles.statVal}>{snapshot.topology.nodeCount}</span>
+                {t("live.nodes")} <span className={styles.statVal}>{snapshot.topology.nodeCount}</span>
               </div>
               <div className={styles.stat}>
-                Edges <span className={styles.statVal}>{snapshot.topology.edgeCount}</span>
+                {t("live.edges")} <span className={styles.statVal}>{snapshot.topology.edgeCount}</span>
               </div>
               <div className={styles.stat}>
-                Bindings <span className={styles.statVal}>{snapshot.topology.resolvedBindings}</span>
+                {t("live.bindings")} <span className={styles.statVal}>{snapshot.topology.resolvedBindings}</span>
               </div>
               <div className={styles.stat}>
-                Alerts <span className={styles.statVal}>{alertCount}</span>
+                {t("live.alerts")} <span className={styles.statVal}>{alertCount}</span>
               </div>
               {faultCount > 0 && (
                 <div className={`${styles.stat} ${styles.statFault}`}>
-                  Faults <span className={styles.statVal}>{faultCount}</span>
+                  {t("live.faults")} <span className={styles.statVal}>{faultCount}</span>
                 </div>
               )}
             </>
@@ -215,7 +211,7 @@ export default function LiveDiagramPage() {
                 checked={showParticles}
                 onChange={(e) => setShowParticles(e.target.checked)}
               />
-              <span>Particles</span>
+              <span>{t("live.particles")}</span>
             </label>
             <label className={styles.overlayToggle}>
               <input
@@ -223,7 +219,7 @@ export default function LiveDiagramPage() {
                 checked={showFaultRipple}
                 onChange={(e) => setShowFaultRipple(e.target.checked)}
               />
-              <span>Fault Ripple</span>
+              <span>{t("live.faultRipple")}</span>
             </label>
             <label className={styles.overlayToggle}>
               <input
@@ -231,7 +227,7 @@ export default function LiveDiagramPage() {
                 checked={showHeatmap}
                 onChange={(e) => setShowHeatmap(e.target.checked)}
               />
-              <span>Heatmap</span>
+              <span>{t("live.heatmap")}</span>
             </label>
             <label className={styles.overlayToggle}>
               <input
@@ -239,7 +235,7 @@ export default function LiveDiagramPage() {
                 checked={showTimeline}
                 onChange={(e) => setShowTimeline(e.target.checked)}
               />
-              <span>Timeline</span>
+              <span>{t("live.timeline")}</span>
             </label>
           </div>
         )}
@@ -252,7 +248,7 @@ export default function LiveDiagramPage() {
             <Suspense
               fallback={
                 <div className={styles.canvasWrap}>
-                  <div className={styles.loadingCenter}>Loading 3D...</div>
+                  <div className={styles.loadingCenter}>{t("live.loading3d")}</div>
                 </div>
               }
             >

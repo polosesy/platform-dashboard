@@ -105,6 +105,40 @@
   cursor: not-allowed;
 }
 
+/* ── Language Toggle ── */
+
+.langToggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.50);
+}
+
+.langBtn {
+  all: unset;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.langBtn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.langBtn:hover {
+  background: rgba(255, 255, 255, 0.80);
+}
+
+.langBtnActive {
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.90);
+}
+
 .error {
   padding: 10px 12px;
   border: 1px solid rgba(216, 59, 1, 0.26);

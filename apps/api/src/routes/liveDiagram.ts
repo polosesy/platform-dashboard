@@ -58,7 +58,10 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
     })
       .then((graph) => {
         if (!graph) {
-          res.status(503).json({ error: "Azure Resource Graph not available. Check bearer token and AZURE_SUBSCRIPTION_IDS." });
+          const reasons: string[] = [];
+          if (!env.AZURE_SUBSCRIPTION_IDS) reasons.push("AZURE_SUBSCRIPTION_IDS not set");
+          if (!env.AZURE_AD_TENANT_ID || !env.AZURE_AD_CLIENT_ID || !env.AZURE_AD_CLIENT_SECRET) reasons.push("AZURE_AD credentials not configured");
+          res.status(503).json({ error: `Azure Resource Graph not available. ${reasons.join("; ") || "Check configuration."}` });
           return;
         }
 
@@ -142,10 +145,19 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
       azureEnabled: env.AZURE_LIVE_DIAGRAM_ENABLED,
       appInsightsConfigured: !!env.AZURE_APP_INSIGHTS_APP_ID,
       oboConfigured: !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET),
+      trafficSources: {
+        trafficAnalytics: env.AZURE_TRAFFIC_ANALYTICS_ENABLED && !!env.AZURE_LOG_ANALYTICS_WORKSPACE_ID,
+        nsgFlowLogs: !!env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT,
+        appInsightsDependencies: !!env.AZURE_APP_INSIGHTS_APP_ID,
+        connectionMonitor: env.AZURE_CONNECTION_MONITOR_ENABLED,
+      },
       cacheTtl: {
         metrics: env.AZURE_LIVE_METRICS_CACHE_TTL_MS,
         alerts: env.AZURE_MONITOR_ALERTS_CACHE_TTL_MS,
         appInsights: env.AZURE_APP_INSIGHTS_CACHE_TTL_MS,
+        trafficAnalytics: env.AZURE_TRAFFIC_ANALYTICS_CACHE_TTL_MS,
+        nsgFlowLogs: env.AZURE_NSG_FLOW_LOG_CACHE_TTL_MS,
+        connectionMonitor: env.AZURE_CONNECTION_MONITOR_CACHE_TTL_MS,
       },
     });
   });

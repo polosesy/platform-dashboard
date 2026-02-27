@@ -14,6 +14,10 @@ import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { collectBatchMetrics, collectBatchEdgeMetrics } from "./metricsCollector";
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector";
 import { collectDiagramAlerts } from "./alertsCollector";
+import { collectTrafficAnalytics, type EdgeTrafficData } from "./trafficAnalyticsCollector";
+import { collectNsgFlowLogs, type NsgFlowEdgeData } from "./nsgFlowLogCollector";
+import { collectAppInsightsDependencies, type DependencyEdgeData } from "./appInsightsDependencyCollector";
+import { collectConnectionMonitorData, type ConnectionMonitorEdgeData } from "./connectionMonitorCollector";
 import {
   resolveNodeHealth,
   resolveEdgeStatus,
@@ -26,8 +30,14 @@ import {
 // Orchestrates: DiagramSpec → Metric Collection
 //   → Health Calculation → Snapshot Assembly
 //
-// Phase 2: Full Azure Monitor integration with
-// edge metrics, App Insights, and alert correlation.
+// Phase 3: Full multi-source traffic flow integration:
+//   - Azure Monitor metrics (node + edge)
+//   - App Insights edge metrics
+//   - Traffic Analytics KQL (edge throughput)
+//   - NSG Flow Logs (edge throughput from Storage)
+//   - App Insights Dependencies (edge call rates)
+//   - Connection Monitor (edge latency/loss)
+//   - Azure Monitor Alerts
 // ────────────────────────────────────────────
 
 const snapshotCache = new CacheManager<LiveDiagramSnapshot>(20, 30_000);
@@ -75,14 +85,15 @@ export async function buildLiveSnapshot(
     if (cached) return cached;
   }
 
-  const azureEnabled = bearerToken != null && env.AZURE_LIVE_DIAGRAM_ENABLED;
+  const azureEnabled = env.AZURE_LIVE_DIAGRAM_ENABLED;
+  const hasBearerToken = bearerToken != null;
 
   // ── Collect node metrics from Azure Monitor ──
   let nodeMetricsMap = new Map<string, Record<string, number | null>>();
   let resolvedBindings = 0;
   let failedBindings = 0;
 
-  if (azureEnabled) {
+  if (azureEnabled && hasBearerToken) {
     const resources = spec.nodes
       .filter((n) => n.azureResourceId)
       .map((n) => ({
@@ -105,7 +116,7 @@ export async function buildLiveSnapshot(
   const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
   let edgeMonitorMetrics = new Map<string, Record<string, number | null>>();
 
-  if (azureEnabled) {
+  if (azureEnabled && hasBearerToken) {
     const edgeItems = spec.edges
       .filter((e) => {
         const srcNode = nodeById.get(e.source);
@@ -132,7 +143,7 @@ export async function buildLiveSnapshot(
   // ── Collect App Insights metrics for edges ──
   const appInsightsEdgeMetrics = new Map<string, Record<string, number | null>>();
 
-  if (azureEnabled) {
+  if (azureEnabled && hasBearerToken) {
     const appInsightsEdges = spec.edges.filter((e) =>
       Object.values(e.bindings).some((b) => b.source === "appInsights"),
     );
@@ -162,7 +173,7 @@ export async function buildLiveSnapshot(
   // ── Collect Azure Monitor Alerts ──
   let liveAlerts: LiveAlert[] = [];
 
-  if (azureEnabled) {
+  if (azureEnabled && hasBearerToken) {
     const edgeMap = new Map(spec.edges.map((e) => [e.id, { source: e.source, target: e.target }]));
     try {
       liveAlerts = await collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap);
@@ -170,6 +181,10 @@ export async function buildLiveSnapshot(
       // Non-critical
     }
   }
+
+  // ── Collect Traffic Flow Data (multi-source) ──
+  // These collectors use SP fallback — no bearer token required.
+  const trafficFlowData = await collectAllTrafficSources(env, bearerToken, spec);
 
   // ── Build alert lookup for node/edge activeAlertIds ──
   const nodeAlertIds = new Map<string, string[]>();
@@ -236,7 +251,7 @@ export async function buildLiveSnapshot(
     };
   });
 
-  // ── Build live edges ──
+  // ── Build live edges (merge all data sources) ──
   const rawEdges: Array<{ id: string; edgeMetrics: LiveEdge["metrics"] }> = [];
 
   for (const edgeSpec of spec.edges) {
@@ -244,13 +259,47 @@ export async function buildLiveSnapshot(
     const aiMetrics = appInsightsEdgeMetrics.get(edgeSpec.id) ?? {};
     const merged = { ...monitorMetrics, ...aiMetrics };
 
-    // Map binding keys to standard edge metric fields
+    // Start with monitor/appInsights binding-based metrics
     const edgeMetrics: LiveEdge["metrics"] = {
       throughputBps: toNumber(merged.throughput),
       latencyMs: toNumber(merged.latency),
       errorRate: toNumber(merged.errorRate),
       requestsPerSec: toNumber(merged.rps ?? merged.requestsPerSec),
     };
+
+    // Merge traffic flow data (Traffic Analytics / NSG Flow Logs)
+    const trafficData = trafficFlowData.traffic.get(edgeSpec.id);
+    if (trafficData) {
+      // Traffic sources provide throughputBps — use if no monitor binding
+      if (edgeMetrics.throughputBps == null && trafficData.throughputBps > 0) {
+        edgeMetrics.throughputBps = trafficData.throughputBps;
+      }
+      resolvedBindings++;
+    }
+
+    // Merge App Insights dependency data
+    const depData = trafficFlowData.dependencies.get(edgeSpec.id);
+    if (depData) {
+      if (edgeMetrics.requestsPerSec == null && depData.requestsPerSec > 0) {
+        edgeMetrics.requestsPerSec = depData.requestsPerSec;
+      }
+      if (edgeMetrics.latencyMs == null && depData.avgDurationMs > 0) {
+        edgeMetrics.latencyMs = depData.avgDurationMs;
+      }
+      if (edgeMetrics.errorRate == null && depData.successRate < 100) {
+        edgeMetrics.errorRate = 100 - depData.successRate;
+      }
+      resolvedBindings++;
+    }
+
+    // Merge Connection Monitor data
+    const cmData = trafficFlowData.connectionMonitor.get(edgeSpec.id);
+    if (cmData) {
+      if (edgeMetrics.latencyMs == null && cmData.avgLatencyMs > 0) {
+        edgeMetrics.latencyMs = cmData.avgLatencyMs;
+      }
+      resolvedBindings++;
+    }
 
     rawEdges.push({ id: edgeSpec.id, edgeMetrics });
   }
@@ -295,6 +344,80 @@ export async function buildLiveSnapshot(
   }
 
   return snapshot;
+}
+
+// ────────────────────────────────────────────
+// Multi-Source Traffic Flow Collector
+// ────────────────────────────────────────────
+
+type TrafficFlowResult = {
+  traffic: Map<string, EdgeTrafficData>;
+  nsgFlows: Map<string, NsgFlowEdgeData>;
+  dependencies: Map<string, DependencyEdgeData>;
+  connectionMonitor: Map<string, ConnectionMonitorEdgeData>;
+};
+
+async function collectAllTrafficSources(
+  env: Env,
+  bearerToken: string | undefined,
+  spec: DiagramSpec,
+): Promise<TrafficFlowResult> {
+  const result: TrafficFlowResult = {
+    traffic: new Map(),
+    nsgFlows: new Map(),
+    dependencies: new Map(),
+    connectionMonitor: new Map(),
+  };
+
+  if (!env.AZURE_LIVE_DIAGRAM_ENABLED) return result;
+
+  // Collect all traffic sources in parallel
+  const [trafficResult, nsgResult, depResult, cmResult] = await Promise.allSettled([
+    collectTrafficAnalytics(env, bearerToken, spec.nodes, spec.edges),
+    collectNsgFlowLogs(env, bearerToken, spec.nodes, spec.edges),
+    collectAppInsightsDependencies(env, bearerToken, spec.nodes, spec.edges),
+    collectConnectionMonitorData(env, bearerToken, spec.nodes, spec.edges),
+  ]);
+
+  // Traffic Analytics
+  if (trafficResult.status === "fulfilled") {
+    for (const data of trafficResult.value) {
+      result.traffic.set(data.edgeId, data);
+    }
+  }
+
+  // NSG Flow Logs — merge with traffic analytics (prefer TA if both available)
+  if (nsgResult.status === "fulfilled") {
+    for (const data of nsgResult.value) {
+      result.nsgFlows.set(data.edgeId, data);
+      // If no traffic analytics data for this edge, use NSG flow data
+      if (!result.traffic.has(data.edgeId)) {
+        result.traffic.set(data.edgeId, {
+          edgeId: data.edgeId,
+          totalBytes: data.totalBytes,
+          allowedFlows: data.allowedFlows,
+          deniedFlows: data.deniedFlows,
+          throughputBps: data.throughputBps,
+        });
+      }
+    }
+  }
+
+  // App Insights Dependencies
+  if (depResult.status === "fulfilled") {
+    for (const data of depResult.value) {
+      result.dependencies.set(data.edgeId, data);
+    }
+  }
+
+  // Connection Monitor
+  if (cmResult.status === "fulfilled") {
+    for (const data of cmResult.value) {
+      result.connectionMonitor.set(data.edgeId, data);
+    }
+  }
+
+  return result;
 }
 
 function toNumber(v: unknown): number | undefined {

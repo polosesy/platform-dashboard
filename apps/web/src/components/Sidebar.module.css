@@ -161,6 +161,54 @@
   opacity: 1;
 }
 
+/* ── Settings Row ── */
+
+.settingRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(20, 21, 23, 0.76);
+}
+
+.settingLabel {
+  flex: 1;
+}
+
+.langSwitch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.50);
+}
+
+.langBtn {
+  all: unset;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.langBtn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.langBtn:hover {
+  background: rgba(255, 255, 255, 0.80);
+}
+
+.langBtnActive {
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.90);
+}
+
 /* ── Footer ── */
 
 .sidebarFooter {

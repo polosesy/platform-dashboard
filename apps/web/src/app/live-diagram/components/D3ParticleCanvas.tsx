@@ -2,7 +2,6 @@
 
 import { useRef, useEffect, useCallback } from "react";
 import { timer, type Timer } from "d3-timer";
-import { interpolate } from "d3-interpolate";
 import { color as d3Color } from "d3-color";
 import type { LiveEdge, EdgeStatus, EdgeTrafficLevel } from "@aud/types";
 import { edgeColor, particleCount, particleDuration, particleRadius } from "../utils/designTokens";
@@ -13,6 +12,7 @@ type ParticleCanvasProps = {
     id: string;
     sourceX: number; sourceY: number;
     targetX: number; targetY: number;
+    pathD?: string;
     status: EdgeStatus;
     trafficLevel: EdgeTrafficLevel;
     metrics?: LiveEdge["metrics"];
@@ -27,23 +27,13 @@ type Particle = { t: number; offset: number; isError: boolean };
 
 type EdgeParticleGroup = {
   edgeId: string;
-  sourceX: number; sourceY: number;
-  targetX: number; targetY: number;
+  pathEl: SVGPathElement;
+  pathLen: number;
   status: EdgeStatus;
   trafficLevel: EdgeTrafficLevel;
   errorRate: number;
   particles: Particle[];
 };
-
-/** Cubic bezier interpolation between source and target. */
-function bezierPt(sx: number, sy: number, tx: number, ty: number, t: number): [number, number] {
-  const mx = (sx + tx) / 2;
-  const u = 1 - t;
-  return [
-    u * u * u * sx + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * tx,
-    u * u * u * sy + 3 * u * u * t * sy + 3 * u * t * t * ty + t * t * t * ty,
-  ];
-}
 
 function parseAlpha(rgba: string): number {
   const parsed = d3Color(rgba);
@@ -52,6 +42,19 @@ function parseAlpha(rgba: string): number {
 
 const ERROR_COLOR = "rgba(216,59,1,0.95)";
 const TRAIL_STEPS = [0.02, 0.04, 0.06] as const;
+
+/** Create an offscreen SVG path element for getPointAtLength. */
+function makeSvgPath(d: string): SVGPathElement {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  el.setAttribute("d", d);
+  return el;
+}
+
+/** Get point on path at parameter t (0..1). */
+function pathPoint(el: SVGPathElement, len: number, t: number): [number, number] {
+  const pt = el.getPointAtLength(Math.max(0, Math.min(1, t)) * len);
+  return [pt.x, pt.y];
+}
 
 export function D3ParticleCanvas({ edges, width, height, transform, enabled }: ParticleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,13 +68,17 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
 
     for (const edge of edges) {
       const count = particleCount(edge.trafficLevel);
-      if (count <= 0) continue;
+      if (count <= 0 || !edge.pathD) continue;
       const errorRate = edge.metrics?.errorRate ?? 0;
       const prev = existing.get(edge.id);
 
+      // Create/update SVG path element for exact curve sampling
+      const pathEl = makeSvgPath(edge.pathD);
+      const pathLen = pathEl.getTotalLength();
+
       if (prev && prev.particles.length === count) {
-        prev.sourceX = edge.sourceX; prev.sourceY = edge.sourceY;
-        prev.targetX = edge.targetX; prev.targetY = edge.targetY;
+        prev.pathEl = pathEl;
+        prev.pathLen = pathLen;
         prev.status = edge.status;
         prev.trafficLevel = edge.trafficLevel;
         prev.errorRate = errorRate;
@@ -79,8 +86,8 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
       } else {
         next.push({
           edgeId: edge.id,
-          sourceX: edge.sourceX, sourceY: edge.sourceY,
-          targetX: edge.targetX, targetY: edge.targetY,
+          pathEl,
+          pathLen,
           status: edge.status, trafficLevel: edge.trafficLevel, errorRate,
           particles: Array.from({ length: count }, (_, i) => ({
             t: i / count, offset: i / count, isError: Math.random() < errorRate,
@@ -123,12 +130,11 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
       // Batch render all particles in a single canvas pass
       for (const group of groupsRef.current) {
         const dur = particleDuration(group.trafficLevel);
-        if (dur <= 0) continue;
+        if (dur <= 0 || group.pathLen <= 0) continue;
 
         const speed = 1 / (dur * 60);
         const r = particleRadius(group.trafficLevel);
         const pColor = edgeColor(group.status).particle;
-        const { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty } = group;
 
         for (const p of group.particles) {
           p.t += speed;
@@ -138,13 +144,13 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
           }
 
           const fill = p.isError ? ERROR_COLOR : pColor;
-          const [px, py] = bezierPt(sx, sy, tx, ty, p.t);
+          const [px, py] = pathPoint(group.pathEl, group.pathLen, p.t);
 
           // Trail: 3 trailing circles with decreasing opacity
           for (let ti = TRAIL_STEPS.length - 1; ti >= 0; ti--) {
             const trailT = p.t - TRAIL_STEPS[ti];
             if (trailT < 0) continue;
-            const [ttx, tty] = bezierPt(sx, sy, tx, ty, trailT);
+            const [ttx, tty] = pathPoint(group.pathEl, group.pathLen, trailT);
             ctx.globalAlpha = 0.15 - ti * 0.04;
             ctx.beginPath();
             ctx.arc(ttx, tty, r * (0.7 - ti * 0.1), 0, Math.PI * 2);

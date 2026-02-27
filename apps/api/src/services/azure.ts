@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { OnBehalfOfCredential } from "@azure/identity";
+import { OnBehalfOfCredential, ClientSecretCredential } from "@azure/identity";
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import type { Env } from "../env";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "../types";
@@ -8,6 +8,7 @@ type AzureResourceRow = {
   id: string;
   name?: string;
   type?: string;
+  kind?: string;
   location?: string;
   resourceGroup?: string;
   subscriptionId?: string;
@@ -55,7 +56,9 @@ function bearerKey(bearerToken: string): string {
   return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
 }
 
-function createOBOClient(env: Env, bearerToken: string): { client: ResourceGraphClient; subscriptions: string[]; pageSize: number } {
+type RGClientBundle = { client: ResourceGraphClient; subscriptions: string[]; pageSize: number };
+
+function createOBOClient(env: Env, bearerToken: string): RGClientBundle {
   const tenantId = env.AZURE_AD_TENANT_ID;
   const clientId = env.AZURE_AD_CLIENT_ID;
   const clientSecret = env.AZURE_AD_CLIENT_SECRET;
@@ -80,18 +83,57 @@ function createOBOClient(env: Env, bearerToken: string): { client: ResourceGraph
   return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
 }
 
-function mapKind(type: string | undefined): GraphNodeKind {
+/** Fallback: use service principal credentials directly (no user token needed). */
+function createServicePrincipalClient(env: Env): RGClientBundle {
+  const tenantId = env.AZURE_AD_TENANT_ID;
+  const clientId = env.AZURE_AD_CLIENT_ID;
+  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
+  const subRaw = env.AZURE_SUBSCRIPTION_IDS;
+
+  if (!tenantId || !clientId || !clientSecret || !subRaw) {
+    throw new Error("Azure SP not configured (AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET, AZURE_SUBSCRIPTION_IDS required)");
+  }
+
+  const subscriptions = parseSubscriptionIds(subRaw);
+  if (subscriptions.length === 0) {
+    throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
+  }
+
+  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+  return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
+}
+
+function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind {
   const t = (type ?? "").toLowerCase();
   if (t === "microsoft.network/virtualnetworks") return "vnet";
   if (t === "microsoft.network/virtualnetworks/subnets") return "subnet";
   if (t === "microsoft.network/networkinterfaces") return "nic";
+  if (t === "microsoft.network/networksecuritygroups") return "nsg";
   if (t === "microsoft.compute/virtualmachines") return "vm";
+  if (t === "microsoft.compute/virtualmachinescalesets") return "vmss";
   if (t === "microsoft.network/applicationgateways") return "appGateway";
   if (t === "microsoft.network/loadbalancers") return "lb";
+  if (t === "microsoft.network/frontdoors") return "frontDoor";
+  if (t === "microsoft.network/trafficmanagerprofiles") return "trafficManager";
   if (t === "microsoft.containerservice/managedclusters") return "aks";
+  if (t === "microsoft.app/containerapps") return "containerApp";
   if (t === "microsoft.network/privateendpoints") return "privateEndpoint";
   if (t === "microsoft.storage/storageaccounts") return "storage";
-  if (t === "microsoft.sql/servers") return "sql";
+  if (t === "microsoft.sql/servers" || t === "microsoft.sql/servers/databases") return "sql";
+  if (t === "microsoft.documentdb/databaseaccounts") return "cosmosDb";
+  if (t === "microsoft.cache/redis") return "redis";
+  if (t === "microsoft.dbforpostgresql/flexibleservers" || t === "microsoft.dbforpostgresql/servers") return "postgres";
+  if (t === "microsoft.keyvault/vaults") return "keyVault";
+  if (t === "microsoft.insights/components") return "appInsights";
+  if (t === "microsoft.operationalinsights/workspaces") return "logAnalytics";
+  if (t === "microsoft.network/azurefirewalls") return "firewall";
+  if (t === "microsoft.servicebus/namespaces") return "serviceBus";
+  if (t === "microsoft.eventhub/namespaces") return "eventHub";
+  if (t === "microsoft.network/dnszones" || t === "microsoft.network/privatednszones") return "dns";
+  if (t === "microsoft.web/sites") {
+    const k = (resourceKind ?? "").toLowerCase();
+    return k.includes("functionapp") ? "functionApp" : "appService";
+  }
   return "unknown";
 }
 
@@ -247,8 +289,19 @@ async function resourceGraphQueryAll<T>(
   return all;
 }
 
-async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string): Promise<ArchitectureGraph> {
-  const { client, subscriptions, pageSize } = createOBOClient(env, bearerToken);
+function createResourceGraphClient(env: Env, bearerToken: string | undefined): RGClientBundle {
+  if (bearerToken) {
+    try {
+      return createOBOClient(env, bearerToken);
+    } catch {
+      // OBO failed — fall through to SP
+    }
+  }
+  return createServicePrincipalClient(env);
+}
+
+async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | undefined): Promise<ArchitectureGraph> {
+  const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
 
   const subsQuery =
     "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
@@ -259,14 +312,32 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string): Pr
     "'microsoft.network/virtualnetworks'," +
     "'microsoft.network/virtualnetworks/subnets'," +
     "'microsoft.network/networkinterfaces'," +
+    "'microsoft.network/networksecuritygroups'," +
     "'microsoft.compute/virtualmachines'," +
+    "'microsoft.compute/virtualmachinescalesets'," +
     "'microsoft.containerservice/managedclusters'," +
+    "'microsoft.app/containerapps'," +
     "'microsoft.network/applicationgateways'," +
     "'microsoft.network/loadbalancers'," +
+    "'microsoft.network/frontdoors'," +
+    "'microsoft.network/trafficmanagerprofiles'," +
     "'microsoft.network/privateendpoints'," +
+    "'microsoft.network/azurefirewalls'," +
+    "'microsoft.network/dnszones'," +
+    "'microsoft.network/privatednszones'," +
     "'microsoft.storage/storageaccounts'," +
-    "'microsoft.sql/servers'" +
-    ") | project id, name, type, location, resourceGroup, subscriptionId, tags, properties";
+    "'microsoft.sql/servers'," +
+    "'microsoft.documentdb/databaseaccounts'," +
+    "'microsoft.cache/redis'," +
+    "'microsoft.dbforpostgresql/flexibleservers'," +
+    "'microsoft.dbforpostgresql/servers'," +
+    "'microsoft.keyvault/vaults'," +
+    "'microsoft.insights/components'," +
+    "'microsoft.operationalinsights/workspaces'," +
+    "'microsoft.web/sites'," +
+    "'microsoft.servicebus/namespaces'," +
+    "'microsoft.eventhub/namespaces'" +
+    ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
   const [subRows, rgRows, resRows] = await Promise.all([
     resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize),
@@ -327,7 +398,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string): Pr
       nicById.set(r.id, r);
     }
 
-    const kind = mapKind(r.type);
+    const kind = mapKind(r.type, r.kind);
     nodes.push({
       id: r.id,
       kind,
@@ -479,14 +550,16 @@ export async function tryListAzureSubscriptionsFromAzure(
   env: Env,
   bearerToken: string | undefined
 ): Promise<AzureSubscriptionOption[] | null> {
-  if (!bearerToken) return null;
   if (!env.AZURE_SUBSCRIPTION_IDS) return null;
+  // Require either bearer token or SP credentials
+  if (!bearerToken && !(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET)) return null;
 
-  const cacheKey = `${bearerKey(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const tokenKey = bearerToken ? bearerKey(bearerToken) : "sp";
+  const cacheKey = `${tokenKey}:${env.AZURE_SUBSCRIPTION_IDS}`;
   const now = Date.now();
   if (subsCache && subsCache.key === cacheKey && subsCache.expiresAt > now) return subsCache.subscriptions;
 
-  const { client, subscriptions, pageSize } = createOBOClient(env, bearerToken);
+  const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
   const subsQuery = "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
   const rows = await resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize);
 
@@ -509,8 +582,9 @@ export async function tryGetArchitectureGraphFromAzure(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string }
 ): Promise<ArchitectureGraph | null> {
-  if (!bearerToken) return null;
   if (!env.AZURE_SUBSCRIPTION_IDS) return null;
+  // Require either bearer token or SP credentials
+  if (!bearerToken && !(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET)) return null;
 
   // Optional narrowing to a single subscription (must be in the allow-list env)
   if (opts?.subscriptionId) {
@@ -521,7 +595,8 @@ export async function tryGetArchitectureGraphFromAzure(
     env = { ...env, AZURE_SUBSCRIPTION_IDS: opts.subscriptionId };
   }
 
-  const cacheKey = `${bearerKey(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const tokenKey = bearerToken ? bearerKey(bearerToken) : "sp";
+  const cacheKey = `${tokenKey}:${env.AZURE_SUBSCRIPTION_IDS}`;
 
   const now = Date.now();
   if (cache && cache.key === cacheKey && cache.expiresAt > now) return cache.graph;
