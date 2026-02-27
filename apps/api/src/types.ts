@@ -36,6 +36,7 @@ export type ArchitectureNode = {
   name: string;
   azureId?: string;
   location?: string;
+  endpoint?: string;           // IP address, FQDN, or service endpoint
   tags?: Record<string, string>;
   health?: "ok" | "warning" | "critical" | "unknown";
   metrics?: Record<string, number>;

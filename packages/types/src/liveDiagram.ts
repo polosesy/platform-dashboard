@@ -30,7 +30,12 @@ export type DiagramNodeSpec = {
   icon: DiagramIconKind;
   groupId?: string;
   azureResourceId?: string;
+  endpoint?: string;           // IP address or FQDN (e.g., "10.0.1.4" or "myapp.azurewebsites.net")
   position?: { x: number; y: number };
+  parentId?: string;           // ReactFlow parent node (for VNet/Subnet containment)
+  nodeType?: "group" | "default"; // "group" = container node (VNet/Subnet)
+  width?: number;              // Explicit width for group nodes
+  height?: number;             // Explicit height for group nodes
   bindings: Record<string, MetricBinding>;
 };
 

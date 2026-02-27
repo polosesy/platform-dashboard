@@ -41,7 +41,7 @@ function parseAlpha(rgba: string): number {
 }
 
 const ERROR_COLOR = "rgba(216,59,1,0.95)";
-const TRAIL_STEPS = [0.02, 0.04, 0.06] as const;
+const TRAIL_STEPS = [0.03, 0.06] as const;
 
 /** Create an offscreen SVG path element for getPointAtLength. */
 function makeSvgPath(d: string): SVGPathElement {
@@ -159,9 +159,9 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
           }
 
           // Glow: larger semi-transparent circle
-          ctx.globalAlpha = 0.3;
+          ctx.globalAlpha = 0.25;
           ctx.beginPath();
-          ctx.arc(px, py, r * 2, 0, Math.PI * 2);
+          ctx.arc(px, py, r * 1.5, 0, Math.PI * 2);
           ctx.fillStyle = fill;
           ctx.fill();
 

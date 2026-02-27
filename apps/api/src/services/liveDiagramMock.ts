@@ -8,8 +8,36 @@ import type {
 } from "@aud/types";
 
 // ────────────────────────────────────────────
-// Mock Diagram Spec — Production Infrastructure
+// Mock Diagram Spec — Network-Centric Architecture
+//
+// Layout:
+// ┌── VNet: prod-vnet (10.0.0.0/16) ────────────────────────────────────────┐
+// │ ┌── gw-subnet (10.0.0.0/24) ──┐ ┌── app-subnet (10.0.1.0/24) ──────┐  │
+// │ │ [App Gateway]                │ │ [AKS Platform]     [Functions]    │  │
+// │ └──────────────────────────────┘ └───────────────────────────────────┘  │
+// └──────────────────────────────────────────────────────────────────────────┘
+//
+// [SQL Database]    [Redis Cache]    [Blob Storage]   (PaaS — outside VNet)
 // ────────────────────────────────────────────
+
+const NODE_W = 220;
+const NODE_H = 80;
+const SUBNET_PAD = 30;
+const SUBNET_HEAD = 44;
+const VNET_PAD = 30;
+const VNET_HEAD = 48;
+const GAP = 16;
+
+// Subnet sizes
+const GW_SUB_W = NODE_W + 2 * SUBNET_PAD;
+const GW_SUB_H = SUBNET_HEAD + NODE_H + SUBNET_PAD;
+
+const APP_SUB_W = 2 * NODE_W + 2 * SUBNET_PAD + GAP;
+const APP_SUB_H = SUBNET_HEAD + NODE_H + SUBNET_PAD;
+
+// VNet size
+const VNET_W = VNET_PAD + GW_SUB_W + 24 + APP_SUB_W + VNET_PAD;
+const VNET_H = VNET_HEAD + Math.max(GW_SUB_H, APP_SUB_H) + VNET_PAD + 10;
 
 export const mockDiagramSpec: DiagramSpec = {
   version: "1.0",
@@ -18,13 +46,54 @@ export const mockDiagramSpec: DiagramSpec = {
   createdAt: "2026-02-23T00:00:00Z",
   updatedAt: "2026-02-23T00:00:00Z",
   nodes: [
+    // ── VNet (group) ──
+    {
+      id: "prod-vnet",
+      label: "prod-vnet (10.0.0.0/16)",
+      icon: "vnet",
+      nodeType: "group",
+      width: VNET_W,
+      height: VNET_H,
+      endpoint: "10.0.0.0/16",
+      position: { x: 40, y: 40 },
+      bindings: {},
+    },
+    // ── Gateway Subnet (group, inside VNet) ──
+    {
+      id: "gw-subnet",
+      label: "gw-subnet (10.0.0.0/24)",
+      icon: "subnet",
+      nodeType: "group",
+      parentId: "prod-vnet",
+      width: GW_SUB_W,
+      height: GW_SUB_H,
+      endpoint: "10.0.0.0/24",
+      position: { x: VNET_PAD, y: VNET_HEAD },
+      bindings: {},
+    },
+    // ── App Subnet (group, inside VNet) ──
+    {
+      id: "app-subnet",
+      label: "app-subnet (10.0.1.0/24)",
+      icon: "subnet",
+      nodeType: "group",
+      parentId: "prod-vnet",
+      width: APP_SUB_W,
+      height: APP_SUB_H,
+      endpoint: "10.0.1.0/24",
+      position: { x: VNET_PAD + GW_SUB_W + 24, y: VNET_HEAD },
+      bindings: {},
+    },
+    // ── App Gateway (inside gw-subnet) ──
     {
       id: "appgw",
       label: "Application Gateway",
       icon: "appGateway",
-      groupId: "frontend",
+      groupId: "ingress",
+      parentId: "gw-subnet",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/applicationGateways/appgw-prod",
-      position: { x: 100, y: 200 },
+      endpoint: "10.0.0.4",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
       bindings: {
         rps: { source: "monitor", metric: "Throughput", aggregation: "total" },
         latency: { source: "monitor", metric: "BackendLastByteResponseTime", aggregation: "p95" },
@@ -34,13 +103,16 @@ export const mockDiagramSpec: DiagramSpec = {
         ]},
       },
     },
+    // ── AKS (inside app-subnet) ──
     {
       id: "aks",
       label: "AKS Platform",
       icon: "aks",
       groupId: "compute",
+      parentId: "app-subnet",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod",
-      position: { x: 400, y: 120 },
+      endpoint: "10.0.1.10",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
       bindings: {
         cpu: { source: "monitor", metric: "node_cpu_usage_percentage", aggregation: "avg" },
         memory: { source: "monitor", metric: "node_memory_rss_percentage", aggregation: "avg" },
@@ -52,13 +124,33 @@ export const mockDiagramSpec: DiagramSpec = {
         ]},
       },
     },
+    // ── Functions (inside app-subnet) ──
+    {
+      id: "func",
+      label: "Functions",
+      icon: "functionApp",
+      groupId: "compute",
+      parentId: "app-subnet",
+      endpoint: "func-prod.azurewebsites.net",
+      position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD },
+      bindings: {
+        executions: { source: "monitor", metric: "FunctionExecutionCount", aggregation: "total" },
+        errors: { source: "monitor", metric: "FunctionExecutionUnits", aggregation: "total" },
+        health: { source: "composite", rules: [
+          { metric: "executions", op: ">", threshold: 0, weight: 0.6 },
+          { metric: "errors", op: "<", threshold: 100, weight: 0.4 },
+        ]},
+      },
+    },
+    // ── PaaS resources (outside VNet) ──
     {
       id: "sql",
       label: "SQL Database",
       icon: "sql",
       groupId: "data",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-prod/databases/orders",
-      position: { x: 700, y: 120 },
+      endpoint: "sql-prod.database.windows.net",
+      position: { x: 40, y: 40 + VNET_H + 40 },
       bindings: {
         dtu: { source: "monitor", metric: "dtu_consumption_percent", aggregation: "avg" },
         connections: { source: "monitor", metric: "connection_successful", aggregation: "total" },
@@ -74,7 +166,8 @@ export const mockDiagramSpec: DiagramSpec = {
       icon: "redis",
       groupId: "data",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Cache/redis/redis-prod",
-      position: { x: 700, y: 280 },
+      endpoint: "redis-prod.redis.cache.windows.net",
+      position: { x: 40 + NODE_W + 36, y: 40 + VNET_H + 40 },
       bindings: {
         cpu: { source: "monitor", metric: "percentProcessorTime", aggregation: "avg" },
         memory: { source: "monitor", metric: "usedmemorypercentage", aggregation: "avg" },
@@ -89,26 +182,12 @@ export const mockDiagramSpec: DiagramSpec = {
       label: "Blob Storage",
       icon: "storage",
       groupId: "data",
-      position: { x: 700, y: 440 },
+      endpoint: "stprod.blob.core.windows.net",
+      position: { x: 40 + 2 * (NODE_W + 36), y: 40 + VNET_H + 40 },
       bindings: {
         transactions: { source: "monitor", metric: "Transactions", aggregation: "total" },
         health: { source: "composite", rules: [
           { metric: "transactions", op: ">", threshold: 0, weight: 1.0 },
-        ]},
-      },
-    },
-    {
-      id: "func",
-      label: "Functions",
-      icon: "functionApp",
-      groupId: "compute",
-      position: { x: 400, y: 360 },
-      bindings: {
-        executions: { source: "monitor", metric: "FunctionExecutionCount", aggregation: "total" },
-        errors: { source: "monitor", metric: "FunctionExecutionUnits", aggregation: "total" },
-        health: { source: "composite", rules: [
-          { metric: "executions", op: ">", threshold: 0, weight: 0.6 },
-          { metric: "errors", op: "<", threshold: 100, weight: 0.4 },
         ]},
       },
     },
@@ -129,10 +208,21 @@ export const mockDiagramSpec: DiagramSpec = {
       alerts: [{ condition: "errorRate > 5", severity: "critical" }],
     },
     {
+      id: "appgw->func",
+      source: "appgw",
+      target: "func",
+      label: "HTTPS",
+      protocol: "HTTPS",
+      bindings: {
+        throughput: { source: "monitor", metric: "ByteCount", aggregation: "total" },
+      },
+      animation: "flow",
+    },
+    {
       id: "aks->sql",
       source: "aks",
       target: "sql",
-      label: "TCP 1433",
+      label: "10.0.1.10 → sql-prod",
       protocol: "TCP",
       bindings: {
         throughput: { source: "monitor", metric: "BytesSent", aggregation: "total" },
@@ -145,7 +235,7 @@ export const mockDiagramSpec: DiagramSpec = {
       id: "aks->redis",
       source: "aks",
       target: "redis",
-      label: "TCP 6380",
+      label: "10.0.1.10 → redis-prod",
       protocol: "TCP",
       bindings: {
         throughput: { source: "monitor", metric: "BytesSent", aggregation: "total" },
@@ -164,28 +254,18 @@ export const mockDiagramSpec: DiagramSpec = {
       animation: "flow",
     },
     {
-      id: "appgw->func",
-      source: "appgw",
-      target: "func",
-      label: "HTTPS",
-      protocol: "HTTPS",
-      bindings: {
-        throughput: { source: "monitor", metric: "ByteCount", aggregation: "total" },
-      },
-      animation: "flow",
-    },
-    {
       id: "func->sql",
       source: "func",
       target: "sql",
-      label: "TCP 1433",
+      label: "func-prod → sql-prod",
       protocol: "TCP",
       bindings: {},
       animation: "dash",
     },
   ],
   groups: [
-    { id: "frontend", label: "Frontend", layout: "row" },
+    { id: "network", label: "Networking", layout: "row" },
+    { id: "ingress", label: "Ingress", layout: "row" },
     { id: "compute", label: "Compute", layout: "column" },
     { id: "data", label: "Data", layout: "column" },
   ],
@@ -213,8 +293,8 @@ function mockTrafficLevel(throughput: number): EdgeTrafficLevel {
 }
 
 export function generateMockSnapshot(): LiveDiagramSnapshot {
-  const aksHealth = rand(0, 100) > 20;  // 80% chance healthy
-  const sqlLatencySpike = rand(0, 100) > 85; // 15% chance
+  const aksHealth = rand(0, 100) > 20;
+  const sqlLatencySpike = rand(0, 100) > 85;
 
   const nodes: LiveNode[] = [
     {
@@ -283,6 +363,13 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       activeAlertIds: [],
     },
     {
+      id: "appgw->func",
+      status: "normal",
+      metrics: { throughputBps: appgwFuncThroughput, latencyMs: rand(15, 60) },
+      trafficLevel: mockTrafficLevel(appgwFuncThroughput),
+      activeAlertIds: [],
+    },
+    {
       id: "aks->sql",
       status: sqlLatencySpike ? "degraded" : "normal",
       metrics: {
@@ -305,13 +392,6 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       status: "normal",
       metrics: { throughputBps: funcStorageThroughput, latencyMs: rand(20, 80) },
       trafficLevel: mockTrafficLevel(funcStorageThroughput),
-      activeAlertIds: [],
-    },
-    {
-      id: "appgw->func",
-      status: "normal",
-      metrics: { throughputBps: appgwFuncThroughput, latencyMs: rand(15, 60) },
-      trafficLevel: mockTrafficLevel(appgwFuncThroughput),
       activeAlertIds: [],
     },
     {

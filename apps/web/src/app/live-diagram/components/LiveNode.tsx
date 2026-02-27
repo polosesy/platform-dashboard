@@ -16,6 +16,7 @@ export type LiveNodeData = {
   metrics: Record<string, number | null>;
   hasAlert: boolean;
   sparklines?: Record<string, SparklineData>;
+  endpoint?: string;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -30,7 +31,7 @@ function fmtMetric(val: number | null): string {
 }
 
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint } = data;
   const colors = nodeColor(health);
   const pulse = defaultTokens.animation.pulseFrequency[health];
 
@@ -104,6 +105,9 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
         <div className={styles.nodeIcon}>
           <img src={getAzureIconUrl(icon)} alt={icon} width={20} height={20} />
         </div>
+        {endpoint && (
+          <div className={styles.nodeEndpoint} title={endpoint}>{endpoint}</div>
+        )}
       </div>
 
       {/* Metric badges */}

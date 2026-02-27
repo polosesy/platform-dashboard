@@ -24,6 +24,10 @@ const EXCLUDED_KINDS: Set<GraphNodeKind> = new Set([
   "logAnalytics",
 ]);
 
+// ── Network container kinds (rendered as group nodes) ──
+
+const NETWORK_CONTAINER_KINDS = new Set<GraphNodeKind>(["vnet", "subnet"]);
+
 // ── GraphNodeKind → DiagramIconKind ──
 
 const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
@@ -197,59 +201,68 @@ const EDGE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
   },
 };
 
-// ── Tier-based layout ──
+// ── Dependency inference sets ──
 
-const KIND_TIER: Record<string, number> = {
-  appGateway: 0,
-  lb: 0,
-  frontDoor: 0,
-  trafficManager: 0,
-  firewall: 0,
-  aks: 1,
-  vm: 1,
-  vmss: 1,
-  containerApp: 1,
-  functionApp: 1,
-  appService: 1,
-  sql: 2,
-  storage: 2,
-  redis: 2,
-  cosmosDb: 2,
-  postgres: 2,
-  privateEndpoint: 2,
-  keyVault: 2,
-  serviceBus: 2,
-  eventHub: 2,
-};
+const COMPUTE_KINDS = new Set<string>([
+  "aks", "vm", "vmss", "containerApp", "functionApp", "appService",
+]);
 
-const X_STEP = 320;
-const Y_STEP = 150;
-const BASE_X = 80;
-const BASE_Y = 60;
+const DATA_KINDS = new Set<string>([
+  "sql", "storage", "redis", "cosmosDb", "postgres", "keyVault", "serviceBus", "eventHub",
+]);
 
-function computePositions(
-  nodes: Array<{ id: string; kind: string }>,
-): Map<string, { x: number; y: number }> {
-  const tiers = new Map<number, string[]>();
+const INGRESS_KINDS = new Set<string>([
+  "appGateway", "lb", "frontDoor", "trafficManager", "firewall",
+]);
 
-  for (const node of nodes) {
-    const tier = KIND_TIER[node.kind] ?? 1;
-    const arr = tiers.get(tier) ?? [];
-    arr.push(node.id);
-    tiers.set(tier, arr);
+function inferProtocol(dataKind: string): string {
+  switch (dataKind) {
+    case "sql": case "postgres": return "TCP/1433";
+    case "redis": return "TCP/6380";
+    case "cosmosDb": return "HTTPS/443";
+    case "storage": return "HTTPS/443";
+    case "keyVault": return "HTTPS/443";
+    case "serviceBus": case "eventHub": return "AMQP/5671";
+    default: return "TCP";
   }
+}
 
-  const positions = new Map<string, { x: number; y: number }>();
-  for (const [tier, nodeIds] of tiers) {
-    for (let row = 0; row < nodeIds.length; row++) {
-      positions.set(nodeIds[row]!, {
-        x: BASE_X + tier * X_STEP,
-        y: BASE_Y + row * Y_STEP,
-      });
-    }
+function buildEdgeLabel(srcNode: ArchitectureNode | undefined, tgtNode: ArchitectureNode | undefined): string | undefined {
+  if (!srcNode?.endpoint && !tgtNode?.endpoint) return undefined;
+  const parts: string[] = [];
+  if (srcNode?.endpoint) parts.push(truncateEndpoint(srcNode.endpoint));
+  if (tgtNode?.endpoint) parts.push(truncateEndpoint(tgtNode.endpoint));
+  return parts.join(" → ");
+}
+
+function truncateEndpoint(ep: string): string {
+  if (/^\d+\.\d+/.test(ep)) return ep;
+  const first = ep.split(".")[0];
+  return first && first.length < ep.length ? first : ep.slice(0, 24);
+}
+
+// ── Layout constants ──
+
+const NODE_W = 220;
+const NODE_H = 80;
+const NODE_GAP = 16;
+const SUBNET_INNER_PAD = 30;
+const SUBNET_HEADER = 44;
+const VNET_PAD = 30;
+const VNET_HEADER = 48;
+const SUBNET_GAP = 24;
+const EXTERNAL_GAP = 40;
+
+// ── Subnet tier classification ──
+
+function subnetTier(childKinds: Set<string>): number {
+  for (const k of childKinds) {
+    if (INGRESS_KINDS.has(k)) return 0;
   }
-
-  return positions;
+  for (const k of childKinds) {
+    if (COMPUTE_KINDS.has(k)) return 1;
+  }
+  return 2;
 }
 
 // ── Derive short stable ID from Azure resource ID ──
@@ -257,8 +270,75 @@ function computePositions(
 function shortId(azureId: string): string {
   const parts = azureId.split("/");
   const name = parts[parts.length - 1] ?? azureId;
-  // Keep alphanumeric + dash, lowercase
   return name.toLowerCase().replace(/[^a-z0-9-]/g, "");
+}
+
+function buildUniqueIdMap(nodes: ArchitectureNode[]): Map<string, string> {
+  const idMap = new Map<string, string>();
+  const seen = new Map<string, number>();
+
+  for (const node of nodes) {
+    let sid = shortId(node.azureId ?? node.id);
+    const count = seen.get(sid) ?? 0;
+    seen.set(sid, count + 1);
+    if (count > 0) {
+      sid = `${sid}-${count + 1}`;
+    }
+    idMap.set(node.id, sid);
+  }
+
+  return idMap;
+}
+
+// ── Containment map builder ──
+
+type ContainmentMap = {
+  subnetParent: Map<string, string>;   // subnetOrigId → vnetOrigId
+  resourceSubnet: Map<string, string>; // resourceOrigId → subnetOrigId
+};
+
+function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
+  const subnetParent = new Map<string, string>();
+  const resourceSubnet = new Map<string, string>();
+
+  const nodeKindMap = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+
+  // VNet → Subnet (contains edges)
+  for (const edge of graph.edges) {
+    if (edge.kind !== "contains") continue;
+    const srcKind = nodeKindMap.get(edge.source);
+    const tgtKind = nodeKindMap.get(edge.target);
+    if (srcKind === "vnet" && tgtKind === "subnet") {
+      subnetParent.set(edge.target, edge.source);
+    }
+  }
+
+  // Subnet → Resource (connects edges, direct or via NIC)
+  const nicToSubnet = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.kind !== "connects") continue;
+    const srcKind = nodeKindMap.get(edge.source);
+    const tgtKind = nodeKindMap.get(edge.target);
+
+    if (srcKind === "subnet" && tgtKind === "nic") {
+      nicToSubnet.set(edge.target, edge.source);
+    } else if (srcKind === "subnet" && tgtKind && !NETWORK_CONTAINER_KINDS.has(tgtKind)) {
+      resourceSubnet.set(edge.target, edge.source);
+    }
+  }
+
+  // NIC → Resource: resolve through NIC to subnet
+  for (const edge of graph.edges) {
+    if (edge.kind !== "connects") continue;
+    const srcKind = nodeKindMap.get(edge.source);
+    if (srcKind !== "nic") continue;
+    const subnetId = nicToSubnet.get(edge.source);
+    if (subnetId && !resourceSubnet.has(edge.target)) {
+      resourceSubnet.set(edge.target, subnetId);
+    }
+  }
+
+  return { subnetParent, resourceSubnet };
 }
 
 // ── Main generator ──
@@ -269,7 +349,10 @@ export function generateDiagramSpec(
 ): DiagramSpec {
   const now = new Date().toISOString();
 
-  // Filter nodes — exclude infra-only kinds
+  // Build containment map from FULL graph (before filtering)
+  const containment = buildContainmentMap(graph);
+
+  // Filter nodes — exclude infra-only kinds (but keep VNet/Subnet)
   const filteredNodes = graph.nodes.filter(
     (n) => !EXCLUDED_KINDS.has(n.kind),
   );
@@ -277,45 +360,216 @@ export function generateDiagramSpec(
   // Build node ID set for edge filtering
   const nodeOriginalIds = new Set(filteredNodes.map((n) => n.id));
 
-  // Map original IDs → short IDs
-  const idMap = new Map<string, string>();
-  for (const node of filteredNodes) {
-    idMap.set(node.id, shortId(node.azureId ?? node.id));
+  // Map original IDs → unique short IDs
+  const idMap = buildUniqueIdMap(filteredNodes);
+
+  // Categorize nodes
+  const vnetNodes = filteredNodes.filter((n) => n.kind === "vnet");
+  const subnetNodes = filteredNodes.filter((n) => n.kind === "subnet");
+  const resourceNodes = filteredNodes.filter((n) => !NETWORK_CONTAINER_KINDS.has(n.kind));
+
+  // Build subnet → children map (using short IDs)
+  const subnetChildren = new Map<string, Array<{ node: ArchitectureNode; shortId: string }>>();
+  for (const res of resourceNodes) {
+    const subnetOrigId = containment.resourceSubnet.get(res.id);
+    if (!subnetOrigId) continue;
+    const subnetShortId = idMap.get(subnetOrigId);
+    if (!subnetShortId) continue;
+    const arr = subnetChildren.get(subnetShortId) ?? [];
+    arr.push({ node: res, shortId: idMap.get(res.id)! });
+    subnetChildren.set(subnetShortId, arr);
   }
 
-  // Compute positions
-  const positions = computePositions(
-    filteredNodes.map((n) => ({ id: idMap.get(n.id)!, kind: n.kind })),
-  );
+  // Build VNet → subnets map (using short IDs)
+  const vnetSubnets = new Map<string, Array<{ node: ArchitectureNode; shortId: string }>>();
+  for (const sub of subnetNodes) {
+    const vnetOrigId = containment.subnetParent.get(sub.id);
+    if (!vnetOrigId) continue;
+    const vnetShortId = idMap.get(vnetOrigId);
+    if (!vnetShortId) continue;
+    const arr = vnetSubnets.get(vnetShortId) ?? [];
+    arr.push({ node: sub, shortId: idMap.get(sub.id)! });
+    vnetSubnets.set(vnetShortId, arr);
+  }
 
-  // Build DiagramNodeSpec[]
-  const diagramNodes: DiagramNodeSpec[] = filteredNodes.map((node) => {
-    const id = idMap.get(node.id)!;
-    return {
-      id,
-      label: node.name,
-      icon: KIND_TO_ICON[node.kind] ?? "custom",
-      azureResourceId: node.azureId,
-      groupId: inferGroup(node),
-      position: positions.get(id),
-      bindings: NODE_BINDINGS[node.kind] ?? {
-        health: { source: "composite", rules: [] },
-      },
-    };
+  // Compute subnet dimensions and tier
+  const subnetInfo = new Map<string, { width: number; height: number; tier: number }>();
+  for (const [subShortId, children] of subnetChildren) {
+    const childKinds = new Set(children.map((c) => c.node.kind));
+    const w = NODE_W + 2 * SUBNET_INNER_PAD;
+    const h = SUBNET_HEADER + children.length * NODE_H + Math.max(0, children.length - 1) * NODE_GAP + SUBNET_INNER_PAD;
+    subnetInfo.set(subShortId, { width: w, height: Math.max(h, SUBNET_HEADER + NODE_H + SUBNET_INNER_PAD), tier: subnetTier(childKinds) });
+  }
+
+  // Include empty subnets with minimal size
+  for (const sub of subnetNodes) {
+    const sid = idMap.get(sub.id)!;
+    if (!subnetInfo.has(sid)) {
+      subnetInfo.set(sid, { width: NODE_W + 2 * SUBNET_INNER_PAD, height: SUBNET_HEADER + SUBNET_INNER_PAD + 20, tier: 2 });
+    }
+  }
+
+  // Compute VNet dimensions
+  const vnetInfo = new Map<string, { width: number; height: number }>();
+  for (const vnet of vnetNodes) {
+    const vShortId = idMap.get(vnet.id)!;
+    const subs = vnetSubnets.get(vShortId) ?? [];
+    subs.sort((a, b) => {
+      const ta = subnetInfo.get(a.shortId)?.tier ?? 2;
+      const tb = subnetInfo.get(b.shortId)?.tier ?? 2;
+      return ta - tb;
+    });
+
+    let totalSubW = 0;
+    let maxSubH = 0;
+    for (const sub of subs) {
+      const info = subnetInfo.get(sub.shortId);
+      if (!info) continue;
+      totalSubW += info.width;
+      maxSubH = Math.max(maxSubH, info.height);
+    }
+    totalSubW += Math.max(0, subs.length - 1) * SUBNET_GAP;
+
+    const vW = Math.max(totalSubW + 2 * VNET_PAD, 400);
+    const vH = VNET_HEADER + maxSubH + VNET_PAD + 10;
+    vnetInfo.set(vShortId, { width: vW, height: Math.max(vH, 200) });
+  }
+
+  // ── Compute positions ──
+  const diagramNodes: DiagramNodeSpec[] = [];
+  let cursorY = 40;
+
+  // Place VNets
+  for (const vnet of vnetNodes) {
+    const vShortId = idMap.get(vnet.id)!;
+    const vSize = vnetInfo.get(vShortId) ?? { width: 600, height: 300 };
+
+    diagramNodes.push({
+      id: vShortId,
+      label: `${vnet.name}${vnet.endpoint ? ` (${vnet.endpoint})` : ""}`,
+      icon: "vnet",
+      nodeType: "group",
+      width: vSize.width,
+      height: vSize.height,
+      azureResourceId: vnet.azureId,
+      endpoint: vnet.endpoint,
+      position: { x: 40, y: cursorY },
+      bindings: {},
+    });
+
+    // Place subnets within VNet (sorted by tier)
+    const subs = vnetSubnets.get(vShortId) ?? [];
+    subs.sort((a, b) => {
+      const ta = subnetInfo.get(a.shortId)?.tier ?? 2;
+      const tb = subnetInfo.get(b.shortId)?.tier ?? 2;
+      return ta - tb;
+    });
+
+    let subX = VNET_PAD;
+    for (const sub of subs) {
+      const sInfo = subnetInfo.get(sub.shortId);
+      if (!sInfo) continue;
+
+      diagramNodes.push({
+        id: sub.shortId,
+        label: `${sub.node.name}${sub.node.endpoint ? ` (${sub.node.endpoint})` : ""}`,
+        icon: "subnet",
+        nodeType: "group",
+        parentId: vShortId,
+        width: sInfo.width,
+        height: sInfo.height,
+        azureResourceId: sub.node.azureId,
+        endpoint: sub.node.endpoint,
+        position: { x: subX, y: VNET_HEADER },
+        bindings: {},
+      });
+
+      // Place resources within subnet
+      const children = subnetChildren.get(sub.shortId) ?? [];
+      for (let ci = 0; ci < children.length; ci++) {
+        const child = children[ci]!;
+        diagramNodes.push({
+          id: child.shortId,
+          label: child.node.name,
+          icon: KIND_TO_ICON[child.node.kind] ?? "custom",
+          azureResourceId: child.node.azureId,
+          endpoint: child.node.endpoint,
+          parentId: sub.shortId,
+          groupId: inferGroup(child.node),
+          position: { x: SUBNET_INNER_PAD, y: SUBNET_HEADER + ci * (NODE_H + NODE_GAP) },
+          bindings: NODE_BINDINGS[child.node.kind] ?? {
+            health: { source: "composite", rules: [] },
+          },
+        });
+      }
+
+      subX += sInfo.width + SUBNET_GAP;
+    }
+
+    cursorY += vSize.height + EXTERNAL_GAP;
+  }
+
+  // Identify resources NOT inside any subnet
+  const containedResourceIds = new Set<string>();
+  for (const children of subnetChildren.values()) {
+    for (const c of children) containedResourceIds.add(c.shortId);
+  }
+
+  const vnetSubnetIds = new Set([
+    ...vnetNodes.map((n) => idMap.get(n.id)!),
+    ...subnetNodes.map((n) => idMap.get(n.id)!),
+  ]);
+
+  const externalResources = resourceNodes.filter((n) => {
+    const sid = idMap.get(n.id)!;
+    return !containedResourceIds.has(sid) && !vnetSubnetIds.has(sid);
   });
 
-  // Filter edges — only "connects", both endpoints must survive filtering
-  const connectEdges = graph.edges.filter(
+  // Place external resources horizontally below VNets
+  if (externalResources.length > 0) {
+    externalResources.sort((a, b) => {
+      const tierA = DATA_KINDS.has(a.kind) ? 0 : COMPUTE_KINDS.has(a.kind) ? 1 : 2;
+      const tierB = DATA_KINDS.has(b.kind) ? 0 : COMPUTE_KINDS.has(b.kind) ? 1 : 2;
+      return tierA - tierB;
+    });
+
+    const cols = Math.min(externalResources.length, 5);
+    for (let i = 0; i < externalResources.length; i++) {
+      const res = externalResources[i]!;
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+
+      diagramNodes.push({
+        id: idMap.get(res.id)!,
+        label: res.name,
+        icon: KIND_TO_ICON[res.kind] ?? "custom",
+        azureResourceId: res.azureId,
+        endpoint: res.endpoint,
+        groupId: inferGroup(res),
+        position: {
+          x: 40 + col * (NODE_W + NODE_GAP + 20),
+          y: cursorY + row * (NODE_H + NODE_GAP),
+        },
+        bindings: NODE_BINDINGS[res.kind] ?? {
+          health: { source: "composite", rules: [] },
+        },
+      });
+    }
+  }
+
+  // ── Build edges (traffic flow only, exclude VNet/Subnet containment) ──
+  const filteredEdgesNoNetwork = graph.edges.filter(
     (e) =>
       e.kind === "connects" &&
       nodeOriginalIds.has(e.source) &&
-      nodeOriginalIds.has(e.target),
+      nodeOriginalIds.has(e.target) &&
+      !isNetworkContainer(graph, e.source) &&
+      !isNetworkContainer(graph, e.target),
   );
 
-  // Deduplicate edges by source→target pair
   const edgeSeen = new Set<string>();
   const uniqueEdges: ArchitectureEdge[] = [];
-  for (const edge of connectEdges) {
+  for (const edge of filteredEdgesNoNetwork) {
     const key = `${edge.source}→${edge.target}`;
     if (!edgeSeen.has(key)) {
       edgeSeen.add(key);
@@ -323,26 +577,65 @@ export function generateDiagramSpec(
     }
   }
 
-  // Build DiagramEdgeSpec[]
+  const edgeIdSeen = new Set<string>();
+
+  function makeEdge(srcId: string, tgtId: string, srcKind: string, label?: string, protocol?: string): DiagramEdgeSpec {
+    let edgeId = `${srcId}-to-${tgtId}`;
+    if (edgeIdSeen.has(edgeId)) {
+      let suffix = 2;
+      while (edgeIdSeen.has(`${edgeId}-${suffix}`)) suffix++;
+      edgeId = `${edgeId}-${suffix}`;
+    }
+    edgeIdSeen.add(edgeId);
+
+    return {
+      id: edgeId,
+      source: srcId,
+      target: tgtId,
+      label,
+      protocol,
+      bindings: EDGE_BINDINGS[srcKind] ?? {},
+      animation: "flow" as const,
+    };
+  }
+
+  // Topology-based edges
   const diagramEdges: DiagramEdgeSpec[] = uniqueEdges.map((edge) => {
     const srcId = idMap.get(edge.source)!;
     const tgtId = idMap.get(edge.target)!;
     const srcNode = filteredNodes.find((n) => n.id === edge.source);
+    const tgtNode = filteredNodes.find((n) => n.id === edge.target);
     const srcKind = srcNode?.kind ?? "unknown";
-
-    return {
-      id: `${srcId}-to-${tgtId}`,
-      source: srcId,
-      target: tgtId,
-      bindings: EDGE_BINDINGS[srcKind] ?? {},
-      animation: "flow" as const,
-    };
+    const label = buildEdgeLabel(srcNode, tgtNode);
+    return makeEdge(srcId, tgtId, srcKind, label);
   });
+
+  // Dependency-based edges: compute → data
+  const computeNodesList = filteredNodes.filter((n) => COMPUTE_KINDS.has(n.kind));
+  const dataNodesList = filteredNodes.filter((n) => DATA_KINDS.has(n.kind));
+
+  const existingPairs = new Set<string>();
+  for (const e of diagramEdges) {
+    existingPairs.add(`${e.source}→${e.target}`);
+    existingPairs.add(`${e.target}→${e.source}`);
+  }
+
+  for (const compute of computeNodesList) {
+    for (const data of dataNodesList) {
+      const cId = idMap.get(compute.id)!;
+      const dId = idMap.get(data.id)!;
+      if (existingPairs.has(`${cId}→${dId}`) || existingPairs.has(`${dId}→${cId}`)) continue;
+
+      const label = buildEdgeLabel(compute, data);
+      const protocol = inferProtocol(data.kind);
+      diagramEdges.push(makeEdge(cId, dId, compute.kind, label, protocol));
+      existingPairs.add(`${cId}→${dId}`);
+    }
+  }
 
   // Build groups
   const groups = inferGroups(filteredNodes);
 
-  // Sanitize subscription ID for spec ID
   const specId = `auto-${subscriptionId.slice(0, 8)}`;
 
   return {
@@ -363,14 +656,19 @@ export function generateDiagramSpec(
   };
 }
 
-// ── Group inference ──
+// ── Helpers ──
+
+function isNetworkContainer(graph: ArchitectureGraph, nodeId: string): boolean {
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  return node ? NETWORK_CONTAINER_KINDS.has(node.kind) : false;
+}
 
 function inferGroup(node: ArchitectureNode): string {
   const kind = node.kind;
-  if (kind === "appGateway" || kind === "lb" || kind === "frontDoor" || kind === "trafficManager" || kind === "firewall") return "ingress";
-  if (kind === "aks" || kind === "vm" || kind === "vmss" || kind === "containerApp" || kind === "functionApp" || kind === "appService") return "compute";
-  if (kind === "sql" || kind === "storage" || kind === "privateEndpoint" || kind === "cosmosDb" || kind === "redis" || kind === "postgres" || kind === "keyVault" || kind === "serviceBus" || kind === "eventHub") return "data";
-  if (kind === "vnet" || kind === "subnet" || kind === "dns") return "network";
+  if (INGRESS_KINDS.has(kind)) return "ingress";
+  if (COMPUTE_KINDS.has(kind)) return "compute";
+  if (DATA_KINDS.has(kind) || kind === "privateEndpoint") return "data";
+  if (kind === "vnet" || kind === "subnet") return "network";
   if (kind === "appInsights" || kind === "logAnalytics") return "monitoring";
   return "other";
 }

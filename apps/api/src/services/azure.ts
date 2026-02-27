@@ -145,6 +145,116 @@ function safeString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
 }
 
+/**
+ * Extract a displayable endpoint (IP or FQDN) from resource properties.
+ * Returns the most relevant endpoint based on resource type.
+ */
+function extractEndpoint(type: string | undefined, name: string | undefined, properties: unknown): string | undefined {
+  if (!type || !properties || typeof properties !== "object") return undefined;
+  const t = type.toLowerCase();
+  const p = properties as Record<string, unknown>;
+
+  // VM — extract private IP from NIC configs
+  if (t === "microsoft.compute/virtualmachines") {
+    const nicProfile = p.networkProfile as { networkInterfaces?: Array<{ properties?: { ipConfigurations?: Array<{ properties?: { privateIPAddress?: string } }> } }> } | undefined;
+    const firstIp = nicProfile?.networkInterfaces?.[0]?.properties?.ipConfigurations?.[0]?.properties?.privateIPAddress;
+    return safeString(firstIp);
+  }
+
+  // NIC — extract private IP
+  if (t === "microsoft.network/networkinterfaces") {
+    const ipConfigs = (p.ipConfigurations ?? []) as Array<{ properties?: { privateIPAddress?: string } }>;
+    return safeString(ipConfigs[0]?.properties?.privateIPAddress);
+  }
+
+  // App Service / Function App — defaultHostName
+  if (t === "microsoft.web/sites") {
+    return safeString(p.defaultHostName);
+  }
+
+  // Storage Account — primaryEndpoints.blob or name-based FQDN
+  if (t === "microsoft.storage/storageaccounts") {
+    const endpoints = p.primaryEndpoints as { blob?: string } | undefined;
+    if (endpoints?.blob) return endpoints.blob.replace(/\/$/, "").replace(/^https?:\/\//, "");
+    return name ? `${name}.blob.core.windows.net` : undefined;
+  }
+
+  // SQL Server — fullyQualifiedDomainName
+  if (t === "microsoft.sql/servers") {
+    return safeString(p.fullyQualifiedDomainName);
+  }
+
+  // CosmosDB — documentEndpoint
+  if (t === "microsoft.documentdb/databaseaccounts") {
+    const ep = safeString(p.documentEndpoint);
+    return ep ? ep.replace(/\/$/, "").replace(/^https?:\/\//, "") : undefined;
+  }
+
+  // Redis — hostName
+  if (t === "microsoft.cache/redis") {
+    return safeString(p.hostName);
+  }
+
+  // PostgreSQL — fullyQualifiedDomainName
+  if (t.startsWith("microsoft.dbforpostgresql/")) {
+    return safeString(p.fullyQualifiedDomainName);
+  }
+
+  // Key Vault — vaultUri
+  if (t === "microsoft.keyvault/vaults") {
+    const uri = safeString(p.vaultUri);
+    return uri ? uri.replace(/\/$/, "").replace(/^https?:\/\//, "") : undefined;
+  }
+
+  // AKS — fqdn
+  if (t === "microsoft.containerservice/managedclusters") {
+    return safeString(p.fqdn) ?? safeString(p.privateFQDN);
+  }
+
+  // Container App — configuration.ingress.fqdn or latestRevisionFqdn
+  if (t === "microsoft.app/containerapps") {
+    const config = p.configuration as { ingress?: { fqdn?: string } } | undefined;
+    return safeString(config?.ingress?.fqdn) ?? safeString(p.latestRevisionFqdn);
+  }
+
+  // Application Gateway — frontendIPConfigurations private IP or public IP
+  if (t === "microsoft.network/applicationgateways") {
+    const feConfigs = (p.frontendIPConfigurations ?? []) as Array<{ properties?: { privateIPAddress?: string } }>;
+    return safeString(feConfigs[0]?.properties?.privateIPAddress);
+  }
+
+  // Load Balancer — frontendIPConfigurations private IP
+  if (t === "microsoft.network/loadbalancers") {
+    const feConfigs = (p.frontendIPConfigurations ?? []) as Array<{ properties?: { privateIPAddress?: string } }>;
+    return safeString(feConfigs[0]?.properties?.privateIPAddress);
+  }
+
+  // Firewall — ipConfigurations private IP
+  if (t === "microsoft.network/azurefirewalls") {
+    const ipConfigs = (p.ipConfigurations ?? []) as Array<{ properties?: { privateIPAddress?: string } }>;
+    return safeString(ipConfigs[0]?.properties?.privateIPAddress);
+  }
+
+  // Service Bus / Event Hub — serviceBusEndpoint
+  if (t === "microsoft.servicebus/namespaces" || t === "microsoft.eventhub/namespaces") {
+    const ep = safeString(p.serviceBusEndpoint);
+    return ep ? ep.replace(/\/$/, "").replace(/^https?:\/\//, "") : undefined;
+  }
+
+  // VNet — addressSpace prefixes
+  if (t === "microsoft.network/virtualnetworks") {
+    const space = p.addressSpace as { addressPrefixes?: string[] } | undefined;
+    return space?.addressPrefixes?.[0];
+  }
+
+  // Subnet — addressPrefix
+  if (t === "microsoft.network/virtualnetworks/subnets") {
+    return safeString(p.addressPrefix);
+  }
+
+  return undefined;
+}
+
 function getSubnetIdFromNicProps(properties: unknown): string | undefined {
   if (!properties || typeof properties !== "object") return undefined;
   const ipConfigs = (properties as { ipConfigurations?: unknown }).ipConfigurations;
@@ -399,12 +509,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
 
     const kind = mapKind(r.type, r.kind);
+    const endpoint = extractEndpoint(r.type, r.name, r.properties);
     nodes.push({
       id: r.id,
       kind,
       name: r.name ?? r.id,
       azureId: r.id,
       location: r.location,
+      endpoint,
       tags: r.tags,
       health: "unknown"
     });

@@ -22,12 +22,14 @@ import type {
   VisualizationMode,
 } from "@aud/types";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
+import { GroupNode, type GroupNodeData } from "./GroupNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
 import { D3ParticleCanvas } from "./D3ParticleCanvas";
 import { FaultRipple } from "./FaultRipple";
 import { ImpactCascade } from "./ImpactCascade";
 import { TrafficHeatmap } from "./TrafficHeatmap";
 import { nodeColor } from "../utils/designTokens";
+import { getEdgePath, clearEdgePaths } from "../utils/edgePathStore";
 import styles from "../styles.module.css";
 
 type LiveCanvasProps = {
@@ -40,7 +42,7 @@ type LiveCanvasProps = {
   showHeatmap: boolean;
 };
 
-const nodeTypes: NodeTypes = { live: LiveNode };
+const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode };
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 
 /** Minimum gap between nodes to prevent overlap (px) */
@@ -87,11 +89,43 @@ function LiveCanvasInner({
     }, []),
   });
 
-  // Build initial nodes from spec — then managed by useNodesState for dragging
-  const initialNodes: FlowNode<LiveNodeData>[] = useMemo(() => {
-    return spec.nodes.map((nodeSpec) => {
+  // Build initial nodes from spec — group nodes first, then resource nodes
+  const initialNodes = useMemo(() => {
+    // Group nodes MUST come before their children in the array for ReactFlow
+    const sorted = [...spec.nodes].sort((a, b) => {
+      const aGroup = a.nodeType === "group" ? 0 : 1;
+      const bGroup = b.nodeType === "group" ? 0 : 1;
+      if (aGroup !== bGroup) return aGroup - bGroup;
+      // Among groups, parents before children (no parentId first)
+      const aHasParent = a.parentId ? 1 : 0;
+      const bHasParent = b.parentId ? 1 : 0;
+      return aHasParent - bHasParent;
+    });
+
+    return sorted.map((nodeSpec) => {
+      if (nodeSpec.nodeType === "group") {
+        const groupNode: FlowNode<GroupNodeData> = {
+          id: nodeSpec.id,
+          type: "group",
+          position: nodeSpec.position ?? { x: 0, y: 0 },
+          draggable: true,
+          style: {
+            width: nodeSpec.width ?? 400,
+            height: nodeSpec.height ?? 200,
+          },
+          data: {
+            label: nodeSpec.label,
+            icon: nodeSpec.icon,
+          },
+        };
+        if (nodeSpec.parentId) {
+          (groupNode as FlowNode<GroupNodeData> & { parentNode: string }).parentNode = nodeSpec.parentId;
+        }
+        return groupNode;
+      }
+
       const live = snapshot?.nodes.find((n) => n.id === nodeSpec.id);
-      return {
+      const liveNode: FlowNode<LiveNodeData> = {
         id: nodeSpec.id,
         type: "live",
         position: nodeSpec.position ?? { x: 0, y: 0 },
@@ -104,21 +138,54 @@ function LiveCanvasInner({
           metrics: live?.metrics ?? {},
           hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
           sparklines: live?.sparklines,
+          endpoint: nodeSpec.endpoint,
         },
       };
+      if (nodeSpec.parentId) {
+        (liveNode as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+        (liveNode as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
+      }
+      return liveNode;
     });
   }, [spec.nodes, snapshot?.nodes]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
-  // Sync nodes with spec: update existing, add new, REMOVE stale (when spec changes)
+  // Sync nodes with spec: update data for existing, preserve positions
   useEffect(() => {
     setNodes((prev) => {
-      const specIds = new Set(spec.nodes.map((s) => s.id));
       const prevById = new Map(prev.map((n) => [n.id, n]));
 
-      return spec.nodes.map((nodeSpec) => {
+      // Sort: groups first, parents before children
+      const sorted = [...spec.nodes].sort((a, b) => {
+        const aGroup = a.nodeType === "group" ? 0 : 1;
+        const bGroup = b.nodeType === "group" ? 0 : 1;
+        if (aGroup !== bGroup) return aGroup - bGroup;
+        const aHasParent = a.parentId ? 1 : 0;
+        const bHasParent = b.parentId ? 1 : 0;
+        return aHasParent - bHasParent;
+      });
+
+      return sorted.map((nodeSpec) => {
         const existing = prevById.get(nodeSpec.id);
+
+        if (nodeSpec.nodeType === "group") {
+          const data: GroupNodeData = { label: nodeSpec.label, icon: nodeSpec.icon };
+          if (existing) return { ...existing, data };
+          const gn: FlowNode<GroupNodeData> = {
+            id: nodeSpec.id,
+            type: "group",
+            position: nodeSpec.position ?? { x: 0, y: 0 },
+            draggable: true,
+            style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
+            data,
+          };
+          if (nodeSpec.parentId) {
+            (gn as FlowNode<GroupNodeData> & { parentNode: string }).parentNode = nodeSpec.parentId;
+          }
+          return gn;
+        }
+
         const live = snapshot?.nodes.find((s) => s.id === nodeSpec.id);
         const data: LiveNodeData = {
           label: nodeSpec.label,
@@ -128,22 +195,24 @@ function LiveCanvasInner({
           metrics: live?.metrics ?? {},
           hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
           sparklines: live?.sparklines,
+          endpoint: nodeSpec.endpoint,
         };
 
-        if (existing) {
-          // Preserve drag position, update data only
-          return { ...existing, data };
-        }
-        // New node from spec
-        return {
+        if (existing) return { ...existing, data };
+
+        const ln: FlowNode<LiveNodeData> = {
           id: nodeSpec.id,
           type: "live" as const,
           position: nodeSpec.position ?? { x: 0, y: 0 },
           draggable: true,
           data,
-        } as FlowNode<LiveNodeData>;
+        };
+        if (nodeSpec.parentId) {
+          (ln as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+          (ln as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
+        }
+        return ln;
       });
-      // Nodes NOT in spec.nodes are automatically dropped (not included in the map output)
     });
   }, [spec.nodes, snapshot?.nodes, setNodes]);
 
@@ -163,20 +232,19 @@ function LiveCanvasInner({
         if (!draggedId) return prev;
 
         const dragged = prev.find((n) => n.id === draggedId);
-        if (!dragged) return prev;
+        if (!dragged || dragged.type === "group") return prev; // Skip collision for group nodes
 
         let { x, y } = dragged.position;
         let adjusted = false;
 
         for (const other of prev) {
-          if (other.id === draggedId) continue;
+          if (other.id === draggedId || other.type === "group") continue; // Skip group nodes
           const dx = x - other.position.x;
           const dy = y - other.position.y;
           const overlapX = NODE_WIDTH + NODE_MIN_GAP - Math.abs(dx);
           const overlapY = NODE_HEIGHT + NODE_MIN_GAP - Math.abs(dy);
 
           if (overlapX > 0 && overlapY > 0) {
-            // Push out on the axis with less overlap
             if (overlapX < overlapY) {
               x += dx >= 0 ? overlapX : -overlapX;
             } else {
@@ -237,22 +305,39 @@ function LiveCanvasInner({
     };
   }
 
-  // Build particle edge data with SVG path strings for exact alignment
+  // Track a tick to re-read edge paths from the store after AnimatedEdge renders
+  const [pathTick, setPathTick] = useState(0);
+  useEffect(() => {
+    // After edges render, AnimatedEdge stores paths via useEffect.
+    // Schedule a microtask to re-read the store.
+    const id = requestAnimationFrame(() => setPathTick((t) => t + 1));
+    return () => cancelAnimationFrame(id);
+  }, [edges, nodePositions]);
+
+  // Clear stale edge paths when spec changes
+  useEffect(() => {
+    clearEdgePaths();
+  }, [spec.id]);
+
+  // Build particle edge data — read actual SVG paths from the edge path store
   const particleEdges = useMemo(() => {
     if (!showParticles || vizMode !== "2d-animated") return [];
 
     return spec.edges.map((edgeSpec) => {
       const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
       const pts = edgeEndpoints(edgeSpec.source, edgeSpec.target);
-      // Compute the exact same SVG path that ReactFlow renders
-      const [pathD] = getBezierPath({
+
+      // Prefer actual path from AnimatedEdge (pixel-perfect), fall back to computed
+      const storedPath = getEdgePath(edgeSpec.id);
+      const pathD = storedPath ?? getBezierPath({
         sourceX: pts.sourceX,
         sourceY: pts.sourceY,
         sourcePosition: Position.Right,
         targetX: pts.targetX,
         targetY: pts.targetY,
         targetPosition: Position.Left,
-      });
+      })[0];
+
       return {
         id: edgeSpec.id,
         ...pts,
@@ -263,7 +348,7 @@ function LiveCanvasInner({
       };
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.edges, snapshot?.edges, nodePositions, showParticles, vizMode]);
+  }, [spec.edges, snapshot?.edges, nodePositions, showParticles, vizMode, pathTick]);
 
   // Build edge paths for cascade overlay
   const edgePaths = useMemo(() => {

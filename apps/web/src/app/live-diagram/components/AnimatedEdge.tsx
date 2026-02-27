@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { type EdgeProps, getBezierPath, BaseEdge } from "reactflow";
 import type { EdgeStatus, EdgeTrafficLevel } from "@aud/types";
-import { edgeColor, edgeWidth, particleDuration, particleCount, particleRadius, defaultTokens } from "../utils/designTokens";
+import { edgeColor, edgeWidth, defaultTokens } from "../utils/designTokens";
+import { setEdgePath } from "../utils/edgePathStore";
 
 export type AnimatedEdgeData = {
   status: EdgeStatus;
@@ -12,6 +14,7 @@ export type AnimatedEdgeData = {
 
 export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const {
+    id,
     sourceX, sourceY, targetX, targetY,
     sourcePosition, targetPosition,
     data, markerEnd,
@@ -22,14 +25,16 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
     sourcePosition, targetPosition,
   });
 
+  // Report the actual SVG path to the shared store for D3ParticleCanvas alignment
+  useEffect(() => {
+    setEdgePath(id, edgePath);
+  }, [id, edgePath]);
+
   const status = data?.status ?? "normal";
   const trafficLevel = data?.trafficLevel ?? "none";
   const label = data?.label;
   const colors = edgeColor(status);
   const width = edgeWidth(trafficLevel);
-  const dur = particleDuration(trafficLevel);
-  const count = particleCount(trafficLevel);
-  const radius = particleRadius(trafficLevel);
   const transition = `${defaultTokens.animation.transitionDuration}ms ease`;
 
   return (
@@ -58,32 +63,6 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
           transition: `stroke ${transition}, stroke-width ${transition}`,
         }}
       />
-
-      {/* Animated particles along path */}
-      {dur > 0 && count > 0 && Array.from({ length: count }, (_, i) => (
-        <circle
-          key={i}
-          r={radius}
-          fill={colors.particle}
-          opacity={status === "idle" ? 0.4 : 0.85}
-        >
-          <animateMotion
-            dur={`${dur}s`}
-            repeatCount="indefinite"
-            begin={`${(i / count) * dur}s`}
-            path={edgePath}
-          />
-        </circle>
-      ))}
-
-      {/* Pulse ring for "down" status */}
-      {status === "down" && dur > 0 && (
-        <circle r={4} fill="none" stroke={colors.particle} strokeWidth={1.5} opacity={0.6}>
-          <animateMotion dur={`${dur * 1.2}s`} repeatCount="indefinite" path={edgePath} />
-          <animate attributeName="r" values="3;8;3" dur="1.2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.8;0.15;0.8" dur="1.2s" repeatCount="indefinite" />
-        </circle>
-      )}
 
       {/* Edge label */}
       {label && (
