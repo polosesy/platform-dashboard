@@ -408,7 +408,7 @@ function LiveCanvasInner({
           edges={particleEdges}
           width={dimensions.width}
           height={dimensions.height}
-          transform={viewTransform}
+          transformRef={viewTransformRef}
           enabled={showParticles}
         />
       )}
@@ -454,8 +454,10 @@ function LiveCanvasInner({
 }
 
 export function LiveCanvas(props: LiveCanvasProps) {
+  // key={spec.id} forces full ReactFlow remount when diagram changes
+  // — clears stale nodes/edges/viewport from previous diagram
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={props.spec.id}>
       <LiveCanvasInner {...props} />
     </ReactFlowProvider>
   );

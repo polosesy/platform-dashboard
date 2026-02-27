@@ -202,10 +202,11 @@ export async function buildLiveSnapshot(
     }
   }
 
-  // ── Build live nodes ──
+  // ── Build live nodes (skip group/container nodes — they don't have metrics) ──
   const now = new Date().toISOString();
+  const resourceNodeSpecs = spec.nodes.filter((n) => n.nodeType !== "group");
 
-  const liveNodes: LiveNode[] = spec.nodes.map((nodeSpec) => {
+  const liveNodes: LiveNode[] = resourceNodeSpecs.map((nodeSpec) => {
     const metrics = nodeMetricsMap.get(nodeSpec.azureResourceId ?? "") ?? {};
     const { health, score } = resolveNodeHealth(metrics, nodeSpec.bindings);
 
@@ -343,7 +344,7 @@ export async function buildLiveSnapshot(
     edges: liveEdges,
     alerts: liveAlerts,
     topology: {
-      nodeCount: spec.nodes.length,
+      nodeCount: resourceNodeSpecs.length,
       edgeCount: spec.edges.length,
       resolvedBindings,
       failedBindings,

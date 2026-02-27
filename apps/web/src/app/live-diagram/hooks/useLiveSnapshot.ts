@@ -21,7 +21,7 @@ export function useLiveSnapshot(
   // Manual refresh
   const refresh = useCallback(async () => {
     try {
-      const token = await getApiToken();
+      const token = await getApiToken().catch(() => null);
       const data = await fetchJsonWithBearer<LiveDiagramSnapshot>(
         `${apiBaseUrl()}/api/live/snapshot?diagramId=${diagramId}`,
         token,
@@ -35,6 +35,7 @@ export function useLiveSnapshot(
 
   useEffect(() => {
     let cancelled = false;
+    setSnapshot(null); // Clear stale snapshot on diagram/mode change
 
     if (mode === "sse") {
       const es = new EventSource(
@@ -71,7 +72,7 @@ export function useLiveSnapshot(
     const load = async () => {
       if (cancelled) return;
       try {
-        const token = await getApiToken();
+        const token = await getApiToken().catch(() => null);
         const data = await fetchJsonWithBearer<LiveDiagramSnapshot>(
           `${apiBaseUrl()}/api/live/snapshot?diagramId=${diagramId}`,
           token,

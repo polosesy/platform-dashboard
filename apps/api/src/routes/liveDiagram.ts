@@ -33,20 +33,8 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
     res.json({ diagram: spec });
   });
 
-  // ── Save/update a diagram spec ──
-  router.post("/api/live/diagrams", (req: Request, res: Response) => {
-    const body = req.body as DiagramSpec;
-    if (!body?.id || !body?.version) {
-      res.status(400).json({ error: "Invalid diagram spec: id and version required" });
-      return;
-    }
-    body.updatedAt = new Date().toISOString();
-    if (!body.createdAt) body.createdAt = body.updatedAt;
-    saveDiagramSpec(body);
-    res.status(201).json({ ok: true, id: body.id });
-  });
-
   // ── Auto-generate diagram from Azure Resource Graph ──
+  // IMPORTANT: Register before generic POST /api/live/diagrams to avoid route conflicts
   router.post("/api/live/diagrams/generate", (req: Request, res: Response) => {
     const subscriptionId =
       typeof req.body?.subscriptionId === "string"
@@ -75,6 +63,19 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         res.status(500).json({ error: msg });
       });
+  });
+
+  // ── Save/update a diagram spec ──
+  router.post("/api/live/diagrams", (req: Request, res: Response) => {
+    const body = req.body as DiagramSpec;
+    if (!body?.id || !body?.version) {
+      res.status(400).json({ error: "Invalid diagram spec: id and version required" });
+      return;
+    }
+    body.updatedAt = new Date().toISOString();
+    if (!body.createdAt) body.createdAt = body.updatedAt;
+    saveDiagramSpec(body);
+    res.status(201).json({ ok: true, id: body.id });
   });
 
   // ── Live snapshot (REST polling) ──

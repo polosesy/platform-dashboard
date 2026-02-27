@@ -42,7 +42,9 @@ export default function LiveDiagramPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // Gracefully handle MSAL token failure — still fetch subscriptions without auth
     getApiToken()
+      .catch(() => null)
       .then((token) =>
         fetchJsonWithBearer<AzureSubscriptionsResponse>(
           `${apiBaseUrl()}/api/azure/subscriptions`,
@@ -66,7 +68,7 @@ export default function LiveDiagramPage() {
     setGenerating(true);
     setGenerateError(null);
     try {
-      const token = await getApiToken();
+      const token = await getApiToken().catch(() => null);
       const resp = await fetchJsonWithBearer<{ ok: boolean; diagram: { id: string } }>(
         `${apiBaseUrl()}/api/live/diagrams/generate`,
         token,

@@ -50,8 +50,8 @@ export const defaultTokens: DesignTokenSet = {
   dimensions: {
     nodeWidth: 180,
     nodeHeight: 72,
-    edgeWidthRange: [1.5, 12],
-    particleRadius: { none: 0, low: 2, medium: 2.5, high: 3, burst: 3.5 },
+    edgeWidthRange: [1.5, 6],
+    particleRadius: { none: 0, low: 1, medium: 1.2, high: 1.5, burst: 2 },
     healthRingRadius: 17,
     healthRingStroke: 3,
   },
@@ -74,7 +74,7 @@ export function edgeColor(status: EdgeStatus, tokens = defaultTokens): EdgeColor
 
 export function edgeWidth(trafficLevel: EdgeTrafficLevel, tokens = defaultTokens): number {
   const [min, max] = tokens.dimensions.edgeWidthRange;
-  const levels: Record<EdgeTrafficLevel, number> = { none: 0, low: 0.15, medium: 0.35, high: 0.65, burst: 1.0 };
+  const levels: Record<EdgeTrafficLevel, number> = { none: 0, low: 0.20, medium: 0.45, high: 0.70, burst: 1.0 };
   return min + (max - min) * levels[trafficLevel];
 }
 

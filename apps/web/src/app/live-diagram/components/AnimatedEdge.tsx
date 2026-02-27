@@ -45,7 +45,7 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
           path={edgePath}
           style={{
             stroke: colors.glow,
-            strokeWidth: width + 6,
+            strokeWidth: width + 4,
             filter: "blur(4px)",
             transition: `stroke ${transition}, stroke-width ${transition}`,
           }}

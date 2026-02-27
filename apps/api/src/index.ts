@@ -1,4 +1,12 @@
-import "dotenv/config";
+import { config as dotenvConfig } from "dotenv";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// Load .env from monorepo root (cwd is apps/api/ in workspace mode)
+const _here = dirname(fileURLToPath(import.meta.url)); // → apps/api/src
+dotenvConfig({ path: resolve(_here, "../../../.env") });
+dotenvConfig(); // Also try local apps/api/.env if present
+
 import cors from "cors";
 import express from "express";
 import { loadEnv } from "./env";

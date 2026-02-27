@@ -13,10 +13,12 @@ export function useDiagramSpec(diagramId: string) {
 
   useEffect(() => {
     let cancelled = false;
+    setSpec(null); // Clear stale spec immediately on diagram change
     setLoading(true);
     setError(null);
 
     getApiToken()
+      .catch(() => null)
       .then((token) =>
         fetchJsonWithBearer<DiagramSpecResponse>(
           `${apiBaseUrl()}/api/live/diagrams/${diagramId}`,

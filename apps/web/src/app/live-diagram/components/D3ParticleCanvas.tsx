@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import { timer, type Timer } from "d3-timer";
 import { color as d3Color } from "d3-color";
 import type { LiveEdge, EdgeStatus, EdgeTrafficLevel } from "@aud/types";
@@ -19,7 +19,8 @@ type ParticleCanvasProps = {
   }>;
   width: number;
   height: number;
-  transform: { x: number; y: number; zoom: number };
+  /** Ref to viewport transform — read every animation frame for zero-lag sync with ReactFlow */
+  transformRef: React.RefObject<{ x: number; y: number; zoom: number }>;
   enabled: boolean;
 };
 
@@ -56,7 +57,7 @@ function pathPoint(el: SVGPathElement, len: number, t: number): [number, number]
   return [pt.x, pt.y];
 }
 
-export function D3ParticleCanvas({ edges, width, height, transform, enabled }: ParticleCanvasProps) {
+export function D3ParticleCanvas({ edges, width, height, transformRef, enabled }: ParticleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const groupsRef = useRef<EdgeParticleGroup[]>([]);
   const timerRef = useRef<Timer | null>(null);
@@ -122,10 +123,12 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      // Apply viewport transform (pan + zoom)
+      // Read latest viewport transform from ref — zero-lag sync with ReactFlow
+      const vp = transformRef.current;
+      if (!vp) return;
       ctx.save();
-      ctx.translate(transform.x, transform.y);
-      ctx.scale(transform.zoom, transform.zoom);
+      ctx.translate(vp.x, vp.y);
+      ctx.scale(vp.zoom, vp.zoom);
 
       // Batch render all particles in a single canvas pass
       for (const group of groupsRef.current) {
@@ -158,10 +161,10 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
             ctx.fill();
           }
 
-          // Glow: larger semi-transparent circle
-          ctx.globalAlpha = 0.25;
+          // Glow: larger semi-transparent circle — sized to match edge width
+          ctx.globalAlpha = 0.20;
           ctx.beginPath();
-          ctx.arc(px, py, r * 1.5, 0, Math.PI * 2);
+          ctx.arc(px, py, r * 2, 0, Math.PI * 2);
           ctx.fillStyle = fill;
           ctx.fill();
 
@@ -182,7 +185,9 @@ export function D3ParticleCanvas({ edges, width, height, transform, enabled }: P
       timerRef.current?.stop();
       timerRef.current = null;
     };
-  }, [enabled, width, height, transform]);
+  // transformRef is a stable ref — no need to include in deps; read on each frame
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, width, height]);
 
   return (
     <canvas
