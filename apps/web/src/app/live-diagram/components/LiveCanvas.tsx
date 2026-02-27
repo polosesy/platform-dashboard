@@ -8,8 +8,6 @@ import ReactFlow, {
   ReactFlowProvider,
   useNodesState,
   useOnViewportChange,
-  getBezierPath,
-  Position,
   type Node as FlowNode,
   type Edge as FlowEdge,
   type NodeTypes,
@@ -24,12 +22,10 @@ import type {
 import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type GroupNodeData } from "./GroupNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
-import { D3ParticleCanvas } from "./D3ParticleCanvas";
 import { FaultRipple } from "./FaultRipple";
 import { ImpactCascade } from "./ImpactCascade";
 import { TrafficHeatmap } from "./TrafficHeatmap";
 import { nodeColor } from "../utils/designTokens";
-import { getEdgePath, clearEdgePaths } from "../utils/edgePathStore";
 import styles from "../styles.module.css";
 
 type LiveCanvasProps = {
@@ -61,8 +57,25 @@ function LiveCanvasInner({
 }: LiveCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const viewTransformRef = useRef({ x: 0, y: 0, zoom: 1 });
   const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, zoom: 1 });
+
+  // ── Hover highlight state ──
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+
+  // Compute connected edges + nodes from hovered node
+  const { connectedEdgeIds, connectedNodeIds } = useMemo(() => {
+    if (!hoveredNodeId) return { connectedEdgeIds: new Set<string>(), connectedNodeIds: new Set<string>() };
+    const eIds = new Set<string>();
+    const nIds = new Set<string>([hoveredNodeId]);
+    for (const e of spec.edges) {
+      if (e.source === hoveredNodeId || e.target === hoveredNodeId) {
+        eIds.add(e.id);
+        nIds.add(e.source);
+        nIds.add(e.target);
+      }
+    }
+    return { connectedEdgeIds: eIds, connectedNodeIds: nIds };
+  }, [hoveredNodeId, spec.edges]);
 
   // Track container size
   useEffect(() => {
@@ -84,7 +97,6 @@ function LiveCanvasInner({
   // Continuous viewport tracking — fires on every frame during pan/zoom
   useOnViewportChange({
     onChange: useCallback((vp: Viewport) => {
-      viewTransformRef.current = { x: vp.x, y: vp.y, zoom: vp.zoom };
       setViewTransform({ x: vp.x, y: vp.y, zoom: vp.zoom });
     }, []),
   });
@@ -216,6 +228,22 @@ function LiveCanvasInner({
     });
   }, [spec.nodes, snapshot?.nodes, setNodes]);
 
+  // ── Hover: set node className for CSS dimming ──
+  useEffect(() => {
+    if (!hoveredNodeId) {
+      setNodes((prev) => {
+        const needsUpdate = prev.some((n) => n.className);
+        if (!needsUpdate) return prev;
+        return prev.map((n) => n.className ? { ...n, className: "" } : n);
+      });
+      return;
+    }
+    setNodes((prev) => prev.map((n) => ({
+      ...n,
+      className: connectedNodeIds.has(n.id) ? "node-highlighted" : "node-dimmed",
+    })));
+  }, [hoveredNodeId, connectedNodeIds, setNodes]);
+
   // Snap-back collision prevention after drag ends
   const handleNodesChange = useCallback(
     (changes: Parameters<typeof onNodesChange>[0]) => {
@@ -263,9 +291,14 @@ function LiveCanvasInner({
     [onNodesChange, setNodes],
   );
 
+  // ── Build edges with hover highlight flags ──
+  const particlesEnabled = showParticles && vizMode === "2d-animated";
+
   const edges: FlowEdge<AnimatedEdgeData>[] = useMemo(() => {
     return spec.edges.map((edgeSpec) => {
       const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
+      const isHighlighted = hoveredNodeId ? connectedEdgeIds.has(edgeSpec.id) : false;
+      const isDimmed = hoveredNodeId ? !connectedEdgeIds.has(edgeSpec.id) : false;
       return {
         id: edgeSpec.id,
         source: edgeSpec.source,
@@ -275,10 +308,13 @@ function LiveCanvasInner({
           status: live?.status ?? "idle",
           trafficLevel: live?.trafficLevel ?? "none",
           label: edgeSpec.label,
+          isHighlighted,
+          isDimmed,
+          showParticles: particlesEnabled,
         },
       };
     });
-  }, [spec.edges, snapshot?.edges]);
+  }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled]);
 
   // Build node positions map with actual measured dimensions from ReactFlow
   const nodePositions = useMemo(() => {
@@ -304,51 +340,6 @@ function LiveCanvasInner({
       targetY: tgt.y + tgt.h / 2,   // Vertical center
     };
   }
-
-  // Track a tick to re-read edge paths from the store after AnimatedEdge renders
-  const [pathTick, setPathTick] = useState(0);
-  useEffect(() => {
-    // After edges render, AnimatedEdge stores paths via useEffect.
-    // Schedule a microtask to re-read the store.
-    const id = requestAnimationFrame(() => setPathTick((t) => t + 1));
-    return () => cancelAnimationFrame(id);
-  }, [edges, nodePositions]);
-
-  // Clear stale edge paths when spec changes
-  useEffect(() => {
-    clearEdgePaths();
-  }, [spec.id]);
-
-  // Build particle edge data — read actual SVG paths from the edge path store
-  const particleEdges = useMemo(() => {
-    if (!showParticles || vizMode !== "2d-animated") return [];
-
-    return spec.edges.map((edgeSpec) => {
-      const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
-      const pts = edgeEndpoints(edgeSpec.source, edgeSpec.target);
-
-      // Prefer actual path from AnimatedEdge (pixel-perfect), fall back to computed
-      const storedPath = getEdgePath(edgeSpec.id);
-      const pathD = storedPath ?? getBezierPath({
-        sourceX: pts.sourceX,
-        sourceY: pts.sourceY,
-        sourcePosition: Position.Right,
-        targetX: pts.targetX,
-        targetY: pts.targetY,
-        targetPosition: Position.Left,
-      })[0];
-
-      return {
-        id: edgeSpec.id,
-        ...pts,
-        pathD,
-        status: live?.status ?? ("idle" as const),
-        trafficLevel: live?.trafficLevel ?? ("none" as const),
-        metrics: live?.metrics,
-      };
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.edges, snapshot?.edges, nodePositions, showParticles, vizMode, pathTick]);
 
   // Build edge paths for cascade overlay
   const edgePaths = useMemo(() => {
@@ -376,6 +367,14 @@ function LiveCanvasInner({
   const faultImpacts = snapshot?.faultImpacts ?? [];
   const heatmapData = snapshot?.heatmap ?? null;
 
+  // ── Hover handlers ──
+  const handleNodeMouseEnter = useCallback((_e: React.MouseEvent, node: FlowNode) => {
+    if (node.type !== "group") setHoveredNodeId(node.id);
+  }, []);
+  const handleNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+  }, []);
+
   return (
     <div ref={wrapRef} className={styles.canvasWrap}>
       <ReactFlow
@@ -386,6 +385,8 @@ function LiveCanvasInner({
         edgeTypes={edgeTypes}
         onNodeClick={(_e, node) => onNodeSelect(node.id)}
         onPaneClick={() => onNodeSelect(null)}
+        onNodeMouseEnter={handleNodeMouseEnter}
+        onNodeMouseLeave={handleNodeMouseLeave}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
@@ -401,17 +402,6 @@ function LiveCanvasInner({
           style={{ borderRadius: 12, border: "1px solid rgba(20,21,23,0.10)" }}
         />
       </ReactFlow>
-
-      {/* D3 Particle Canvas overlay */}
-      {vizMode === "2d-animated" && showParticles && (
-        <D3ParticleCanvas
-          edges={particleEdges}
-          width={dimensions.width}
-          height={dimensions.height}
-          transformRef={viewTransformRef}
-          enabled={showParticles}
-        />
-      )}
 
       {/* Fault Ripple overlay */}
       {showFaultRipple && faultImpacts.length > 0 && (

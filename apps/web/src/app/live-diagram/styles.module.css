@@ -559,6 +559,18 @@
   color: rgba(20, 21, 23, 0.72);
 }
 
+/* ── Node hover dimming (applied via ReactFlow node className) ── */
+
+:global(.react-flow__node) {
+  transition: opacity 400ms ease, filter 400ms ease;
+}
+
+:global(.react-flow__node.node-dimmed) {
+  opacity: 0.12;
+  filter: grayscale(40%);
+  pointer-events: none;
+}
+
 /* ── Canvas Overlays ── */
 
 .particleCanvas {
