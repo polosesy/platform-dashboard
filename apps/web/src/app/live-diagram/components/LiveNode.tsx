@@ -2,14 +2,15 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { HealthStatus, SparklineData } from "@aud/types";
+import type { HealthStatus, SparklineData, DiagramIconKind } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
+import { getAzureIconUrl } from "../utils/azureIcons";
 import { D3Sparkline } from "./D3Sparkline";
 import styles from "../styles.module.css";
 
 export type LiveNodeData = {
   label: string;
-  icon: string;
+  icon: DiagramIconKind;
   health: HealthStatus;
   healthScore: number;
   metrics: Record<string, number | null>;
@@ -100,7 +101,9 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
       {/* Node info */}
       <div className={styles.nodeInfo}>
         <div className={styles.nodeLabel} style={{ color: colors.text }}>{label}</div>
-        <div className={styles.nodeIcon}>{icon}</div>
+        <div className={styles.nodeIcon}>
+          <img src={getAzureIconUrl(icon)} alt={icon} width={20} height={20} />
+        </div>
       </div>
 
       {/* Metric badges */}

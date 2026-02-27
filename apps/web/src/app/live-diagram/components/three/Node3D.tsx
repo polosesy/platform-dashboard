@@ -4,12 +4,13 @@ import { useRef, useState, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, RoundedBox } from "@react-three/drei";
 import type { Mesh, MeshStandardMaterial } from "three";
-import type { HealthStatus } from "@aud/types";
+import type { HealthStatus, DiagramIconKind } from "@aud/types";
+import { getAzureIconUrl } from "../../utils/azureIcons";
 
 type Node3DProps = {
   id: string;
   label: string;
-  icon: string;
+  icon: DiagramIconKind;
   health: HealthStatus;
   healthScore: number;
   hasAlert: boolean;
@@ -126,7 +127,8 @@ export function Node3D({
             color: "rgba(20,21,23,0.85)",
           }}
         >
-          {icon} {label}
+          <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} style={{ verticalAlign: "middle", marginRight: 4 }} />
+          {label}
         </div>
       </Html>
     </group>

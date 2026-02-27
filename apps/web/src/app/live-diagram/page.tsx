@@ -2,8 +2,10 @@
 
 import "reactflow/dist/style.css";
 
-import { useState, useCallback, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode } from "@aud/types";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse } from "@aud/types";
+import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiToken } from "@/lib/useApiToken";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
 import { useLiveSnapshot } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
@@ -24,7 +26,8 @@ const VIZ_LABELS: Record<VisualizationMode, string> = {
 };
 
 export default function LiveDiagramPage() {
-  const [diagramId] = useState("prod-infra");
+  const getApiToken = useApiToken();
+  const [diagramId, setDiagramId] = useState("prod-infra");
   const [mode, setMode] = useState<UpdateMode>("polling");
   const [vizMode, setVizMode] = useState<VisualizationMode>("2d-animated");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -34,6 +37,57 @@ export default function LiveDiagramPage() {
   const [showFaultRipple, setShowFaultRipple] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+
+  // Generate from Azure
+  const [subscriptions, setSubscriptions] = useState<AzureSubscriptionOption[]>([]);
+  const [subscriptionId, setSubscriptionId] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getApiToken()
+      .then((token) =>
+        fetchJsonWithBearer<AzureSubscriptionsResponse>(
+          `${apiBaseUrl()}/api/azure/subscriptions`,
+          token,
+        ),
+      )
+      .then((resp) => {
+        if (cancelled) return;
+        const subs = resp.subscriptions ?? [];
+        setSubscriptions(subs);
+        setSubscriptionId((prev) => prev || subs[0]?.subscriptionId || "");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSubscriptions([]);
+      });
+    return () => { cancelled = true; };
+  }, [getApiToken]);
+
+  const handleGenerate = useCallback(async () => {
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const token = await getApiToken();
+      const resp = await fetchJsonWithBearer<{ ok: boolean; diagram: { id: string } }>(
+        `${apiBaseUrl()}/api/live/diagrams/generate`,
+        token,
+        {
+          method: "POST",
+          body: JSON.stringify(subscriptionId ? { subscriptionId } : {}),
+        },
+      );
+      if (resp.ok && resp.diagram?.id) {
+        setDiagramId(resp.diagram.id);
+      }
+    } catch (e: unknown) {
+      setGenerateError(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }, [getApiToken, subscriptionId]);
 
   const { spec, error: specError, loading: specLoading } = useDiagramSpec(diagramId);
   const { snapshot, error: snapError, connected, refresh } = useLiveSnapshot(diagramId, mode);
@@ -94,10 +148,38 @@ export default function LiveDiagramPage() {
           <button className={styles.refreshBtn} onClick={refresh} type="button">
             Refresh
           </button>
+
+          {/* Generate from Azure */}
+          <div className={styles.generateGroup}>
+            <select
+              className={styles.select}
+              value={subscriptionId}
+              onChange={(e) => setSubscriptionId(e.target.value)}
+              disabled={subscriptions.length === 0}
+              aria-label="Subscription"
+            >
+              {subscriptions.length === 0 ? <option value="">Subscription</option> : null}
+              {subscriptions.map((s) => (
+                <option key={s.subscriptionId} value={s.subscriptionId}>
+                  {s.name ? `${s.name}` : s.subscriptionId}
+                </option>
+              ))}
+            </select>
+            <button
+              className={styles.generateBtn}
+              onClick={handleGenerate}
+              disabled={generating}
+              type="button"
+            >
+              {generating ? "Generating..." : "Generate from Azure"}
+            </button>
+          </div>
         </div>
       </div>
 
-      {error && <div className={styles.error}>{error}</div>}
+      {(error || generateError) && (
+        <div className={styles.error}>{error || generateError}</div>
+      )}
 
       {/* Overlay controls + Topology stats */}
       <div className={styles.controlBar}>

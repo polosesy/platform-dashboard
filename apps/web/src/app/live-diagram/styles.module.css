@@ -74,6 +74,37 @@
   background: rgba(255, 255, 255, 0.90);
 }
 
+.generateGroup {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.generateBtn {
+  padding: 7px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 120, 212, 0.30);
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.90);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 150ms ease;
+  white-space: nowrap;
+}
+
+.generateBtn:hover {
+  background: rgba(0, 120, 212, 0.18);
+}
+
+.generateBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .error {
   padding: 10px 12px;
   border: 1px solid rgba(216, 59, 1, 0.26);
@@ -239,9 +270,16 @@
 }
 
 .nodeIcon {
-  font-size: 11px;
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-top: 1px;
+}
+
+.nodeIcon img {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 
 .metricBadges {

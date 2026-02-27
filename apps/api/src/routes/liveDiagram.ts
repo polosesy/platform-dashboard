@@ -11,6 +11,8 @@ import {
   mockDiagramSpec,
   generateMockSnapshot,
 } from "../services/liveDiagramMock";
+import { tryGetArchitectureGraphFromAzure } from "../services/azure";
+import { generateDiagramSpec } from "../services/specGenerator";
 
 // Seed the mock diagram on startup
 saveDiagramSpec(mockDiagramSpec);
@@ -42,6 +44,33 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
     if (!body.createdAt) body.createdAt = body.updatedAt;
     saveDiagramSpec(body);
     res.status(201).json({ ok: true, id: body.id });
+  });
+
+  // ── Auto-generate diagram from Azure Resource Graph ──
+  router.post("/api/live/diagrams/generate", (req: Request, res: Response) => {
+    const subscriptionId =
+      typeof req.body?.subscriptionId === "string"
+        ? req.body.subscriptionId
+        : undefined;
+
+    tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, {
+      subscriptionId,
+    })
+      .then((graph) => {
+        if (!graph) {
+          res.status(503).json({ error: "Azure Resource Graph not available. Check bearer token and AZURE_SUBSCRIPTION_IDS." });
+          return;
+        }
+
+        const subId = subscriptionId ?? env.AZURE_SUBSCRIPTION_IDS?.split(",")[0] ?? "default";
+        const spec = generateDiagramSpec(graph, subId);
+        saveDiagramSpec(spec);
+        res.status(201).json({ ok: true, diagram: spec });
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        res.status(500).json({ error: msg });
+      });
   });
 
   // ── Live snapshot (REST polling) ──
