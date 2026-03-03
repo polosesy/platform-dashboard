@@ -404,6 +404,16 @@
   text-overflow: ellipsis;
 }
 
+.groupNodeSubtitle {
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(0, 120, 212, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Alert Sidebar ── */
 
 .alertSidebar {
@@ -733,6 +743,243 @@
 
 .sparklineSvg {
   display: block;
+}
+
+/* ── Resource Detail Panel ── */
+
+.detailPanel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  max-height: calc(100vh - 270px);
+}
+
+.detailHeader {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detailHeaderIcon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.detailHeaderName {
+  flex: 1;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detailHealthDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.detailCloseBtn {
+  all: unset;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--muted);
+  transition: background 150ms ease;
+  flex: none;
+}
+
+.detailCloseBtn:hover {
+  background: rgba(20, 21, 23, 0.06);
+}
+
+.detailBody {
+  padding: 10px;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.detailSection {
+  display: grid;
+  gap: 6px;
+}
+
+.detailSectionTitle {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  padding-bottom: 2px;
+}
+
+.detailRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.detailKey {
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.detailVal {
+  font-weight: 600;
+  color: rgba(20, 21, 23, 0.82);
+  word-break: break-all;
+}
+
+.detailValMono {
+  font-family: var(--font-geist-mono);
+  font-weight: 600;
+  font-size: 11px;
+  color: rgba(0, 120, 212, 0.70);
+  word-break: break-all;
+}
+
+.detailTags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.detailTag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 120, 212, 0.06);
+  border: 1px solid rgba(0, 120, 212, 0.14);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 120, 212, 0.75);
+}
+
+.detailMetricGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.detailMetricCard {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 2px;
+}
+
+.detailMetricKey {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.detailMetricVal {
+  font-family: var(--font-geist-mono);
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(20, 21, 23, 0.82);
+}
+
+.detailSparklineWrap {
+  padding: 4px 0;
+}
+
+.detailAlertCard {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 4px;
+}
+
+.detailAlertHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detailAlertSeverity {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.detailAlertTitle {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detailAlertSummary {
+  font-size: 11px;
+  color: rgba(20, 21, 23, 0.65);
+  line-height: 1.4;
+}
+
+.detailEdgeItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+}
+
+.detailEdgeDir {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  min-width: 32px;
+}
+
+.detailEdgePeer {
+  flex: 1;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detailEdgeMetric {
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(20, 21, 23, 0.55);
+  white-space: nowrap;
+}
+
+.detailEmpty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* ── Responsive ── */

@@ -10,10 +10,11 @@ import styles from "../styles.module.css";
 export type GroupNodeData = {
   label: string;
   icon: DiagramIconKind;
+  subtitle?: string;  // CIDR display (addressSpace for VNet, prefix for Subnet)
 };
 
 export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<GroupNodeData>) {
-  const { label, icon } = data;
+  const { label, icon, subtitle } = data;
   const scope = scopeStyle(icon);
 
   return (
@@ -44,6 +45,7 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<G
             className={styles.groupNodeIcon}
           />
           <span className={styles.groupNodeLabel}>{label}</span>
+          {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
         </div>
       </div>
     </>

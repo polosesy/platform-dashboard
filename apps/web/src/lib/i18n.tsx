@@ -20,6 +20,7 @@ const T: Translations = {
   "live.generateFromAzure": { ko: "Azure에서 생성", en: "Generate from Azure" },
   "live.generating": { ko: "생성 중...", en: "Generating..." },
   "live.subscription": { ko: "구독", en: "Subscription" },
+  "live.networkFlow": { ko: "네트워크 플로우", en: "Network Flow" },
   "live.particles": { ko: "파티클", en: "Particles" },
   "live.faultRipple": { ko: "장애 파급", en: "Fault Ripple" },
   "live.heatmap": { ko: "히트맵", en: "Heatmap" },
@@ -45,6 +46,23 @@ const T: Translations = {
   // ── Fault Timeline ──
   "fault.title": { ko: "장애 타임라인", en: "Fault Timeline" },
   "fault.empty": { ko: "활성 장애 없음", en: "No active faults" },
+
+  // ── Resource Detail Panel ──
+  "detail.kind": { ko: "유형", en: "Type" },
+  "detail.location": { ko: "위치", en: "Location" },
+  "detail.resourceGroup": { ko: "리소스 그룹", en: "Resource Group" },
+  "detail.endpoint": { ko: "엔드포인트", en: "Endpoint" },
+  "detail.azureId": { ko: "Azure ID", en: "Azure ID" },
+  "detail.tags": { ko: "태그", en: "Tags" },
+  "detail.metrics": { ko: "메트릭", en: "Metrics" },
+  "detail.alerts": { ko: "알림", en: "Alerts" },
+  "detail.connections": { ko: "연결", en: "Connections" },
+  "detail.noAlerts": { ko: "활성 알림 없음", en: "No active alerts" },
+  "detail.inbound": { ko: "인바운드", en: "Inbound" },
+  "detail.outbound": { ko: "아웃바운드", en: "Outbound" },
+  "detail.health": { ko: "상태", en: "Health" },
+  "detail.noData": { ko: "데이터 없음", en: "No data" },
+  "detail.noMetrics": { ko: "메트릭 없음", en: "No metrics" },
 
   // ── Common ──
   "common.language": { ko: "한국어", en: "English" },

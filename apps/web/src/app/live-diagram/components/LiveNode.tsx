@@ -23,7 +23,7 @@ const RING_R = defaultTokens.dimensions.healthRingRadius;
 const RING_STROKE = defaultTokens.dimensions.healthRingStroke;
 const CIRCUMFERENCE = 2 * Math.PI * RING_R;
 
-function fmtMetric(val: number | null): string {
+export function fmtMetric(val: number | null): string {
   if (val == null) return "-";
   if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
   if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;

@@ -138,11 +138,16 @@ function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind
 }
 
 function rgId(subscriptionId: string, resourceGroup: string): string {
-  return `/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}`;
+  return `/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}`.toLowerCase();
 }
 
 function safeString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/** Like safeString, but also lowercases — for Azure resource IDs which are case-insensitive. */
+function safeId(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v.trim().toLowerCase() : undefined;
 }
 
 /** Safely traverse nested unknown properties and return a string leaf. */
@@ -279,7 +284,7 @@ function getSubnetIdFromNicProps(properties: unknown): string | undefined {
   for (const c of ipConfigs) {
     const subnet = (c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet;
     const id = subnet?.id;
-    const s = safeString(id);
+    const s = safeId(id);
     if (s) return s;
   }
   return undefined;
@@ -288,7 +293,7 @@ function getSubnetIdFromNicProps(properties: unknown): string | undefined {
 function getSubnetIdFromPrivateEndpointProps(properties: unknown): string | undefined {
   if (!properties || typeof properties !== "object") return undefined;
   const subnetId = (properties as { subnet?: { id?: unknown } }).subnet?.id;
-  return safeString(subnetId);
+  return safeId(subnetId);
 }
 
 function getSubnetIdsFromAksProps(properties: unknown): string[] {
@@ -301,7 +306,7 @@ function getSubnetIdsFromAksProps(properties: unknown): string[] {
     const subnetId =
       (p as { vnetSubnetId?: unknown; vnetSubnetID?: unknown }).vnetSubnetId ??
       (p as { vnetSubnetID?: unknown }).vnetSubnetID;
-    const s = safeString(subnetId);
+    const s = safeId(subnetId);
     if (s) ids.push(s);
   }
   return [...new Set(ids)];
@@ -312,7 +317,7 @@ function getSubnetIdsFromAppGatewayProps(properties: unknown): string[] {
   const configs = (properties as { gatewayIPConfigurations?: unknown }).gatewayIPConfigurations;
   if (!Array.isArray(configs)) return [];
   const ids = configs
-    .map((c) => safeString((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
+    .map((c) => safeId((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -322,7 +327,7 @@ function getSubnetIdsFromLoadBalancerProps(properties: unknown): string[] {
   const configs = (properties as { frontendIPConfigurations?: unknown }).frontendIPConfigurations;
   if (!Array.isArray(configs)) return [];
   const ids = configs
-    .map((c) => safeString((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
+    .map((c) => safeId((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -339,10 +344,10 @@ function getBackendNicIdsFromLoadBalancerProps(properties: unknown): string[] {
   }
 
   const nicIds = ipConfigs
-    .map((x) => safeString((x as { id?: unknown }).id))
+    .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x))
     .map((id) => {
-      const idx = id.toLowerCase().indexOf("/ipconfigurations/");
+      const idx = id.indexOf("/ipconfigurations/"); // already lowercase from safeId
       return idx > 0 ? id.slice(0, idx) : id;
     });
   return [...new Set(nicIds)];
@@ -360,10 +365,10 @@ function getBackendNicIdsFromAppGatewayProps(properties: unknown): string[] {
   }
 
   const nicIds = ipConfigs
-    .map((x) => safeString((x as { id?: unknown }).id))
+    .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x))
     .map((id) => {
-      const idx = id.toLowerCase().indexOf("/ipconfigurations/");
+      const idx = id.indexOf("/ipconfigurations/"); // already lowercase from safeId
       return idx > 0 ? id.slice(0, idx) : id;
     });
   return [...new Set(nicIds)];
@@ -375,7 +380,7 @@ function getPrivateLinkTargetIdsFromPrivateEndpointProps(properties: unknown): s
   const manual = (properties as { manualPrivateLinkServiceConnections?: unknown }).manualPrivateLinkServiceConnections;
   const all = [...(Array.isArray(conns) ? conns : []), ...(Array.isArray(manual) ? manual : [])];
   const ids = all
-    .map((c) => safeString((c as { properties?: { privateLinkServiceId?: unknown } }).properties?.privateLinkServiceId))
+    .map((c) => safeId((c as { properties?: { privateLinkServiceId?: unknown } }).properties?.privateLinkServiceId))
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -385,7 +390,7 @@ function getNicIdsFromVmProps(properties: unknown): string[] {
   const nis = (properties as { networkProfile?: { networkInterfaces?: unknown } }).networkProfile?.networkInterfaces;
   if (!Array.isArray(nis)) return [];
   const ids = nis
-    .map((x) => safeString((x as { id?: unknown }).id))
+    .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -478,6 +483,12 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, diagQuery, pageSize).catch(() => [] as AzureResourceRow[]),
   ]);
 
+  // Normalize Azure resource IDs to lowercase — Azure resource IDs are
+  // case-insensitive but different API responses may use different casing
+  for (const rg of rgRows) { if (rg.id) rg.id = rg.id.toLowerCase(); }
+  for (const r of resRows) { if (r.id) r.id = r.id.toLowerCase(); }
+  for (const d of diagRows) { if (d.id) d.id = d.id.toLowerCase(); }
+
   const subNameById = new Map<string, string>();
   for (const s of subRows) {
     if (s.subscriptionId && s.name) subNameById.set(s.subscriptionId, s.name);
@@ -558,33 +569,123 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
 
-  // derived edges: vnet -> subnet
+  // ── Ensure subnets are in the graph ──
+  // Azure Resource Graph may not always return subnets as separate resources.
+  // Extract subnets from VNet properties as a fallback.
+  const edgeIdSet = new Set<string>(edges.map(e => e.id));
+  for (const r of resRows) {
+    if (!r.id) continue;
+    const t = (r.type ?? "").toLowerCase();
+    if (t !== "microsoft.network/virtualnetworks") continue;
+
+    const vnetSubnetsArr = safePropArray(r.properties, "subnets");
+    for (const sub of vnetSubnetsArr) {
+      if (!sub || typeof sub !== "object") continue;
+      const subObj = sub as Record<string, unknown>;
+      const subId = safeId(subObj.id);
+      if (!subId) continue;
+
+      // Create subnet node if not already in the graph
+      if (!resourceById.has(subId)) {
+        const subName = safeString(subObj.name) ?? subId.split("/").pop() ?? subId;
+        const subProps = subObj.properties;
+        const endpoint = extractEndpoint("microsoft.network/virtualnetworks/subnets", subName, subProps);
+
+        const subRow: AzureResourceRow = {
+          id: subId,
+          name: subName,
+          type: "Microsoft.Network/virtualNetworks/subnets",
+          location: r.location,
+          resourceGroup: r.resourceGroup,
+          subscriptionId: r.subscriptionId,
+          properties: subProps,
+        };
+        resourceById.set(subId, subRow);
+        nodes.push({
+          id: subId,
+          kind: "subnet",
+          name: subName,
+          azureId: subId,
+          location: r.location,
+          endpoint,
+          resourceGroup: r.resourceGroup,
+          health: "unknown",
+        });
+      }
+
+      // Ensure VNet→Subnet contains edge exists
+      const edgeId = `e:vnet->subnet:${r.id}:${subId}`;
+      if (!edgeIdSet.has(edgeId)) {
+        edgeIdSet.add(edgeId);
+        edges.push({
+          id: edgeId,
+          source: r.id,
+          target: subId,
+          kind: "contains",
+        });
+      }
+
+      // Extract NIC→Subnet bindings from subnet ipConfigurations
+      if (subObj.properties && typeof subObj.properties === "object") {
+        const ipConfigs = safePropArray(subObj.properties, "ipConfigurations");
+        for (const cfg of ipConfigs) {
+          if (!cfg || typeof cfg !== "object") continue;
+          const nicConfigId = safeId((cfg as Record<string, unknown>).id);
+          if (!nicConfigId) continue;
+          const nicIdx = nicConfigId.indexOf("/ipconfigurations/");
+          if (nicIdx <= 0) continue;
+          const nicId = nicConfigId.slice(0, nicIdx);
+          if (!nicById.has(nicId)) continue;
+          const nicEdgeId = `e:subnet->nic:${subId}:${nicId}`;
+          if (!edgeIdSet.has(nicEdgeId)) {
+            edgeIdSet.add(nicEdgeId);
+            edges.push({
+              id: nicEdgeId,
+              source: subId,
+              target: nicId,
+              kind: "attached-to",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // derived edges: vnet -> subnet (from separate subnet resources — may overlap with above)
   for (const r of resRows) {
     if (!r.id) continue;
     const t = (r.type ?? "").toLowerCase();
     if (t !== "microsoft.network/virtualnetworks/subnets") continue;
-    const parts = r.id.toLowerCase().split("/subnets/");
+    const parts = r.id.split("/subnets/");
     if (parts.length !== 2) continue;
-    const parentVnetId = r.id.slice(0, r.id.toLowerCase().indexOf("/subnets/"));
+    const parentVnetId = r.id.slice(0, r.id.indexOf("/subnets/"));
     if (!resourceById.has(parentVnetId)) continue;
-    edges.push({
-      id: `e:vnet->subnet:${parentVnetId}:${r.id}`,
-      source: parentVnetId,
-      target: r.id,
-      kind: "contains"
-    });
+    const edgeId = `e:vnet->subnet:${parentVnetId}:${r.id}`;
+    if (!edgeIdSet.has(edgeId)) {
+      edgeIdSet.add(edgeId);
+      edges.push({
+        id: edgeId,
+        source: parentVnetId,
+        target: r.id,
+        kind: "contains",
+      });
+    }
   }
 
   // derived edges: subnet -> nic, nic -> vm
   for (const nic of nicById.values()) {
     const subnetId = getSubnetIdFromNicProps(nic.properties);
     if (subnetId) {
-      edges.push({
-        id: `e:subnet->nic:${subnetId}:${nic.id}`,
-        source: subnetId,
-        target: nic.id,
-        kind: "connects"
-      });
+      const nicEdgeId = `e:subnet->nic:${subnetId}:${nic.id}`;
+      if (!edgeIdSet.has(nicEdgeId)) {
+        edgeIdSet.add(nicEdgeId);
+        edges.push({
+          id: nicEdgeId,
+          source: subnetId,
+          target: nic.id,
+          kind: "attached-to",
+        });
+      }
     }
   }
 
@@ -598,7 +699,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           id: `e:nic->vm:${nicId}:${r.id}`,
           source: nicId,
           target: r.id,
-          kind: "connects"
+          kind: "bound-to"
         });
       }
     }
@@ -685,12 +786,12 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t === "microsoft.network/virtualnetworks") {
       const peerings = safePropArray(r.properties, "virtualNetworkPeerings");
       for (const p of peerings) {
-        const remoteId = safePropString(p, "properties", "remoteVirtualNetwork", "id");
+        const remoteId = safePropString(p, "properties", "remoteVirtualNetwork", "id")?.toLowerCase();
         if (remoteId && resourceById.has(remoteId)) {
           const peerState = safePropString(p, "properties", "peeringState") ?? "Unknown";
           const edgeId = `e:peering:${r.id}:${remoteId}`;
           // Only add one direction (lower ID → higher ID) to avoid duplicates
-          if (r.id.toLowerCase() < remoteId.toLowerCase()) {
+          if (r.id < remoteId) {
             edges.push({
               id: edgeId,
               source: r.id,
@@ -705,7 +806,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
 
     // 14. App Service / Function App → Subnet (VNet Integration)
     if (t === "microsoft.web/sites") {
-      const vnetSubnetId = safePropString(r.properties, "virtualNetworkSubnetId");
+      const vnetSubnetId = safePropString(r.properties, "virtualNetworkSubnetId")?.toLowerCase();
       if (vnetSubnetId && resourceById.has(vnetSubnetId)) {
         edges.push({
           id: `e:site->subnet:${r.id}:${vnetSubnetId}`,
@@ -720,8 +821,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t === "microsoft.network/networksecuritygroups") {
       const nsgSubnets = safePropArray(r.properties, "subnets");
       for (const s of nsgSubnets) {
-        const subnetRef = typeof s === "object" && s !== null ? (s as Record<string, unknown>).id : undefined;
-        if (typeof subnetRef === "string" && resourceById.has(subnetRef)) {
+        const subnetRef = safeId(typeof s === "object" && s !== null ? (s as Record<string, unknown>).id : undefined);
+        if (subnetRef && resourceById.has(subnetRef)) {
           edges.push({
             id: `e:nsg->subnet:${r.id}:${subnetRef}`,
             source: r.id,
@@ -732,8 +833,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       }
       const nsgNics = safePropArray(r.properties, "networkInterfaces");
       for (const n of nsgNics) {
-        const nicRef = typeof n === "object" && n !== null ? (n as Record<string, unknown>).id : undefined;
-        if (typeof nicRef === "string" && nicById.has(nicRef)) {
+        const nicRef = safeId(typeof n === "object" && n !== null ? (n as Record<string, unknown>).id : undefined);
+        if (nicRef && nicById.has(nicRef)) {
           edges.push({
             id: `e:nsg->nic:${r.id}:${nicRef}`,
             source: r.id,
@@ -746,8 +847,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
 
     // 17. App Insights → Log Analytics Workspace
     if (t === "microsoft.insights/components") {
-      const workspaceId = safePropString(r.properties, "WorkspaceResourceId")
-        ?? safePropString(r.properties, "workspaceResourceId");
+      const workspaceId = (safePropString(r.properties, "WorkspaceResourceId")
+        ?? safePropString(r.properties, "workspaceResourceId"))?.toLowerCase();
       if (workspaceId && resourceById.has(workspaceId)) {
         edges.push({
           id: `e:ai->la:${r.id}:${workspaceId}`,
@@ -763,13 +864,12 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   for (const ds of diagRows) {
     if (!ds.id || !ds.properties) continue;
     // Diagnostic settings resourceId format: {sourceResourceId}/providers/microsoft.insights/diagnosticSettings/{name}
-    // Extract the source resource that this diagnostic setting belongs to
-    const dsIdLower = ds.id.toLowerCase();
-    const providerIdx = dsIdLower.indexOf("/providers/microsoft.insights/diagnosticsettings/");
+    // Extract the source resource that this diagnostic setting belongs to (ds.id already lowercase)
+    const providerIdx = ds.id.indexOf("/providers/microsoft.insights/diagnosticsettings/");
     const sourceResourceId = providerIdx > 0 ? ds.id.slice(0, providerIdx) : undefined;
 
-    const workspaceId = safePropString(ds.properties, "workspaceId");
-    const storageId = safePropString(ds.properties, "storageAccountId");
+    const workspaceId = safePropString(ds.properties, "workspaceId")?.toLowerCase();
+    const storageId = safePropString(ds.properties, "storageAccountId")?.toLowerCase();
 
     if (sourceResourceId && resourceById.has(sourceResourceId)) {
       if (workspaceId && resourceById.has(workspaceId)) {
@@ -793,6 +893,19 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       }
     }
   }
+
+  // ── Diagnostic: graph summary ──
+  const kindCount = new Map<string, number>();
+  for (const n of nodes) {
+    kindCount.set(n.kind, (kindCount.get(n.kind) ?? 0) + 1);
+  }
+  const edgeKindCount = new Map<string, number>();
+  for (const e of edges) {
+    edgeKindCount.set(e.kind, (edgeKindCount.get(e.kind) ?? 0) + 1);
+  }
+  console.log(`[azure] Graph built: ${nodes.length} nodes, ${edges.length} edges`);
+  console.log(`[azure] Node kinds: ${JSON.stringify(Object.fromEntries(kindCount))}`);
+  console.log(`[azure] Edge kinds: ${JSON.stringify(Object.fromEntries(edgeKindCount))}`);
 
   return {
     generatedAt: new Date().toISOString(),

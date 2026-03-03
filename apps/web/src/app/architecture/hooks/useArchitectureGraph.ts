@@ -18,10 +18,11 @@ import { useApiToken } from "@/lib/useApiToken";
 import { fallbackGraph, layoutGraph } from "../utils/graphUtils";
 
 async function loadGraph(bearerToken: string | null, subscriptionId?: string): Promise<ArchitectureGraph> {
-  const url = new URL(`${apiBaseUrl()}/api/architecture/graph`);
-  if (subscriptionId) url.searchParams.set("subscriptionId", subscriptionId);
+  const base = apiBaseUrl();
+  const params = subscriptionId ? `?subscriptionId=${encodeURIComponent(subscriptionId)}` : "";
+  const url = `${base}/api/architecture/graph${params}`;
   try {
-    return await fetchJsonWithBearer<ArchitectureGraph>(url.toString(), bearerToken);
+    return await fetchJsonWithBearer<ArchitectureGraph>(url, bearerToken);
   } catch (err) {
     console.warn("Failed to load architecture graph, using fallback.", err);
     return fallbackGraph();
@@ -29,8 +30,10 @@ async function loadGraph(bearerToken: string | null, subscriptionId?: string): P
 }
 
 async function loadSubscriptions(bearerToken: string | null): Promise<AzureSubscriptionsResponse> {
-  const url = new URL(`${apiBaseUrl()}/api/azure/subscriptions`);
-  return await fetchJsonWithBearer<AzureSubscriptionsResponse>(url.toString(), bearerToken);
+  return await fetchJsonWithBearer<AzureSubscriptionsResponse>(
+    `${apiBaseUrl()}/api/azure/subscriptions`,
+    bearerToken,
+  );
 }
 
 export function useArchitectureGraph() {

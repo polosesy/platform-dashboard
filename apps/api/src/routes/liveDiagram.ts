@@ -57,7 +57,20 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
         const subId = subscriptionId ?? env.AZURE_SUBSCRIPTION_IDS?.split(",")[0] ?? "default";
         const spec = await generateDiagramSpec(graph, subId);
         saveDiagramSpec(spec);
-        res.status(201).json({ ok: true, diagram: spec });
+        const nodesWithParent = spec.nodes.filter(n => n.parentId).length;
+        const groupNodes = spec.nodes.filter(n => n.nodeType === "group").length;
+        res.status(201).json({
+          ok: true,
+          diagram: spec,
+          _diagnostics: {
+            graphNodes: graph.nodes.length,
+            graphEdges: graph.edges.length,
+            specNodes: spec.nodes.length,
+            specEdges: spec.edges.length,
+            nodesWithParent,
+            groupNodes,
+          },
+        });
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : "Unknown error";

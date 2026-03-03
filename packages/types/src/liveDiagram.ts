@@ -37,6 +37,11 @@ export type DiagramNodeSpec = {
   width?: number;              // Explicit width for group nodes
   height?: number;             // Explicit height for group nodes
   bindings: Record<string, MetricBinding>;
+  metadata?: Record<string, string>;  // Extensible: addressSpace, prefix, privateIP, etc.
+  resourceKind?: string;       // Original resource type (e.g., "aks", "vm", "sql")
+  location?: string;           // Azure region (e.g., "eastus")
+  resourceGroup?: string;      // Parent resource group name
+  tags?: Record<string, string>; // Azure resource tags
 };
 
 export type DiagramEdgeKind =
@@ -45,7 +50,9 @@ export type DiagramEdgeKind =
   | "privateLink"
   | "routes"
   | "logging"
-  | "inferred";
+  | "inferred"
+  | "attached-to"  // Subnet → NIC
+  | "bound-to";    // NIC → VM
 
 export type DiagramEdgeSpec = {
   id: string;

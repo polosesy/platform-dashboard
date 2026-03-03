@@ -33,6 +33,7 @@ type LiveCanvasProps = {
   snapshot: LiveDiagramSnapshot | null;
   onNodeSelect: (nodeId: string | null) => void;
   vizMode: VisualizationMode;
+  showNetworkFlow: boolean;
   showParticles: boolean;
   showFaultRipple: boolean;
   showHeatmap: boolean;
@@ -51,6 +52,7 @@ function LiveCanvasInner({
   snapshot,
   onNodeSelect,
   vizMode,
+  showNetworkFlow,
   showParticles,
   showFaultRipple,
   showHeatmap,
@@ -114,7 +116,7 @@ function LiveCanvasInner({
       return aHasParent - bHasParent;
     });
 
-    return sorted.map((nodeSpec) => {
+    const result = sorted.map((nodeSpec) => {
       if (nodeSpec.nodeType === "group") {
         const groupNode: FlowNode<GroupNodeData> = {
           id: nodeSpec.id,
@@ -129,6 +131,7 @@ function LiveCanvasInner({
           data: {
             label: nodeSpec.label,
             icon: nodeSpec.icon,
+            subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
           },
         };
         if (nodeSpec.parentId) {
@@ -160,6 +163,32 @@ function LiveCanvasInner({
       }
       return liveNode;
     });
+
+    // ── Checkpoint 2: Verify parentNode mapping ──
+    if (process.env.NODE_ENV !== "production") {
+      const specWithParent = spec.nodes.filter((n) => n.parentId);
+      type AnyFlowNode = FlowNode & { parentNode?: string; extent?: string };
+      const flowWithParent = result.filter((n) => (n as AnyFlowNode).parentNode);
+      const allIds = new Set(result.map((n) => n.id));
+      const brokenRefs = flowWithParent.filter((n) => !allIds.has((n as AnyFlowNode).parentNode!));
+      console.log(
+        `[CP2] spec.nodes: ${spec.nodes.length} total, ${specWithParent.length} with parentId` +
+        ` → flowNodes: ${result.length} total, ${flowWithParent.length} with parentNode` +
+        ` (${brokenRefs.length} broken refs)`,
+      );
+      // Sample first 5
+      for (const n of flowWithParent.slice(0, 5)) {
+        const an = n as AnyFlowNode;
+        console.log(`[CP2]  "${n.id}" type=${n.type} parentNode="${an.parentNode}" extent="${an.extent}" pos=(${n.position.x},${n.position.y})`);
+      }
+      if (brokenRefs.length > 0) {
+        for (const n of brokenRefs.slice(0, 3)) {
+          console.error(`[CP2] BROKEN: "${n.id}" parentNode="${(n as AnyFlowNode).parentNode}" NOT in node array`);
+        }
+      }
+    }
+
+    return result;
   }, [spec.nodes, snapshot?.nodes]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -179,11 +208,15 @@ function LiveCanvasInner({
         return aHasParent - bHasParent;
       });
 
-      return sorted.map((nodeSpec) => {
+      const result = sorted.map((nodeSpec) => {
         const existing = prevById.get(nodeSpec.id);
 
         if (nodeSpec.nodeType === "group") {
-          const data: GroupNodeData = { label: nodeSpec.label, icon: nodeSpec.icon };
+          const data: GroupNodeData = {
+            label: nodeSpec.label,
+            icon: nodeSpec.icon,
+            subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
+          };
           if (existing) {
             const updated = { ...existing, data } as FlowNode<GroupNodeData> & { parentNode?: string };
             if (nodeSpec.parentId) updated.parentNode = nodeSpec.parentId;
@@ -242,6 +275,19 @@ function LiveCanvasInner({
         }
         return ln;
       });
+
+      // ── Checkpoint 3: Verify parentNode survives setNodes ──
+      if (process.env.NODE_ENV !== "production") {
+        type AnyFlowNode = FlowNode & { parentNode?: string };
+        const withParent = result.filter((n) => (n as AnyFlowNode).parentNode);
+        const prevWithParent = prev.filter((n) => (n as AnyFlowNode).parentNode);
+        console.log(
+          `[CP3] setNodes sync: prev ${prev.length} nodes (${prevWithParent.length} with parentNode)` +
+          ` → next ${result.length} nodes (${withParent.length} with parentNode)`,
+        );
+      }
+
+      return result;
     });
   }, [spec.nodes, snapshot?.nodes, setNodes]);
 
@@ -312,6 +358,7 @@ function LiveCanvasInner({
   const particlesEnabled = showParticles && vizMode === "2d-animated";
 
   const edges: FlowEdge<AnimatedEdgeData>[] = useMemo(() => {
+    if (!showNetworkFlow) return [];
     return spec.edges.map((edgeSpec) => {
       const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
       const isHighlighted = hoveredNodeId ? connectedEdgeIds.has(edgeSpec.id) : false;
@@ -333,7 +380,7 @@ function LiveCanvasInner({
         },
       };
     });
-  }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled]);
+  }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled, showNetworkFlow]);
 
   // Build node positions map with actual measured dimensions from ReactFlow
   const nodePositions = useMemo(() => {

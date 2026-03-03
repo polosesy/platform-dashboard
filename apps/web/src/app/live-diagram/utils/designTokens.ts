@@ -129,12 +129,14 @@ export type EdgeKindStyle = {
 };
 
 const EDGE_KIND_STYLES: Record<DiagramEdgeKind, EdgeKindStyle> = {
-  network:     { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
-  peering:     { stroke: "rgba(16,185,129,0.60)",  particle: "rgba(16,185,129,0.90)",  dashArray: "8 4",       showParticles: false },
-  privateLink: { stroke: "rgba(139,92,246,0.60)",  particle: "rgba(139,92,246,0.90)",  dashArray: "none",      showParticles: true },
-  routes:      { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
-  logging:     { stroke: "rgba(107,113,122,0.30)", particle: "rgba(107,113,122,0.50)", dashArray: "4 6",       showParticles: false },
-  inferred:    { stroke: "rgba(107,113,122,0.25)", particle: "rgba(107,113,122,0.40)", dashArray: "2 4 6 4",   showParticles: false },
+  network:       { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
+  peering:       { stroke: "rgba(16,185,129,0.60)",  particle: "rgba(16,185,129,0.90)",  dashArray: "8 4",       showParticles: false },
+  privateLink:   { stroke: "rgba(139,92,246,0.60)",  particle: "rgba(139,92,246,0.90)",  dashArray: "none",      showParticles: true },
+  routes:        { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
+  logging:       { stroke: "rgba(107,113,122,0.30)", particle: "rgba(107,113,122,0.50)", dashArray: "4 6",       showParticles: false },
+  inferred:      { stroke: "rgba(107,113,122,0.25)", particle: "rgba(107,113,122,0.40)", dashArray: "2 4 6 4",   showParticles: false },
+  "attached-to": { stroke: "rgba(95,75,139,0.50)",   particle: "rgba(95,75,139,0.70)",   dashArray: "none",      showParticles: false },
+  "bound-to":    { stroke: "rgba(0,120,212,0.45)",   particle: "rgba(0,120,212,0.70)",   dashArray: "4 4",       showParticles: false },
 };
 
 export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle {

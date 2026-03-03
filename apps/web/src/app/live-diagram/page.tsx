@@ -2,8 +2,8 @@
 
 import "reactflow/dist/style.css";
 
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse } from "@aud/types";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, DiagramSpec, LiveDiagramSnapshot } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
@@ -12,6 +12,7 @@ import { useLiveSnapshot } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
 import { AlertSidebar } from "./components/AlertSidebar";
 import { FaultTimeline } from "./components/FaultTimeline";
+import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
 import styles from "./styles.module.css";
 
 const Canvas3D = lazy(() =>
@@ -19,6 +20,35 @@ const Canvas3D = lazy(() =>
 );
 
 type UpdateMode = "polling" | "sse";
+
+function buildConnectedEdges(
+  spec: DiagramSpec,
+  snapshot: LiveDiagramSnapshot | null,
+  nodeId: string,
+) {
+  const result: Array<{
+    edgeSpec: DiagramSpec["edges"][number];
+    liveEdge?: LiveDiagramSnapshot["edges"][number];
+    peerLabel: string;
+    direction: "inbound" | "outbound";
+  }> = [];
+
+  for (const edge of spec.edges) {
+    if (edge.source !== nodeId && edge.target !== nodeId) continue;
+    const isOutbound = edge.source === nodeId;
+    const peerId = isOutbound ? edge.target : edge.source;
+    const peerNode = spec.nodes.find((n) => n.id === peerId);
+    const liveEdge = snapshot?.edges.find((e) => e.id === edge.id);
+    result.push({
+      edgeSpec: edge,
+      liveEdge,
+      peerLabel: peerNode?.label ?? peerId,
+      direction: isOutbound ? "outbound" : "inbound",
+    });
+  }
+
+  return result;
+}
 
 export default function LiveDiagramPage() {
   const { t } = useI18n();
@@ -29,6 +59,7 @@ export default function LiveDiagramPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Overlay toggles
+  const [showNetworkFlow, setShowNetworkFlow] = useState(true);
   const [showParticles, setShowParticles] = useState(true);
   const [showFaultRipple, setShowFaultRipple] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -98,6 +129,12 @@ export default function LiveDiagramPage() {
   const error = specError || snapError;
   const faultCount = snapshot?.faultImpacts?.length ?? 0;
   const alertCount = snapshot?.alerts.length ?? 0;
+
+  // Build connected edges for the selected node's detail panel
+  const connectedEdges = useMemo(() => {
+    if (!selectedNodeId || !spec) return [];
+    return buildConnectedEdges(spec, snapshot, selectedNodeId);
+  }, [selectedNodeId, spec, snapshot]);
 
   return (
     <div className={styles.page}>
@@ -210,6 +247,14 @@ export default function LiveDiagramPage() {
             <label className={styles.overlayToggle}>
               <input
                 type="checkbox"
+                checked={showNetworkFlow}
+                onChange={(e) => setShowNetworkFlow(e.target.checked)}
+              />
+              <span>{t("live.networkFlow")}</span>
+            </label>
+            <label className={styles.overlayToggle}>
+              <input
+                type="checkbox"
                 checked={showParticles}
                 onChange={(e) => setShowParticles(e.target.checked)}
               />
@@ -266,15 +311,24 @@ export default function LiveDiagramPage() {
               snapshot={snapshot}
               onNodeSelect={setSelectedNodeId}
               vizMode={vizMode}
+              showNetworkFlow={showNetworkFlow}
               showParticles={showParticles}
               showFaultRipple={showFaultRipple}
               showHeatmap={showHeatmap}
             />
           )}
 
-          {/* Right sidebar: alerts or timeline */}
+          {/* Right sidebar: detail panel, alerts, or timeline */}
           <div className={styles.sidebarStack}>
-            {showTimeline && alertCount > 0 ? (
+            {selectedNodeId ? (
+              <ResourceDetailPanel
+                nodeSpec={spec.nodes.find((n) => n.id === selectedNodeId) ?? null}
+                liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}
+                alerts={snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []}
+                connectedEdges={connectedEdges}
+                onClose={() => setSelectedNodeId(null)}
+              />
+            ) : showTimeline && alertCount > 0 ? (
               <FaultTimeline
                 alerts={snapshot?.alerts ?? []}
                 onAlertClick={handleAlertClick}

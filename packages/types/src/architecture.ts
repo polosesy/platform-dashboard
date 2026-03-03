@@ -33,14 +33,16 @@ export type GraphNodeKind =
   | "unknown";
 
 export type EdgeKind =
-  | "contains"   // hierarchical containment (Sub→RG→VNet→Subnet)
-  | "network"    // network connectivity (Subnet↔NIC↔VM, VNet integration)
-  | "peering"    // VNet Peering
-  | "privateLink"// Private Endpoint → target service
-  | "routes"     // AppGW/LB → backend pool targets
-  | "logging"    // Diagnostic Settings → Log Analytics / Storage
-  | "connects"   // legacy catch-all (backwards compat)
-  | "inferred";  // proximity-based implicit dependency
+  | "contains"    // hierarchical containment (Sub→RG→VNet→Subnet)
+  | "network"     // network connectivity (Subnet↔NIC↔VM, VNet integration)
+  | "peering"     // VNet Peering
+  | "privateLink" // Private Endpoint → target service
+  | "routes"      // AppGW/LB → backend pool targets
+  | "logging"     // Diagnostic Settings → Log Analytics / Storage
+  | "connects"    // legacy catch-all (backwards compat)
+  | "inferred"    // proximity-based implicit dependency
+  | "attached-to" // Subnet → NIC (network infrastructure binding)
+  | "bound-to";   // NIC → VM (compute-to-network binding)
 
 export type ArchitectureNode = {
   id: string;

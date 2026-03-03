@@ -78,7 +78,7 @@ function buildVNetMembership(graph: ArchitectureGraph): Map<string, Set<string>>
   // NIC → subnet
   const nicToSubnet = new Map<string, string>();
   for (const e of graph.edges) {
-    if (e.kind !== "network" && e.kind !== "connects") continue;
+    if (e.kind !== "network" && e.kind !== "connects" && e.kind !== "attached-to") continue;
     if (nodeKind.get(e.source) === "subnet" && nodeKind.get(e.target) === "nic") {
       nicToSubnet.set(e.target, e.source);
     }
@@ -96,7 +96,7 @@ function buildVNetMembership(graph: ArchitectureGraph): Map<string, Set<string>>
   }
 
   for (const e of graph.edges) {
-    if (e.kind !== "network" && e.kind !== "connects") continue;
+    if (e.kind !== "network" && e.kind !== "connects" && e.kind !== "attached-to" && e.kind !== "bound-to") continue;
     const srcKind = nodeKind.get(e.source);
     const tgtKind = nodeKind.get(e.target);
 
