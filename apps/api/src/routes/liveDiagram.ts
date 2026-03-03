@@ -11,7 +11,7 @@ import {
   mockDiagramSpec,
   generateMockSnapshot,
 } from "../services/liveDiagramMock";
-import { tryGetArchitectureGraphFromAzure } from "../services/azure";
+import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure";
 import { generateDiagramSpec } from "../services/specGenerator";
 
 // Seed the mock diagram on startup
@@ -41,6 +41,10 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
         ? req.body.subscriptionId
         : undefined;
 
+    // Always clear graph cache on generate to ensure fresh Azure data
+    // with latest edge extraction logic
+    clearGraphCache();
+
     tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, {
       subscriptionId,
     })
@@ -55,20 +59,48 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
         }
 
         const subId = subscriptionId ?? env.AZURE_SUBSCRIPTION_IDS?.split(",")[0] ?? "default";
-        const spec = await generateDiagramSpec(graph, subId);
+        const { spec, containmentDiagnostics } = await generateDiagramSpec(graph, subId);
         saveDiagramSpec(spec);
         const nodesWithParent = spec.nodes.filter(n => n.parentId).length;
-        const groupNodes = spec.nodes.filter(n => n.nodeType === "group").length;
+        const groupNodesList = spec.nodes.filter(n => n.nodeType === "group");
+
+        // ── Verification logs (user requirement #4) ──
+        const vnetCount = spec.nodes.filter(n => n.icon === "vnet").length;
+        const subnetCount = spec.nodes.filter(n => n.icon === "subnet").length;
+        const nicCount = spec.nodes.filter(n => n.icon === "nic").length;
+        const vmCount = spec.nodes.filter(n => n.icon === "vm").length;
+
+        const subnetSamples = spec.nodes
+          .filter(n => n.icon === "subnet")
+          .slice(0, 5)
+          .map(n => ({ id: n.id, parentId: n.parentId ?? null, label: n.label }));
+
+        const nicSamples = spec.nodes
+          .filter(n => n.icon === "nic")
+          .slice(0, 5)
+          .map(n => ({
+            id: n.id,
+            parentId: n.parentId ?? null,
+            label: n.label,
+          }));
+
         res.status(201).json({
           ok: true,
           diagram: spec,
+          _source: "azure",
           _diagnostics: {
             graphNodes: graph.nodes.length,
             graphEdges: graph.edges.length,
             specNodes: spec.nodes.length,
             specEdges: spec.edges.length,
             nodesWithParent,
-            groupNodes,
+            groupNodes: groupNodesList.length,
+          },
+          _containment: containmentDiagnostics,
+          _verification: {
+            counts: { vnetCount, subnetCount, nicCount, vmCount },
+            subnetSamples,
+            nicSamples,
           },
         });
       })

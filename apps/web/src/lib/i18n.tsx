@@ -63,6 +63,8 @@ const T: Translations = {
   "detail.health": { ko: "상태", en: "Health" },
   "detail.noData": { ko: "데이터 없음", en: "No data" },
   "detail.noMetrics": { ko: "메트릭 없음", en: "No metrics" },
+  "detail.essentials": { ko: "필수 정보", en: "Essentials" },
+  "detail.status": { ko: "상태", en: "Status" },
 
   // ── Common ──
   "common.language": { ko: "한국어", en: "English" },

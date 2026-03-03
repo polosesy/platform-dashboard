@@ -100,7 +100,38 @@ export default function LiveDiagramPage() {
     setGenerateError(null);
     try {
       const token = await getApiToken().catch(() => null);
-      const resp = await fetchJsonWithBearer<{ ok: boolean; diagram: { id: string } }>(
+      const resp = await fetchJsonWithBearer<{
+        ok: boolean;
+        diagram: DiagramSpec;
+        _diagnostics?: {
+          graphNodes: number;
+          graphEdges: number;
+          specNodes: number;
+          specEdges: number;
+          nodesWithParent: number;
+          groupNodes: number;
+        };
+        _containment?: {
+          subnetParentCount: number;
+          resourceSubnetCount: number;
+          pass1: number;
+          pass1b: number;
+          pass2Nic: number;
+          pass2Other: number;
+          pass3: number;
+          pass4: number;
+          pass5: number;
+          sampleChains: string[];
+          edgeKindCounts: Record<string, number>;
+          graphNodeCounts?: { vnet: number; subnet: number; nic: number; total: number };
+        };
+        _source?: string;
+        _verification?: {
+          counts: { vnetCount: number; subnetCount: number; nicCount: number; vmCount: number };
+          subnetSamples: Array<{ id: string; parentId: string | null; label: string }>;
+          nicSamples: Array<{ id: string; parentId: string | null; label: string }>;
+        };
+      }>(
         `${apiBaseUrl()}/api/live/diagrams/generate`,
         token,
         {
@@ -109,6 +140,39 @@ export default function LiveDiagramPage() {
         },
       );
       if (resp.ok && resp.diagram?.id) {
+        // Log diagnostics for debugging containment
+        console.log(`[Generate] Source: ${resp._source ?? "unknown"}`);
+        if (resp._diagnostics) {
+          console.log("[Generate] Diagnostics:", resp._diagnostics);
+        }
+        if (resp._containment) {
+          const c = resp._containment;
+          console.log("[Generate] Containment:", c);
+          if (c.graphNodeCounts) {
+            console.log(`[Generate] Graph nodes: ${c.graphNodeCounts.total} total, VNet=${c.graphNodeCounts.vnet}, Subnet=${c.graphNodeCounts.subnet}, NIC=${c.graphNodeCounts.nic}`);
+          }
+          console.log(`[Generate] Containment passes: P1=${c.pass1} P1b=${c.pass1b} P2nic=${c.pass2Nic} P2other=${c.pass2Other} P3=${c.pass3} P4=${c.pass4} P5=${c.pass5}`);
+          console.log(`[Generate] Result: ${c.subnetParentCount} subnet→vnet, ${c.resourceSubnetCount} resource→subnet`);
+          console.log("[Generate] Edge kinds:", c.edgeKindCounts);
+          for (const chain of c.sampleChains) {
+            console.log(`[Generate]   ${chain}`);
+          }
+        }
+        // Verification logs (requirement #4)
+        if (resp._verification) {
+          const v = resp._verification;
+          console.log(`[Generate] Verification counts: VNet=${v.counts.vnetCount}, Subnet=${v.counts.subnetCount}, NIC=${v.counts.nicCount}, VM=${v.counts.vmCount}`);
+          console.log("[Generate] Subnet samples:", v.subnetSamples);
+          console.log("[Generate] NIC samples:", v.nicSamples);
+        }
+        // Log parentId distribution from returned spec
+        const groups = resp.diagram.nodes.filter((n) => n.nodeType === "group");
+        const withParent = resp.diagram.nodes.filter((n) => n.parentId);
+        console.log(`[Generate] Spec: ${resp.diagram.nodes.length} nodes, ${groups.length} groups, ${withParent.length} with parentId`);
+        for (const g of groups) {
+          const children = resp.diagram.nodes.filter((n) => n.parentId === g.id);
+          console.log(`[Generate]   Group "${g.id}" (${g.label}): ${children.length} children`);
+        }
         setDiagramId(resp.diagram.id);
       }
     } catch (e: unknown) {

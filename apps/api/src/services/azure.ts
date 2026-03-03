@@ -45,6 +45,11 @@ let subsCache:
     }
   | undefined;
 
+/** Clear the in-memory Azure Resource Graph cache. Call before generate to ensure fresh data. */
+export function clearGraphCache(): void {
+  cache = undefined;
+}
+
 function parseSubscriptionIds(raw: string): string[] {
   return raw
     .split(",")
@@ -148,6 +153,17 @@ function safeString(v: unknown): string | undefined {
 /** Like safeString, but also lowercases — for Azure resource IDs which are case-insensitive. */
 function safeId(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim().toLowerCase() : undefined;
+}
+
+/** Extract the full subnet resource ID from any Azure resource ID containing /subnets/ */
+function extractSubnetIdFromResourceId(rid: string): string | undefined {
+  const lower = rid.toLowerCase();
+  const idx = lower.indexOf("/subnets/");
+  if (idx <= 0) return undefined;
+  const afterSubnets = lower.slice(idx + "/subnets/".length);
+  const subnetName = afterSubnets.split("/")[0];
+  if (!subnetName) return undefined;
+  return lower.slice(0, idx + "/subnets/".length + subnetName.length);
 }
 
 /** Safely traverse nested unknown properties and return a string leaf. */
@@ -282,10 +298,16 @@ function getSubnetIdFromNicProps(properties: unknown): string | undefined {
   const ipConfigs = (properties as { ipConfigurations?: unknown }).ipConfigurations;
   if (!Array.isArray(ipConfigs)) return undefined;
   for (const c of ipConfigs) {
-    const subnet = (c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet;
-    const id = subnet?.id;
-    const s = safeId(id);
-    if (s) return s;
+    if (!c || typeof c !== "object") continue;
+    const obj = c as Record<string, unknown>;
+    // ARM API format: ipConfigurations[].properties.subnet.id
+    const nested = (obj.properties as { subnet?: { id?: unknown } } | undefined)?.subnet?.id;
+    const s1 = safeId(nested);
+    if (s1) return s1;
+    // Resource Graph flattened format: ipConfigurations[].subnet.id
+    const flat = (obj.subnet as { id?: unknown } | undefined)?.id;
+    const s2 = safeId(flat);
+    if (s2) return s2;
   }
   return undefined;
 }
@@ -317,7 +339,13 @@ function getSubnetIdsFromAppGatewayProps(properties: unknown): string[] {
   const configs = (properties as { gatewayIPConfigurations?: unknown }).gatewayIPConfigurations;
   if (!Array.isArray(configs)) return [];
   const ids = configs
-    .map((c) => safeId((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
+    .map((c) => {
+      if (!c || typeof c !== "object") return undefined;
+      const obj = c as Record<string, unknown>;
+      // ARM API: .properties.subnet.id  |  Resource Graph flattened: .subnet.id
+      return safeId((obj.properties as { subnet?: { id?: unknown } } | undefined)?.subnet?.id)
+        ?? safeId((obj.subnet as { id?: unknown } | undefined)?.id);
+    })
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -327,7 +355,12 @@ function getSubnetIdsFromLoadBalancerProps(properties: unknown): string[] {
   const configs = (properties as { frontendIPConfigurations?: unknown }).frontendIPConfigurations;
   if (!Array.isArray(configs)) return [];
   const ids = configs
-    .map((c) => safeId((c as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id))
+    .map((c) => {
+      if (!c || typeof c !== "object") return undefined;
+      const obj = c as Record<string, unknown>;
+      return safeId((obj.properties as { subnet?: { id?: unknown } } | undefined)?.subnet?.id)
+        ?? safeId((obj.subnet as { id?: unknown } | undefined)?.id);
+    })
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -339,7 +372,11 @@ function getBackendNicIdsFromLoadBalancerProps(properties: unknown): string[] {
 
   const ipConfigs: unknown[] = [];
   for (const p of pools) {
-    const cfgs = (p as { properties?: { backendIPConfigurations?: unknown } }).properties?.backendIPConfigurations;
+    if (!p || typeof p !== "object") continue;
+    const obj = p as Record<string, unknown>;
+    // ARM API: .properties.backendIPConfigurations  |  RG flattened: .backendIPConfigurations
+    const cfgs = (obj.properties as { backendIPConfigurations?: unknown } | undefined)?.backendIPConfigurations
+      ?? obj.backendIPConfigurations;
     if (Array.isArray(cfgs)) ipConfigs.push(...cfgs);
   }
 
@@ -347,7 +384,7 @@ function getBackendNicIdsFromLoadBalancerProps(properties: unknown): string[] {
     .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x))
     .map((id) => {
-      const idx = id.indexOf("/ipconfigurations/"); // already lowercase from safeId
+      const idx = id.indexOf("/ipconfigurations/");
       return idx > 0 ? id.slice(0, idx) : id;
     });
   return [...new Set(nicIds)];
@@ -360,7 +397,10 @@ function getBackendNicIdsFromAppGatewayProps(properties: unknown): string[] {
 
   const ipConfigs: unknown[] = [];
   for (const p of pools) {
-    const cfgs = (p as { properties?: { backendIPConfigurations?: unknown } }).properties?.backendIPConfigurations;
+    if (!p || typeof p !== "object") continue;
+    const obj = p as Record<string, unknown>;
+    const cfgs = (obj.properties as { backendIPConfigurations?: unknown } | undefined)?.backendIPConfigurations
+      ?? obj.backendIPConfigurations;
     if (Array.isArray(cfgs)) ipConfigs.push(...cfgs);
   }
 
@@ -368,7 +408,7 @@ function getBackendNicIdsFromAppGatewayProps(properties: unknown): string[] {
     .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x))
     .map((id) => {
-      const idx = id.indexOf("/ipconfigurations/"); // already lowercase from safeId
+      const idx = id.indexOf("/ipconfigurations/");
       return idx > 0 ? id.slice(0, idx) : id;
     });
   return [...new Set(nicIds)];
@@ -380,7 +420,12 @@ function getPrivateLinkTargetIdsFromPrivateEndpointProps(properties: unknown): s
   const manual = (properties as { manualPrivateLinkServiceConnections?: unknown }).manualPrivateLinkServiceConnections;
   const all = [...(Array.isArray(conns) ? conns : []), ...(Array.isArray(manual) ? manual : [])];
   const ids = all
-    .map((c) => safeId((c as { properties?: { privateLinkServiceId?: unknown } }).properties?.privateLinkServiceId))
+    .map((c) => {
+      if (!c || typeof c !== "object") return undefined;
+      const obj = c as Record<string, unknown>;
+      return safeId((obj.properties as { privateLinkServiceId?: unknown } | undefined)?.privateLinkServiceId)
+        ?? safeId(obj.privateLinkServiceId);
+    })
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
 }
@@ -393,6 +438,97 @@ function getNicIdsFromVmProps(properties: unknown): string[] {
     .map((x) => safeId((x as { id?: unknown }).id))
     .filter((x): x is string => Boolean(x));
   return [...new Set(ids)];
+}
+
+/**
+ * Generic scanner: check common property paths for subnet ID references.
+ * Returns the first matching subnet ID that exists in the graph, or undefined.
+ */
+function findSubnetReferenceInProps(
+  properties: unknown,
+  knownSubnetIds: Set<string>,
+): string | undefined {
+  if (!properties || typeof properties !== "object") return undefined;
+  const p = properties as Record<string, unknown>;
+
+  // Direct subnet.id reference (e.g., Private Endpoints, some PaaS)
+  const directSubnet = safeId((p.subnet as Record<string, unknown> | undefined)?.id);
+  if (directSubnet && knownSubnetIds.has(directSubnet)) return directSubnet;
+
+  // virtualNetworkSubnetId (App Service / Function App VNet integration)
+  const vnetSubnetId = safeId(p.virtualNetworkSubnetId);
+  if (vnetSubnetId && knownSubnetIds.has(vnetSubnetId)) return vnetSubnetId;
+
+  // ipConfigurations[].properties.subnet.id (NICs, Firewalls, etc.)
+  const ipConfigs = Array.isArray(p.ipConfigurations) ? p.ipConfigurations : [];
+  for (const cfg of ipConfigs) {
+    const subId = safeId(
+      (cfg as { properties?: { subnet?: { id?: unknown } } })?.properties?.subnet?.id,
+    );
+    if (subId && knownSubnetIds.has(subId)) return subId;
+  }
+
+  // gatewayIPConfigurations[].properties.subnet.id (App Gateway)
+  const gwConfigs = Array.isArray(p.gatewayIPConfigurations) ? p.gatewayIPConfigurations : [];
+  for (const cfg of gwConfigs) {
+    const subId = safeId(
+      (cfg as { properties?: { subnet?: { id?: unknown } } })?.properties?.subnet?.id,
+    );
+    if (subId && knownSubnetIds.has(subId)) return subId;
+  }
+
+  // frontendIPConfigurations[].properties.subnet.id (Load Balancers)
+  const feConfigs = Array.isArray(p.frontendIPConfigurations) ? p.frontendIPConfigurations : [];
+  for (const cfg of feConfigs) {
+    const subId = safeId(
+      (cfg as { properties?: { subnet?: { id?: unknown } } })?.properties?.subnet?.id,
+    );
+    if (subId && knownSubnetIds.has(subId)) return subId;
+  }
+
+  // agentPoolProfiles[].vnetSubnetId / vnetSubnetID (AKS)
+  const agentPools = Array.isArray(p.agentPoolProfiles) ? p.agentPoolProfiles : [];
+  for (const pool of agentPools) {
+    const subId = safeId(
+      (pool as { vnetSubnetId?: unknown; vnetSubnetID?: unknown }).vnetSubnetId ??
+      (pool as { vnetSubnetID?: unknown }).vnetSubnetID,
+    );
+    if (subId && knownSubnetIds.has(subId)) return subId;
+  }
+
+  // Deep scan: recursively look for any string value matching a known subnet ID
+  const found = deepScanForSubnetId(properties, knownSubnetIds, 0);
+  if (found) return found;
+
+  return undefined;
+}
+
+/** Recursively scan an object for string values that match known subnet IDs. Max depth 5. */
+function deepScanForSubnetId(
+  obj: unknown,
+  knownSubnetIds: Set<string>,
+  depth: number,
+): string | undefined {
+  if (depth > 5 || !obj || typeof obj !== "object") return undefined;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = deepScanForSubnetId(item, knownSubnetIds, depth + 1);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  for (const value of Object.values(obj as Record<string, unknown>)) {
+    if (typeof value === "string") {
+      const lower = value.toLowerCase().trim();
+      if (knownSubnetIds.has(lower)) return lower;
+    } else if (typeof value === "object" && value !== null) {
+      const found = deepScanForSubnetId(value, knownSubnetIds, depth + 1);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 async function resourceGraphQueryAll<T>(
@@ -579,6 +715,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t !== "microsoft.network/virtualnetworks") continue;
 
     const vnetSubnetsArr = safePropArray(r.properties, "subnets");
+    console.log(`[azure] VNet "${r.name}" (${r.id.split("/").pop()}) has ${vnetSubnetsArr.length} embedded subnets`);
     for (const sub of vnetSubnetsArr) {
       if (!sub || typeof sub !== "object") continue;
       const subObj = sub as Record<string, unknown>;
@@ -626,26 +763,37 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       }
 
       // Extract NIC→Subnet bindings from subnet ipConfigurations
-      if (subObj.properties && typeof subObj.properties === "object") {
-        const ipConfigs = safePropArray(subObj.properties, "ipConfigurations");
-        for (const cfg of ipConfigs) {
-          if (!cfg || typeof cfg !== "object") continue;
-          const nicConfigId = safeId((cfg as Record<string, unknown>).id);
-          if (!nicConfigId) continue;
-          const nicIdx = nicConfigId.indexOf("/ipconfigurations/");
-          if (nicIdx <= 0) continue;
-          const nicId = nicConfigId.slice(0, nicIdx);
-          if (!nicById.has(nicId)) continue;
-          const nicEdgeId = `e:subnet->nic:${subId}:${nicId}`;
-          if (!edgeIdSet.has(nicEdgeId)) {
-            edgeIdSet.add(nicEdgeId);
-            edges.push({
-              id: nicEdgeId,
-              source: subId,
-              target: nicId,
-              kind: "attached-to",
-            });
-          }
+      // Handle both nested format (subObj.properties.ipConfigurations) and
+      // Resource Graph flattened format (subObj.ipConfigurations directly)
+      const subnetIpConfigs: unknown[] = (() => {
+        // Try nested format first
+        if (subObj.properties && typeof subObj.properties === "object") {
+          const nested = safePropArray(subObj.properties, "ipConfigurations");
+          if (nested.length > 0) return nested;
+        }
+        // Fallback: flattened format (ipConfigurations directly on subnet object)
+        const flat = safePropArray(subObj, "ipConfigurations");
+        return flat;
+      })();
+      const subLabel = safeString(subObj.name) ?? subId.split("/").pop();
+      console.log(`[azure]   Subnet "${subLabel}" has ${subnetIpConfigs.length} ipConfigurations (props=${!!subObj.properties}, flat=${Array.isArray(subObj.ipConfigurations)})`);
+      for (const cfg of subnetIpConfigs) {
+        if (!cfg || typeof cfg !== "object") continue;
+        const nicConfigId = safeId((cfg as Record<string, unknown>).id);
+        if (!nicConfigId) continue;
+        const nicIdx = nicConfigId.indexOf("/ipconfigurations/");
+        if (nicIdx <= 0) continue;
+        const nicId = nicConfigId.slice(0, nicIdx);
+        if (!nicById.has(nicId)) continue;
+        const nicEdgeId = `e:subnet->nic:${subId}:${nicId}`;
+        if (!edgeIdSet.has(nicEdgeId)) {
+          edgeIdSet.add(nicEdgeId);
+          edges.push({
+            id: nicEdgeId,
+            source: subId,
+            target: nicId,
+            kind: "attached-to",
+          });
         }
       }
     }
@@ -673,6 +821,30 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   }
 
   // derived edges: subnet -> nic, nic -> vm
+  // Dump first NIC's raw ipConfigurations structure for debugging
+  const firstNic = nicById.values().next().value;
+  if (firstNic) {
+    const p = firstNic.properties as Record<string, unknown> | undefined;
+    const ipCfgs = p?.ipConfigurations;
+    if (Array.isArray(ipCfgs) && ipCfgs.length > 0) {
+      const first = ipCfgs[0] as Record<string, unknown>;
+      const keys = Object.keys(first);
+      console.log(`[azure] NIC "${firstNic.name}" ipConfigurations[0] keys: [${keys.join(", ")}]`);
+      // Check which format: nested (.properties.subnet.id) or flat (.subnet.id)
+      const hasNestedProps = first.properties != null;
+      const hasFlatSubnet = first.subnet != null;
+      console.log(`[azure] NIC format: hasNestedProperties=${hasNestedProps}, hasFlatSubnet=${hasFlatSubnet}`);
+      if (hasNestedProps) {
+        const nested = first.properties as Record<string, unknown>;
+        console.log(`[azure] NIC .properties keys: [${Object.keys(nested).join(", ")}]`);
+      }
+    } else {
+      console.log(`[azure] NIC "${firstNic.name}" has no ipConfigurations array`);
+    }
+  }
+
+  let nicSubnetEdgeCount = 0;
+  let nicSubnetMissCount = 0;
   for (const nic of nicById.values()) {
     const subnetId = getSubnetIdFromNicProps(nic.properties);
     if (subnetId) {
@@ -685,22 +857,40 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           target: nic.id,
           kind: "attached-to",
         });
+        nicSubnetEdgeCount++;
+        // Check if the subnet node actually exists in graph
+        const subnetExists = nodes.some(n => n.id === subnetId);
+        console.log(`[azure] NIC→Subnet: "${nic.name}" → subnet "${subnetId.split("/").pop()}" (subnetInGraph=${subnetExists})`);
       }
+    } else {
+      nicSubnetMissCount++;
+      console.log(`[azure] NIC "${nic.name}" has NO subnet reference in properties`);
     }
   }
+  console.log(`[azure] NIC→Subnet edges: ${nicSubnetEdgeCount} created, ${nicSubnetMissCount} missing subnet ref`);
 
+  let nicVmEdgeCount = 0;
   for (const r of resRows) {
     if (!r.id) continue;
     const t = (r.type ?? "").toLowerCase();
     if (t === "microsoft.compute/virtualmachines") {
-      for (const nicId of getNicIdsFromVmProps(r.properties)) {
-        if (!nicById.has(nicId)) continue;
+      const nicIds = getNicIdsFromVmProps(r.properties);
+      for (const nicId of nicIds) {
+        if (!nicById.has(nicId)) {
+          console.log(`[azure] VM "${r.name}" references NIC "${nicId.split("/").pop()}" but NIC not in graph`);
+          continue;
+        }
         edges.push({
           id: `e:nic->vm:${nicId}:${r.id}`,
           source: nicId,
           target: r.id,
           kind: "bound-to"
         });
+        nicVmEdgeCount++;
+        console.log(`[azure] NIC→VM: "${nicId.split("/").pop()}" → VM "${r.name}"`);
+      }
+      if (nicIds.length === 0) {
+        console.log(`[azure] VM "${r.name}" has NO NIC references in properties`);
       }
     }
     if (t === "microsoft.containerservice/managedclusters") {
@@ -775,6 +965,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       }
     }
   }
+
+  console.log(`[azure] NIC→VM edges: ${nicVmEdgeCount} created`);
 
   // ── New relationship parsers ──
 
@@ -894,6 +1086,153 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // ██ COMPREHENSIVE SUBNET DISCOVERY ██
+  // Ensures subnet nodes ALWAYS exist. Subnet count must NEVER be 0
+  // when VNets or NICs exist. Collects subnet IDs from ALL sources.
+  // ══════════════════════════════════════════════════════════════════
+
+  const discoveredSubnetIds = new Set<string>();
+  const vnetNodeIds = new Set(nodes.filter(n => n.kind === "vnet").map(n => n.id));
+
+  // ── Source (a): NIC.properties.ipConfigurations[].subnet.id ──
+  for (const nic of nicById.values()) {
+    const subnetId = getSubnetIdFromNicProps(nic.properties);
+    if (subnetId) discoveredSubnetIds.add(subnetId);
+  }
+  console.log(`[subnet-discovery] Source (a) NIC properties: ${discoveredSubnetIds.size} subnet IDs`);
+
+  // ── Source (b): VNet.properties.subnets[].id ──
+  const preNicCount = discoveredSubnetIds.size;
+  for (const r of resRows) {
+    if (!r.id) continue;
+    const t = (r.type ?? "").toLowerCase();
+    if (t !== "microsoft.network/virtualnetworks") continue;
+    const arr = safePropArray(r.properties, "subnets");
+    for (const sub of arr) {
+      if (!sub || typeof sub !== "object") continue;
+      const id = safeId((sub as Record<string, unknown>).id);
+      if (id) discoveredSubnetIds.add(id);
+    }
+  }
+  console.log(`[subnet-discovery] Source (b) VNet embedded: +${discoveredSubnetIds.size - preNicCount} (total ${discoveredSubnetIds.size})`);
+
+  // ── Source (c): Resource ID / edge ID parsing for /subnets/ pattern ──
+  const preEdgeCount = discoveredSubnetIds.size;
+  for (const edge of edges) {
+    for (const rid of [edge.source, edge.target]) {
+      const subId = extractSubnetIdFromResourceId(rid);
+      if (subId) discoveredSubnetIds.add(subId);
+    }
+  }
+  for (const n of nodes) {
+    const subId = extractSubnetIdFromResourceId(n.id);
+    if (subId) discoveredSubnetIds.add(subId);
+  }
+  console.log(`[subnet-discovery] Source (c) ID parsing: +${discoveredSubnetIds.size - preEdgeCount} (total ${discoveredSubnetIds.size})`);
+
+  // ── Create subnet nodes for ALL discovered IDs ──
+  let createdSubnets = 0;
+  for (const subnetId of discoveredSubnetIds) {
+    if (nodes.some(n => n.id === subnetId && n.kind === "subnet")) continue; // Already exists
+
+    const subName = subnetId.split("/").pop() ?? "unknown-subnet";
+    const vnetIdx = subnetId.lastIndexOf("/subnets/");
+    const parentVnetId = vnetIdx > 0 ? subnetId.slice(0, vnetIdx) : undefined;
+    const vnetRow = parentVnetId ? resourceById.get(parentVnetId) : undefined;
+    // Fall back to NIC's location/RG if VNet not found
+    const anyNicForSubnet = [...nicById.values()].find(nic => getSubnetIdFromNicProps(nic.properties) === subnetId);
+
+    const subRow: AzureResourceRow = {
+      id: subnetId,
+      name: subName,
+      type: "Microsoft.Network/virtualNetworks/subnets",
+      location: vnetRow?.location ?? anyNicForSubnet?.location,
+      resourceGroup: vnetRow?.resourceGroup ?? anyNicForSubnet?.resourceGroup,
+    };
+    resourceById.set(subnetId, subRow);
+    nodes.push({
+      id: subnetId,
+      kind: "subnet",
+      name: subName,
+      azureId: subnetId,
+      location: subRow.location,
+      resourceGroup: subRow.resourceGroup,
+      health: "unknown",
+    });
+    createdSubnets++;
+    console.log(`[subnet-discovery] Created subnet: "${subName}" (VNet: ${parentVnetId ? vnetNodeIds.has(parentVnetId) ? "found" : "MISSING" : "N/A"})`);
+  }
+  console.log(`[subnet-discovery] Result: ${discoveredSubnetIds.size} total subnets, ${createdSubnets} newly created`);
+
+  // ── Ensure VNet→Subnet contains edges exist for ALL subnets ──
+  const finalSubnetNodeIds = new Set(nodes.filter(n => n.kind === "subnet").map(n => n.id));
+  let containsCreated = 0;
+  for (const subId of finalSubnetNodeIds) {
+    const hasContains = edges.some(e => e.kind === "contains" && e.target === subId && vnetNodeIds.has(e.source));
+    if (hasContains) continue;
+
+    const vnetIdx = subId.lastIndexOf("/subnets/");
+    if (vnetIdx <= 0) continue;
+    const parentVnetId = subId.slice(0, vnetIdx);
+    if (!vnetNodeIds.has(parentVnetId)) continue;
+
+    const eid = `e:vnet->subnet-disc:${parentVnetId}:${subId}`;
+    if (!edgeIdSet.has(eid)) {
+      edgeIdSet.add(eid);
+      edges.push({ id: eid, source: parentVnetId, target: subId, kind: "contains" });
+      containsCreated++;
+    }
+  }
+  if (containsCreated > 0) {
+    console.log(`[subnet-discovery] Created ${containsCreated} VNet→Subnet contains edges`);
+  }
+
+  // ── Ensure Subnet→NIC edges exist for ALL NICs ──
+  let nicEdgesCreated = 0;
+  for (const nic of nicById.values()) {
+    const hasSubnetEdge = edges.some(e => e.target === nic.id && finalSubnetNodeIds.has(e.source));
+    if (hasSubnetEdge) continue;
+
+    const subnetId = getSubnetIdFromNicProps(nic.properties);
+    if (!subnetId || !finalSubnetNodeIds.has(subnetId)) continue;
+
+    const eid = `e:subnet->nic-disc:${subnetId}:${nic.id}`;
+    if (!edgeIdSet.has(eid)) {
+      edgeIdSet.add(eid);
+      edges.push({ id: eid, source: subnetId, target: nic.id, kind: "attached-to" });
+      nicEdgesCreated++;
+    }
+  }
+  if (nicEdgesCreated > 0) {
+    console.log(`[subnet-discovery] Created ${nicEdgesCreated} Subnet→NIC edges`);
+  }
+
+  // ── Generic fallback: scan ALL resource properties for subnet references ──
+  let genericSubnetEdges = 0;
+  for (const r of resRows) {
+    if (!r.id || !r.properties) continue;
+    const kind = mapKind(r.type, r.kind);
+    if (kind === "vnet" || kind === "subnet" || kind === "nic" || kind === "nsg") continue;
+    const hasSubnetEdge = edges.some(e =>
+      (e.target === r.id && finalSubnetNodeIds.has(e.source)) ||
+      (e.source === r.id && finalSubnetNodeIds.has(e.target)),
+    );
+    if (hasSubnetEdge) continue;
+    const subnetRef = findSubnetReferenceInProps(r.properties, finalSubnetNodeIds);
+    if (subnetRef) {
+      const edgeId = `e:subnet->res-generic:${subnetRef}:${r.id}`;
+      if (!edgeIdSet.has(edgeId)) {
+        edgeIdSet.add(edgeId);
+        edges.push({ id: edgeId, source: subnetRef, target: r.id, kind: "network" });
+        genericSubnetEdges++;
+      }
+    }
+  }
+  if (genericSubnetEdges > 0) {
+    console.log(`[subnet-discovery] Generic scanner: ${genericSubnetEdges} additional subnet→resource edges`);
+  }
+
   // ── Diagnostic: graph summary ──
   const kindCount = new Map<string, number>();
   for (const n of nodes) {
@@ -906,6 +1245,15 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   console.log(`[azure] Graph built: ${nodes.length} nodes, ${edges.length} edges`);
   console.log(`[azure] Node kinds: ${JSON.stringify(Object.fromEntries(kindCount))}`);
   console.log(`[azure] Edge kinds: ${JSON.stringify(Object.fromEntries(edgeKindCount))}`);
+
+  // ── Diagnostic: containment edge counts (using final subnet set) ──
+  const vnetToSubnet = edges.filter(e => e.kind === "contains" && finalSubnetNodeIds.has(e.target)).length;
+  const subnetToResource = edges.filter(e =>
+    finalSubnetNodeIds.has(e.source) &&
+    e.kind !== "contains" &&
+    !finalSubnetNodeIds.has(e.target),
+  ).length;
+  console.log(`[azure] Containment edges: ${vnetToSubnet} vnet→subnet, ${subnetToResource} subnet→resource`);
 
   return {
     generatedAt: new Date().toISOString(),

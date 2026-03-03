@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   DiagramNodeSpec,
   DiagramEdgeSpec,
@@ -36,6 +37,35 @@ const healthLabel: Record<HealthStatus, string> = {
   unknown: "Unknown",
 };
 
+/** Map internal resource kind to display name */
+const RESOURCE_KIND_DISPLAY: Record<string, string> = {
+  vnet: "Virtual Network",
+  subnet: "Subnet",
+  nic: "Network Interface",
+  vm: "Virtual Machine",
+  vmss: "VM Scale Set",
+  aks: "Azure Kubernetes Service",
+  containerApp: "Container App",
+  appGateway: "Application Gateway",
+  lb: "Load Balancer",
+  frontDoor: "Front Door",
+  trafficManager: "Traffic Manager",
+  privateEndpoint: "Private Endpoint",
+  storage: "Storage Account",
+  sql: "SQL Database",
+  cosmosDb: "Cosmos DB",
+  redis: "Azure Cache for Redis",
+  postgres: "PostgreSQL",
+  keyVault: "Key Vault",
+  appInsights: "Application Insights",
+  logAnalytics: "Log Analytics Workspace",
+  firewall: "Azure Firewall",
+  functionApp: "Function App",
+  appService: "App Service",
+  serviceBus: "Service Bus",
+  eventHub: "Event Hub",
+};
+
 function truncateId(id: string, maxLen = 60): string {
   if (id.length <= maxLen) return id;
   return id.slice(0, maxLen) + "...";
@@ -56,6 +86,7 @@ export function ResourceDetailPanel({
   onClose,
 }: ResourceDetailPanelProps) {
   const { t } = useI18n();
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
 
   if (!nodeSpec) return null;
 
@@ -68,13 +99,16 @@ export function ResourceDetailPanel({
     ([, v]) => v != null,
   );
 
-  // Get all sparklines with enough data
   const sparklineEntries: [string, SparklineData][] = sparklines
     ? Object.entries(sparklines).filter(([, s]) => s.values.length >= 2)
     : [];
 
   const tags = nodeSpec.tags;
   const tagEntries = tags ? Object.entries(tags) : [];
+
+  const kindDisplay = nodeSpec.resourceKind
+    ? RESOURCE_KIND_DISPLAY[nodeSpec.resourceKind] ?? nodeSpec.resourceKind
+    : undefined;
 
   return (
     <aside className={styles.detailPanel}>
@@ -103,47 +137,56 @@ export function ResourceDetailPanel({
 
       {/* Body */}
       <div className={styles.detailBody}>
-        {/* Basic Info */}
+        {/* ── Essentials (Azure Portal style) ── */}
         <div className={styles.detailSection}>
-          {nodeSpec.resourceKind && (
-            <div className={styles.detailRow}>
-              <span className={styles.detailKey}>{t("detail.kind")}</span>
-              <span className={styles.detailVal}>{nodeSpec.resourceKind}</span>
+          <div className={styles.detailSectionTitle}>{t("detail.essentials")}</div>
+          <div className={styles.essentialsGrid}>
+            {/* Left column */}
+            <div className={styles.essentialsCol}>
+              {kindDisplay && (
+                <div className={styles.essentialsItem}>
+                  <span className={styles.essentialsLabel}>{t("detail.kind")}</span>
+                  <span className={styles.essentialsValue}>{kindDisplay}</span>
+                </div>
+              )}
+              <div className={styles.essentialsItem}>
+                <span className={styles.essentialsLabel}>{t("detail.status")}</span>
+                <span className={styles.essentialsValue} style={{ color: colors.ringStroke }}>
+                  {healthLabel[health]}
+                  {liveNode ? ` (${(liveNode.healthScore * 100).toFixed(0)}%)` : ""}
+                </span>
+              </div>
+              {nodeSpec.location && (
+                <div className={styles.essentialsItem}>
+                  <span className={styles.essentialsLabel}>{t("detail.location")}</span>
+                  <span className={styles.essentialsValue}>{nodeSpec.location}</span>
+                </div>
+              )}
             </div>
-          )}
-          <div className={styles.detailRow}>
-            <span className={styles.detailKey}>{t("detail.health")}</span>
-            <span className={styles.detailVal} style={{ color: colors.ringStroke }}>
-              {healthLabel[health]}
-              {liveNode ? ` (${(liveNode.healthScore * 100).toFixed(0)}%)` : ""}
-            </span>
+            {/* Right column */}
+            <div className={styles.essentialsCol}>
+              {nodeSpec.resourceGroup && (
+                <div className={styles.essentialsItem}>
+                  <span className={styles.essentialsLabel}>{t("detail.resourceGroup")}</span>
+                  <span className={styles.essentialsValue}>{nodeSpec.resourceGroup}</span>
+                </div>
+              )}
+              {nodeSpec.endpoint && (
+                <div className={styles.essentialsItem}>
+                  <span className={styles.essentialsLabel}>{t("detail.endpoint")}</span>
+                  <span className={styles.essentialsValueMono}>{nodeSpec.endpoint}</span>
+                </div>
+              )}
+              {nodeSpec.azureResourceId && (
+                <div className={styles.essentialsItem}>
+                  <span className={styles.essentialsLabel}>{t("detail.azureId")}</span>
+                  <span className={styles.essentialsValueMono} title={nodeSpec.azureResourceId}>
+                    {truncateId(nodeSpec.azureResourceId)}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-          {nodeSpec.location && (
-            <div className={styles.detailRow}>
-              <span className={styles.detailKey}>{t("detail.location")}</span>
-              <span className={styles.detailVal}>{nodeSpec.location}</span>
-            </div>
-          )}
-          {nodeSpec.resourceGroup && (
-            <div className={styles.detailRow}>
-              <span className={styles.detailKey}>{t("detail.resourceGroup")}</span>
-              <span className={styles.detailVal}>{nodeSpec.resourceGroup}</span>
-            </div>
-          )}
-          {nodeSpec.endpoint && (
-            <div className={styles.detailRow}>
-              <span className={styles.detailKey}>{t("detail.endpoint")}</span>
-              <span className={styles.detailValMono}>{nodeSpec.endpoint}</span>
-            </div>
-          )}
-          {nodeSpec.azureResourceId && (
-            <div className={styles.detailRow}>
-              <span className={styles.detailKey}>{t("detail.azureId")}</span>
-              <span className={styles.detailValMono} title={nodeSpec.azureResourceId}>
-                {truncateId(nodeSpec.azureResourceId)}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Tags */}
@@ -218,31 +261,41 @@ export function ResourceDetailPanel({
           )}
         </div>
 
-        {/* Connections */}
+        {/* Connections (collapsible) */}
         {connectedEdges.length > 0 && (
           <div className={styles.detailSection}>
-            <div className={styles.detailSectionTitle}>
-              {t("detail.connections")} ({connectedEdges.length})
-            </div>
-            {connectedEdges.map((ce) => {
-              const m = ce.liveEdge?.metrics;
-              const metricStr = m?.latencyMs != null
-                ? `${m.latencyMs.toFixed(0)}ms`
-                : m?.throughputBps != null
-                  ? fmtThroughput(m.throughputBps)
-                  : "";
-              return (
-                <div key={ce.edgeSpec.id} className={styles.detailEdgeItem}>
-                  <span className={styles.detailEdgeDir}>
-                    {ce.direction === "inbound" ? t("detail.inbound") : t("detail.outbound")}
-                  </span>
-                  <span className={styles.detailEdgePeer}>{ce.peerLabel}</span>
-                  {metricStr && (
-                    <span className={styles.detailEdgeMetric}>{metricStr}</span>
-                  )}
-                </div>
-              );
-            })}
+            <button
+              className={styles.detailSectionToggle}
+              onClick={() => setConnectionsOpen((prev) => !prev)}
+              type="button"
+            >
+              <span>
+                {t("detail.connections")} ({connectedEdges.length})
+              </span>
+              <span className={styles.toggleChevron}>
+                {connectionsOpen ? "\u25B2" : "\u25BC"}
+              </span>
+            </button>
+            {connectionsOpen &&
+              connectedEdges.map((ce) => {
+                const m = ce.liveEdge?.metrics;
+                const metricStr = m?.latencyMs != null
+                  ? `${m.latencyMs.toFixed(0)}ms`
+                  : m?.throughputBps != null
+                    ? fmtThroughput(m.throughputBps)
+                    : "";
+                return (
+                  <div key={ce.edgeSpec.id} className={styles.detailEdgeItem}>
+                    <span className={styles.detailEdgeDir}>
+                      {ce.direction === "inbound" ? t("detail.inbound") : t("detail.outbound")}
+                    </span>
+                    <span className={styles.detailEdgePeer}>{ce.peerLabel}</span>
+                    {metricStr && (
+                      <span className={styles.detailEdgeMetric}>{metricStr}</span>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </div>
