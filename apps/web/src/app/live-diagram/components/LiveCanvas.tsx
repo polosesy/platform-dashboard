@@ -121,6 +121,7 @@ function LiveCanvasInner({
           type: "group",
           position: nodeSpec.position ?? { x: 0, y: 0 },
           draggable: true,
+          selectable: true,
           style: {
             width: nodeSpec.width ?? 400,
             height: nodeSpec.height ?? 200,
@@ -183,12 +184,18 @@ function LiveCanvasInner({
 
         if (nodeSpec.nodeType === "group") {
           const data: GroupNodeData = { label: nodeSpec.label, icon: nodeSpec.icon };
-          if (existing) return { ...existing, data };
+          if (existing) {
+            const updated = { ...existing, data } as FlowNode<GroupNodeData> & { parentNode?: string };
+            if (nodeSpec.parentId) updated.parentNode = nodeSpec.parentId;
+            else delete updated.parentNode;
+            return updated;
+          }
           const gn: FlowNode<GroupNodeData> = {
             id: nodeSpec.id,
             type: "group",
             position: nodeSpec.position ?? { x: 0, y: 0 },
             draggable: true,
+            selectable: true,
             style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
             data,
           };
@@ -210,7 +217,17 @@ function LiveCanvasInner({
           endpoint: nodeSpec.endpoint,
         };
 
-        if (existing) return { ...existing, data };
+        if (existing) {
+          const updated = { ...existing, data } as FlowNode<LiveNodeData> & { parentNode?: string; extent?: string };
+          if (nodeSpec.parentId) {
+            updated.parentNode = nodeSpec.parentId;
+            updated.extent = "parent";
+          } else {
+            delete updated.parentNode;
+            delete updated.extent;
+          }
+          return updated;
+        }
 
         const ln: FlowNode<LiveNodeData> = {
           id: nodeSpec.id,
