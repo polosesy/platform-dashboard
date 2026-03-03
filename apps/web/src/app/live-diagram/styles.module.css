@@ -358,24 +358,14 @@
   color: rgba(20, 21, 23, 0.82);
 }
 
-/* ── Group Node (VNet / Subnet containers) ── */
+/* ── Group Node (Subscription / RG / VNet / Subnet containers) ── */
 
 .groupNode {
   width: 100%;
   height: 100%;
   border-radius: 16px;
-  border: 1.5px dashed;
   pointer-events: none;
-}
-
-.groupNodeVnet {
-  border-color: rgba(0, 120, 212, 0.25);
-  background: rgba(0, 120, 212, 0.03);
-}
-
-.groupNodeSubnet {
-  border-color: rgba(95, 75, 139, 0.22);
-  background: rgba(95, 75, 139, 0.03);
+  /* border-color, border-style, border-width, background set via inline style from scopeStyle() */
 }
 
 .groupNodeHeader {

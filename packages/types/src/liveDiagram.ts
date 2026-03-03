@@ -39,12 +39,22 @@ export type DiagramNodeSpec = {
   bindings: Record<string, MetricBinding>;
 };
 
+export type DiagramEdgeKind =
+  | "network"
+  | "peering"
+  | "privateLink"
+  | "routes"
+  | "logging"
+  | "inferred";
+
 export type DiagramEdgeSpec = {
   id: string;
   source: string;
   target: string;
   label?: string;
   protocol?: string;
+  edgeKind?: DiagramEdgeKind;
+  confidence?: number;         // 0-1, for inferred edges
   bindings: Record<string, MetricBinding>;
   animation: EdgeAnimationKind;
   alerts?: AlertCondition[];

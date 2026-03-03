@@ -3,6 +3,7 @@ import type {
   HealthStatus,
   EdgeStatus,
   EdgeTrafficLevel,
+  DiagramEdgeKind,
   NodeColorToken,
   EdgeColorToken,
   FaultDesignTokens,
@@ -117,3 +118,46 @@ export const canvasParticleTokens: CanvasParticleTokens = {
   trailLength: 3,
   trailOpacity: 0.15,
 };
+
+// ── EdgeKind visual tokens ──
+
+export type EdgeKindStyle = {
+  stroke: string;
+  particle: string;
+  dashArray: string;       // SVG stroke-dasharray ("none" = solid)
+  showParticles: boolean;
+};
+
+const EDGE_KIND_STYLES: Record<DiagramEdgeKind, EdgeKindStyle> = {
+  network:     { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
+  peering:     { stroke: "rgba(16,185,129,0.60)",  particle: "rgba(16,185,129,0.90)",  dashArray: "8 4",       showParticles: false },
+  privateLink: { stroke: "rgba(139,92,246,0.60)",  particle: "rgba(139,92,246,0.90)",  dashArray: "none",      showParticles: true },
+  routes:      { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
+  logging:     { stroke: "rgba(107,113,122,0.30)", particle: "rgba(107,113,122,0.50)", dashArray: "4 6",       showParticles: false },
+  inferred:    { stroke: "rgba(107,113,122,0.25)", particle: "rgba(107,113,122,0.40)", dashArray: "2 4 6 4",   showParticles: false },
+};
+
+export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle {
+  if (!kind) return EDGE_KIND_STYLES.network; // default for legacy edges
+  return EDGE_KIND_STYLES[kind] ?? EDGE_KIND_STYLES.network;
+}
+
+// ── GroupNode scope visual tokens ──
+
+export type ScopeStyle = {
+  borderColor: string;
+  background: string;
+  borderStyle: string;     // "solid" | "dashed"
+  borderWidth: string;
+};
+
+export const SCOPE_STYLES: Record<string, ScopeStyle> = {
+  subscription:  { borderColor: "rgba(0,120,212,0.15)",  background: "rgba(0,120,212,0.02)",  borderStyle: "solid",  borderWidth: "1px" },
+  resourceGroup: { borderColor: "rgba(107,113,122,0.20)", background: "rgba(107,113,122,0.02)", borderStyle: "dashed", borderWidth: "1px" },
+  vnet:          { borderColor: "rgba(0,120,212,0.25)",   background: "rgba(0,120,212,0.03)",   borderStyle: "dashed", borderWidth: "1.5px" },
+  subnet:        { borderColor: "rgba(95,75,139,0.22)",   background: "rgba(95,75,139,0.03)",   borderStyle: "dashed", borderWidth: "1.5px" },
+};
+
+export function scopeStyle(icon: string): ScopeStyle {
+  return SCOPE_STYLES[icon] ?? SCOPE_STYLES.vnet;
+}

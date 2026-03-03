@@ -44,7 +44,7 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
     tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, {
       subscriptionId,
     })
-      .then((graph) => {
+      .then(async (graph) => {
         if (!graph) {
           // Azure Resource Graph not available — fall back to mock diagram with demo traffic
           const spec = { ...mockDiagramSpec, id: "auto-demo", name: "Demo Infrastructure" };
@@ -55,7 +55,7 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
         }
 
         const subId = subscriptionId ?? env.AZURE_SUBSCRIPTION_IDS?.split(",")[0] ?? "default";
-        const spec = generateDiagramSpec(graph, subId);
+        const spec = await generateDiagramSpec(graph, subId);
         saveDiagramSpec(spec);
         res.status(201).json({ ok: true, diagram: spec });
       })

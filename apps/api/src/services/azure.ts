@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { OnBehalfOfCredential, ClientSecretCredential } from "@azure/identity";
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import type { Env } from "../env";
-import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "../types";
+import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, EdgeKind, GraphNodeKind } from "../types";
 
 type AzureResourceRow = {
   id: string;
@@ -143,6 +143,23 @@ function rgId(subscriptionId: string, resourceGroup: string): string {
 
 function safeString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/** Safely traverse nested unknown properties and return a string leaf. */
+function safePropString(obj: unknown, ...path: string[]): string | undefined {
+  let cur: unknown = obj;
+  for (const key of path) {
+    if (!cur || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return typeof cur === "string" && cur.trim() ? cur : undefined;
+}
+
+/** Safely traverse to an array property. */
+function safePropArray(obj: unknown, key: string): unknown[] {
+  if (!obj || typeof obj !== "object") return [];
+  const val = (obj as Record<string, unknown>)[key];
+  return Array.isArray(val) ? val : [];
 }
 
 /**
@@ -449,10 +466,16 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     "'microsoft.eventhub/namespaces'" +
     ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
-  const [subRows, rgRows, resRows] = await Promise.all([
+  // Query 4: Diagnostic Settings (separate resource type)
+  const diagQuery =
+    "resources | where type =~ 'microsoft.insights/diagnosticsettings'" +
+    " | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
+
+  const [subRows, rgRows, resRows, diagRows] = await Promise.all([
     resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize),
     resourceGraphQueryAll<AzureResourceGroupRow>(client, subscriptions, rgQuery, pageSize),
-    resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, resQuery, pageSize)
+    resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, resQuery, pageSize),
+    resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, diagQuery, pageSize).catch(() => [] as AzureResourceRow[]),
   ]);
 
   const subNameById = new Map<string, string>();
@@ -517,6 +540,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       azureId: r.id,
       location: r.location,
       endpoint,
+      resourceGroup: r.resourceGroup,
       tags: r.tags,
       health: "unknown"
     });
@@ -604,7 +628,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           id: `e:appgw->nic:${r.id}:${nicId}`,
           source: r.id,
           target: nicId,
-          kind: "connects"
+          kind: "routes"
         });
       }
     }
@@ -624,7 +648,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           id: `e:lb->nic:${r.id}:${nicId}`,
           source: r.id,
           target: nicId,
-          kind: "connects"
+          kind: "routes"
         });
       }
     }
@@ -635,7 +659,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           id: `e:subnet->pe:${subnetId}:${r.id}`,
           source: subnetId,
           target: r.id,
-          kind: "connects"
+          kind: "network"
         });
       }
 
@@ -645,7 +669,126 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           id: `e:pe->target:${r.id}:${targetId}`,
           source: r.id,
           target: targetId,
-          kind: "connects"
+          kind: "privateLink"
+        });
+      }
+    }
+  }
+
+  // ── New relationship parsers ──
+
+  for (const r of resRows) {
+    if (!r.id) continue;
+    const t = (r.type ?? "").toLowerCase();
+
+    // 13. VNet Peering
+    if (t === "microsoft.network/virtualnetworks") {
+      const peerings = safePropArray(r.properties, "virtualNetworkPeerings");
+      for (const p of peerings) {
+        const remoteId = safePropString(p, "properties", "remoteVirtualNetwork", "id");
+        if (remoteId && resourceById.has(remoteId)) {
+          const peerState = safePropString(p, "properties", "peeringState") ?? "Unknown";
+          const edgeId = `e:peering:${r.id}:${remoteId}`;
+          // Only add one direction (lower ID → higher ID) to avoid duplicates
+          if (r.id.toLowerCase() < remoteId.toLowerCase()) {
+            edges.push({
+              id: edgeId,
+              source: r.id,
+              target: remoteId,
+              kind: "peering",
+              metadata: { peeringState: peerState },
+            });
+          }
+        }
+      }
+    }
+
+    // 14. App Service / Function App → Subnet (VNet Integration)
+    if (t === "microsoft.web/sites") {
+      const vnetSubnetId = safePropString(r.properties, "virtualNetworkSubnetId");
+      if (vnetSubnetId && resourceById.has(vnetSubnetId)) {
+        edges.push({
+          id: `e:site->subnet:${r.id}:${vnetSubnetId}`,
+          source: vnetSubnetId,
+          target: r.id,
+          kind: "network",
+        });
+      }
+    }
+
+    // 15–16. NSG → Subnet / NIC associations
+    if (t === "microsoft.network/networksecuritygroups") {
+      const nsgSubnets = safePropArray(r.properties, "subnets");
+      for (const s of nsgSubnets) {
+        const subnetRef = typeof s === "object" && s !== null ? (s as Record<string, unknown>).id : undefined;
+        if (typeof subnetRef === "string" && resourceById.has(subnetRef)) {
+          edges.push({
+            id: `e:nsg->subnet:${r.id}:${subnetRef}`,
+            source: r.id,
+            target: subnetRef,
+            kind: "network",
+          });
+        }
+      }
+      const nsgNics = safePropArray(r.properties, "networkInterfaces");
+      for (const n of nsgNics) {
+        const nicRef = typeof n === "object" && n !== null ? (n as Record<string, unknown>).id : undefined;
+        if (typeof nicRef === "string" && nicById.has(nicRef)) {
+          edges.push({
+            id: `e:nsg->nic:${r.id}:${nicRef}`,
+            source: r.id,
+            target: nicRef,
+            kind: "network",
+          });
+        }
+      }
+    }
+
+    // 17. App Insights → Log Analytics Workspace
+    if (t === "microsoft.insights/components") {
+      const workspaceId = safePropString(r.properties, "WorkspaceResourceId")
+        ?? safePropString(r.properties, "workspaceResourceId");
+      if (workspaceId && resourceById.has(workspaceId)) {
+        edges.push({
+          id: `e:ai->la:${r.id}:${workspaceId}`,
+          source: r.id,
+          target: workspaceId,
+          kind: "logging",
+        });
+      }
+    }
+  }
+
+  // 18. Diagnostic Settings → target workspace/storage
+  for (const ds of diagRows) {
+    if (!ds.id || !ds.properties) continue;
+    // Diagnostic settings resourceId format: {sourceResourceId}/providers/microsoft.insights/diagnosticSettings/{name}
+    // Extract the source resource that this diagnostic setting belongs to
+    const dsIdLower = ds.id.toLowerCase();
+    const providerIdx = dsIdLower.indexOf("/providers/microsoft.insights/diagnosticsettings/");
+    const sourceResourceId = providerIdx > 0 ? ds.id.slice(0, providerIdx) : undefined;
+
+    const workspaceId = safePropString(ds.properties, "workspaceId");
+    const storageId = safePropString(ds.properties, "storageAccountId");
+
+    if (sourceResourceId && resourceById.has(sourceResourceId)) {
+      if (workspaceId && resourceById.has(workspaceId)) {
+        const category = safePropString(ds.properties, "logs", "0", "category") ?? "Logs";
+        edges.push({
+          id: `e:diag->la:${sourceResourceId}:${workspaceId}:${ds.name}`,
+          source: sourceResourceId,
+          target: workspaceId,
+          kind: "logging",
+          metadata: { diagnosticCategory: category },
+        });
+      }
+      if (storageId && resourceById.has(storageId)) {
+        edges.push({
+          id: `e:diag->sa:${sourceResourceId}:${storageId}:${ds.name}`,
+          source: sourceResourceId,
+          target: storageId,
+          kind: "logging",
+          metadata: { diagnosticCategory: "Archive" },
         });
       }
     }

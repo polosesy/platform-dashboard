@@ -308,6 +308,8 @@ function LiveCanvasInner({
           status: live?.status ?? "idle",
           trafficLevel: live?.trafficLevel ?? "none",
           label: edgeSpec.label,
+          edgeKind: edgeSpec.edgeKind,
+          confidence: edgeSpec.confidence,
           isHighlighted,
           isDimmed,
           showParticles: particlesEnabled,

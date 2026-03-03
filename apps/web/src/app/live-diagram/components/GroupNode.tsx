@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { type NodeProps } from "reactflow";
 import { getAzureIconUrl } from "../utils/azureIcons";
+import { scopeStyle } from "../utils/designTokens";
 import type { DiagramIconKind } from "@aud/types";
 import styles from "../styles.module.css";
 
@@ -13,11 +14,17 @@ export type GroupNodeData = {
 
 export const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupNodeData>) {
   const { label, icon } = data;
-  const isVnet = icon === "vnet";
+  const scope = scopeStyle(icon);
 
   return (
     <div
-      className={`${styles.groupNode} ${isVnet ? styles.groupNodeVnet : styles.groupNodeSubnet}`}
+      className={styles.groupNode}
+      style={{
+        borderColor: scope.borderColor,
+        borderStyle: scope.borderStyle,
+        borderWidth: scope.borderWidth,
+        background: scope.background,
+      }}
     >
       <div className={styles.groupNodeHeader}>
         <img

@@ -3,15 +3,20 @@ import type {
   ArchitectureNode,
   ArchitectureEdge,
   GraphNodeKind,
+  EdgeKind,
 } from "../types";
 import type {
   DiagramSpec,
   DiagramNodeSpec,
   DiagramEdgeSpec,
+  DiagramEdgeKind,
   DiagramGroupSpec,
   DiagramIconKind,
+  DiagramLayoutKind,
   MetricBinding,
 } from "@aud/types";
+import { inferImplicitEdges } from "./dependencyInference";
+import ELK from "elkjs";
 
 // ── Kinds to exclude (infra-only, not useful for live monitoring) ──
 
@@ -313,10 +318,11 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     }
   }
 
-  // Subnet → Resource (connects edges, direct or via NIC)
+  // Subnet → Resource (network/connects edges, direct or via NIC)
+  const NETWORK_EDGE_KINDS: Set<EdgeKind> = new Set(["connects", "network"]);
   const nicToSubnet = new Map<string, string>();
   for (const edge of graph.edges) {
-    if (edge.kind !== "connects") continue;
+    if (!NETWORK_EDGE_KINDS.has(edge.kind)) continue;
     const srcKind = nodeKindMap.get(edge.source);
     const tgtKind = nodeKindMap.get(edge.target);
 
@@ -329,7 +335,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
 
   // NIC → Resource: resolve through NIC to subnet
   for (const edge of graph.edges) {
-    if (edge.kind !== "connects") continue;
+    if (!NETWORK_EDGE_KINDS.has(edge.kind)) continue;
     const srcKind = nodeKindMap.get(edge.source);
     if (srcKind !== "nic") continue;
     const subnetId = nicToSubnet.get(edge.source);
@@ -341,12 +347,155 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
   return { subnetParent, resourceSubnet };
 }
 
+// ── ELK Layout Engine ──
+
+const elk = new ELK();
+
+async function applyElkLayout(
+  nodes: DiagramNodeSpec[],
+  edges: DiagramEdgeSpec[],
+): Promise<void> {
+  // Build ELK graph with compound nodes
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const rootChildren: ElkNode[] = [];
+  const parentChildrenMap = new Map<string, ElkNode[]>();
+
+  type ElkNode = {
+    id: string;
+    width: number;
+    height: number;
+    children?: ElkNode[];
+    layoutOptions?: Record<string, string>;
+  };
+
+  // Sort nodes: parents first, then children
+  const groupNodes = nodes.filter((n) => n.nodeType === "group");
+  const leafNodes = nodes.filter((n) => n.nodeType !== "group");
+
+  // Create ELK nodes for groups
+  for (const gn of groupNodes) {
+    const elkNode: ElkNode = {
+      id: gn.id,
+      width: gn.width ?? 400,
+      height: gn.height ?? 200,
+      children: [],
+      layoutOptions: {
+        "elk.padding": "[top=50,left=30,bottom=30,right=30]",
+        "elk.algorithm": "layered",
+        "elk.direction": "RIGHT",
+      },
+    };
+    if (gn.parentId) {
+      const siblings = parentChildrenMap.get(gn.parentId) ?? [];
+      siblings.push(elkNode);
+      parentChildrenMap.set(gn.parentId, siblings);
+    } else {
+      rootChildren.push(elkNode);
+    }
+    parentChildrenMap.set(gn.id, elkNode.children!);
+  }
+
+  // Create ELK nodes for leaf resources
+  for (const ln of leafNodes) {
+    const elkNode: ElkNode = {
+      id: ln.id,
+      width: NODE_W,
+      height: NODE_H,
+    };
+    if (ln.parentId) {
+      const siblings = parentChildrenMap.get(ln.parentId) ?? [];
+      siblings.push(elkNode);
+      parentChildrenMap.set(ln.parentId, siblings);
+    } else {
+      rootChildren.push(elkNode);
+    }
+  }
+
+  // Wire children into group nodes
+  for (const gn of groupNodes) {
+    const elkChildren = parentChildrenMap.get(gn.id) ?? [];
+    // Find the elkNode in rootChildren or nested
+    const findElk = (arr: ElkNode[], id: string): ElkNode | undefined => {
+      for (const n of arr) {
+        if (n.id === id) return n;
+        if (n.children) {
+          const found = findElk(n.children, id);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    };
+    const elkNode = findElk(rootChildren, gn.id);
+    if (elkNode) elkNode.children = elkChildren;
+  }
+
+  // Build ELK edges (only between nodes at the same level or cross-hierarchy)
+  const elkEdges = edges.map((e) => ({
+    id: e.id,
+    sources: [e.source],
+    targets: [e.target],
+  }));
+
+  const elkGraph = {
+    id: "root",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "RIGHT",
+      "elk.spacing.nodeNode": "40",
+      "elk.spacing.edgeEdge": "20",
+      "elk.spacing.componentComponent": "60",
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "60",
+    },
+    children: rootChildren,
+    edges: elkEdges,
+  };
+
+  try {
+    const layout = await elk.layout(elkGraph);
+
+    // Apply positions back from ELK result
+    const applyPositions = (elkNodes: typeof rootChildren, parentX = 0, parentY = 0) => {
+      for (const en of elkNodes) {
+        const node = nodeMap.get(en.id);
+        if (node) {
+          const x = (en as { x?: number }).x ?? 0;
+          const y = (en as { y?: number }).y ?? 0;
+          // For nodes with a parent, position is relative to parent
+          if (node.parentId) {
+            node.position = { x, y };
+          } else {
+            node.position = { x: x + parentX, y: y + parentY };
+          }
+          // Update group dimensions from ELK
+          if (node.nodeType === "group") {
+            const w = (en as { width?: number }).width;
+            const h = (en as { height?: number }).height;
+            if (w) node.width = w;
+            if (h) node.height = h;
+          }
+        }
+        if (en.children) {
+          const nx = (en as { x?: number }).x ?? 0;
+          const ny = (en as { y?: number }).y ?? 0;
+          applyPositions(en.children, parentX + nx, parentY + ny);
+        }
+      }
+    };
+
+    applyPositions(layout.children ?? []);
+  } catch {
+    // ELK failed — positions remain from manual layout as fallback
+  }
+}
+
 // ── Main generator ──
 
-export function generateDiagramSpec(
+export async function generateDiagramSpec(
   graph: ArchitectureGraph,
   subscriptionId: string,
-): DiagramSpec {
+  layoutMode: DiagramLayoutKind = "elk",
+): Promise<DiagramSpec> {
   const now = new Date().toISOString();
 
   // Build containment map from FULL graph (before filtering)
@@ -557,10 +706,11 @@ export function generateDiagramSpec(
     }
   }
 
-  // ── Build edges (traffic flow only, exclude VNet/Subnet containment) ──
+  // ── Build edges (all non-containment edges between visible nodes) ──
+  const CONTAINMENT_KINDS: Set<EdgeKind> = new Set(["contains"]);
   const filteredEdgesNoNetwork = graph.edges.filter(
     (e) =>
-      e.kind === "connects" &&
+      !CONTAINMENT_KINDS.has(e.kind) &&
       nodeOriginalIds.has(e.source) &&
       nodeOriginalIds.has(e.target) &&
       !isNetworkContainer(graph, e.source) &&
@@ -579,7 +729,15 @@ export function generateDiagramSpec(
 
   const edgeIdSeen = new Set<string>();
 
-  function makeEdge(srcId: string, tgtId: string, srcKind: string, label?: string, protocol?: string): DiagramEdgeSpec {
+  function makeEdge(
+    srcId: string,
+    tgtId: string,
+    srcKind: string,
+    label?: string,
+    protocol?: string,
+    edgeKind?: DiagramEdgeKind,
+    confidence?: number,
+  ): DiagramEdgeSpec {
     let edgeId = `${srcId}-to-${tgtId}`;
     if (edgeIdSeen.has(edgeId)) {
       let suffix = 2;
@@ -594,47 +752,76 @@ export function generateDiagramSpec(
       target: tgtId,
       label,
       protocol,
+      edgeKind,
+      confidence,
       bindings: EDGE_BINDINGS[srcKind] ?? {},
-      animation: "flow" as const,
+      animation: edgeKind === "logging" || edgeKind === "inferred" ? "dash" as const : "flow" as const,
     };
   }
 
-  // Topology-based edges
+  // Map ArchitectureEdge.kind → DiagramEdgeKind
+  function toDiagramEdgeKind(kind: EdgeKind): DiagramEdgeKind | undefined {
+    switch (kind) {
+      case "network": case "connects": return "network";
+      case "peering": return "peering";
+      case "privateLink": return "privateLink";
+      case "routes": return "routes";
+      case "logging": return "logging";
+      case "inferred": return "inferred";
+      default: return undefined;
+    }
+  }
+
+  // Edge label helpers for typed edges
+  function edgeKindLabel(kind: EdgeKind, edge: ArchitectureEdge): string | undefined {
+    switch (kind) {
+      case "peering": return `VNet Peering (${edge.metadata?.peeringState ?? "Connected"})`;
+      case "privateLink": return "Private Link";
+      case "logging": return edge.metadata?.diagnosticCategory ?? "Diagnostics";
+      default: return undefined;
+    }
+  }
+
+  // Topology-based edges (explicit from azure.ts)
   const diagramEdges: DiagramEdgeSpec[] = uniqueEdges.map((edge) => {
     const srcId = idMap.get(edge.source)!;
     const tgtId = idMap.get(edge.target)!;
     const srcNode = filteredNodes.find((n) => n.id === edge.source);
     const tgtNode = filteredNodes.find((n) => n.id === edge.target);
     const srcKind = srcNode?.kind ?? "unknown";
-    const label = buildEdgeLabel(srcNode, tgtNode);
-    return makeEdge(srcId, tgtId, srcKind, label);
+    const label = edgeKindLabel(edge.kind, edge) ?? buildEdgeLabel(srcNode, tgtNode);
+    const protocol = edge.metadata?.protocol;
+    return makeEdge(srcId, tgtId, srcKind, label, protocol, toDiagramEdgeKind(edge.kind));
   });
 
-  // Dependency-based edges: compute → data
-  const computeNodesList = filteredNodes.filter((n) => COMPUTE_KINDS.has(n.kind));
-  const dataNodesList = filteredNodes.filter((n) => DATA_KINDS.has(n.kind));
-
+  // Dependency-based edges: proximity-scored inference (replaces Cartesian product)
   const existingPairs = new Set<string>();
   for (const e of diagramEdges) {
     existingPairs.add(`${e.source}→${e.target}`);
     existingPairs.add(`${e.target}→${e.source}`);
   }
 
-  for (const compute of computeNodesList) {
-    for (const data of dataNodesList) {
-      const cId = idMap.get(compute.id)!;
-      const dId = idMap.get(data.id)!;
-      if (existingPairs.has(`${cId}→${dId}`) || existingPairs.has(`${dId}→${cId}`)) continue;
+  const inferredEdges = inferImplicitEdges(graph, filteredNodes, existingPairs, idMap);
+  for (const inf of inferredEdges) {
+    const cId = idMap.get(inf.source)!;
+    const dId = idMap.get(inf.target)!;
+    if (!cId || !dId) continue;
+    if (existingPairs.has(`${cId}→${dId}`) || existingPairs.has(`${dId}→${cId}`)) continue;
 
-      const label = buildEdgeLabel(compute, data);
-      const protocol = inferProtocol(data.kind);
-      diagramEdges.push(makeEdge(cId, dId, compute.kind, label, protocol));
-      existingPairs.add(`${cId}→${dId}`);
-    }
+    const srcNode = filteredNodes.find((n) => n.id === inf.source);
+    const tgtNode = filteredNodes.find((n) => n.id === inf.target);
+    const label = buildEdgeLabel(srcNode, tgtNode);
+    diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", label, inf.metadata.protocol, "inferred", inf.confidence));
+    existingPairs.add(`${cId}→${dId}`);
   }
 
   // Build groups
   const groups = inferGroups(filteredNodes);
+
+  // Apply ELK auto-layout if requested (repositions nodes + resizes containers)
+  if (layoutMode === "elk") {
+    await applyElkLayout(diagramNodes, diagramEdges);
+  }
 
   const specId = `auto-${subscriptionId.slice(0, 8)}`;
 
@@ -651,7 +838,7 @@ export function generateDiagramSpec(
     settings: {
       refreshIntervalSec: 30,
       defaultTimeRange: "5m",
-      layout: "manual",
+      layout: layoutMode,
     },
   };
 }
