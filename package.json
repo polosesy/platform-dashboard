@@ -6,7 +6,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
+    "predev": "node -e \"try{require('fs').unlinkSync('apps/web/.next/dev/lock')}catch{}\"",
+    "dev": "concurrently --kill-others-on-fail -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
     "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
     "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web"
   },

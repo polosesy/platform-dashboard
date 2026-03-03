@@ -1,4 +1,7 @@
 export function apiBaseUrl() {
+  // In the browser, use same-origin relative path (Next.js rewrites /api/* → API server).
+  // On the server (SSR), call the API directly.
+  if (typeof window !== "undefined") return "";
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 }
 
