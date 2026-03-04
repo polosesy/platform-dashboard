@@ -52,7 +52,7 @@ const T: Translations = {
   "detail.location": { ko: "위치", en: "Location" },
   "detail.resourceGroup": { ko: "리소스 그룹", en: "Resource Group" },
   "detail.endpoint": { ko: "엔드포인트", en: "Endpoint" },
-  "detail.azureId": { ko: "Azure ID", en: "Azure ID" },
+  "detail.azureId": { ko: "Azure Resource ID", en: "Azure Resource ID" },
   "detail.tags": { ko: "태그", en: "Tags" },
   "detail.metrics": { ko: "메트릭", en: "Metrics" },
   "detail.alerts": { ko: "알림", en: "Alerts" },

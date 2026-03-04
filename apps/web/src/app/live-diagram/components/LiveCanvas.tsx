@@ -8,6 +8,7 @@ import ReactFlow, {
   ReactFlowProvider,
   useNodesState,
   useOnViewportChange,
+  useReactFlow,
   type Node as FlowNode,
   type Edge as FlowEdge,
   type NodeTypes,
@@ -63,6 +64,7 @@ function LiveCanvasInner({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, zoom: 1 });
+  const reactFlowInstance = useReactFlow();
 
   // ── Hover highlight state ──
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -310,6 +312,28 @@ function LiveCanvasInner({
       return result;
     });
   }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect]);
+
+  // ── Fit view when filtered node set changes ──
+  const specNodeKey = useMemo(
+    () => spec.nodes.map((n) => n.id).sort().join(","),
+    [spec.nodes],
+  );
+  const prevNodeKeyRef = useRef(specNodeKey);
+  useEffect(() => {
+    if (prevNodeKeyRef.current !== specNodeKey) {
+      prevNodeKeyRef.current = specNodeKey;
+      // Two-phase fitView: quick settle + delayed final fit.
+      // ReactFlow needs time to measure and position new nodes,
+      // especially when group/parent relationships change.
+      const t1 = setTimeout(() => {
+        reactFlowInstance.fitView({ padding: 0.18, duration: 200 });
+      }, 100);
+      const t2 = setTimeout(() => {
+        reactFlowInstance.fitView({ padding: 0.18, duration: 350 });
+      }, 450);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [specNodeKey, reactFlowInstance]);
 
   // ── Hover: set node className for CSS dimming ──
   useEffect(() => {

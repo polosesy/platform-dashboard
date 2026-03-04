@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type {
   DiagramNodeSpec,
   DiagramEdgeSpec,
@@ -7,6 +7,7 @@ import type {
   LiveAlert,
   AlertRuleInfo,
   HealthStatus,
+  PowerState,
   SparklineData,
   SubResource,
 } from "@aud/types";
@@ -69,9 +70,60 @@ export const RESOURCE_KIND_DISPLAY: Record<string, string> = {
   eventHub: "Event Hub",
 };
 
+const POWER_STATE_LABEL: Record<PowerState, string> = {
+  running: "Running",
+  stopped: "Stopped",
+  deallocated: "Deallocated",
+  starting: "Starting",
+  stopping: "Stopping",
+  unknown: "Unknown",
+};
+
+/** Resource kinds that have no meaningful operational state */
+const HIDE_STATUS_KINDS = new Set([
+  "vnet", "subnet", "nic", "dns", "privateEndpoint",
+]);
+
 function truncateId(id: string, maxLen = 60): string {
   if (id.length <= maxLen) return id;
   return id.slice(0, maxLen) + "...";
+}
+
+/** Value display with copy-to-clipboard on hover */
+function CopyableValue({
+  value,
+  className,
+  title,
+  style,
+  children,
+}: {
+  value: string;
+  className?: string;
+  title?: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  }, [value]);
+
+  return (
+    <span className={`${styles.copyableWrap} ${className ?? ""}`} title={title} style={style}>
+      <span className={styles.copyableText}>{children ?? value}</span>
+      <button
+        type="button"
+        className={styles.copyBtn}
+        onClick={handleCopy}
+        aria-label="Copy to clipboard"
+      >
+        {copied ? "\u2713" : "\u2398"}
+      </button>
+    </span>
+  );
 }
 
 function fmtRelativeTime(iso: string): string {
@@ -124,6 +176,7 @@ export function ResourceDetailPanel({
   if (!nodeSpec) return null;
 
   const health: HealthStatus = liveNode?.health ?? "unknown";
+  const powerState: PowerState | undefined = liveNode?.powerState;
   const colors = nodeColor(health);
   const metrics = liveNode?.metrics ?? {};
   const sparklines = liveNode?.sparklines;
@@ -173,52 +226,68 @@ export function ResourceDetailPanel({
         {/* ── Essentials (Azure Portal style) ── */}
         <div className={styles.detailSection}>
           <div className={styles.detailSectionTitle}>{t("detail.essentials")}</div>
-          <div className={styles.essentialsGrid}>
-            {/* Left column */}
-            <div className={styles.essentialsCol}>
-              {kindDisplay && (
-                <div className={styles.essentialsItem}>
-                  <span className={styles.essentialsLabel}>{t("detail.kind")}</span>
-                  <span className={styles.essentialsValue}>{kindDisplay}</span>
-                </div>
-              )}
-              <div className={styles.essentialsItem}>
+          <div className={styles.essentialsList}>
+            {kindDisplay && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.kind")}</span>
+                <CopyableValue value={kindDisplay} className={styles.essentialsValue}>
+                  {kindDisplay}
+                </CopyableValue>
+              </div>
+            )}
+            {!HIDE_STATUS_KINDS.has(nodeSpec.resourceKind ?? "") && (
+              <div className={styles.essentialsRow}>
                 <span className={styles.essentialsLabel}>{t("detail.status")}</span>
-                <span className={styles.essentialsValue} style={{ color: colors.ringStroke }}>
-                  {healthLabel[health]}
-                  {liveNode ? ` (${(liveNode.healthScore * 100).toFixed(0)}%)` : ""}
+                <span className={styles.essentialsValue}>
+                  {powerState && powerState !== "unknown" ? (
+                    <span className={styles.powerStateBadgeDetail} data-state={powerState}>
+                      {POWER_STATE_LABEL[powerState]}
+                    </span>
+                  ) : (
+                    <span style={{ color: colors.ringStroke }}>
+                      {healthLabel[health]}
+                      {liveNode ? ` (${(liveNode.healthScore * 100).toFixed(0)}%)` : ""}
+                    </span>
+                  )}
                 </span>
               </div>
-              {nodeSpec.location && (
-                <div className={styles.essentialsItem}>
-                  <span className={styles.essentialsLabel}>{t("detail.location")}</span>
-                  <span className={styles.essentialsValue}>{nodeSpec.location}</span>
-                </div>
-              )}
-            </div>
-            {/* Right column */}
-            <div className={styles.essentialsCol}>
-              {nodeSpec.resourceGroup && (
-                <div className={styles.essentialsItem}>
-                  <span className={styles.essentialsLabel}>{t("detail.resourceGroup")}</span>
-                  <span className={styles.essentialsValue}>{nodeSpec.resourceGroup}</span>
-                </div>
-              )}
-              {nodeSpec.endpoint && (
-                <div className={styles.essentialsItem}>
-                  <span className={styles.essentialsLabel}>{t("detail.endpoint")}</span>
-                  <span className={styles.essentialsValueMono}>{nodeSpec.endpoint}</span>
-                </div>
-              )}
-              {nodeSpec.azureResourceId && (
-                <div className={styles.essentialsItem}>
-                  <span className={styles.essentialsLabel}>{t("detail.azureId")}</span>
-                  <span className={styles.essentialsValueMono} title={nodeSpec.azureResourceId}>
-                    {truncateId(nodeSpec.azureResourceId)}
-                  </span>
-                </div>
-              )}
-            </div>
+            )}
+            {nodeSpec.location && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.location")}</span>
+                <CopyableValue value={nodeSpec.location} className={styles.essentialsValue}>
+                  {nodeSpec.location}
+                </CopyableValue>
+              </div>
+            )}
+            {nodeSpec.resourceGroup && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.resourceGroup")}</span>
+                <CopyableValue value={nodeSpec.resourceGroup} className={styles.essentialsValue}>
+                  {nodeSpec.resourceGroup}
+                </CopyableValue>
+              </div>
+            )}
+            {nodeSpec.endpoint && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.endpoint")}</span>
+                <CopyableValue value={nodeSpec.endpoint} className={styles.essentialsValueMono}>
+                  {nodeSpec.endpoint}
+                </CopyableValue>
+              </div>
+            )}
+            {nodeSpec.azureResourceId && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.azureId")}</span>
+                <CopyableValue
+                  value={nodeSpec.azureResourceId}
+                  className={styles.essentialsValueMono}
+                  title={nodeSpec.azureResourceId}
+                >
+                  {truncateId(nodeSpec.azureResourceId)}
+                </CopyableValue>
+              </div>
+            )}
           </div>
         </div>
 
@@ -235,22 +304,27 @@ export function ResourceDetailPanel({
                   height={16}
                   style={{ opacity: 0.7, flexShrink: 0 }}
                 />
-                <div style={{ minWidth: 0 }}>
-                  <div className={styles.essentialsValue}>{sr.label}</div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
+                  <CopyableValue value={sr.label} className={styles.essentialsValue}>
+                    {sr.label}
+                  </CopyableValue>
                   <div className={styles.essentialsValueMono} style={{ fontSize: 11 }}>
                     {RESOURCE_KIND_DISPLAY[sr.kind] ?? sr.kind}
                   </div>
                   {sr.endpoint && (
-                    <div className={styles.essentialsValueMono}>{sr.endpoint}</div>
+                    <CopyableValue value={sr.endpoint} className={styles.essentialsValueMono}>
+                      {sr.endpoint}
+                    </CopyableValue>
                   )}
                   {sr.azureResourceId && (
-                    <div
+                    <CopyableValue
+                      value={sr.azureResourceId}
                       className={styles.essentialsValueMono}
                       title={sr.azureResourceId}
                       style={{ fontSize: 10 }}
                     >
                       {truncateId(sr.azureResourceId, 50)}
-                    </div>
+                    </CopyableValue>
                   )}
                 </div>
               </div>

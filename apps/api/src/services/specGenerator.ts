@@ -449,6 +449,9 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     if (EXCLUDED_KINDS.has(node.kind)) continue;
     if (resourceSubnet.has(node.id)) continue;
     if (!node.resourceGroup) continue;
+    // Skip PaaS resources — they belong outside VNet (connected via PE if at all)
+    if (DATA_KINDS.has(node.kind)) continue;
+    if (node.kind === "appInsights" || node.kind === "logAnalytics") continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
     if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -542,6 +545,9 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
           if (EXCLUDED_KINDS.has(node.kind)) continue;
           if (resourceSubnet.has(node.id)) continue;
           if (!node.resourceGroup) continue;
+          // Skip PaaS resources — external to VNet
+          if (DATA_KINDS.has(node.kind)) continue;
+          if (node.kind === "appInsights" || node.kind === "logAnalytics") continue;
           const rg = node.resourceGroup.toLowerCase();
           const rgSubnets = subRgMap5.get(rg);
           if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -784,11 +790,50 @@ export async function generateDiagramSpec(
     }]);
   }
 
+  // ── Build LB Frontend IP absorption map ──
+  const lbFrontendIPs = new Map<string, SubResource[]>();
+  for (const node of graph.nodes) {
+    if (node.kind !== "lb") continue;
+    if (!node.endpoint) continue;
+    lbFrontendIPs.set(node.id, [{
+      id: `${node.id}/frontendIP/0`,
+      label: "Frontend IP",
+      kind: "frontendIP" as SubResourceKind,
+      endpoint: node.endpoint,
+      azureResourceId: node.azureId,
+    }]);
+  }
+
   if (vmBoundNics.size > 0) {
     console.log(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
   }
   if (appGwFrontendIPs.size > 0) {
     console.log(`[specGenerator] AppGW Frontend IPs: ${appGwFrontendIPs.size} AppGWs with frontend IPs`);
+  }
+  if (lbFrontendIPs.size > 0) {
+    console.log(`[specGenerator] LB Frontend IPs: ${lbFrontendIPs.size} LBs with frontend IPs`);
+  }
+
+  /** Collect sub-resources (NICs, Frontend IPs) for a given node by its original ID. */
+  function collectSubResources(nodeOrigId: string): SubResource[] | undefined {
+    const subs: SubResource[] = [];
+    const boundNics = vmBoundNics.get(nodeOrigId);
+    if (boundNics) {
+      for (const nic of boundNics) {
+        subs.push({
+          id: idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id),
+          label: nic.name,
+          kind: "nic" as SubResourceKind,
+          endpoint: nic.endpoint,
+          azureResourceId: nic.azureId,
+        });
+      }
+    }
+    const feIPs = appGwFrontendIPs.get(nodeOrigId);
+    if (feIPs) subs.push(...feIPs);
+    const lbFeIPs = lbFrontendIPs.get(nodeOrigId);
+    if (lbFeIPs) subs.push(...lbFeIPs);
+    return subs.length > 0 ? subs : undefined;
   }
 
   // Filter nodes — exclude infra-only kinds + absorbed NICs (but keep VNet/Subnet)
@@ -993,6 +1038,10 @@ export async function generateDiagramSpec(
         if (feIPs) {
           childSubResources.push(...feIPs);
         }
+        const lbFeIPs = lbFrontendIPs.get(child.node.id);
+        if (lbFeIPs) {
+          childSubResources.push(...lbFeIPs);
+        }
 
         diagramNodes.push({
           id: child.shortId,
@@ -1085,6 +1134,7 @@ export async function generateDiagramSpec(
           tags: res.tags,
           position: { x: VNET_PAD, y: VNET_HEADER + ci * (NODE_H + NODE_GAP) },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+          subResources: collectSubResources(res.id),
         });
       }
       cursorY += rgH + EXTERNAL_GAP;
@@ -1119,6 +1169,7 @@ export async function generateDiagramSpec(
             y: cursorY + row * (NODE_H + NODE_GAP),
           },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+          subResources: collectSubResources(res.id),
         });
       }
     }
@@ -1209,6 +1260,7 @@ export async function generateDiagramSpec(
           tags: res.tags,
           position: { x: targetX, y: targetY },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+          subResources: collectSubResources(res.id),
         });
       }
 
@@ -1248,6 +1300,7 @@ export async function generateDiagramSpec(
           bindings: NODE_BINDINGS[res.kind] ?? {
             health: { source: "composite", rules: [] },
           },
+          subResources: collectSubResources(res.id),
         });
       }
     }
@@ -1301,6 +1354,12 @@ export async function generateDiagramSpec(
     if (n.nodeType === "group") continue;
     if (!n.azureResourceId) continue;
 
+    // Skip PaaS/data resources — they're external services positioned outside VNet.
+    // Only their Private Endpoints belong inside subnets, not the PaaS resources themselves.
+    if (n.resourceKind && DATA_KINDS.has(n.resourceKind)) continue;
+    // Also skip App Insights / Log Analytics — always external PaaS
+    if (n.resourceKind === "appInsights" || n.resourceKind === "logAnalytics") continue;
+
     // Try containment.resourceSubnet (uses original graph IDs)
     const azIdLower = n.azureResourceId.toLowerCase();
     // Find original graph ID that matches (may differ in case from azureResourceId)
@@ -1329,9 +1388,20 @@ export async function generateDiagramSpec(
     console.log(`[force-parentId] Forced ${forceSubnetParent} subnet→VNet + ${forceResourceParent} resource→subnet parentIds`);
   }
 
+  // ── Retarget edges from embedded NICs to their parent VMs ──
+  // When a NIC is absorbed as a sub-resource of a VM, edges like LB→NIC
+  // would be dropped because the NIC is no longer a separate node.
+  // We redirect them to the parent VM so the flow is preserved.
+  const retargetedEdges = graph.edges.map((e) => {
+    const newSource = nicToVmBound.get(e.source);
+    const newTarget = nicToVmBound.get(e.target);
+    if (!newSource && !newTarget) return e;
+    return { ...e, source: newSource ?? e.source, target: newTarget ?? e.target };
+  }).filter((e) => e.source !== e.target); // drop self-loops
+
   // ── Build edges (all non-containment edges between visible nodes) ──
   const CONTAINMENT_KINDS: Set<EdgeKind> = new Set(["contains"]);
-  const filteredEdgesNoNetwork = graph.edges.filter(
+  const filteredEdgesNoNetwork = retargetedEdges.filter(
     (e) =>
       !CONTAINMENT_KINDS.has(e.kind) &&
       nodeOriginalIds.has(e.source) &&

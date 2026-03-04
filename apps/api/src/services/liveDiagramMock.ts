@@ -461,6 +461,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       healthScore: 0.95,
       metrics: { transactions: rand(500, 3000) },
       activeAlertIds: [],
+      powerState: "running" as PowerState,
     },
   ];
 

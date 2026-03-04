@@ -88,7 +88,9 @@ export async function buildLiveSnapshot(
     if (cached) return cached;
   }
 
-  const azureEnabled = env.AZURE_LIVE_DIAGRAM_ENABLED;
+  // Auto-generated diagrams (from "Generate from Azure") should also fetch
+  // live data via ARM APIs, even if AZURE_LIVE_DIAGRAM_ENABLED is not set.
+  const azureEnabled = env.AZURE_LIVE_DIAGRAM_ENABLED || diagramId.startsWith("auto-");
   const hasBearerToken = bearerToken != null;
 
   // ── Collect node metrics from Azure Monitor ──

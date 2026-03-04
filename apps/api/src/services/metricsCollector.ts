@@ -242,15 +242,22 @@ const powerStateCache = new CacheManager<PowerState>(200, 120_000);
 
 const POWER_STATE_RESOURCE_KINDS = new Set([
   "vm", "vmss", "aks", "containerApp", "functionApp", "appService",
+  "postgres", "sql", "redis", "cosmosDb", "storage", "keyVault",
 ]);
 
 function parsePowerState(code: string): PowerState {
   const lower = code.toLowerCase();
+  // Compute states
   if (lower.includes("running")) return "running";
   if (lower.includes("deallocat")) return "deallocated";
   if (lower.includes("stopped")) return "stopped";
   if (lower.includes("starting")) return "starting";
   if (lower.includes("stopping")) return "stopping";
+  // PaaS operational states
+  if (lower === "ready" || lower === "online" || lower === "succeeded" || lower === "available") return "running";
+  if (lower === "disabled" || lower === "offline" || lower === "paused" || lower === "dropped") return "stopped";
+  if (lower === "creating" || lower === "resuming" || lower === "updating") return "starting";
+  if (lower === "deleting" || lower === "pausing" || lower === "scaling") return "stopping";
   return "unknown";
 }
 
@@ -298,6 +305,42 @@ async function collectResourcePowerState(
         properties?: { state?: string };
       }>(`https://management.azure.com${azureResourceId}?api-version=2023-12-01`);
       const s = resp.properties?.state;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "postgres") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { state?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2022-12-01`);
+      const s = resp.properties?.state;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "sql") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { status?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2021-11-01`);
+      const s = resp.properties?.status;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "redis") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { provisioningState?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2023-08-01`);
+      const s = resp.properties?.provisioningState;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "cosmosDb") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { provisioningState?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2024-02-15-preview`);
+      const s = resp.properties?.provisioningState;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "storage") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { statusOfPrimary?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2023-05-01`);
+      const s = resp.properties?.statusOfPrimary;
+      if (s) state = parsePowerState(s);
+    } else if (resourceKind === "keyVault") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { provisioningState?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2023-07-01`);
+      const s = resp.properties?.provisioningState;
       if (s) state = parsePowerState(s);
     }
   } catch {
