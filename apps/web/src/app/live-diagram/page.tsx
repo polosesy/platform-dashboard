@@ -257,7 +257,7 @@ export default function LiveDiagramPage() {
         }
       }
 
-      // Also include PaaS resources connected via edges from visible nodes
+      // Also include external resources connected via edges from visible nodes
       for (const edge of spec.edges) {
         if (visibleNodeIds.has(edge.source) && !visibleNodeIds.has(edge.target)) {
           visibleNodeIds.add(edge.target);
@@ -275,20 +275,56 @@ export default function LiveDiagramPage() {
       const regionNodeIds = new Set(
         spec.nodes.filter((n) => n.location === selectedRegion).map((n) => n.id),
       );
-      // Also include parent groups of region-matching nodes
+      // Walk parent chain upward for each matching node (subnet → VNet)
       for (const n of spec.nodes) {
-        if (regionNodeIds.has(n.id) && n.parentId) {
-          regionNodeIds.add(n.parentId);
-          // grandparent (VNet → Subnet → Resource)
-          const parent = spec.nodes.find((p) => p.id === n.parentId);
-          if (parent?.parentId) regionNodeIds.add(parent.parentId);
+        if (regionNodeIds.has(n.id)) {
+          let cur = n;
+          while (cur.parentId) {
+            regionNodeIds.add(cur.parentId);
+            const parent = spec.nodes.find((p) => p.id === cur.parentId);
+            if (!parent) break;
+            cur = parent;
+          }
+        }
+      }
+      // Also include child groups that contain region-matching nodes
+      // (e.g., subnets that contain matching resources)
+      for (const n of spec.nodes) {
+        if (n.nodeType === "group" && !regionNodeIds.has(n.id)) {
+          const hasChild = spec.nodes.some((c) => c.parentId === n.id && regionNodeIds.has(c.id));
+          if (hasChild) regionNodeIds.add(n.id);
         }
       }
       // Intersect with VNet filter
       visibleNodeIds = new Set([...visibleNodeIds].filter((id) => regionNodeIds.has(id)));
     }
 
-    const filteredNodes = spec.nodes.filter((n) => visibleNodeIds.has(n.id));
+    // Ensure all parent chains are fully included
+    // (add missing ancestors so parentId refs don't break)
+    for (const n of spec.nodes) {
+      if (visibleNodeIds.has(n.id) && n.parentId) {
+        let cur = n;
+        while (cur.parentId && !visibleNodeIds.has(cur.parentId)) {
+          // Only add parent if it's in the original spec
+          const parent = spec.nodes.find((p) => p.id === cur.parentId);
+          if (!parent) break;
+          visibleNodeIds.add(parent.id);
+          cur = parent;
+        }
+      }
+    }
+
+    // Build filtered nodes — strip parentId if parent is still not visible
+    // (edge-connected external nodes from other VNets)
+    const filteredNodes = spec.nodes
+      .filter((n) => visibleNodeIds.has(n.id))
+      .map((n) => {
+        if (n.parentId && !visibleNodeIds.has(n.parentId)) {
+          return { ...n, parentId: undefined };
+        }
+        return n;
+      });
+
     const filteredEdges = spec.edges.filter(
       (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target),
     );
