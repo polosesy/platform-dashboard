@@ -5,40 +5,50 @@ import type {
   LiveEdge,
   LiveAlert,
   EdgeTrafficLevel,
+  SubResource,
 } from "@aud/types";
 
 // ────────────────────────────────────────────
 // Mock Diagram Spec — Network-Centric Architecture
 //
 // Layout:
-// ┌── VNet: prod-vnet (10.0.0.0/16) ───────────────────────────────────────────────┐
-// │ ┌── gw-subnet (10.0.0.0/24) ─────┐ ┌── app-subnet (10.0.1.0/24) ───────────┐  │
-// │ │ [NIC: nic-appgw]               │ │ [NIC: nic-aks]     [NIC: nic-func]     │  │
-// │ │ [App Gateway]                   │ │ [AKS Platform]     [Functions]         │  │
-// │ └─────────────────────────────────┘ └────────────────────────────────────────┘  │
-// └─────────────────────────────────────────────────────────────────────────────────┘
+// ┌── VNet: prod-vnet (10.0.0.0/16) ────────────────────────────────────────────────────┐
+// │ ┌── gw-subnet (10.0.0.0/24) ────┐ ┌── app-subnet (10.0.1.0/24) ──────────────────┐ │
+// │ │ [App Gateway]                  │ │ [AKS Platform]     [Functions]                │ │
+// │ │   └ nic-appgw (chip)           │ │   └ nic-aks (chip)   └ nic-func (chip)        │ │
+// │ └────────────────────────────────┘ │ [PE-sql]            [PE-redis]                │ │
+// │                                    └───────────────────────────────────────────────┘ │
+// └──────────────────────────────────────────────────────────────────────────────────────┘
 //
-// [SQL Database]    [Redis Cache]    [Blob Storage]   (PaaS — outside VNet)
+// [SQL Database] ──privateLink── PE-sql      [Redis Cache] ──privateLink── PE-redis
+// [Blob Storage]   (no PE, general placement)
 // ────────────────────────────────────────────
 
 const NODE_W = 220;
 const NODE_H = 80;
+const NODE_H_SUB = 102; // node height with sub-resource chip row
 const SUBNET_PAD = 30;
 const SUBNET_HEAD = 44;
 const VNET_PAD = 30;
 const VNET_HEAD = 48;
 const GAP = 16;
 
-// Subnet sizes (extra row for NIC nodes)
+// Subnet sizes
+// gw-subnet: AppGW (with NIC chip)
 const GW_SUB_W = NODE_W + 2 * SUBNET_PAD;
-const GW_SUB_H = SUBNET_HEAD + 2 * NODE_H + GAP + SUBNET_PAD;
+const GW_SUB_H = SUBNET_HEAD + NODE_H_SUB + SUBNET_PAD;
 
+// app-subnet: 2 compute nodes (with NIC chips) + 2 PE nodes
 const APP_SUB_W = 2 * NODE_W + 2 * SUBNET_PAD + GAP;
-const APP_SUB_H = SUBNET_HEAD + 2 * NODE_H + GAP + SUBNET_PAD;
+const APP_SUB_H = SUBNET_HEAD + NODE_H_SUB + GAP + NODE_H + SUBNET_PAD;
 
 // VNet size
 const VNET_W = VNET_PAD + GW_SUB_W + 24 + APP_SUB_W + VNET_PAD;
 const VNET_H = VNET_HEAD + Math.max(GW_SUB_H, APP_SUB_H) + VNET_PAD + 10;
+
+// PaaS positions (below VNet, aligned near app-subnet where PEs live)
+const PAAS_Y = 40 + VNET_H + 40;
+const APP_SUBNET_ABS_X = 40 + VNET_PAD + GW_SUB_W + 24; // Absolute X of app-subnet
 
 export const mockDiagramSpec: DiagramSpec = {
   version: "1.0",
@@ -88,18 +98,7 @@ export const mockDiagramSpec: DiagramSpec = {
       bindings: {},
       metadata: { prefix: "10.0.1.0/24" },
     },
-    // ── NIC for App Gateway (inside gw-subnet) ──
-    {
-      id: "nic-appgw",
-      label: "nic-appgw-prod",
-      icon: "nic",
-      parentId: "gw-subnet",
-      endpoint: "10.0.0.4",
-      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
-      bindings: { health: { source: "composite", rules: [] } },
-      metadata: { privateIP: "10.0.0.4" },
-    },
-    // ── App Gateway (inside gw-subnet) ──
+    // ── App Gateway (inside gw-subnet, with NIC + Frontend IP as subResources) ──
     {
       id: "appgw",
       label: "Application Gateway",
@@ -108,7 +107,7 @@ export const mockDiagramSpec: DiagramSpec = {
       parentId: "gw-subnet",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/applicationGateways/appgw-prod",
       endpoint: "10.0.0.4",
-      position: { x: SUBNET_PAD, y: SUBNET_HEAD + NODE_H + GAP },
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
       bindings: {
         rps: { source: "monitor", metric: "Throughput", aggregation: "total" },
         latency: { source: "monitor", metric: "BackendLastByteResponseTime", aggregation: "p95" },
@@ -118,30 +117,23 @@ export const mockDiagramSpec: DiagramSpec = {
         ]},
       },
       metadata: { privateIP: "10.0.0.4" },
+      subResources: [
+        {
+          id: "nic-appgw",
+          label: "nic-appgw-prod",
+          kind: "nic",
+          endpoint: "10.0.0.4",
+          azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-appgw",
+        },
+        {
+          id: "feip-appgw",
+          label: "Frontend IP",
+          kind: "frontendIP",
+          endpoint: "20.0.0.1",
+        },
+      ] as SubResource[],
     },
-    // ── NIC for AKS (inside app-subnet) ──
-    {
-      id: "nic-aks",
-      label: "nic-aks-prod",
-      icon: "nic",
-      parentId: "app-subnet",
-      endpoint: "10.0.1.10",
-      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
-      bindings: { health: { source: "composite", rules: [] } },
-      metadata: { privateIP: "10.0.1.10" },
-    },
-    // ── NIC for Functions (inside app-subnet) ──
-    {
-      id: "nic-func",
-      label: "nic-func-prod",
-      icon: "nic",
-      parentId: "app-subnet",
-      endpoint: "10.0.1.20",
-      position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD },
-      bindings: { health: { source: "composite", rules: [] } },
-      metadata: { privateIP: "10.0.1.20" },
-    },
-    // ── AKS (inside app-subnet) ──
+    // ── AKS (inside app-subnet, with NIC as subResource) ──
     {
       id: "aks",
       label: "AKS Platform",
@@ -150,7 +142,7 @@ export const mockDiagramSpec: DiagramSpec = {
       parentId: "app-subnet",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod",
       endpoint: "10.0.1.10",
-      position: { x: SUBNET_PAD, y: SUBNET_HEAD + NODE_H + GAP },
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
       bindings: {
         cpu: { source: "monitor", metric: "node_cpu_usage_percentage", aggregation: "avg" },
         memory: { source: "monitor", metric: "node_memory_rss_percentage", aggregation: "avg" },
@@ -162,8 +154,17 @@ export const mockDiagramSpec: DiagramSpec = {
         ]},
       },
       metadata: { privateIP: "10.0.1.10" },
+      subResources: [
+        {
+          id: "nic-aks",
+          label: "nic-aks-prod",
+          kind: "nic",
+          endpoint: "10.0.1.10",
+          azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-aks",
+        },
+      ] as SubResource[],
     },
-    // ── Functions (inside app-subnet) ──
+    // ── Functions (inside app-subnet, with NIC as subResource) ──
     {
       id: "func",
       label: "Functions",
@@ -171,7 +172,7 @@ export const mockDiagramSpec: DiagramSpec = {
       groupId: "compute",
       parentId: "app-subnet",
       endpoint: "func-prod.azurewebsites.net",
-      position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD + NODE_H + GAP },
+      position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD },
       bindings: {
         executions: { source: "monitor", metric: "FunctionExecutionCount", aggregation: "total" },
         errors: { source: "monitor", metric: "FunctionExecutionUnits", aggregation: "total" },
@@ -180,8 +181,40 @@ export const mockDiagramSpec: DiagramSpec = {
           { metric: "errors", op: "<", threshold: 100, weight: 0.4 },
         ]},
       },
+      subResources: [
+        {
+          id: "nic-func",
+          label: "nic-func-prod",
+          kind: "nic",
+          endpoint: "10.0.1.20",
+          azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-func",
+        },
+      ] as SubResource[],
     },
-    // ── PaaS resources (outside VNet) ──
+    // ── Private Endpoints (inside app-subnet) ──
+    {
+      id: "pe-sql",
+      label: "PE-sql-prod",
+      icon: "privateEndpoint",
+      groupId: "data",
+      parentId: "app-subnet",
+      endpoint: "10.0.1.50",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD + NODE_H_SUB + GAP },
+      bindings: { health: { source: "composite", rules: [] } },
+      metadata: { privateIP: "10.0.1.50" },
+    },
+    {
+      id: "pe-redis",
+      label: "PE-redis-prod",
+      icon: "privateEndpoint",
+      groupId: "data",
+      parentId: "app-subnet",
+      endpoint: "10.0.1.51",
+      position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD + NODE_H_SUB + GAP },
+      bindings: { health: { source: "composite", rules: [] } },
+      metadata: { privateIP: "10.0.1.51" },
+    },
+    // ── PaaS resources (outside VNet, positioned near app-subnet PEs) ──
     {
       id: "sql",
       label: "SQL Database",
@@ -189,7 +222,7 @@ export const mockDiagramSpec: DiagramSpec = {
       groupId: "data",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Sql/servers/sql-prod/databases/orders",
       endpoint: "sql-prod.database.windows.net",
-      position: { x: 40, y: 40 + VNET_H + 40 },
+      position: { x: APP_SUBNET_ABS_X, y: PAAS_Y },
       bindings: {
         dtu: { source: "monitor", metric: "dtu_consumption_percent", aggregation: "avg" },
         connections: { source: "monitor", metric: "connection_successful", aggregation: "total" },
@@ -206,7 +239,7 @@ export const mockDiagramSpec: DiagramSpec = {
       groupId: "data",
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Cache/redis/redis-prod",
       endpoint: "redis-prod.redis.cache.windows.net",
-      position: { x: 40 + NODE_W + 36, y: 40 + VNET_H + 40 },
+      position: { x: APP_SUBNET_ABS_X + NODE_W + 36, y: PAAS_Y },
       bindings: {
         cpu: { source: "monitor", metric: "percentProcessorTime", aggregation: "avg" },
         memory: { source: "monitor", metric: "usedmemorypercentage", aggregation: "avg" },
@@ -222,7 +255,7 @@ export const mockDiagramSpec: DiagramSpec = {
       icon: "storage",
       groupId: "data",
       endpoint: "stprod.blob.core.windows.net",
-      position: { x: 40 + 2 * (NODE_W + 36), y: 40 + VNET_H + 40 },
+      position: { x: 40, y: PAAS_Y },
       bindings: {
         transactions: { source: "monitor", metric: "Transactions", aggregation: "total" },
         health: { source: "composite", rules: [
@@ -257,12 +290,33 @@ export const mockDiagramSpec: DiagramSpec = {
       },
       animation: "flow",
     },
+    // ── Private Link edges: PE → PaaS target ──
     {
-      id: "aks->sql",
-      source: "aks",
+      id: "pe-sql->sql",
+      source: "pe-sql",
       target: "sql",
-      label: "10.0.1.10 → sql-prod",
+      label: "Private Link",
+      edgeKind: "privateLink",
+      bindings: {},
+      animation: "dash",
+    },
+    {
+      id: "pe-redis->redis",
+      source: "pe-redis",
+      target: "redis",
+      label: "Private Link",
+      edgeKind: "privateLink",
+      bindings: {},
+      animation: "dash",
+    },
+    // ── Service edges: compute → data ──
+    {
+      id: "aks->pe-sql",
+      source: "aks",
+      target: "pe-sql",
+      label: "10.0.1.10 → PE-sql",
       protocol: "TCP",
+      edgeKind: "network",
       bindings: {
         throughput: { source: "monitor", metric: "BytesSent", aggregation: "total" },
         latency: { source: "appInsights", metric: "dependencies/duration", aggregation: "p95" },
@@ -271,11 +325,12 @@ export const mockDiagramSpec: DiagramSpec = {
       alerts: [{ condition: "latency > 500", severity: "warning" }],
     },
     {
-      id: "aks->redis",
+      id: "aks->pe-redis",
       source: "aks",
-      target: "redis",
-      label: "10.0.1.10 → redis-prod",
+      target: "pe-redis",
+      label: "10.0.1.10 → PE-redis",
       protocol: "TCP",
+      edgeKind: "network",
       bindings: {
         throughput: { source: "monitor", metric: "BytesSent", aggregation: "total" },
       },
@@ -293,39 +348,12 @@ export const mockDiagramSpec: DiagramSpec = {
       animation: "flow",
     },
     {
-      id: "func->sql",
+      id: "func->pe-sql",
       source: "func",
-      target: "sql",
-      label: "func-prod → sql-prod",
+      target: "pe-sql",
+      label: "func-prod → PE-sql",
       protocol: "TCP",
-      bindings: {},
-      animation: "dash",
-    },
-    // ── NIC binding edges ──
-    {
-      id: "nic-appgw->appgw",
-      source: "nic-appgw",
-      target: "appgw",
-      label: "NIC Binding",
-      edgeKind: "bound-to",
-      bindings: {},
-      animation: "dash",
-    },
-    {
-      id: "nic-aks->aks",
-      source: "nic-aks",
-      target: "aks",
-      label: "NIC Binding",
-      edgeKind: "bound-to",
-      bindings: {},
-      animation: "dash",
-    },
-    {
-      id: "nic-func->func",
-      source: "nic-func",
-      target: "func",
-      label: "NIC Binding",
-      edgeKind: "bound-to",
+      edgeKind: "network",
       bindings: {},
       animation: "dash",
     },
@@ -365,27 +393,6 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
 
   const nodes: LiveNode[] = [
     {
-      id: "nic-appgw",
-      health: "ok",
-      healthScore: 0.95,
-      metrics: {},
-      activeAlertIds: [],
-    },
-    {
-      id: "nic-aks",
-      health: "ok",
-      healthScore: 0.95,
-      metrics: {},
-      activeAlertIds: [],
-    },
-    {
-      id: "nic-func",
-      health: "ok",
-      healthScore: 0.95,
-      metrics: {},
-      activeAlertIds: [],
-    },
-    {
       id: "appgw",
       health: "ok",
       healthScore: 0.92,
@@ -402,6 +409,27 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
         pods: rand(18, 30),
       },
       activeAlertIds: aksHealth ? [] : ["alert-001"],
+    },
+    {
+      id: "func",
+      health: "ok",
+      healthScore: 0.82,
+      metrics: { executions: rand(100, 800), errors: rand(0, 15) },
+      activeAlertIds: [],
+    },
+    {
+      id: "pe-sql",
+      health: "ok",
+      healthScore: 0.95,
+      metrics: {},
+      activeAlertIds: [],
+    },
+    {
+      id: "pe-redis",
+      health: "ok",
+      healthScore: 0.95,
+      metrics: {},
+      activeAlertIds: [],
     },
     {
       id: "sql",
@@ -427,18 +455,11 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       metrics: { transactions: rand(500, 3000) },
       activeAlertIds: [],
     },
-    {
-      id: "func",
-      health: "ok",
-      healthScore: 0.82,
-      metrics: { executions: rand(100, 800), errors: rand(0, 15) },
-      activeAlertIds: [],
-    },
   ];
 
   const appgwAksThroughput = rand(8_000_000, 25_000_000);
-  const aksSqlThroughput = rand(2_000_000, 12_000_000);
-  const aksRedisThroughput = rand(4_000_000, 18_000_000);
+  const aksPeSqlThroughput = rand(2_000_000, 12_000_000);
+  const aksPeRedisThroughput = rand(4_000_000, 18_000_000);
   const funcStorageThroughput = rand(1_000_000, 5_000_000);
   const appgwFuncThroughput = rand(500_000, 4_000_000);
 
@@ -458,21 +479,35 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       activeAlertIds: [],
     },
     {
-      id: "aks->sql",
+      id: "pe-sql->sql",
+      status: sqlLatencySpike ? "degraded" : "normal",
+      metrics: { throughputBps: 0 },
+      trafficLevel: "low",
+      activeAlertIds: [],
+    },
+    {
+      id: "pe-redis->redis",
+      status: "normal",
+      metrics: { throughputBps: 0 },
+      trafficLevel: "low",
+      activeAlertIds: [],
+    },
+    {
+      id: "aks->pe-sql",
       status: sqlLatencySpike ? "degraded" : "normal",
       metrics: {
-        throughputBps: aksSqlThroughput,
+        throughputBps: aksPeSqlThroughput,
         latencyMs: sqlLatencySpike ? rand(400, 1200) : rand(10, 50),
         errorRate: sqlLatencySpike ? rand(8, 18) : rand(0, 1),
       },
-      trafficLevel: mockTrafficLevel(aksSqlThroughput),
+      trafficLevel: mockTrafficLevel(aksPeSqlThroughput),
       activeAlertIds: sqlLatencySpike ? ["alert-002"] : [],
     },
     {
-      id: "aks->redis",
+      id: "aks->pe-redis",
       status: "normal",
-      metrics: { throughputBps: aksRedisThroughput, latencyMs: rand(1, 5) },
-      trafficLevel: mockTrafficLevel(aksRedisThroughput),
+      metrics: { throughputBps: aksPeRedisThroughput, latencyMs: rand(1, 5) },
+      trafficLevel: mockTrafficLevel(aksPeRedisThroughput),
       activeAlertIds: [],
     },
     {
@@ -483,31 +518,9 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       activeAlertIds: [],
     },
     {
-      id: "func->sql",
+      id: "func->pe-sql",
       status: "idle",
       metrics: { throughputBps: 0 },
-      trafficLevel: "none",
-      activeAlertIds: [],
-    },
-    // NIC binding edges
-    {
-      id: "nic-appgw->appgw",
-      status: "normal",
-      metrics: {},
-      trafficLevel: "none",
-      activeAlertIds: [],
-    },
-    {
-      id: "nic-aks->aks",
-      status: "normal",
-      metrics: {},
-      trafficLevel: "none",
-      activeAlertIds: [],
-    },
-    {
-      id: "nic-func->func",
-      status: "normal",
-      metrics: {},
       trafficLevel: "none",
       activeAlertIds: [],
     },
@@ -524,7 +537,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       summary: "Node CPU usage has exceeded 80% for 3+ minutes. Consider scaling node pool.",
       rootCauseCandidates: ["High pod density", "Memory pressure causing swap"],
       affectedNodeIds: ["aks"],
-      affectedEdgeIds: ["appgw->aks", "aks->sql", "aks->redis"],
+      affectedEdgeIds: ["appgw->aks", "aks->pe-sql", "aks->pe-redis"],
     });
   }
   if (sqlLatencySpike) {
@@ -536,8 +549,8 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       firedAt: new Date(Date.now() - 60_000).toISOString(),
       summary: "P95 query latency exceeded 500ms. DTU usage at 95%. Possible deadlock on orders table.",
       rootCauseCandidates: ["DTU saturation", "Long-running query on orders table", "Missing index on orders.created_at"],
-      affectedNodeIds: ["sql"],
-      affectedEdgeIds: ["aks->sql", "func->sql"],
+      affectedNodeIds: ["sql", "pe-sql"],
+      affectedEdgeIds: ["aks->pe-sql", "pe-sql->sql", "func->pe-sql"],
     });
   }
 
@@ -549,8 +562,8 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
     edges,
     alerts,
     topology: {
-      nodeCount: 9,
-      edgeCount: 9,
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
       resolvedBindings: 0,
       failedBindings: 0,
     },

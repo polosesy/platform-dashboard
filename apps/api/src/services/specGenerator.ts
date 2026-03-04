@@ -1124,39 +1124,132 @@ export async function generateDiagramSpec(
     }
   }
 
-  // Place external resources horizontally below VNets (when VNets exist)
+  // Place external resources below VNets — PaaS resources near their PE's subnet (when VNets exist)
   if ((vnetNodes.length > 0 || subnetNodes.length > 0) && externalResources.length > 0) {
-    externalResources.sort((a, b) => {
-      const tierA = DATA_KINDS.has(a.kind) ? 0 : COMPUTE_KINDS.has(a.kind) ? 1 : 2;
-      const tierB = DATA_KINDS.has(b.kind) ? 0 : COMPUTE_KINDS.has(b.kind) ? 1 : 2;
-      return tierA - tierB;
-    });
+    // ── Build PE → PaaS target mapping ──
+    // privateLink edges: PE → target PaaS resource
+    const peTargetMap = new Map<string, string>(); // PE origId → PaaS origId
+    const paasToSubnetPos = new Map<string, { subnetX: number; vnetX: number }>(); // PaaS shortId → position hint
+    for (const edge of graph.edges) {
+      if (edge.kind !== "privateLink") continue;
+      const srcKind = nodeKindLookup.get(edge.source);
+      if (srcKind === "privateEndpoint") {
+        peTargetMap.set(edge.source, edge.target);
+      }
+    }
 
-    const cols = Math.min(externalResources.length, 5);
-    for (let i = 0; i < externalResources.length; i++) {
-      const res = externalResources[i]!;
-      const row = Math.floor(i / cols);
-      const col = i % cols;
+    // For each PE with a target, find the subnet the PE lives in and its horizontal position
+    for (const [peOrigId, paasOrigId] of peTargetMap) {
+      const peShortId = idMap.get(peOrigId);
+      const paasShortId = idMap.get(paasOrigId);
+      if (!peShortId || !paasShortId) continue;
 
-      diagramNodes.push({
-        id: idMap.get(res.id)!,
-        label: res.name,
-        icon: KIND_TO_ICON[res.kind] ?? "custom",
-        azureResourceId: res.azureId,
-        endpoint: res.endpoint,
-        groupId: inferGroup(res),
-        resourceKind: res.kind,
-        location: res.location,
-        resourceGroup: res.resourceGroup,
-        tags: res.tags,
-        position: {
-          x: 40 + col * (NODE_W + NODE_GAP + 20),
-          y: cursorY + row * (NODE_H + NODE_GAP),
-        },
-        bindings: NODE_BINDINGS[res.kind] ?? {
-          health: { source: "composite", rules: [] },
-        },
+      // Find the PE's subnet via containment
+      const peSubnetOrigId = containment.resourceSubnet.get(peOrigId);
+      if (!peSubnetOrigId) continue;
+      const peSubnetShortId = idMap.get(peSubnetOrigId);
+      if (!peSubnetShortId) continue;
+
+      // Find the subnet's position in the diagram
+      const subnetSpec = diagramNodes.find(n => n.id === peSubnetShortId);
+      if (!subnetSpec || !subnetSpec.parentId) continue;
+      const vnetSpec = diagramNodes.find(n => n.id === subnetSpec.parentId);
+      if (!vnetSpec) continue;
+
+      // Compute absolute X position of the subnet
+      const subnetAbsX = (vnetSpec.position?.x ?? 0) + (subnetSpec.position?.x ?? 0);
+      paasToSubnetPos.set(paasShortId, { subnetX: subnetAbsX, vnetX: vnetSpec.position?.x ?? 0 });
+    }
+
+    // Split external resources: PE-connected PaaS vs others
+    const peConnectedPaaS: ArchitectureNode[] = [];
+    const otherExternal: ArchitectureNode[] = [];
+    for (const res of externalResources) {
+      const sid = idMap.get(res.id)!;
+      if (paasToSubnetPos.has(sid)) {
+        peConnectedPaaS.push(res);
+      } else {
+        otherExternal.push(res);
+      }
+    }
+
+    // Place PE-connected PaaS near their PE's subnet (aligned horizontally)
+    if (peConnectedPaaS.length > 0) {
+      console.log(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned near their PE subnet`);
+      // Group by approximate X position to avoid overlaps
+      const placed = new Set<string>();
+      const usedPositions: Array<{ x: number; y: number }> = [];
+
+      for (const res of peConnectedPaaS) {
+        const sid = idMap.get(res.id)!;
+        const posHint = paasToSubnetPos.get(sid)!;
+        let targetX = posHint.subnetX;
+        let targetY = cursorY;
+
+        // Avoid overlaps with previously placed PaaS nodes
+        for (const used of usedPositions) {
+          if (Math.abs(targetX - used.x) < NODE_W + NODE_GAP && Math.abs(targetY - used.y) < NODE_H + NODE_GAP) {
+            targetX = used.x + NODE_W + NODE_GAP + 20;
+          }
+        }
+
+        usedPositions.push({ x: targetX, y: targetY });
+        placed.add(sid);
+
+        diagramNodes.push({
+          id: sid,
+          label: res.name,
+          icon: KIND_TO_ICON[res.kind] ?? "custom",
+          azureResourceId: res.azureId,
+          endpoint: res.endpoint,
+          groupId: inferGroup(res),
+          resourceKind: res.kind,
+          location: res.location,
+          resourceGroup: res.resourceGroup,
+          tags: res.tags,
+          position: { x: targetX, y: targetY },
+          bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+        });
+      }
+
+      // Advance cursor past PE-connected PaaS row
+      cursorY += NODE_H + EXTERNAL_GAP;
+    }
+
+    // Place remaining external resources in a flat row
+    if (otherExternal.length > 0) {
+      otherExternal.sort((a, b) => {
+        const tierA = DATA_KINDS.has(a.kind) ? 0 : COMPUTE_KINDS.has(a.kind) ? 1 : 2;
+        const tierB = DATA_KINDS.has(b.kind) ? 0 : COMPUTE_KINDS.has(b.kind) ? 1 : 2;
+        return tierA - tierB;
       });
+
+      const cols = Math.min(otherExternal.length, 5);
+      for (let i = 0; i < otherExternal.length; i++) {
+        const res = otherExternal[i]!;
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+
+        diagramNodes.push({
+          id: idMap.get(res.id)!,
+          label: res.name,
+          icon: KIND_TO_ICON[res.kind] ?? "custom",
+          azureResourceId: res.azureId,
+          endpoint: res.endpoint,
+          groupId: inferGroup(res),
+          resourceKind: res.kind,
+          location: res.location,
+          resourceGroup: res.resourceGroup,
+          tags: res.tags,
+          position: {
+            x: 40 + col * (NODE_W + NODE_GAP + 20),
+            y: cursorY + row * (NODE_H + NODE_GAP),
+          },
+          bindings: NODE_BINDINGS[res.kind] ?? {
+            health: { source: "composite", rules: [] },
+          },
+        });
+      }
     }
   }
 

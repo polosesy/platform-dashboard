@@ -138,7 +138,8 @@ function LiveCanvasInner({
           },
         };
         if (nodeSpec.parentId) {
-          (groupNode as FlowNode<GroupNodeData> & { parentNode: string }).parentNode = nodeSpec.parentId;
+          (groupNode as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+          (groupNode as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
         }
         return groupNode;
       }
@@ -223,9 +224,14 @@ function LiveCanvasInner({
             subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
           };
           if (existing) {
-            const updated = { ...existing, data } as FlowNode<GroupNodeData> & { parentNode?: string };
-            if (nodeSpec.parentId) updated.parentNode = nodeSpec.parentId;
-            else delete updated.parentNode;
+            const updated = { ...existing, data } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
+            if (nodeSpec.parentId) {
+              updated.parentNode = nodeSpec.parentId;
+              updated.extent = "parent";
+            } else {
+              delete updated.parentNode;
+              delete updated.extent;
+            }
             return updated;
           }
           const gn: FlowNode<GroupNodeData> = {
@@ -238,7 +244,8 @@ function LiveCanvasInner({
             data,
           };
           if (nodeSpec.parentId) {
-            (gn as FlowNode<GroupNodeData> & { parentNode: string }).parentNode = nodeSpec.parentId;
+            (gn as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+            (gn as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
           }
           return gn;
         }
@@ -472,6 +479,8 @@ function LiveCanvasInner({
         onNodeMouseLeave={handleNodeMouseLeave}
         fitView
         fitViewOptions={{ padding: 0.15 }}
+        minZoom={0.05}
+        maxZoom={4}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color="rgba(20,21,23,0.06)" />
