@@ -6,6 +6,7 @@ import type {
   LiveAlert,
   AlertRuleInfo,
   EdgeTrafficLevel,
+  PowerState,
   SubResource,
 } from "@aud/types";
 
@@ -399,6 +400,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       healthScore: 0.92,
       metrics: { rps: rand(800, 1500), latency: rand(20, 80) },
       activeAlertIds: [],
+      powerState: "running" as PowerState,
     },
     {
       id: "aks",
@@ -410,6 +412,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
         pods: rand(18, 30),
       },
       activeAlertIds: aksHealth ? [] : ["alert-001"],
+      powerState: "running" as PowerState,
     },
     {
       id: "func",
@@ -417,6 +420,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       healthScore: 0.82,
       metrics: { executions: rand(100, 800), errors: rand(0, 15) },
       activeAlertIds: [],
+      powerState: "running" as PowerState,
     },
     {
       id: "pe-sql",
@@ -441,6 +445,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
         connections: rand(80, 200),
       },
       activeAlertIds: sqlLatencySpike ? ["alert-002"] : [],
+      powerState: sqlLatencySpike ? "stopped" as PowerState : "running" as PowerState,
     },
     {
       id: "redis",
@@ -448,6 +453,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       healthScore: 0.88,
       metrics: { cpu: rand(10, 35), memory: rand(30, 55) },
       activeAlertIds: [],
+      powerState: "running" as PowerState,
     },
     {
       id: "storage",

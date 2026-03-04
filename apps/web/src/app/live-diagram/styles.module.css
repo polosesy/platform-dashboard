@@ -327,6 +327,45 @@
   letter-spacing: 0.02em;
 }
 
+/* ── PowerState Badge ── */
+
+.powerStateBadge {
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.powerStateBadge[data-state="running"] {
+  color: rgba(16, 137, 62, 0.85);
+  background: rgba(16, 137, 62, 0.08);
+}
+
+.powerStateBadge[data-state="stopped"] {
+  color: rgba(209, 132, 0, 0.85);
+  background: rgba(209, 132, 0, 0.10);
+}
+
+.powerStateBadge[data-state="deallocated"] {
+  color: rgba(20, 21, 23, 0.45);
+  background: rgba(20, 21, 23, 0.06);
+}
+
+.powerStateBadge[data-state="starting"],
+.powerStateBadge[data-state="stopping"] {
+  color: rgba(0, 120, 212, 0.80);
+  background: rgba(0, 120, 212, 0.08);
+  animation: powerPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes powerPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .nodeEndpoint {
   font-family: var(--font-geist-mono);
   font-size: 10px;

@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { HealthStatus, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import type { HealthStatus, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { D3Sparkline } from "./D3Sparkline";
@@ -22,6 +22,7 @@ export type LiveNodeData = {
   onSubResourceSelect?: (sr: SubResource) => void;
   resourceKind?: string;
   azureResourceId?: string;
+  powerState?: PowerState;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -34,6 +35,14 @@ export function fmtMetric(val: number | null): string {
   if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
   return val % 1 === 0 ? String(val) : val.toFixed(1);
 }
+
+const POWER_STATE_LABEL: Record<string, string> = {
+  running: "Running",
+  stopped: "Stopped",
+  deallocated: "Deallocated",
+  starting: "Starting",
+  stopping: "Stopping",
+};
 
 // Azure CAF resource type abbreviations
 const RESOURCE_TYPE_ABBR: Record<string, string> = {
@@ -48,7 +57,7 @@ const RESOURCE_TYPE_ABBR: Record<string, string> = {
 };
 
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
   const colors = nodeColor(health);
@@ -128,6 +137,11 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
           {typeAbbr && (
             <span className={styles.nodeTypeAbbr} title={RESOURCE_KIND_DISPLAY[resourceKind!] ?? resourceKind}>
               {typeAbbr}
+            </span>
+          )}
+          {powerState && powerState !== "unknown" && (
+            <span className={styles.powerStateBadge} data-state={powerState}>
+              {POWER_STATE_LABEL[powerState] ?? powerState}
             </span>
           )}
         </div>

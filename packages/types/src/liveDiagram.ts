@@ -207,6 +207,7 @@ export type LiveNode = {
   activeAlertIds: string[];
   sparkline?: number[];  // last N metric values for mini chart
   sparklines?: Record<string, SparklineData>;
+  powerState?: PowerState;
 };
 
 export type LiveEdge = {
@@ -251,6 +252,7 @@ export type AlertRuleInfo = {
 // ────────────────────────────────────────────
 
 export type HealthStatus = "ok" | "warning" | "critical" | "unknown";
+export type PowerState = "running" | "stopped" | "deallocated" | "starting" | "stopping" | "unknown";
 export type EdgeStatus = "normal" | "degraded" | "down" | "idle";
 export type EdgeTrafficLevel = "none" | "low" | "medium" | "high" | "burst";
 export type AlertSeverity = "info" | "warning" | "critical";

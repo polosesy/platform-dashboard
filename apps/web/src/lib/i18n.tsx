@@ -75,6 +75,10 @@ const T: Translations = {
   // ── Tenant / Subscription Selector ──
   "live.tenant": { ko: "테넌트", en: "Tenant" },
   "live.selectTenant": { ko: "테넌트 선택", en: "Select Tenant" },
+  "live.region": { ko: "리전", en: "Region" },
+  "live.vnet": { ko: "VNet", en: "VNet" },
+  "live.allRegions": { ko: "전체 리전", en: "All Regions" },
+  "live.allVnets": { ko: "전체 VNet", en: "All VNets" },
 
   // ── Common ──
   "common.language": { ko: "한국어", en: "English" },

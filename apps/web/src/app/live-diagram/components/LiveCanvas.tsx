@@ -163,6 +163,7 @@ function LiveCanvasInner({
           onSubResourceSelect,
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
+          powerState: live?.powerState,
         },
       };
       if (nodeSpec.parentId) {
@@ -266,6 +267,7 @@ function LiveCanvasInner({
           onSubResourceSelect,
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
+          powerState: live?.powerState,
         };
 
         if (existing) {

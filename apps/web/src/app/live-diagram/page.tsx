@@ -77,6 +77,10 @@ export default function LiveDiagramPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // VNet / Region filter state
+  const [selectedVnet, setSelectedVnet] = useState<string>("");     // "" = 전체
+  const [selectedRegion, setSelectedRegion] = useState<string>(""); // "" = 전체
+
   // Fetch tenants on mount
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +219,91 @@ export default function LiveDiagramPage() {
   const { spec, error: specError, loading: specLoading } = useDiagramSpec(diagramId);
   const { snapshot, error: snapError, connected, refresh } = useLiveSnapshot(diagramId, mode);
 
+  // ── VNet / Region option extraction ──
+  const vnetOptions = useMemo(() => {
+    if (!spec) return [];
+    return spec.nodes
+      .filter((n) => n.nodeType === "group" && n.icon === "vnet")
+      .map((n) => ({ id: n.id, label: n.label }));
+  }, [spec]);
+
+  const regionOptions = useMemo(() => {
+    if (!spec) return [];
+    return [...new Set(spec.nodes.map((n) => n.location).filter(Boolean))] as string[];
+  }, [spec]);
+
+  // ── Filtered spec (VNet + Region) ──
+  const filteredSpec = useMemo(() => {
+    if (!spec) return spec;
+    if (!selectedVnet && !selectedRegion) return spec;
+
+    // Build set of visible node IDs
+    let visibleNodeIds: Set<string>;
+
+    if (selectedVnet) {
+      // Include the VNet group itself + all children (parentId chain)
+      visibleNodeIds = new Set<string>();
+      visibleNodeIds.add(selectedVnet);
+
+      // BFS: find all descendants via parentId
+      const queue = [selectedVnet];
+      while (queue.length > 0) {
+        const parentId = queue.shift()!;
+        for (const n of spec.nodes) {
+          if (n.parentId === parentId && !visibleNodeIds.has(n.id)) {
+            visibleNodeIds.add(n.id);
+            queue.push(n.id);
+          }
+        }
+      }
+
+      // Also include PaaS resources connected via edges from visible nodes
+      for (const edge of spec.edges) {
+        if (visibleNodeIds.has(edge.source) && !visibleNodeIds.has(edge.target)) {
+          visibleNodeIds.add(edge.target);
+        }
+        if (visibleNodeIds.has(edge.target) && !visibleNodeIds.has(edge.source)) {
+          visibleNodeIds.add(edge.source);
+        }
+      }
+    } else {
+      visibleNodeIds = new Set(spec.nodes.map((n) => n.id));
+    }
+
+    // Region filter: further restrict
+    if (selectedRegion) {
+      const regionNodeIds = new Set(
+        spec.nodes.filter((n) => n.location === selectedRegion).map((n) => n.id),
+      );
+      // Also include parent groups of region-matching nodes
+      for (const n of spec.nodes) {
+        if (regionNodeIds.has(n.id) && n.parentId) {
+          regionNodeIds.add(n.parentId);
+          // grandparent (VNet → Subnet → Resource)
+          const parent = spec.nodes.find((p) => p.id === n.parentId);
+          if (parent?.parentId) regionNodeIds.add(parent.parentId);
+        }
+      }
+      // Intersect with VNet filter
+      visibleNodeIds = new Set([...visibleNodeIds].filter((id) => regionNodeIds.has(id)));
+    }
+
+    const filteredNodes = spec.nodes.filter((n) => visibleNodeIds.has(n.id));
+    const filteredEdges = spec.edges.filter(
+      (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target),
+    );
+
+    return { ...spec, nodes: filteredNodes, edges: filteredEdges };
+  }, [spec, selectedVnet, selectedRegion]);
+
+  // Reset selected node when filter changes (node may no longer be visible)
+  useEffect(() => {
+    if (selectedNodeId && filteredSpec) {
+      const stillVisible = filteredSpec.nodes.some((n) => n.id === selectedNodeId);
+      if (!stillVisible) setSelectedNodeId(null);
+    }
+  }, [filteredSpec, selectedNodeId]);
+
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     const nodeId = alert.affectedNodeIds[0];
     if (nodeId) handleNodeSelect(nodeId);
@@ -226,9 +315,9 @@ export default function LiveDiagramPage() {
 
   // Build connected edges for the selected node's detail panel
   const connectedEdges = useMemo(() => {
-    if (!selectedNodeId || !spec) return [];
-    return buildConnectedEdges(spec, snapshot, selectedNodeId);
-  }, [selectedNodeId, spec, snapshot]);
+    if (!selectedNodeId || !filteredSpec) return [];
+    return buildConnectedEdges(filteredSpec, snapshot, selectedNodeId);
+  }, [selectedNodeId, filteredSpec, snapshot]);
 
   return (
     <div className={styles.page}>
@@ -326,6 +415,42 @@ export default function LiveDiagramPage() {
         >
           {generating ? t("live.generating") : t("live.generateFromAzure")}
         </button>
+        {spec && (
+          <>
+            <div className={styles.selectorDivider} />
+            <div className={styles.selectorGroup}>
+              <span className={styles.selectorLabel}>{t("live.region")}</span>
+              <select
+                className={styles.select}
+                value={selectedRegion}
+                onChange={(e) => setSelectedRegion(e.target.value)}
+                disabled={regionOptions.length === 0}
+                aria-label={t("live.region")}
+              >
+                <option value="">{t("live.allRegions")}</option>
+                {regionOptions.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.selectorDivider} />
+            <div className={styles.selectorGroup}>
+              <span className={styles.selectorLabel}>{t("live.vnet")}</span>
+              <select
+                className={styles.select}
+                value={selectedVnet}
+                onChange={(e) => setSelectedVnet(e.target.value)}
+                disabled={vnetOptions.length === 0}
+                aria-label={t("live.vnet")}
+              >
+                <option value="">{t("live.allVnets")}</option>
+                {vnetOptions.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       {(error || generateError) && (
@@ -405,7 +530,7 @@ export default function LiveDiagramPage() {
       </div>
 
       {/* Canvas + Sidebars */}
-      {spec && (
+      {filteredSpec && (
         <div className={styles.canvasGrid}>
           {vizMode === "3d" ? (
             <Suspense
@@ -416,14 +541,14 @@ export default function LiveDiagramPage() {
               }
             >
               <Canvas3D
-                spec={spec}
+                spec={filteredSpec}
                 snapshot={snapshot}
                 onNodeSelect={handleNodeSelect}
               />
             </Suspense>
           ) : (
             <LiveCanvas
-              spec={spec}
+              spec={filteredSpec}
               snapshot={snapshot}
               onNodeSelect={handleNodeSelect}
               vizMode={vizMode}
@@ -438,7 +563,7 @@ export default function LiveDiagramPage() {
           <div className={styles.sidebarStack}>
             {selectedNodeId ? (
               <ResourceDetailPanel
-                nodeSpec={spec.nodes.find((n) => n.id === selectedNodeId) ?? null}
+                nodeSpec={filteredSpec.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 alerts={snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []}
                 alertRules={snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []}

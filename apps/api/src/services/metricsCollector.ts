@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import type { MetricBinding, MetricAggregation, DiagramEdgeSpec, DiagramNodeSpec } from "@aud/types";
+import type { MetricBinding, MetricAggregation, DiagramEdgeSpec, DiagramNodeSpec, PowerState } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { getArmFetcher } from "../infra/azureClientFactory";
 
@@ -222,6 +222,117 @@ export async function collectBatchEdgeMetrics(
         results.set(item.edge.id, metrics);
       } catch {
         results.set(item.edge.id, {});
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+  return results;
+}
+
+// ────────────────────────────────────────────
+// PowerState Collection
+//
+// Fetches instance power state for compute resources
+// (VM, VMSS, AKS, Container App, Function App, App Service).
+// Uses ARM instanceView or properties.powerState/state.
+// ────────────────────────────────────────────
+
+const powerStateCache = new CacheManager<PowerState>(200, 120_000);
+
+const POWER_STATE_RESOURCE_KINDS = new Set([
+  "vm", "vmss", "aks", "containerApp", "functionApp", "appService",
+]);
+
+function parsePowerState(code: string): PowerState {
+  const lower = code.toLowerCase();
+  if (lower.includes("running")) return "running";
+  if (lower.includes("deallocat")) return "deallocated";
+  if (lower.includes("stopped")) return "stopped";
+  if (lower.includes("starting")) return "starting";
+  if (lower.includes("stopping")) return "stopping";
+  return "unknown";
+}
+
+async function collectResourcePowerState(
+  env: Env,
+  bearerToken: string,
+  azureResourceId: string,
+  resourceKind: string,
+): Promise<PowerState> {
+  const prefix = bearerKeyPrefix(bearerToken);
+  const cacheKey = `${prefix}:powerstate:${azureResourceId}`;
+  const cached = powerStateCache.get(cacheKey);
+  if (cached) return cached;
+
+  const fetcher = await getArmFetcher(env, bearerToken);
+  let state: PowerState = "unknown";
+
+  try {
+    if (resourceKind === "vm") {
+      const resp = await fetcher.fetchJson<{
+        statuses?: Array<{ code: string }>;
+      }>(`https://management.azure.com${azureResourceId}/instanceView?api-version=2024-07-01`);
+      const psStatus = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
+      if (psStatus) state = parsePowerState(psStatus.code);
+    } else if (resourceKind === "vmss") {
+      const resp = await fetcher.fetchJson<{
+        statuses?: Array<{ code: string }>;
+      }>(`https://management.azure.com${azureResourceId}/instanceView?api-version=2024-07-01`);
+      const psStatus = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
+      if (psStatus) state = parsePowerState(psStatus.code);
+    } else if (resourceKind === "aks") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { powerState?: { code: string } };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2024-09-01`);
+      const code = resp.properties?.powerState?.code;
+      if (code) state = parsePowerState(code);
+    } else if (resourceKind === "containerApp") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { runningStatus?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2024-03-01`);
+      const rs = resp.properties?.runningStatus;
+      if (rs) state = parsePowerState(rs);
+    } else if (resourceKind === "functionApp" || resourceKind === "appService") {
+      const resp = await fetcher.fetchJson<{
+        properties?: { state?: string };
+      }>(`https://management.azure.com${azureResourceId}?api-version=2023-12-01`);
+      const s = resp.properties?.state;
+      if (s) state = parsePowerState(s);
+    }
+  } catch {
+    // Non-critical — return "unknown"
+  }
+
+  powerStateCache.set(cacheKey, state);
+  return state;
+}
+
+/**
+ * Batch collect power states for compute resources (parallel with concurrency limit).
+ */
+export async function collectBatchPowerStates(
+  env: Env,
+  bearerToken: string,
+  nodes: Array<{ azureResourceId: string; resourceKind: string }>,
+): Promise<Map<string, PowerState>> {
+  const CONCURRENCY = 6;
+  const targets = nodes.filter(
+    (n) => n.azureResourceId && POWER_STATE_RESOURCE_KINDS.has(n.resourceKind),
+  );
+
+  const results = new Map<string, PowerState>();
+  const queue = [...targets];
+
+  async function worker() {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) break;
+      try {
+        const state = await collectResourcePowerState(env, bearerToken, item.azureResourceId, item.resourceKind);
+        results.set(item.azureResourceId, state);
+      } catch {
+        results.set(item.azureResourceId, "unknown");
       }
     }
   }

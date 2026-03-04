@@ -6,13 +6,14 @@ import type {
   LiveEdge,
   LiveAlert,
   AlertRuleInfo,
+  PowerState,
   SparklineData,
   FaultImpact,
   HeatmapCell,
   TrafficHeatmapData,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { collectBatchMetrics, collectBatchEdgeMetrics } from "./metricsCollector";
+import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector";
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector";
 import { collectDiagramAlerts } from "./alertsCollector";
 import { collectAlertRules } from "./alertRulesCollector";
@@ -190,6 +191,22 @@ export async function buildLiveSnapshot(
     }
   }
 
+  // ── Collect PowerState for compute resources ──
+  let powerStateMap = new Map<string, PowerState>();
+
+  if (azureEnabled && hasBearerToken) {
+    const computeNodes = spec.nodes
+      .filter((n) => n.azureResourceId && n.resourceKind)
+      .map((n) => ({ azureResourceId: n.azureResourceId!, resourceKind: n.resourceKind! }));
+    if (computeNodes.length > 0) {
+      try {
+        powerStateMap = await collectBatchPowerStates(env, bearerToken!, computeNodes);
+      } catch {
+        // Non-critical
+      }
+    }
+  }
+
   // ── Collect Traffic Flow Data (multi-source) ──
   // These collectors use SP fallback — no bearer token required.
   const trafficFlowData = await collectAllTrafficSources(env, bearerToken, spec);
@@ -247,6 +264,8 @@ export async function buildLiveSnapshot(
       };
     }
 
+    const powerState = powerStateMap.get(nodeSpec.azureResourceId ?? "") as PowerState | undefined;
+
     return {
       id: nodeSpec.id,
       health,
@@ -257,6 +276,7 @@ export async function buildLiveSnapshot(
         ? [...(sparklineBuffers.get(bufferKey)!.values)]
         : undefined,
       sparklines: Object.keys(sparklines).length > 0 ? sparklines : undefined,
+      powerState,
     };
   });
 
