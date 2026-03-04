@@ -14,6 +14,8 @@ import type {
   DiagramIconKind,
   DiagramLayoutKind,
   MetricBinding,
+  SubResource,
+  SubResourceKind,
 } from "@aud/types";
 import { inferImplicitEdges } from "./dependencyInference";
 import ELK from "elkjs";
@@ -750,9 +752,48 @@ export async function generateDiagramSpec(
   // Build containment map from FULL graph (before filtering)
   const containment = buildContainmentMap(graph);
 
-  // Filter nodes — exclude infra-only kinds (but keep VNet/Subnet)
+  // ── Build NIC→VM absorption map ──
+  // NICs "bound-to" a VM get embedded as subResources instead of separate nodes.
+  const nodeKindLookup = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+  const nicToVmBound = new Map<string, string>(); // nicOrigId → vmOrigId
+  const vmBoundNics = new Map<string, ArchitectureNode[]>(); // vmOrigId → NIC nodes
+  for (const edge of graph.edges) {
+    if (edge.kind !== "bound-to") continue;
+    const srcKind = nodeKindLookup.get(edge.source);
+    const tgtKind = nodeKindLookup.get(edge.target);
+    if (srcKind === "nic" && (tgtKind === "vm" || tgtKind === "vmss")) {
+      nicToVmBound.set(edge.source, edge.target);
+      const arr = vmBoundNics.get(edge.target) ?? [];
+      const nicNode = graph.nodes.find((n) => n.id === edge.source);
+      if (nicNode) arr.push(nicNode);
+      vmBoundNics.set(edge.target, arr);
+    }
+  }
+
+  // ── Build AppGW Frontend IP absorption map ──
+  const appGwFrontendIPs = new Map<string, SubResource[]>();
+  for (const node of graph.nodes) {
+    if (node.kind !== "appGateway") continue;
+    if (!node.endpoint) continue;
+    appGwFrontendIPs.set(node.id, [{
+      id: `${node.id}/frontendIP/0`,
+      label: "Frontend IP",
+      kind: "frontendIP" as SubResourceKind,
+      endpoint: node.endpoint,
+      azureResourceId: node.azureId,
+    }]);
+  }
+
+  if (vmBoundNics.size > 0) {
+    console.log(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
+  }
+  if (appGwFrontendIPs.size > 0) {
+    console.log(`[specGenerator] AppGW Frontend IPs: ${appGwFrontendIPs.size} AppGWs with frontend IPs`);
+  }
+
+  // Filter nodes — exclude infra-only kinds + absorbed NICs (but keep VNet/Subnet)
   const filteredNodes = graph.nodes.filter(
-    (n) => !EXCLUDED_KINDS.has(n.kind),
+    (n) => !EXCLUDED_KINDS.has(n.kind) && !(n.kind === "nic" && nicToVmBound.has(n.id)),
   );
 
   // Build node ID set for edge filtering
@@ -815,12 +856,24 @@ export async function generateDiagramSpec(
     console.log(`[specGenerator] VNet "${vShortId}" → ${subs.length} subnets: [${childCounts.join(", ")}]`);
   }
 
+  // Height of sub-resource chip row (NIC/Frontend IP embedded in parent)
+  const SUB_RESOURCE_CHIP_H = 22;
+
+  // Effective node height accounting for embedded sub-resources
+  function effectiveNodeH(node: ArchitectureNode): number {
+    const nicCount = vmBoundNics.get(node.id)?.length ?? 0;
+    const feIpCount = appGwFrontendIPs.get(node.id)?.length ?? 0;
+    const subCount = nicCount + feIpCount;
+    return NODE_H + (subCount > 0 ? SUB_RESOURCE_CHIP_H : 0);
+  }
+
   // Compute subnet dimensions and tier
   const subnetInfo = new Map<string, { width: number; height: number; tier: number }>();
   for (const [subShortId, children] of subnetChildren) {
     const childKinds = new Set(children.map((c) => c.node.kind));
     const w = NODE_W + 2 * SUBNET_INNER_PAD;
-    const h = SUBNET_HEADER + children.length * NODE_H + Math.max(0, children.length - 1) * NODE_GAP + SUBNET_INNER_PAD;
+    const totalChildH = children.reduce((sum, c) => sum + effectiveNodeH(c.node), 0);
+    const h = SUBNET_HEADER + totalChildH + Math.max(0, children.length - 1) * NODE_GAP + SUBNET_INNER_PAD;
     subnetInfo.set(subShortId, { width: w, height: Math.max(h, SUBNET_HEADER + NODE_H + SUBNET_INNER_PAD), tier: subnetTier(childKinds) });
   }
 
@@ -918,8 +971,29 @@ export async function generateDiagramSpec(
 
       // Place resources within subnet
       const children = subnetChildren.get(sub.shortId) ?? [];
+      let childY = SUBNET_HEADER;
       for (let ci = 0; ci < children.length; ci++) {
         const child = children[ci]!;
+
+        // Build subResources for VM (bound NICs) and AppGW (frontend IPs)
+        const childSubResources: SubResource[] = [];
+        const boundNics = vmBoundNics.get(child.node.id);
+        if (boundNics) {
+          for (const nic of boundNics) {
+            childSubResources.push({
+              id: idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id),
+              label: nic.name,
+              kind: "nic" as SubResourceKind,
+              endpoint: nic.endpoint,
+              azureResourceId: nic.azureId,
+            });
+          }
+        }
+        const feIPs = appGwFrontendIPs.get(child.node.id);
+        if (feIPs) {
+          childSubResources.push(...feIPs);
+        }
+
         diagramNodes.push({
           id: child.shortId,
           label: child.node.name,
@@ -928,7 +1002,7 @@ export async function generateDiagramSpec(
           endpoint: child.node.endpoint,
           parentId: sub.shortId,
           groupId: inferGroup(child.node),
-          position: { x: SUBNET_INNER_PAD, y: SUBNET_HEADER + ci * (NODE_H + NODE_GAP) },
+          position: { x: SUBNET_INNER_PAD, y: childY },
           bindings: NODE_BINDINGS[child.node.kind] ?? {
             health: { source: "composite", rules: [] },
           },
@@ -937,7 +1011,9 @@ export async function generateDiagramSpec(
           location: child.node.location,
           resourceGroup: child.node.resourceGroup,
           tags: child.node.tags,
+          subResources: childSubResources.length > 0 ? childSubResources : undefined,
         });
+        childY += effectiveNodeH(child.node) + NODE_GAP;
       }
 
       subX += sInfo.width + SUBNET_GAP;

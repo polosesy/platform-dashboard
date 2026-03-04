@@ -42,6 +42,18 @@ export type DiagramNodeSpec = {
   location?: string;           // Azure region (e.g., "eastus")
   resourceGroup?: string;      // Parent resource group name
   tags?: Record<string, string>; // Azure resource tags
+  subResources?: SubResource[];  // Embedded child objects (NICs in VM, Frontend IPs in AppGW)
+};
+
+export type SubResourceKind = "nic" | "frontendIP" | "publicIP";
+
+export type SubResource = {
+  id: string;
+  label: string;
+  kind: SubResourceKind;
+  endpoint?: string;
+  azureResourceId?: string;
+  health?: HealthStatus;
 };
 
 export type DiagramEdgeKind =

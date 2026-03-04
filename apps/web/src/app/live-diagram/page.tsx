@@ -58,6 +58,10 @@ export default function LiveDiagramPage() {
   const [vizMode, setVizMode] = useState<VisualizationMode>("2d-animated");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+  const handleNodeSelect = useCallback((nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+  }, []);
+
   // Overlay toggles
   const [showNetworkFlow, setShowNetworkFlow] = useState(true);
   const [showParticles, setShowParticles] = useState(true);
@@ -187,8 +191,8 @@ export default function LiveDiagramPage() {
 
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     const nodeId = alert.affectedNodeIds[0];
-    if (nodeId) setSelectedNodeId(nodeId);
-  }, []);
+    if (nodeId) handleNodeSelect(nodeId);
+  }, [handleNodeSelect]);
 
   const error = specError || snapError;
   const faultCount = snapshot?.faultImpacts?.length ?? 0;
@@ -366,14 +370,14 @@ export default function LiveDiagramPage() {
               <Canvas3D
                 spec={spec}
                 snapshot={snapshot}
-                onNodeSelect={setSelectedNodeId}
+                onNodeSelect={handleNodeSelect}
               />
             </Suspense>
           ) : (
             <LiveCanvas
               spec={spec}
               snapshot={snapshot}
-              onNodeSelect={setSelectedNodeId}
+              onNodeSelect={handleNodeSelect}
               vizMode={vizMode}
               showNetworkFlow={showNetworkFlow}
               showParticles={showParticles}
@@ -390,7 +394,7 @@ export default function LiveDiagramPage() {
                 liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 alerts={snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []}
                 connectedEdges={connectedEdges}
-                onClose={() => setSelectedNodeId(null)}
+                onClose={() => handleNodeSelect(null)}
               />
             ) : showTimeline && alertCount > 0 ? (
               <FaultTimeline

@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { HealthStatus, SparklineData, DiagramIconKind } from "@aud/types";
+import type { HealthStatus, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { D3Sparkline } from "./D3Sparkline";
@@ -17,6 +17,8 @@ export type LiveNodeData = {
   hasAlert: boolean;
   sparklines?: Record<string, SparklineData>;
   endpoint?: string;
+  subResources?: SubResource[];
+  onSubResourceSelect?: (sr: SubResource) => void;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -31,7 +33,7 @@ export function fmtMetric(val: number | null): string {
 }
 
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect } = data;
   const colors = nodeColor(health);
   const pulse = defaultTokens.animation.pulseFrequency[health];
 
@@ -117,6 +119,30 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
             <div key={key} className={styles.metricBadge}>
               <span className={styles.metricKey}>{key}</span>
               <span className={styles.metricVal}>{fmtMetric(val)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sub-resource chips (NIC bound to VM, Frontend IP in AppGW) */}
+      {subResources && subResources.length > 0 && (
+        <div className={styles.subResourceChips}>
+          {subResources.map((sr) => (
+            <div
+              key={sr.id}
+              className={styles.subResourceChip}
+              title={`${sr.label}${sr.endpoint ? `: ${sr.endpoint}` : ""}`}
+            >
+              <img
+                src={getAzureIconUrl(sr.kind === "nic" ? "nic" : "appGateway")}
+                alt={sr.kind}
+                width={12}
+                height={12}
+              />
+              <span className={styles.subResourceLabel}>{sr.label}</span>
+              {sr.endpoint && (
+                <span className={styles.subResourceEndpoint}>{sr.endpoint}</span>
+              )}
             </div>
           ))}
         </div>

@@ -358,6 +358,56 @@
   color: rgba(20, 21, 23, 0.82);
 }
 
+/* ── Sub-resource chips (NIC in VM, Frontend IP in AppGW) ── */
+
+.subResourceChips {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 0 8px 4px;
+}
+
+.subResourceChip {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 120, 212, 0.06);
+  border: 1px solid rgba(0, 120, 212, 0.12);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.subResourceChip:hover {
+  background: rgba(0, 120, 212, 0.14);
+  border-color: rgba(0, 120, 212, 0.28);
+}
+
+.subResourceChip img {
+  flex: none;
+  opacity: 0.7;
+}
+
+.subResourceLabel {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(20, 21, 23, 0.62);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subResourceEndpoint {
+  font-family: var(--font-geist-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(0, 120, 212, 0.55);
+}
+
 /* ── Group Node (Subscription / RG / VNet / Subnet containers) ── */
 
 .groupNode {
@@ -980,6 +1030,17 @@
   padding: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.subResourceDetailCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 120, 212, 0.04);
+  border: 1px solid rgba(0, 120, 212, 0.08);
+  margin-bottom: 4px;
 }
 
 /* ── Essentials Grid (Azure Portal style) ── */

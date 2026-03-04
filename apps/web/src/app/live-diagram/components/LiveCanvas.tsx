@@ -18,6 +18,7 @@ import type {
   DiagramSpec,
   LiveDiagramSnapshot,
   VisualizationMode,
+  SubResource,
 } from "@aud/types";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type GroupNodeData } from "./GroupNode";
@@ -32,6 +33,7 @@ type LiveCanvasProps = {
   spec: DiagramSpec;
   snapshot: LiveDiagramSnapshot | null;
   onNodeSelect: (nodeId: string | null) => void;
+  onSubResourceSelect?: (sr: SubResource) => void;
   vizMode: VisualizationMode;
   showNetworkFlow: boolean;
   showParticles: boolean;
@@ -51,6 +53,7 @@ function LiveCanvasInner({
   spec,
   snapshot,
   onNodeSelect,
+  onSubResourceSelect,
   vizMode,
   showNetworkFlow,
   showParticles,
@@ -155,6 +158,8 @@ function LiveCanvasInner({
           hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
           sparklines: live?.sparklines,
           endpoint: nodeSpec.endpoint,
+          subResources: nodeSpec.subResources,
+          onSubResourceSelect,
         },
       };
       if (nodeSpec.parentId) {
@@ -189,7 +194,7 @@ function LiveCanvasInner({
     }
 
     return result;
-  }, [spec.nodes, snapshot?.nodes]);
+  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
@@ -248,6 +253,8 @@ function LiveCanvasInner({
           hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
           sparklines: live?.sparklines,
           endpoint: nodeSpec.endpoint,
+          subResources: nodeSpec.subResources,
+          onSubResourceSelect,
         };
 
         if (existing) {
@@ -289,7 +296,7 @@ function LiveCanvasInner({
 
       return result;
     });
-  }, [spec.nodes, snapshot?.nodes, setNodes]);
+  }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect]);
 
   // ── Hover: set node className for CSS dimming ──
   useEffect(() => {
@@ -323,13 +330,23 @@ function LiveCanvasInner({
         if (!draggedId) return prev;
 
         const dragged = prev.find((n) => n.id === draggedId);
-        if (!dragged || dragged.type === "group") return prev; // Skip collision for group nodes
+        if (!dragged || dragged.type === "group") return prev;
+
+        // FIX: Skip collision detection for contained nodes (inside VNet/Subnet).
+        // These nodes use extent="parent" which already constrains them within
+        // their parent bounds. Running collision detection would use positions
+        // in different coordinate systems and push nodes outside their parent.
+        type AnyFlowNode = typeof dragged & { parentNode?: string };
+        if ((dragged as AnyFlowNode).parentNode) return prev;
 
         let { x, y } = dragged.position;
         let adjusted = false;
 
         for (const other of prev) {
-          if (other.id === draggedId || other.type === "group") continue; // Skip group nodes
+          if (other.id === draggedId || other.type === "group") continue;
+          // FIX: Only check collision against other top-level nodes
+          if ((other as AnyFlowNode).parentNode) continue;
+
           const dx = x - other.position.x;
           const dy = y - other.position.y;
           const overlapX = NODE_WIDTH + NODE_MIN_GAP - Math.abs(dx);

@@ -7,6 +7,7 @@ import type {
   LiveAlert,
   HealthStatus,
   SparklineData,
+  SubResource,
 } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
@@ -188,6 +189,42 @@ export function ResourceDetailPanel({
             </div>
           </div>
         </div>
+
+        {/* Sub-Resources (NICs in VM, Frontend IPs in AppGW) */}
+        {nodeSpec.subResources && nodeSpec.subResources.length > 0 && (
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionTitle}>Sub-Resources</div>
+            {nodeSpec.subResources.map((sr: SubResource) => (
+              <div key={sr.id} className={styles.subResourceDetailCard}>
+                <img
+                  src={getAzureIconUrl(sr.kind === "nic" ? "nic" : "appGateway")}
+                  alt={sr.kind}
+                  width={16}
+                  height={16}
+                  style={{ opacity: 0.7, flexShrink: 0 }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div className={styles.essentialsValue}>{sr.label}</div>
+                  <div className={styles.essentialsValueMono} style={{ fontSize: 11 }}>
+                    {RESOURCE_KIND_DISPLAY[sr.kind] ?? sr.kind}
+                  </div>
+                  {sr.endpoint && (
+                    <div className={styles.essentialsValueMono}>{sr.endpoint}</div>
+                  )}
+                  {sr.azureResourceId && (
+                    <div
+                      className={styles.essentialsValueMono}
+                      title={sr.azureResourceId}
+                      style={{ fontSize: 10 }}
+                    >
+                      {truncateId(sr.azureResourceId, 50)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Tags */}
         {tagEntries.length > 0 && (
