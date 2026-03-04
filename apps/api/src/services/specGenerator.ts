@@ -253,9 +253,9 @@ function truncateEndpoint(ep: string): string {
 // ── Layout constants ──
 
 const NODE_W = 220;
-const NODE_H = 80;
-const NODE_GAP = 16;
-const SUBNET_INNER_PAD = 30;
+const NODE_H = 100;
+const NODE_GAP = 20;
+const SUBNET_INNER_PAD = 44;
 const SUBNET_HEADER = 44;
 const VNET_PAD = 30;
 const VNET_HEADER = 48;
@@ -857,7 +857,7 @@ export async function generateDiagramSpec(
   }
 
   // Height of sub-resource chip row (NIC/Frontend IP embedded in parent)
-  const SUB_RESOURCE_CHIP_H = 22;
+  const SUB_RESOURCE_CHIP_H = 26;
 
   // Effective node height accounting for embedded sub-resources
   function effectiveNodeH(node: ArchitectureNode): number {

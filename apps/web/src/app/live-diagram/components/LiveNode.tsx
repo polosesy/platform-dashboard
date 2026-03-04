@@ -19,6 +19,8 @@ export type LiveNodeData = {
   endpoint?: string;
   subResources?: SubResource[];
   onSubResourceSelect?: (sr: SubResource) => void;
+  resourceKind?: string;
+  azureResourceId?: string;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -32,8 +34,22 @@ export function fmtMetric(val: number | null): string {
   return val % 1 === 0 ? String(val) : val.toFixed(1);
 }
 
+// Azure CAF resource type abbreviations
+const RESOURCE_TYPE_ABBR: Record<string, string> = {
+  vm: "VM", vmss: "VMSS", aks: "AKS", containerApp: "CA",
+  functionApp: "Func", appService: "App Svc", sql: "SQL",
+  storage: "Storage", redis: "Redis", cosmosDb: "Cosmos",
+  postgres: "PgSQL", keyVault: "KV", appGateway: "App GW",
+  lb: "LB", frontDoor: "AFD", trafficManager: "TM",
+  firewall: "FW", appInsights: "App Insights", logAnalytics: "Log Analytics",
+  nic: "NIC", dns: "DNS", privateEndpoint: "PE",
+  serviceBus: "Service Bus", eventHub: "Event Hub",
+};
+
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId } = data;
+  const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
+  const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
   const colors = nodeColor(health);
   const pulse = defaultTokens.animation.pulseFrequency[health];
 
@@ -102,10 +118,13 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
       )}
 
       {/* Node info */}
-      <div className={styles.nodeInfo}>
-        <div className={styles.nodeLabel} style={{ color: colors.text }}>{label}</div>
+      <div className={styles.nodeInfo} title={fullAzureName}>
+        <div className={styles.nodeLabel} style={{ color: colors.text }}>
+          {label}
+        </div>
         <div className={styles.nodeIcon}>
           <img src={getAzureIconUrl(icon)} alt={icon} width={20} height={20} />
+          {typeAbbr && <span className={styles.nodeTypeAbbr}>{typeAbbr}</span>}
         </div>
         {endpoint && (
           <div className={styles.nodeEndpoint} title={endpoint}>{endpoint}</div>

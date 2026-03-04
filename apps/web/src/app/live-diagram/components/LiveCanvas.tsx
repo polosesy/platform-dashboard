@@ -47,7 +47,7 @@ const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 /** Minimum gap between nodes to prevent overlap (px) */
 const NODE_MIN_GAP = 20;
 const NODE_WIDTH = 220;
-const NODE_HEIGHT = 80;
+const NODE_HEIGHT = 100;
 
 function LiveCanvasInner({
   spec,
@@ -161,6 +161,8 @@ function LiveCanvasInner({
           endpoint: nodeSpec.endpoint,
           subResources: nodeSpec.subResources,
           onSubResourceSelect,
+          resourceKind: nodeSpec.resourceKind,
+          azureResourceId: nodeSpec.azureResourceId,
         },
       };
       if (nodeSpec.parentId) {
@@ -262,6 +264,8 @@ function LiveCanvasInner({
           endpoint: nodeSpec.endpoint,
           subResources: nodeSpec.subResources,
           onSubResourceSelect,
+          resourceKind: nodeSpec.resourceKind,
+          azureResourceId: nodeSpec.azureResourceId,
         };
 
         if (existing) {

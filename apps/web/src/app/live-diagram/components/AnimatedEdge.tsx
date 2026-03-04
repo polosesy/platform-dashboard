@@ -71,6 +71,14 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const pFill = isHighlighted ? particleColor : strokeColor;
   const pOpacity = isHighlighted ? 0.92 : 0.7;
 
+  // Directional arrow particle config — always show at least 1 arrow on visible edges
+  const arrowH = Math.max(width * 0.8, 1.8);
+  const arrowW = Math.max(width * 2.5, 4);
+  const arrowPts = `${-arrowW},${-arrowH} ${arrowW},0 ${-arrowW},${arrowH}`;
+  const arrowCount = shouldShowParticles ? count : (!isDimmed ? 1 : 0);
+  const arrowDur = shouldShowParticles ? duration : 6;
+  const arrowOpacity = shouldShowParticles ? pOpacity : 0.4;
+
   const groupOpacity = isDimmed ? 0.10 : 1;
   const showGlow = statusColors.glow || (isHighlighted && !isDimmed);
 
@@ -102,23 +110,22 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
         }}
       />
 
-      {/* Inline SVG flow particles — ellipses moving along the edge via <animateMotion> */}
-      {shouldShowParticles && Array.from({ length: count }, (_, i) => (
-        <ellipse
-          key={`${id}-p-${i}`}
-          rx={pRx}
-          ry={pRy}
+      {/* Directional arrow particles flowing along the edge */}
+      {arrowCount > 0 && Array.from({ length: arrowCount }, (_, i) => (
+        <polygon
+          key={`${id}-arr-${i}`}
+          points={arrowPts}
           fill={pFill}
-          opacity={pOpacity}
+          opacity={arrowOpacity}
         >
           <animateMotion
-            dur={`${duration}s`}
+            dur={`${arrowDur}s`}
             repeatCount="indefinite"
             rotate="auto"
             path={edgePath}
-            begin={`-${i * (duration / count)}s`}
+            begin={`-${i * (arrowDur / arrowCount)}s`}
           />
-        </ellipse>
+        </polygon>
       ))}
 
       {/* Edge label */}
