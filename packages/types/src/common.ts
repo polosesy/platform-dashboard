@@ -8,3 +8,14 @@ export type AzureSubscriptionsResponse = {
   subscriptions: AzureSubscriptionOption[];
   note?: string;
 };
+
+export type AzureTenantOption = {
+  tenantId: string;
+  displayName?: string;
+};
+
+export type AzureTenantsResponse = {
+  generatedAt: string;
+  tenants: AzureTenantOption[];
+  note?: string;
+};

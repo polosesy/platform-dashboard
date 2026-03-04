@@ -4,6 +4,7 @@ import type {
   LiveNode,
   LiveEdge,
   LiveAlert,
+  AlertRuleInfo,
   EdgeTrafficLevel,
   SubResource,
 } from "@aud/types";
@@ -554,6 +555,65 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
     });
   }
 
+  // ── Mock Alert Rules (configured rule definitions) ──
+  const alertRules: AlertRuleInfo[] = [
+    {
+      id: "/subscriptions/mock/providers/Microsoft.Insights/metricAlerts/aks-cpu-alert",
+      name: "AKS CPU > 80%",
+      severity: 2,
+      signalType: "Metric",
+      condition: "Percentage CPU >= 80",
+      targetResourceId: "/subscriptions/mock/.../aks-prod",
+      targetResourceType: "Microsoft.ContainerService/managedClusters",
+      enabled: true,
+      affectedNodeIds: ["aks"],
+    },
+    {
+      id: "/subscriptions/mock/providers/Microsoft.AlertsManagement/smartDetectorAlertRules/failure-anomalies",
+      name: "Failure Anomalies - appinsights-prod",
+      severity: 3,
+      signalType: "Smart Detection",
+      condition: "Detects an unusual rise in the rate of failed HTTP requests or dependency calls",
+      targetResourceId: "/subscriptions/mock/.../appinsights-prod",
+      targetResourceType: "Microsoft.Insights/components",
+      enabled: true,
+      affectedNodeIds: ["aks"],
+    },
+    {
+      id: "/subscriptions/mock/providers/Microsoft.Insights/metricAlerts/sql-dtu-alert",
+      name: "SQL DTU > 90%",
+      severity: 1,
+      signalType: "Metric",
+      condition: "dtu_consumption_percent >= 90",
+      targetResourceId: "/subscriptions/mock/.../sql-prod",
+      targetResourceType: "Microsoft.Sql/servers/databases",
+      enabled: true,
+      affectedNodeIds: ["sql"],
+    },
+    {
+      id: "/subscriptions/mock/providers/Microsoft.Insights/scheduledQueryRules/redis-conn-alert",
+      name: "Redis connection spike",
+      severity: 3,
+      signalType: "Log",
+      condition: "connectedclients >= 500",
+      targetResourceId: "/subscriptions/mock/.../redis-prod",
+      targetResourceType: "Microsoft.Cache/Redis",
+      enabled: true,
+      affectedNodeIds: ["redis"],
+    },
+    {
+      id: "/subscriptions/mock/providers/Microsoft.Insights/metricAlerts/appgw-unhealthy",
+      name: "AppGW Unhealthy Backend",
+      severity: 2,
+      signalType: "Metric",
+      condition: "UnhealthyHostCount >= 1",
+      targetResourceId: "/subscriptions/mock/.../appgw-prod",
+      targetResourceType: "Microsoft.Network/applicationGateways",
+      enabled: true,
+      affectedNodeIds: ["appgw"],
+    },
+  ];
+
   return {
     diagramId: "prod-infra",
     generatedAt: new Date().toISOString(),
@@ -561,6 +621,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
     nodes,
     edges,
     alerts,
+    alertRules,
     topology: {
       nodeCount: nodes.length,
       edgeCount: edges.length,

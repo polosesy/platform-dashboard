@@ -3,7 +3,7 @@
 import "reactflow/dist/style.css";
 
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, DiagramSpec, LiveDiagramSnapshot } from "@aud/types";
+import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
@@ -69,15 +69,41 @@ export default function LiveDiagramPage() {
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
-  // Generate from Azure
+  // Tenant & Subscription context
+  const [tenants, setTenants] = useState<AzureTenantOption[]>([]);
+  const [tenantId, setTenantId] = useState("");
   const [subscriptions, setSubscriptions] = useState<AzureSubscriptionOption[]>([]);
   const [subscriptionId, setSubscriptionId] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // Fetch tenants on mount
   useEffect(() => {
     let cancelled = false;
-    // Gracefully handle MSAL token failure — still fetch subscriptions without auth
+    getApiToken()
+      .catch(() => null)
+      .then((token) =>
+        fetchJsonWithBearer<AzureTenantsResponse>(
+          `${apiBaseUrl()}/api/azure/tenants`,
+          token,
+        ),
+      )
+      .then((resp) => {
+        if (cancelled) return;
+        const list = resp.tenants ?? [];
+        setTenants(list);
+        setTenantId((prev) => prev || list[0]?.tenantId || "");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTenants([]);
+      });
+    return () => { cancelled = true; };
+  }, [getApiToken]);
+
+  // Fetch subscriptions (re-fetch when tenantId changes)
+  useEffect(() => {
+    let cancelled = false;
     getApiToken()
       .catch(() => null)
       .then((token) =>
@@ -97,7 +123,7 @@ export default function LiveDiagramPage() {
         setSubscriptions([]);
       });
     return () => { cancelled = true; };
-  }, [getApiToken]);
+  }, [getApiToken, tenantId]);
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -251,33 +277,55 @@ export default function LiveDiagramPage() {
           <button className={styles.refreshBtn} onClick={refresh} type="button">
             {t("live.refresh")}
           </button>
-
-          {/* Generate from Azure */}
-          <div className={styles.generateGroup}>
-            <select
-              className={styles.select}
-              value={subscriptionId}
-              onChange={(e) => setSubscriptionId(e.target.value)}
-              disabled={subscriptions.length === 0}
-              aria-label={t("live.subscription")}
-            >
-              {subscriptions.length === 0 ? <option value="">{t("live.subscription")}</option> : null}
-              {subscriptions.map((s) => (
-                <option key={s.subscriptionId} value={s.subscriptionId}>
-                  {s.name ? `${s.name}` : s.subscriptionId}
-                </option>
-              ))}
-            </select>
-            <button
-              className={styles.generateBtn}
-              onClick={handleGenerate}
-              disabled={generating}
-              type="button"
-            >
-              {generating ? t("live.generating") : t("live.generateFromAzure")}
-            </button>
-          </div>
         </div>
+      </div>
+
+      {/* Tenant & Subscription Selector Bar */}
+      <div className={styles.selectorBar}>
+        <div className={styles.selectorGroup}>
+          <span className={styles.selectorLabel}>{t("live.tenant")}</span>
+          <select
+            className={styles.select}
+            value={tenantId}
+            onChange={(e) => setTenantId(e.target.value)}
+            disabled={tenants.length === 0}
+            aria-label={t("live.tenant")}
+          >
+            {tenants.length === 0 ? <option value="">{t("live.selectTenant")}</option> : null}
+            {tenants.map((tn) => (
+              <option key={tn.tenantId} value={tn.tenantId}>
+                {tn.displayName ?? tn.tenantId}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.selectorDivider} />
+        <div className={styles.selectorGroup}>
+          <span className={styles.selectorLabel}>{t("live.subscription")}</span>
+          <select
+            className={styles.select}
+            value={subscriptionId}
+            onChange={(e) => setSubscriptionId(e.target.value)}
+            disabled={subscriptions.length === 0}
+            aria-label={t("live.subscription")}
+          >
+            {subscriptions.length === 0 ? <option value="">{t("live.subscription")}</option> : null}
+            {subscriptions.map((s) => (
+              <option key={s.subscriptionId} value={s.subscriptionId}>
+                {s.name ?? s.subscriptionId}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.selectorDivider} />
+        <button
+          className={styles.generateBtn}
+          onClick={handleGenerate}
+          disabled={generating}
+          type="button"
+        >
+          {generating ? t("live.generating") : t("live.generateFromAzure")}
+        </button>
       </div>
 
       {(error || generateError) && (
@@ -393,6 +441,7 @@ export default function LiveDiagramPage() {
                 nodeSpec={spec.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 alerts={snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []}
+                alertRules={snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []}
                 connectedEdges={connectedEdges}
                 onClose={() => handleNodeSelect(null)}
               />

@@ -65,6 +65,16 @@ const T: Translations = {
   "detail.noMetrics": { ko: "메트릭 없음", en: "No metrics" },
   "detail.essentials": { ko: "필수 정보", en: "Essentials" },
   "detail.status": { ko: "상태", en: "Status" },
+  "detail.alertCauses": { ko: "원인 후보", en: "Root Causes" },
+  "detail.alertAffects": { ko: "영향", en: "Affects" },
+  "detail.alertNodes": { ko: "노드", en: "nodes" },
+  "detail.alertEdges": { ko: "엣지", en: "edges" },
+  "detail.alertRules": { ko: "경고 규칙", en: "Alert Rules" },
+  "detail.disabled": { ko: "비활성", en: "Disabled" },
+
+  // ── Tenant / Subscription Selector ──
+  "live.tenant": { ko: "테넌트", en: "Tenant" },
+  "live.selectTenant": { ko: "테넌트 선택", en: "Select Tenant" },
 
   // ── Common ──
   "common.language": { ko: "한국어", en: "English" },

@@ -5,6 +5,7 @@ import type {
   LiveNode,
   LiveEdge,
   LiveAlert,
+  AlertRuleInfo,
   SparklineData,
   FaultImpact,
   HeatmapCell,
@@ -14,6 +15,7 @@ import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { collectBatchMetrics, collectBatchEdgeMetrics } from "./metricsCollector";
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector";
 import { collectDiagramAlerts } from "./alertsCollector";
+import { collectAlertRules } from "./alertRulesCollector";
 import { collectTrafficAnalytics, type EdgeTrafficData } from "./trafficAnalyticsCollector";
 import { collectNsgFlowLogs, type NsgFlowEdgeData } from "./nsgFlowLogCollector";
 import { collectAppInsightsDependencies, type DependencyEdgeData } from "./appInsightsDependencyCollector";
@@ -172,11 +174,17 @@ export async function buildLiveSnapshot(
 
   // ── Collect Azure Monitor Alerts ──
   let liveAlerts: LiveAlert[] = [];
+  let alertRules: AlertRuleInfo[] = [];
 
   if (azureEnabled && hasBearerToken) {
     const edgeMap = new Map(spec.edges.map((e) => [e.id, { source: e.source, target: e.target }]));
     try {
       liveAlerts = await collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap);
+    } catch {
+      // Non-critical
+    }
+    try {
+      alertRules = await collectAlertRules(env, bearerToken!, spec.nodes);
     } catch {
       // Non-critical
     }
@@ -343,6 +351,7 @@ export async function buildLiveSnapshot(
     nodes: liveNodes,
     edges: liveEdges,
     alerts: liveAlerts,
+    alertRules: alertRules.length > 0 ? alertRules : undefined,
     topology: {
       nodeCount: resourceNodeSpecs.length,
       edgeCount: spec.edges.length,

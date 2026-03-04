@@ -6,6 +6,7 @@ import type { HealthStatus, SparklineData, DiagramIconKind, SubResource } from "
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { D3Sparkline } from "./D3Sparkline";
+import { RESOURCE_KIND_DISPLAY } from "./ResourceDetailPanel";
 import styles from "../styles.module.css";
 
 export type LiveNodeData = {
@@ -124,7 +125,11 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
         </div>
         <div className={styles.nodeIcon}>
           <img src={getAzureIconUrl(icon)} alt={icon} width={20} height={20} />
-          {typeAbbr && <span className={styles.nodeTypeAbbr}>{typeAbbr}</span>}
+          {typeAbbr && (
+            <span className={styles.nodeTypeAbbr} title={RESOURCE_KIND_DISPLAY[resourceKind!] ?? resourceKind}>
+              {typeAbbr}
+            </span>
+          )}
         </div>
         {endpoint && (
           <div className={styles.nodeEndpoint} title={endpoint}>{endpoint}</div>

@@ -1001,6 +1001,149 @@
   line-height: 1.4;
 }
 
+.detailAlertTime {
+  margin-left: auto;
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.detailAlertCauses {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(20, 21, 23, 0.02);
+}
+
+.detailAlertCausesTitle {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.detailAlertCause {
+  font-size: 11px;
+  color: rgba(20, 21, 23, 0.65);
+  line-height: 1.3;
+  padding-left: 8px;
+}
+
+.detailAlertCause::before {
+  content: "\00B7  ";
+  font-weight: 800;
+}
+
+.detailAlertAffects {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Alert Rules (configured rule definitions) ── */
+
+.detailAlertRuleCard {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 3px;
+}
+
+.detailAlertRuleHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detailAlertRuleSeverity {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.detailAlertRuleSignal {
+  margin-left: auto;
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.detailAlertRuleDisabled {
+  font-size: 9px;
+  font-weight: 700;
+  color: #e74c3c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detailAlertRuleName {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detailAlertRuleCondition {
+  font-family: var(--font-geist-mono);
+  font-size: 11px;
+  color: rgba(20, 21, 23, 0.65);
+  line-height: 1.3;
+  word-break: break-all;
+}
+
+.detailAlertRuleTarget {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ── Tenant/Subscription Selector Bar ── */
+
+.selectorBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.selectorGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.selectorLabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.selectorDivider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex: none;
+}
+
 .detailEdgeItem {
   display: flex;
   align-items: center;

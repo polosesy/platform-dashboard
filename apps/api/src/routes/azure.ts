@@ -1,9 +1,24 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env";
-import type { AzureSubscriptionsResponse } from "@aud/types";
+import type { AzureSubscriptionsResponse, AzureTenantsResponse } from "@aud/types";
 import { tryListAzureSubscriptionsFromAzure } from "../services/azure";
 
 export function registerAzureRoutes(router: Router, env: Env) {
+  // ── Tenants ──
+  router.get("/api/azure/tenants", (_req: Request, res: Response) => {
+    const tenantId = env.AZURE_AD_TENANT_ID;
+    const tenants = tenantId
+      ? [{ tenantId, displayName: tenantId }]
+      : [];
+    const resp: AzureTenantsResponse = {
+      generatedAt: new Date().toISOString(),
+      tenants,
+      note: tenants.length === 0 ? "no tenant configured" : undefined,
+    };
+    res.json(resp);
+  });
+
+  // ── Subscriptions ──
   router.get("/api/azure/subscriptions", async (req: Request, res: Response) => {
     const allowRaw = env.AZURE_SUBSCRIPTION_IDS ?? "";
     const allowList = allowRaw

@@ -5,6 +5,7 @@ import type {
   LiveNode,
   LiveEdge,
   LiveAlert,
+  AlertRuleInfo,
   HealthStatus,
   SparklineData,
   SubResource,
@@ -27,6 +28,7 @@ type ResourceDetailPanelProps = {
   nodeSpec: DiagramNodeSpec | null;
   liveNode: LiveNode | null;
   alerts: LiveAlert[];
+  alertRules: AlertRuleInfo[];
   connectedEdges: ConnectedEdge[];
   onClose: () => void;
 };
@@ -39,7 +41,7 @@ const healthLabel: Record<HealthStatus, string> = {
 };
 
 /** Map internal resource kind to display name */
-const RESOURCE_KIND_DISPLAY: Record<string, string> = {
+export const RESOURCE_KIND_DISPLAY: Record<string, string> = {
   vnet: "Virtual Network",
   subnet: "Subnet",
   nic: "Network Interface",
@@ -72,6 +74,17 @@ function truncateId(id: string, maxLen = 60): string {
   return id.slice(0, maxLen) + "...";
 }
 
+function fmtRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const secs = Math.max(0, Math.floor(diff / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 function fmtThroughput(bps: number | undefined): string {
   if (bps == null) return "-";
   if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} MB/s`;
@@ -79,14 +92,33 @@ function fmtThroughput(bps: number | undefined): string {
   return `${bps.toFixed(0)} B/s`;
 }
 
+const SEVERITY_LABELS: Record<number, string> = {
+  0: "Sev0 (Critical)",
+  1: "Sev1 (Error)",
+  2: "Sev2 (Warning)",
+  3: "Sev3 (Informational)",
+  4: "Sev4 (Verbose)",
+};
+
+const SEVERITY_COLORS: Record<number, string> = {
+  0: "#e74c3c",
+  1: "#e67e22",
+  2: "#f1c40f",
+  3: "#3498db",
+  4: "#95a5a6",
+};
+
 export function ResourceDetailPanel({
   nodeSpec,
   liveNode,
   alerts,
+  alertRules,
   connectedEdges,
   onClose,
 }: ResourceDetailPanelProps) {
   const { t } = useI18n();
+  const [alertsOpen, setAlertsOpen] = useState(true);
+  const [alertRulesOpen, setAlertRulesOpen] = useState(true);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
 
   if (!nodeSpec) return null;
@@ -274,29 +306,104 @@ export function ResourceDetailPanel({
           </div>
         )}
 
-        {/* Alerts */}
+        {/* Alerts (collapsible) */}
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>
-            {t("detail.alerts")} {alerts.length > 0 && `(${alerts.length})`}
-          </div>
-          {alerts.length === 0 ? (
-            <div className={styles.detailEmpty}>{t("detail.noAlerts")}</div>
-          ) : (
-            alerts.map((alert) => (
-              <div key={alert.id} className={styles.detailAlertCard}>
-                <div className={styles.detailAlertHeader}>
-                  <div
-                    className={styles.detailHealthDot}
-                    style={{ background: defaultTokens.colors.alert[alert.severity] }}
-                  />
-                  <span className={styles.detailAlertSeverity}>{alert.severity}</span>
+          <button
+            className={styles.detailSectionToggle}
+            onClick={() => setAlertsOpen((prev) => !prev)}
+            type="button"
+          >
+            <span>
+              {t("detail.alerts")} ({alerts.length})
+            </span>
+            <span className={styles.toggleChevron}>
+              {alertsOpen ? "\u25B2" : "\u25BC"}
+            </span>
+          </button>
+          {alertsOpen && (
+            alerts.length === 0 ? (
+              <div className={styles.detailEmpty}>{t("detail.noAlerts")}</div>
+            ) : (
+              alerts.map((alert) => (
+                <div key={alert.id} className={styles.detailAlertCard}>
+                  <div className={styles.detailAlertHeader}>
+                    <div
+                      className={styles.detailHealthDot}
+                      style={{ background: defaultTokens.colors.alert[alert.severity] }}
+                    />
+                    <span className={styles.detailAlertSeverity}>{alert.severity}</span>
+                    <span className={styles.detailAlertTime}>
+                      {fmtRelativeTime(alert.firedAt)}
+                    </span>
+                  </div>
+                  <div className={styles.detailAlertTitle}>{alert.title}</div>
+                  <div className={styles.detailAlertSummary}>{alert.summary}</div>
+                  {alert.rootCauseCandidates && alert.rootCauseCandidates.length > 0 && (
+                    <div className={styles.detailAlertCauses}>
+                      <div className={styles.detailAlertCausesTitle}>{t("detail.alertCauses")}</div>
+                      {alert.rootCauseCandidates.map((cause, i) => (
+                        <div key={i} className={styles.detailAlertCause}>{cause}</div>
+                      ))}
+                    </div>
+                  )}
+                  {(alert.affectedNodeIds.length > 0 || alert.affectedEdgeIds.length > 0) && (
+                    <div className={styles.detailAlertAffects}>
+                      {t("detail.alertAffects")}:{" "}
+                      {alert.affectedNodeIds.length > 0 && `${alert.affectedNodeIds.length} ${t("detail.alertNodes")}`}
+                      {alert.affectedNodeIds.length > 0 && alert.affectedEdgeIds.length > 0 && " · "}
+                      {alert.affectedEdgeIds.length > 0 && `${alert.affectedEdgeIds.length} ${t("detail.alertEdges")}`}
+                    </div>
+                  )}
                 </div>
-                <div className={styles.detailAlertTitle}>{alert.title}</div>
-                <div className={styles.detailAlertSummary}>{alert.summary}</div>
-              </div>
-            ))
+              ))
+            )
           )}
         </div>
+
+        {/* Alert Rules (collapsible) */}
+        {alertRules.length > 0 && (
+          <div className={styles.detailSection}>
+            <button
+              className={styles.detailSectionToggle}
+              onClick={() => setAlertRulesOpen((prev) => !prev)}
+              type="button"
+            >
+              <span>
+                {t("detail.alertRules")} ({alertRules.length})
+              </span>
+              <span className={styles.toggleChevron}>
+                {alertRulesOpen ? "\u25B2" : "\u25BC"}
+              </span>
+            </button>
+            {alertRulesOpen &&
+              alertRules.map((rule) => (
+                <div key={rule.id} className={styles.detailAlertRuleCard}>
+                  <div className={styles.detailAlertRuleHeader}>
+                    <div
+                      className={styles.detailHealthDot}
+                      style={{ background: SEVERITY_COLORS[rule.severity] ?? "#95a5a6" }}
+                    />
+                    <span className={styles.detailAlertRuleSeverity}>
+                      {SEVERITY_LABELS[rule.severity] ?? `Sev${rule.severity}`}
+                    </span>
+                    <span className={styles.detailAlertRuleSignal}>{rule.signalType}</span>
+                    {!rule.enabled && (
+                      <span className={styles.detailAlertRuleDisabled}>{t("detail.disabled")}</span>
+                    )}
+                  </div>
+                  <div className={styles.detailAlertRuleName}>{rule.name}</div>
+                  {rule.condition && (
+                    <div className={styles.detailAlertRuleCondition}>{rule.condition}</div>
+                  )}
+                  {rule.targetResourceType && (
+                    <div className={styles.detailAlertRuleTarget}>
+                      {rule.targetResourceType.split("/").pop()}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        )}
 
         {/* Connections (collapsible) */}
         {connectedEdges.length > 0 && (

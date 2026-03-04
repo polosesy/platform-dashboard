@@ -188,6 +188,7 @@ export type LiveDiagramSnapshot = {
   nodes: LiveNode[];
   edges: LiveEdge[];
   alerts: LiveAlert[];
+  alertRules?: AlertRuleInfo[];
   topology?: {
     nodeCount: number;
     edgeCount: number;
@@ -231,6 +232,18 @@ export type LiveAlert = {
   rootCauseCandidates?: string[];
   affectedNodeIds: string[];
   affectedEdgeIds: string[];
+};
+
+export type AlertRuleInfo = {
+  id: string;
+  name: string;
+  severity: number; // Azure Sev0–Sev4
+  signalType: string; // "Metric" | "Log" | "Activity Log" | "Smart Detection" | "Advisor"
+  condition?: string; // human-readable condition string
+  targetResourceId: string;
+  targetResourceType?: string;
+  enabled: boolean;
+  affectedNodeIds: string[];
 };
 
 // ────────────────────────────────────────────
