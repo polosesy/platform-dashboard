@@ -10,7 +10,7 @@ import type {
   ServiceHealthEventType,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcher } from "../infra/azureClientFactory";
+import { getArmFetcherAuto } from "../infra/azureClientFactory";
 
 // ────────────────────────────────────────────
 // Azure Resource Health — Availability Status
@@ -24,50 +24,112 @@ function parseSubscriptionIds(raw: string): string[] {
 
 type ArmAvailabilityStatus = {
   id?: string;
-  name?: string;
+  location?: string;
   properties?: {
     availabilityState?: string;
     summary?: string;
+    reasonType?: string;
+    reasonChronicity?: string;
     occurredTime?: string;
+    reportedTime?: string;
   };
 };
 
+type ArmAvailabilityStatusPage = {
+  value?: ArmAvailabilityStatus[];
+  nextLink?: string;
+};
+
+/**
+ * Fetch all availability statuses for a subscription, following nextLink pagination.
+ */
+async function fetchAllAvailabilityStatuses(
+  fetcher: { fetchJson: <T>(url: string) => Promise<T> },
+  subId: string,
+): Promise<ArmAvailabilityStatus[]> {
+  const all: ArmAvailabilityStatus[] = [];
+  let url: string | undefined =
+    `https://management.azure.com/subscriptions/${subId}/providers/Microsoft.ResourceHealth/availabilityStatuses?api-version=2024-02-01`;
+
+  while (url) {
+    const currentUrl: string = url;
+    const page: ArmAvailabilityStatusPage = await fetcher.fetchJson<ArmAvailabilityStatusPage>(currentUrl);
+    all.push(...(page.value ?? []));
+    url = page.nextLink;
+  }
+  return all;
+}
+
+function mapArmItem(item: ArmAvailabilityStatus, subId: string): ResourceHealthStatus {
+  const rawId = item.id ?? "";
+  const resourceId = rawId.replace(
+    /\/providers\/Microsoft\.ResourceHealth\/availabilityStatuses\/current$/i,
+    "",
+  );
+  // Extract subscription ID from resource ID if not provided
+  const subMatch = resourceId.match(/subscriptions\/([^/]+)/i);
+  const resolvedSubId = subMatch?.[1] ?? subId;
+
+  const parts = parseResourceId(resourceId);
+  const p = item.properties ?? {};
+  return {
+    resourceId,
+    resourceName: parts.name,
+    resourceType: parts.type,
+    resourceGroup: parts.resourceGroup,
+    subscriptionId: resolvedSubId,
+    location: item.location,
+    availabilityState: mapAvailability(p.availabilityState),
+    summary: p.summary,
+    reasonType: p.reasonType,
+    reasonChronicity: p.reasonChronicity,
+    occurredTime: p.occurredTime,
+    reportedTime: p.reportedTime,
+  };
+}
+
 /**
  * Fetch resource health summary from Azure Resource Health API.
- * Lists availability statuses for all resources in the subscription.
+ * Uses OBO if bearer token available, falls back to SP credentials.
+ * Supports multiple subscriptions and full pagination.
  */
 export async function tryGetHealthSummary(
   env: Env,
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<HealthSummary | null> {
-  if (!bearerToken || !env.AZURE_SUBSCRIPTION_IDS) return null;
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS)[0];
-  if (!subId) return null;
+  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
 
-  const prefix = bearerKeyPrefix(bearerToken);
-  const key = `${prefix}:health:${subId}`;
+  const allSubIds = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
+  // If a specific subscriptionId is requested, use only that one; otherwise all
+  const subIds = opts?.subscriptionId
+    ? [opts.subscriptionId]
+    : allSubIds;
+  if (subIds.length === 0) return null;
+
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const key = `${prefix}:health:${subIds.join(",")}`;
   const cached = healthCache.get(key);
   if (cached) return cached;
 
-  const fetcher = await getArmFetcher(env, bearerToken);
-  const resp = await fetcher.fetchJson<{ value?: ArmAvailabilityStatus[] }>(
-    `https://management.azure.com/subscriptions/${subId}/providers/Microsoft.ResourceHealth/availabilityStatuses?api-version=2024-02-01&$top=200`,
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
+
+  // Aggregate across all subscriptions in parallel
+  const perSubResults = await Promise.allSettled(
+    subIds.map((subId) => fetchAllAvailabilityStatuses(fetcher, subId)),
   );
 
-  const resources: ResourceHealthStatus[] = (resp.value ?? []).map((item) => {
-    const resourceId = item.id?.replace(/\/providers\/Microsoft\.ResourceHealth\/availabilityStatuses\/current$/i, "") ?? "";
-    const parts = parseResourceId(resourceId);
-    return {
-      resourceId,
-      resourceName: parts.name,
-      resourceType: parts.type,
-      resourceGroup: parts.resourceGroup,
-      availabilityState: mapAvailability(item.properties?.availabilityState),
-      summary: item.properties?.summary,
-      occurredTime: item.properties?.occurredTime,
-    };
-  });
+  const resources: ResourceHealthStatus[] = [];
+  for (let i = 0; i < perSubResults.length; i++) {
+    const result = perSubResults[i];
+    if (result.status === "fulfilled") {
+      for (const item of result.value) {
+        resources.push(mapArmItem(item, subIds[i]!));
+      }
+    } else {
+      console.warn(`[health] subscription ${subIds[i]} failed:`, result.reason);
+    }
+  }
 
   const summary: HealthSummary = {
     generatedAt: new Date().toISOString(),
@@ -76,6 +138,7 @@ export async function tryGetHealthSummary(
     unavailable: resources.filter((r) => r.availabilityState === "Unavailable").length,
     unknown: resources.filter((r) => r.availabilityState === "Unknown").length,
     resources,
+    subscriptions: subIds,
   };
 
   healthCache.set(key, summary, env.AZURE_HEALTH_CACHE_TTL_MS);
@@ -268,16 +331,16 @@ export async function tryGetServiceHealthEvents(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<ServiceHealthEventsResponse | null> {
-  if (!bearerToken || !env.AZURE_SUBSCRIPTION_IDS) return null;
+  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
   const subId = opts?.subscriptionId ?? parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS)[0];
   if (!subId) return null;
 
-  const prefix = bearerKeyPrefix(bearerToken);
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
   const key = `${prefix}:health:events:${subId}`;
   const cached = eventsCache.get(key);
   if (cached) return cached;
 
-  const fetcher = await getArmFetcher(env, bearerToken);
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
   const resp = await fetcher.fetchJson<{ value?: ArmHealthEvent[] }>(
     `https://management.azure.com/subscriptions/${subId}/providers/Microsoft.ResourceHealth/events?api-version=2022-10-01`,
   );

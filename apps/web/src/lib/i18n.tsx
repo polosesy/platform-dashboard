@@ -132,6 +132,8 @@ const T: Translations = {
   "health.resources": { ko: "리소스", en: "Resources" },
   "health.healthDistribution": { ko: "상태 분포", en: "Health Distribution" },
   "health.filterAll": { ko: "전체", en: "All" },
+  "health.allSubscriptions": { ko: "모든 구독", en: "All Subscriptions" },
+  "health.occurred": { ko: "발생", en: "Occurred" },
 
   // Tab 3 — Service Events
   "health.noEvents": { ko: "활성 이벤트 없음", en: "No active events" },

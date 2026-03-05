@@ -3,9 +3,14 @@ export type ResourceHealthStatus = {
   resourceName: string;
   resourceType: string;
   resourceGroup: string;
+  subscriptionId: string;
+  location?: string;
   availabilityState: "Available" | "Degraded" | "Unavailable" | "Unknown";
   summary?: string;
+  reasonType?: string;
+  reasonChronicity?: string;
   occurredTime?: string;
+  reportedTime?: string;
 };
 
 export type HealthSummary = {
@@ -15,6 +20,7 @@ export type HealthSummary = {
   unavailable: number;
   unknown: number;
   resources: ResourceHealthStatus[];
+  subscriptions: string[];
   note?: string;
 };
 
