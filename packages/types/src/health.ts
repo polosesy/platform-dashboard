@@ -80,4 +80,24 @@ export type ServiceHealthEventsResponse = {
   };
   events: ServiceHealthEvent[];
   note?: string;
+  tenantId?: string;
+};
+
+// ── Regional Status (user's deployed regions × service health) ──
+
+export type RegionHealthStatus = {
+  name: string;         // Azure internal name e.g. "eastus", "koreacentral"
+  displayName: string;  // Human-readable e.g. "East US", "Korea Central"
+  hasActiveIssues: boolean;
+  serviceIssueCount: number;
+  maintenanceCount: number;
+  affectedServices: string[];
+  events: ServiceHealthEvent[];
+};
+
+export type RegionalStatusResponse = {
+  generatedAt: string;
+  regions: RegionHealthStatus[];
+  totalAffected: number;
+  note?: string;
 };

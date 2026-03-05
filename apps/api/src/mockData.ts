@@ -5,6 +5,7 @@ import type {
   HealthSummary,
   GlobalStatusResponse,
   ServiceHealthEventsResponse,
+  RegionalStatusResponse,
 } from "@aud/types";
 
 export const mockArchitectureGraph: ArchitectureGraph = {
@@ -298,4 +299,81 @@ export const mockServiceHealthEvents: ServiceHealthEventsResponse = {
     },
   ],
   note: "mock data",
+  tenantId: "00000000-0000-0000-0000-000000000001",
+};
+
+// ---------- Health — Regional Status Mock ----------
+// Matches mock resources: koreacentral, eastus2, westeurope, germanywestcentral
+
+export const mockRegionalStatus: RegionalStatusResponse = {
+  generatedAt: new Date().toISOString(),
+  totalAffected: 2,
+  regions: [
+    {
+      name: "koreacentral",
+      displayName: "Korea Central",
+      hasActiveIssues: true,
+      serviceIssueCount: 1,
+      maintenanceCount: 0,
+      affectedServices: ["Azure Kubernetes Service"],
+      events: [
+        {
+          id: "mock-evt-001",
+          eventType: "ServiceIssue",
+          title: "Azure Kubernetes Service — Connectivity Issue in Korea Central",
+          summary: "Some customers using AKS in Korea Central may experience intermittent connectivity issues.",
+          status: "Active",
+          level: "Error",
+          impactStartTime: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+          lastUpdateTime: new Date(Date.now() - 30 * 60_000).toISOString(),
+          affectedServices: ["Azure Kubernetes Service"],
+          affectedRegions: ["Korea Central"],
+          isResolved: false,
+        },
+      ],
+    },
+    {
+      name: "eastus2",
+      displayName: "East US 2",
+      hasActiveIssues: true,
+      serviceIssueCount: 0,
+      maintenanceCount: 1,
+      affectedServices: ["Azure SQL Database"],
+      events: [
+        {
+          id: "mock-evt-002",
+          eventType: "PlannedMaintenance",
+          title: "Azure SQL Database — Planned Maintenance Window",
+          summary: "Routine maintenance for Azure SQL Database in East US 2.",
+          status: "Active",
+          level: "Informational",
+          impactStartTime: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+          impactMitigationTime: new Date(Date.now() + 26 * 3_600_000).toISOString(),
+          lastUpdateTime: new Date(Date.now() - 12 * 3_600_000).toISOString(),
+          affectedServices: ["Azure SQL Database"],
+          affectedRegions: ["East US 2"],
+          isResolved: false,
+        },
+      ],
+    },
+    {
+      name: "westeurope",
+      displayName: "West Europe",
+      hasActiveIssues: false,
+      serviceIssueCount: 0,
+      maintenanceCount: 0,
+      affectedServices: [],
+      events: [],
+    },
+    {
+      name: "germanywestcentral",
+      displayName: "Germany West Central",
+      hasActiveIssues: false,
+      serviceIssueCount: 0,
+      maintenanceCount: 0,
+      affectedServices: [],
+      events: [],
+    },
+  ],
+  note: "mock data — configure AZURE_AD_* and AZURE_SUBSCRIPTION_IDS for real data",
 };

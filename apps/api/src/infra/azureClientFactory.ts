@@ -96,15 +96,25 @@ export function getSPCredential(env: Env): ClientSecretCredential {
 
 // ── Internal helpers ──
 
+/** Default request timeout for Azure ARM / Log Analytics calls (ms). */
+const ARM_FETCH_TIMEOUT_MS = 15_000;
+
 function buildFetcher(armToken: string): ArmFetcher {
   return {
     armToken,
     async fetchJson<T>(url: string): Promise<T> {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${armToken}`, "Content-Type": "application/json" },
-      });
-      if (!res.ok) throw new Error(`ARM ${res.status}: ${await res.text()}`);
-      return res.json() as Promise<T>;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ARM_FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${armToken}`, "Content-Type": "application/json" },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`ARM ${res.status}: ${await res.text()}`);
+        return res.json() as Promise<T>;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }
@@ -113,14 +123,21 @@ function buildLogFetcher(token: string): LogAnalyticsFetcher {
   return {
     token,
     async query(workspaceId: string, kql: string): Promise<unknown> {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ARM_FETCH_TIMEOUT_MS);
       const url = `https://api.loganalytics.io/v1/workspaces/${workspaceId}/query`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: kql }),
-      });
-      if (!res.ok) throw new Error(`LogAnalytics ${res.status}: ${await res.text()}`);
-      return res.json();
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ query: kql }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`LogAnalytics ${res.status}: ${await res.text()}`);
+        return res.json();
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

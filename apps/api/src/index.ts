@@ -1,3 +1,11 @@
+// ── Global error guards — prevent ECONNRESET from crashing the server ──
+process.on("uncaughtException", (err: Error) => {
+  console.error("[api] Uncaught exception (server kept running):", err.message);
+});
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("[api] Unhandled rejection (server kept running):", reason);
+});
+
 import { config as dotenvConfig } from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";

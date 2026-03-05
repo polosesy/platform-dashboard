@@ -37,6 +37,10 @@ const EnvSchema = z.object({
   AZURE_HEALTH_ENABLED: z.coerce.boolean().default(false),
   AZURE_HEALTH_CACHE_TTL_MS: z.coerce.number().default(2 * 60_000),
 
+  // Azure Translator (optional — for Service Events translation feature)
+  AZURE_TRANSLATOR_KEY: z.string().optional(),
+  AZURE_TRANSLATOR_REGION: z.string().optional(),
+
   // Live Diagram — Azure Monitor real integration
   AZURE_LIVE_DIAGRAM_ENABLED: z.coerce.boolean().default(false),
   AZURE_LIVE_METRICS_CACHE_TTL_MS: z.coerce.number().default(60_000),

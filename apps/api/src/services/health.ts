@@ -8,6 +8,8 @@ import type {
   ServiceHealthEventsResponse,
   ServiceHealthEvent,
   ServiceHealthEventType,
+  RegionHealthStatus,
+  RegionalStatusResponse,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -361,7 +363,7 @@ export async function tryGetServiceHealthEvents(
       id: item.name ?? String(Math.random()),
       eventType: mapEventType(p.eventType),
       title: p.title ?? "Unknown event",
-      summary: p.summary ?? "",
+      summary: stripHtml(p.summary ?? "").slice(0, 1000),
       status: p.status ?? "Active",
       level: mapEventLevel(p.level),
       impactStartTime: p.impactStartTime,
@@ -385,8 +387,184 @@ export async function tryGetServiceHealthEvents(
     totalEvents: events.length,
     byType,
     events,
+    tenantId: env.AZURE_AD_TENANT_ID,
   };
 
   eventsCache.set(key, result, env.AZURE_HEALTH_CACHE_TTL_MS);
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────
+// Azure Translator Text — optional batch translation
+// ─────────────────────────────────────────────────────────
+
+type AzureTranslateItem = { translations: Array<{ text: string; to: string }> };
+
+/**
+ * Batch-translate an array of English strings to the target language.
+ * Requires AZURE_TRANSLATOR_KEY (+ optionally AZURE_TRANSLATOR_REGION) in env.
+ * Returns null when the translator is not configured.
+ */
+export async function translateTexts(
+  env: Env,
+  texts: string[],
+  to = "ko",
+  from = "en",
+): Promise<string[] | null> {
+  if (!env.AZURE_TRANSLATOR_KEY || texts.length === 0) return null;
+
+  const params = new URLSearchParams({ "api-version": "3.0", from, to });
+  const resp = await fetch(
+    `https://api.cognitive.microsofttranslator.com/translate?${params.toString()}`,
+    {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": env.AZURE_TRANSLATOR_KEY,
+        "Ocp-Apim-Subscription-Region": env.AZURE_TRANSLATOR_REGION ?? "global",
+        "Content-Type": "application/json; charset=UTF-8",
+      },
+      body: JSON.stringify(texts.map((t) => ({ Text: t }))),
+    },
+  );
+
+  if (!resp.ok) {
+    throw new Error(`Azure Translator ${resp.status}: ${await resp.text()}`);
+  }
+
+  const data = (await resp.json()) as AzureTranslateItem[];
+  return data.map((item) => item.translations[0]?.text ?? "");
+}
+
+// ─────────────────────────────────────────────────────────
+// Regional Status — user's deployed regions × service health
+// ─────────────────────────────────────────────────────────
+
+const regionalCache = new CacheManager<RegionalStatusResponse>(50);
+
+/** Azure internal location name → display name mapping */
+const REGION_DISPLAY: Record<string, string> = {
+  eastus: "East US", eastus2: "East US 2",
+  westus: "West US", westus2: "West US 2", westus3: "West US 3",
+  centralus: "Central US", northcentralus: "North Central US",
+  southcentralus: "South Central US", westcentralus: "West Central US",
+  canadacentral: "Canada Central", canadaeast: "Canada East",
+  brazilsouth: "Brazil South", brazilsoutheast: "Brazil Southeast",
+  northeurope: "North Europe", westeurope: "West Europe",
+  uksouth: "UK South", ukwest: "UK West",
+  francecentral: "France Central", francesouth: "France South",
+  germanywestcentral: "Germany West Central", germanynorth: "Germany North",
+  switzerlandnorth: "Switzerland North", switzerlandwest: "Switzerland West",
+  norwayeast: "Norway East", norwaywest: "Norway West",
+  swedencentral: "Sweden Central", polandcentral: "Poland Central",
+  italynorth: "Italy North", spaincentral: "Spain Central",
+  southeastasia: "Southeast Asia", eastasia: "East Asia",
+  koreacentral: "Korea Central", koreasouth: "Korea South",
+  japaneast: "Japan East", japanwest: "Japan West",
+  australiaeast: "Australia East", australiasoutheast: "Australia Southeast",
+  australiacentral: "Australia Central",
+  centralindia: "Central India", southindia: "South India", westindia: "West India",
+  jioindiawest: "Jio India West", jioindiacentral: "Jio India Central",
+  uaenorth: "UAE North", uaecentral: "UAE Central",
+  southafricanorth: "South Africa North", southafricawest: "South Africa West",
+  qatarcentral: "Qatar Central", israelcentral: "Israel Central",
+  mexicocentral: "Mexico Central", newzealandnorth: "New Zealand North",
+};
+
+/**
+ * Query Azure Resource Graph for distinct resource locations across subscriptions.
+ * Uses POST to the Resource Graph REST API with the existing ARM token.
+ */
+async function fetchResourceLocations(armToken: string, subIds: string[]): Promise<string[]> {
+  type RGResp = { data?: { rows?: unknown[][] } };
+  const resp = await fetch(
+    "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${armToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subscriptions: subIds,
+        query: "Resources | distinct location | project location",
+      }),
+    },
+  );
+  if (!resp.ok) throw new Error(`ResourceGraph ${resp.status}: ${await resp.text()}`);
+  const data = await resp.json() as RGResp;
+  return (data.data?.rows ?? []).map((r) => String(r[0])).filter(Boolean);
+}
+
+/**
+ * Get regional health status for user's deployed regions.
+ * Combines Resource Graph location query with Service Health Events data.
+ *
+ * Required RBAC permissions:
+ *   - Reader (or Microsoft.ResourceGraph/resources/read) on each subscription
+ *   - Reader (or Microsoft.ResourceHealth/events/read) on each subscription
+ */
+export async function tryGetRegionalStatus(
+  env: Env,
+  bearerToken: string | undefined,
+  opts?: { subscriptionId?: string },
+): Promise<RegionalStatusResponse | null> {
+  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
+
+  const allSubIds = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : allSubIds;
+  if (subIds.length === 0) return null;
+
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const key = `${prefix}:health:regional:${subIds.join(",")}`;
+  const cached = regionalCache.get(key);
+  if (cached) return cached;
+
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
+
+  // Fetch user's resource locations and service health events in parallel
+  const [locations, eventsResp] = await Promise.all([
+    fetchResourceLocations(fetcher.armToken, subIds),
+    tryGetServiceHealthEvents(env, bearerToken, opts).catch(() => null),
+  ]);
+
+  const allEvents = eventsResp?.events ?? [];
+
+  // Map each location to regional health status
+  const regions: RegionHealthStatus[] = locations.map((loc) => {
+    const displayName = REGION_DISPLAY[loc.toLowerCase()] ?? loc;
+    // Match events by display name (case-insensitive) or internal name
+    const regionEvents = allEvents.filter((e) =>
+      e.affectedRegions.some(
+        (r) =>
+          r.toLowerCase() === displayName.toLowerCase() ||
+          r.toLowerCase() === loc.toLowerCase(),
+      ),
+    );
+    const activeEvents = regionEvents.filter((e) => !e.isResolved);
+    const serviceIssueCount = activeEvents.filter((e) => e.eventType === "ServiceIssue").length;
+    const maintenanceCount = activeEvents.filter((e) => e.eventType === "PlannedMaintenance").length;
+    const affectedServices = [...new Set(activeEvents.flatMap((e) => e.affectedServices))];
+
+    return {
+      name: loc,
+      displayName,
+      hasActiveIssues: serviceIssueCount > 0 || maintenanceCount > 0,
+      serviceIssueCount,
+      maintenanceCount,
+      affectedServices,
+      events: regionEvents,
+    };
+  });
+
+  // Sort: affected first, then by display name
+  regions.sort((a, b) => {
+    if (a.hasActiveIssues !== b.hasActiveIssues) return a.hasActiveIssues ? -1 : 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  const result: RegionalStatusResponse = {
+    generatedAt: new Date().toISOString(),
+    regions,
+    totalAffected: regions.filter((r) => r.hasActiveIssues).length,
+  };
+
+  regionalCache.set(key, result, env.AZURE_HEALTH_CACHE_TTL_MS);
   return result;
 }

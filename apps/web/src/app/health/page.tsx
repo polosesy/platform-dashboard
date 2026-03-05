@@ -13,6 +13,8 @@ import type {
   ServiceHealthEventType,
   AzureSubscriptionOption,
   AzureSubscriptionsResponse,
+  RegionalStatusResponse,
+  RegionHealthStatus,
 } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -83,14 +85,73 @@ function fmtDate(iso: string): string {
 
 // ── Sub-components ──
 
+function RegionCard({ region }: { region: RegionHealthStatus }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const isAffected = region.hasActiveIssues;
+
+  return (
+    <div
+      className={`${styles.regionCard} ${isAffected ? styles.regionCardAffected : styles.regionCardGood}`}
+      onClick={() => isAffected && setExpanded((v) => !v)}
+      style={{ cursor: isAffected ? "pointer" : "default" }}
+    >
+      <div className={styles.regionCardHeader}>
+        <div className={styles.regionDot} data-state={isAffected ? "affected" : "ok"} />
+        <span className={styles.regionName}>{region.displayName}</span>
+        <span className={`${styles.regionStatusBadge} ${isAffected ? styles.regionStatusAffected : styles.regionStatusOk}`}>
+          {isAffected ? t("health.regionAffected") : t("health.regionOperational")}
+        </span>
+      </div>
+      {isAffected && (
+        <div className={styles.regionIssueRow}>
+          {region.serviceIssueCount > 0 && (
+            <span className={styles.regionIssueChip} data-type="issue">
+              {region.serviceIssueCount} {t("health.regionServiceIssue")}
+            </span>
+          )}
+          {region.maintenanceCount > 0 && (
+            <span className={styles.regionIssueChip} data-type="maintenance">
+              {region.maintenanceCount} {t("health.regionMaintenance")}
+            </span>
+          )}
+          {region.affectedServices.length > 0 && (
+            <div className={styles.regionServices}>
+              {region.affectedServices.map((s) => (
+                <span key={s} className={styles.serviceBadge}>{s}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {expanded && region.events.length > 0 && (
+        <div className={styles.regionEventsExpanded}>
+          {region.events.filter((e) => !e.isResolved).map((evt) => (
+            <div key={evt.id} className={styles.regionEventItem}>
+              <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
+                {evt.eventType.replace(/([A-Z])/g, " $1").trim()}
+              </span>
+              <span className={styles.regionEventTitle}>{evt.title}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GlobalStatusPanel({
   data,
   loading,
   error,
+  regionalData,
+  regionalLoading,
 }: {
   data: GlobalStatusResponse | null;
   loading: boolean;
   error: string | null;
+  regionalData: RegionalStatusResponse | null;
+  regionalLoading: boolean;
 }) {
   const { t } = useI18n();
 
@@ -98,66 +159,103 @@ function GlobalStatusPanel({
   if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
   if (!data) return null;
 
-  if (data.activeIncidents === 0) {
-    return (
-      <div className={styles.allGoodCard}>
-        <div className={styles.allGoodIcon}>✓</div>
-        <div className={styles.allGoodTitle}>{t("health.allOperational")}</div>
-        <div className={styles.allGoodSub}>{t("health.allOperationalSub")}</div>
-        <a
-          href="https://azure.status.microsoft/en-us/status"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={styles.allGoodLink}
-        >
-          {t("health.azureStatusLink")} →
-        </a>
-      </div>
-    );
-  }
+  const hasRegions = regionalData && regionalData.regions.length > 0;
 
   return (
-    <div className={styles.incidentList}>
-      {data.incidents.map((inc: GlobalStatusIncident) => (
-        <div key={inc.id} className={styles.incidentCard}>
-          <div className={styles.incidentHeader}>
-            <span className={`${styles.incidentStatus} ${INCIDENT_STATUS_STYLE[inc.status]}`}>
-              {t(`health.incident.${inc.status}`)}
-            </span>
-            <span className={styles.incidentDate}>{inc.pubDate ? fmtDate(inc.pubDate) : ""}</span>
-          </div>
-          <div className={styles.incidentTitle}>{inc.title}</div>
-          {inc.description && (
-            <div className={styles.incidentDesc}>{inc.description}</div>
-          )}
-          {inc.affectedRegions.length > 0 && (
-            <div className={styles.badgeRow}>
-              <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
-              {inc.affectedRegions.map((r) => (
-                <span key={r} className={styles.regionBadge}>{r}</span>
+    <div className={styles.globalLayout}>
+      {/* ── Your Deployed Regions ── */}
+      <section className={styles.regionalSection}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitle}>{t("health.yourRegions")}</div>
+          <div className={styles.sectionSub}>{t("health.yourRegionsSub")}</div>
+        </div>
+        {regionalLoading ? (
+          <div className={styles.empty}>{t("health.loading")}</div>
+        ) : hasRegions ? (
+          <>
+            {regionalData.totalAffected > 0 && (
+              <div className={styles.regionAffectedBanner}>
+                {regionalData.totalAffected}개 리전에 활성 이슈가 있습니다
+              </div>
+            )}
+            <div className={styles.regionGrid}>
+              {regionalData.regions.map((region) => (
+                <RegionCard key={region.name} region={region} />
               ))}
             </div>
-          )}
-          {inc.affectedServices.length > 0 && (
-            <div className={styles.badgeRow}>
-              <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
-              {inc.affectedServices.map((s) => (
-                <span key={s} className={styles.serviceBadge}>{s}</span>
-              ))}
-            </div>
-          )}
-          {inc.link && (
+            {regionalData.note && (
+              <div className={styles.regionalNote}>{regionalData.note}</div>
+            )}
+          </>
+        ) : (
+          <div className={styles.empty}>{t("health.permissionsNote")}</div>
+        )}
+      </section>
+
+      {/* ── Global Incidents (RSS) ── */}
+      <section>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitle}>{t("health.globalIncidents")}</div>
+        </div>
+        {data.activeIncidents === 0 ? (
+          <div className={styles.allGoodCard}>
+            <div className={styles.allGoodIcon}>✓</div>
+            <div className={styles.allGoodTitle}>{t("health.allOperational")}</div>
+            <div className={styles.allGoodSub}>{t("health.allOperationalSub")}</div>
             <a
-              href={inc.link}
+              href="https://azure.status.microsoft/en-us/status"
               target="_blank"
               rel="noopener noreferrer"
-              className={styles.incidentLink}
+              className={styles.allGoodLink}
             >
-              {t("health.viewDetails")} →
+              {t("health.azureStatusLink")} →
             </a>
-          )}
-        </div>
-      ))}
+          </div>
+        ) : (
+          <div className={styles.incidentList}>
+            {data.incidents.map((inc: GlobalStatusIncident) => (
+              <div key={inc.id} className={styles.incidentCard}>
+                <div className={styles.incidentHeader}>
+                  <span className={`${styles.incidentStatus} ${INCIDENT_STATUS_STYLE[inc.status]}`}>
+                    {t(`health.incident.${inc.status}`)}
+                  </span>
+                  <span className={styles.incidentDate}>{inc.pubDate ? fmtDate(inc.pubDate) : ""}</span>
+                </div>
+                <div className={styles.incidentTitle}>{inc.title}</div>
+                {inc.description && (
+                  <div className={styles.incidentDesc}>{inc.description}</div>
+                )}
+                {inc.affectedRegions.length > 0 && (
+                  <div className={styles.badgeRow}>
+                    <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
+                    {inc.affectedRegions.map((r) => (
+                      <span key={r} className={styles.regionBadge}>{r}</span>
+                    ))}
+                  </div>
+                )}
+                {inc.affectedServices.length > 0 && (
+                  <div className={styles.badgeRow}>
+                    <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
+                    {inc.affectedServices.map((s) => (
+                      <span key={s} className={styles.serviceBadge}>{s}</span>
+                    ))}
+                  </div>
+                )}
+                {inc.link && (
+                  <a
+                    href={inc.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={styles.incidentLink}
+                  >
+                    {t("health.viewDetails")} →
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -239,6 +337,21 @@ function InstanceHealthPanel({
           {data?.note && (
             <span className={styles.instanceNote}>{data.note}</span>
           )}
+        </div>
+      )}
+
+      {/* Permissions guidance when showing mock data */}
+      {data?.note?.includes("mock") && (
+        <div className={styles.permissionsBox}>
+          <div className={styles.permissionsTitle}>{t("health.permissionsRequired")}</div>
+          <div className={styles.permissionsBody}>
+            <p>{t("health.permissionsNote")}</p>
+            <ul>
+              <li><code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_CLIENT_SECRET</code></li>
+              <li><code>AZURE_SUBSCRIPTION_IDS</code> — comma-separated subscription IDs</li>
+              <li>RBAC: <strong>Reader</strong> role on each subscription (includes <code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
+            </ul>
+          </div>
         </div>
       )}
 
@@ -355,6 +468,176 @@ function InstanceHealthPanel({
   );
 }
 
+const EVENT_SECTION: Record<ServiceHealthEventType, string> = {
+  ServiceIssue: "serviceIssues",
+  PlannedMaintenance: "plannedMaintenance",
+  HealthAdvisory: "healthAdvisory",
+  SecurityAdvisory: "securityAdvisory",
+};
+
+function eventPortalUrl(evt: ServiceHealthEvent, tenantId?: string): string {
+  // Tenant-prefixed portal URL forces login in the correct tenant context.
+  // Format: portal.azure.com/{tenantId}/#view/{extension}/{blade}/{params...}
+  const portalBase = tenantId
+    ? `https://portal.azure.com/${encodeURIComponent(tenantId)}`
+    : "https://portal.azure.com";
+  // Deep-link to the specific event — use EventDetailsBlade (plural, required by Azure Health extension v1.1+)
+  // isRCA/false is a required parameter; omitting it causes the blade script to 404.
+  if (evt.id && !evt.id.startsWith("0.") && !evt.id.startsWith("mock-")) {
+    return `${portalBase}/#view/Microsoft_Azure_Health/EventDetailsBlade/trackingId/${encodeURIComponent(evt.id)}/isRCA/false`;
+  }
+  // Fall back to the category browse page
+  return `${portalBase}/#view/Microsoft_Azure_Health/AzureHealthBrowseBlade/~/${EVENT_SECTION[evt.eventType]}`;
+}
+
+type EventTranslation = { title: string; summary: string };
+
+function EventCard({
+  evt,
+  tenantId,
+  translation,
+  showTranslation,
+}: {
+  evt: ServiceHealthEvent;
+  tenantId?: string;
+  translation?: EventTranslation;
+  showTranslation?: boolean;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const toggle = () => setExpanded((v) => !v);
+
+  const LEVEL_STYLE: Record<string, string> = {
+    Error: styles.levelError ?? "",
+    Warning: styles.levelWarning ?? "",
+    Informational: styles.levelInfo ?? "",
+  };
+
+  const displayTitle = showTranslation && translation ? translation.title : evt.title;
+  const displaySummary = showTranslation && translation ? translation.summary : (evt.summary ?? "");
+
+  return (
+    <div className={`${styles.eventCard} ${expanded ? styles.eventCardExpanded : ""}`}>
+      {/* ── Header row (always visible, clickable) ── */}
+      <button type="button" className={styles.eventCardBtn} onClick={toggle} aria-expanded={expanded}>
+        <div className={styles.eventCardBtnLeft}>
+          <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
+            {t(`health.eventType.${evt.eventType}`)}
+          </span>
+          <span className={`${styles.eventLevelBadge} ${LEVEL_STYLE[evt.level] ?? ""}`}>
+            {evt.level}
+          </span>
+          {evt.isResolved && (
+            <span className={styles.resolvedBadge}>{t("health.incident.Resolved")}</span>
+          )}
+          {showTranslation && translation && (
+            <span className={styles.translatedBadge}>KO</span>
+          )}
+        </div>
+        <div className={styles.eventCardBtnRight}>
+          <span className={styles.eventTime}>
+            {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime) : ""}
+          </span>
+          <span className={styles.eventChevron}>{expanded ? "▲" : "▼"}</span>
+        </div>
+      </button>
+
+      {/* ── Title ── */}
+      <div className={styles.eventTitle} onClick={toggle} style={{ cursor: "pointer" }}>
+        {displayTitle}
+      </div>
+
+      {/* ── Summary (truncated when collapsed) ── */}
+      {displaySummary && (
+        <div className={`${styles.eventSummary} ${!expanded ? styles.eventSummaryClamp : ""}`}>
+          {displaySummary}
+        </div>
+      )}
+
+      {/* ── Collapsed hint: top regions/services ── */}
+      {!expanded && (evt.affectedRegions.length > 0 || evt.affectedServices.length > 0) && (
+        <div className={styles.eventCollapsedHint} onClick={toggle}>
+          {evt.affectedRegions.slice(0, 4).map((r) => (
+            <span key={r} className={styles.regionBadge}>{r}</span>
+          ))}
+          {evt.affectedRegions.length > 4 && (
+            <span className={styles.moreBadge}>+{evt.affectedRegions.length - 4}</span>
+          )}
+          {evt.affectedServices.slice(0, 2).map((s) => (
+            <span key={s} className={styles.serviceBadge}>{s}</span>
+          ))}
+          {evt.affectedServices.length > 2 && (
+            <span className={styles.moreBadge}>+{evt.affectedServices.length - 2}</span>
+          )}
+          <span className={styles.expandHint}>{t("health.clickToExpand")}</span>
+        </div>
+      )}
+
+      {/* ── Expanded detail ── */}
+      {expanded && (
+        <div className={styles.eventDetail}>
+          {/* Timestamps — timeline grid */}
+          {(evt.impactStartTime || evt.impactMitigationTime || evt.lastUpdateTime) && (
+            <div className={styles.timestampGrid}>
+              {evt.impactStartTime && (
+                <div className={styles.timestampItem}>
+                  <div className={styles.timestampDot} data-kind="start" />
+                  <span className={styles.timestampLabel}>{t("health.impactStart")}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.impactStartTime)}</span>
+                </div>
+              )}
+              {evt.impactMitigationTime && (
+                <div className={styles.timestampItem}>
+                  <div className={styles.timestampDot} data-kind="end" />
+                  <span className={styles.timestampLabel}>{t("health.impactEnd")}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.impactMitigationTime)}</span>
+                </div>
+              )}
+              {evt.lastUpdateTime && (
+                <div className={styles.timestampItem}>
+                  <div className={styles.timestampDot} data-kind="update" />
+                  <span className={styles.timestampLabel}>{t("health.lastUpdate")}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.lastUpdateTime)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Affected regions */}
+          {evt.affectedRegions.length > 0 && (
+            <div className={styles.badgeRow}>
+              <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
+              {evt.affectedRegions.map((r) => (
+                <span key={r} className={styles.regionBadge}>{r}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Affected services */}
+          {evt.affectedServices.length > 0 && (
+            <div className={styles.badgeRow}>
+              <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
+              {evt.affectedServices.map((s) => (
+                <span key={s} className={styles.serviceBadge}>{s}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Portal link — tenant-aware URL forces login in the correct tenant */}
+          <a
+            href={eventPortalUrl(evt, tenantId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.eventPortalLink}
+          >
+            {t("health.viewInPortal")} →
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ServiceStatusPanel({
   data,
   loading,
@@ -365,15 +648,60 @@ function ServiceStatusPanel({
   error: string | null;
 }) {
   const { t } = useI18n();
+  const getApiToken = useApiToken();
 
-  const eventTypeCounts = (
-    [
-      { type: "ServiceIssue" as const, key: "serviceIssue" as const },
-      { type: "PlannedMaintenance" as const, key: "plannedMaintenance" as const },
-      { type: "HealthAdvisory" as const, key: "healthAdvisory" as const },
-      { type: "SecurityAdvisory" as const, key: "securityAdvisory" as const },
-    ]
-  );
+  // ── Translation state ──
+  const [showKorean, setShowKorean] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateNote, setTranslateNote] = useState<string | null>(null);
+  const [translationMap, setTranslationMap] = useState<Map<string, EventTranslation>>(new Map());
+
+  const handleTranslateToggle = useCallback(async (toKorean: boolean) => {
+    if (!toKorean) { setShowKorean(false); return; }
+    if (!data || data.events.length === 0) { setShowKorean(true); return; }
+
+    const allCached = data.events.every((evt) => translationMap.has(evt.id));
+    if (allCached) { setShowKorean(true); return; }
+
+    setTranslating(true);
+    setTranslateNote(null);
+    try {
+      const token = await getApiToken().catch(() => null);
+      // Flat array: [title0, summary0, title1, summary1, ...]
+      const texts = data.events.flatMap((evt) => [evt.title, evt.summary ?? ""]);
+      const resp = await fetchJsonWithBearer<{ translations?: string[]; error?: string }>(
+        `${apiBaseUrl()}/api/health/translate`,
+        token,
+        { method: "POST", body: JSON.stringify({ texts, to: "ko" }) },
+      );
+      if (resp.error === "not_configured") {
+        setTranslateNote("not_configured");
+      } else if (resp.error) {
+        setTranslateNote("error");
+      } else if (resp.translations) {
+        const newMap = new Map(translationMap);
+        data.events.forEach((evt, i) => {
+          newMap.set(evt.id, {
+            title: resp.translations![i * 2] ?? evt.title,
+            summary: resp.translations![i * 2 + 1] ?? (evt.summary ?? ""),
+          });
+        });
+        setTranslationMap(newMap);
+        setShowKorean(true);
+      }
+    } catch {
+      setTranslateNote("error");
+    } finally {
+      setTranslating(false);
+    }
+  }, [data, translationMap, getApiToken]);
+
+  const eventTypeCounts = [
+    { type: "ServiceIssue" as const, key: "serviceIssue" as const },
+    { type: "PlannedMaintenance" as const, key: "plannedMaintenance" as const },
+    { type: "HealthAdvisory" as const, key: "healthAdvisory" as const },
+    { type: "SecurityAdvisory" as const, key: "securityAdvisory" as const },
+  ];
 
   if (loading) return <div className={styles.empty}>{t("health.loading")}</div>;
   if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
@@ -393,67 +721,52 @@ function ServiceStatusPanel({
         ))}
       </div>
 
+      {/* ── Translation toggle row ── */}
+      {data && data.events.length > 0 && (
+        <div className={styles.translateRow}>
+          <div className={styles.translateToggle}>
+            <button
+              type="button"
+              className={`${styles.translateToggleBtn} ${!showKorean ? styles.translateToggleBtnActive : ""}`}
+              onClick={() => void handleTranslateToggle(false)}
+              disabled={translating}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className={`${styles.translateToggleBtn} ${showKorean ? styles.translateToggleBtnActive : ""}`}
+              onClick={() => void handleTranslateToggle(true)}
+              disabled={translating}
+            >
+              한
+            </button>
+          </div>
+          {translating && (
+            <span className={styles.translateSpinner}>{t("health.translating")}</span>
+          )}
+          {translateNote === "not_configured" && (
+            <span className={styles.translateNote}>{t("health.translateNotConfigured")}</span>
+          )}
+          {translateNote === "error" && (
+            <span className={styles.translateNote}>{t("health.translateError")}</span>
+          )}
+        </div>
+      )}
+
       {/* Event cards */}
       {!data || data.events.length === 0 ? (
         <div className={styles.emptyEvents}>{t("health.noEvents")}</div>
       ) : (
         <div className={styles.eventList}>
           {data.events.map((evt: ServiceHealthEvent) => (
-            <div key={evt.id} className={styles.eventCard}>
-              <div className={styles.eventHeader}>
-                <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
-                  {t(`health.eventType.${evt.eventType}`)}
-                </span>
-                <span className={styles.eventTime}>
-                  {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime) : ""}
-                </span>
-              </div>
-
-              <div className={styles.eventTitle}>{evt.title}</div>
-
-              {evt.summary && (
-                <div className={styles.eventSummary}>{evt.summary}</div>
-              )}
-
-              <div className={styles.eventMeta}>
-                {evt.impactStartTime && (
-                  <span className={styles.eventMetaItem}>
-                    <span className={styles.eventMetaLabel}>{t("health.impactStart")}:</span>
-                    <span className={styles.eventMetaValue}>{fmtDate(evt.impactStartTime)}</span>
-                  </span>
-                )}
-                {evt.impactMitigationTime && (
-                  <span className={styles.eventMetaItem}>
-                    <span className={styles.eventMetaLabel}>{t("health.impactEnd")}:</span>
-                    <span className={styles.eventMetaValue}>{fmtDate(evt.impactMitigationTime)}</span>
-                  </span>
-                )}
-                {evt.lastUpdateTime && (
-                  <span className={styles.eventMetaItem}>
-                    <span className={styles.eventMetaLabel}>{t("health.lastUpdate")}:</span>
-                    <span className={styles.eventMetaValue}>{fmtDate(evt.lastUpdateTime)}</span>
-                  </span>
-                )}
-              </div>
-
-              {evt.affectedRegions.length > 0 && (
-                <div className={styles.badgeRow}>
-                  <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
-                  {evt.affectedRegions.map((r) => (
-                    <span key={r} className={styles.regionBadge}>{r}</span>
-                  ))}
-                </div>
-              )}
-
-              {evt.affectedServices.length > 0 && (
-                <div className={styles.badgeRow}>
-                  <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
-                  {evt.affectedServices.map((s) => (
-                    <span key={s} className={styles.serviceBadge}>{s}</span>
-                  ))}
-                </div>
-              )}
-            </div>
+            <EventCard
+              key={evt.id}
+              evt={evt}
+              tenantId={data.tenantId}
+              translation={translationMap.get(evt.id)}
+              showTranslation={showKorean}
+            />
           ))}
         </div>
       )}
@@ -477,6 +790,11 @@ export default function HealthPage() {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [globalLoaded, setGlobalLoaded] = useState(false);
+
+  // Tab 1 supplement — Regional Status
+  const [regionalData, setRegionalData] = useState<RegionalStatusResponse | null>(null);
+  const [regionalLoading, setRegionalLoading] = useState(false);
+  const [regionalLoaded, setRegionalLoaded] = useState(false);
 
   // Tab 2 — Instance Health
   const [instanceData, setInstanceData] = useState<HealthSummary | null>(null);
@@ -519,6 +837,27 @@ export default function HealthPage() {
       .finally(() => { if (!cancelled) setGlobalLoading(false); });
     return () => { cancelled = true; };
   }, [globalLoaded, globalLoading]);
+
+  const loadRegional = useCallback((subId?: string) => {
+    if (regionalLoaded || regionalLoading) return;
+    let cancelled = false;
+    setRegionalLoading(true);
+    const url = subId
+      ? `${apiBaseUrl()}/api/health/regional-status?subscriptionId=${encodeURIComponent(subId)}`
+      : `${apiBaseUrl()}/api/health/regional-status`;
+    getApiToken()
+      .catch(() => null)
+      .then(async (token) => {
+        const d = await fetchJsonWithBearer<RegionalStatusResponse>(url, token);
+        if (!cancelled) { setRegionalData(d); setRegionalLoaded(true); }
+      })
+      .catch(() => {
+        // Mark as loaded even on error so we don't retry and show the fallback message
+        if (!cancelled) setRegionalLoaded(true);
+      })
+      .finally(() => { if (!cancelled) setRegionalLoading(false); });
+    return () => { cancelled = true; };
+  }, [regionalLoaded, regionalLoading, getApiToken]);
 
   const loadInstance = useCallback((subId?: string) => {
     let cancelled = false;
@@ -570,8 +909,8 @@ export default function HealthPage() {
     if (activeTab === "instance") loadInstance(subscriptionId);
   }, [subscriptionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Preload global tab on mount
-  useEffect(() => { loadGlobal(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Preload global tab on mount (RSS is public, regional needs auth)
+  useEffect(() => { loadGlobal(); loadRegional(subscriptionId || undefined); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeGeneratedAt =
     activeTab === "global" ? globalData?.generatedAt
@@ -618,7 +957,13 @@ export default function HealthPage() {
 
       {/* Tab Content */}
       {activeTab === "global" && (
-        <GlobalStatusPanel data={globalData} loading={globalLoading} error={globalError} />
+        <GlobalStatusPanel
+          data={globalData}
+          loading={globalLoading}
+          error={globalError}
+          regionalData={regionalData}
+          regionalLoading={regionalLoading}
+        />
       )}
       {activeTab === "instance" && (
         <InstanceHealthPanel

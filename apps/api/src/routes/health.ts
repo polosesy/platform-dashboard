@@ -1,10 +1,12 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env";
-import { mockHealthSummary, mockGlobalStatus, mockServiceHealthEvents } from "../mockData";
+import { mockHealthSummary, mockGlobalStatus, mockServiceHealthEvents, mockRegionalStatus } from "../mockData";
 import {
   tryGetHealthSummary,
   tryGetGlobalStatus,
   tryGetServiceHealthEvents,
+  tryGetRegionalStatus,
+  translateTexts,
 } from "../services/health";
 
 export function registerHealthRoutes(router: Router, env: Env) {
@@ -44,6 +46,42 @@ export function registerHealthRoutes(router: Router, env: Env) {
         res.json({
           ...mockServiceHealthEvents,
           note: e instanceof Error ? e.message : "service health events error",
+        });
+      });
+  });
+
+  // Translation proxy (optional — requires AZURE_TRANSLATOR_KEY)
+  router.post("/api/health/translate", (req: Request, res: Response) => {
+    const body = req.body as { texts?: unknown; to?: unknown; from?: unknown };
+    const texts = Array.isArray(body.texts) ? body.texts.map(String) : [];
+    const to = typeof body.to === "string" ? body.to : "ko";
+    const from = typeof body.from === "string" ? body.from : "en";
+
+    if (texts.length === 0) {
+      return void res.status(400).json({ error: "texts_required" });
+    }
+    if (!env.AZURE_TRANSLATOR_KEY) {
+      return void res.json({ error: "not_configured", translations: null });
+    }
+
+    translateTexts(env, texts, to, from)
+      .then((translations) => res.json({ translations, from, to }))
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "translate_error" });
+      });
+  });
+
+  // Tab 1 supplement: Regional Status (user's deployed regions × service health)
+  // Required RBAC: Reader on each subscription (ResourceGraph + ResourceHealth)
+  router.get("/api/health/regional-status", (req: Request, res: Response) => {
+    const subscriptionId =
+      typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
+    tryGetRegionalStatus(env, req.auth?.bearerToken, { subscriptionId })
+      .then((data) => res.json(data ?? mockRegionalStatus))
+      .catch((e: unknown) => {
+        res.json({
+          ...mockRegionalStatus,
+          note: e instanceof Error ? e.message : "regional status error",
         });
       });
   });

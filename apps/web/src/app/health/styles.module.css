@@ -664,6 +664,142 @@
   color: rgba(20, 21, 23, 0.70);
 }
 
+/* ── Event Card — expandable ── */
+
+.eventCardBtn {
+  all: unset;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.eventCardBtnLeft {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.eventCardBtnRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.eventCardExpanded {
+  border-color: rgba(0, 120, 212, 0.22);
+  background: rgba(255, 255, 255, 0.90);
+}
+
+.eventSummaryClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.eventLevelBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.levelError { background: rgba(216, 59, 1, 0.08); color: rgba(216, 59, 1, 0.88); }
+.levelWarning { background: rgba(209, 132, 0, 0.10); color: rgba(209, 132, 0, 0.88); }
+.levelInfo { background: rgba(20, 21, 23, 0.06); color: rgba(20, 21, 23, 0.52); }
+
+.resolvedBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(16, 137, 62, 0.10);
+  color: rgba(16, 137, 62, 0.80);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.eventChevron {
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.eventCollapsedHint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+  padding-top: 2px;
+}
+
+.moreBadge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(20, 21, 23, 0.07);
+  color: rgba(20, 21, 23, 0.52);
+}
+
+.expandHint {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+  margin-left: 4px;
+}
+
+.eventDetail {
+  border-top: 1px solid rgba(20, 21, 23, 0.07);
+  padding-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.eventDetailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.eventDetailMetaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eventPortalLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(0, 120, 212, 0.82);
+  text-decoration: none;
+  padding: 6px 12px;
+  border: 1px solid rgba(0, 120, 212, 0.20);
+  border-radius: 8px;
+  background: rgba(0, 120, 212, 0.05);
+  transition: background 120ms ease;
+  width: fit-content;
+}
+
+.eventPortalLink:hover {
+  background: rgba(0, 120, 212, 0.10);
+  text-decoration: none;
+}
+
 /* ── Empty state ── */
 
 .emptyEvents {
@@ -677,6 +813,368 @@
   font-weight: 700;
 }
 
+/* ── Global Status Layout ── */
+
+.globalLayout {
+  display: grid;
+  gap: 20px;
+}
+
+.sectionHeader {
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: rgba(20, 21, 23, 0.88);
+}
+
+.sectionSub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Regional Status ── */
+
+.regionalSection {
+  display: grid;
+  gap: 10px;
+}
+
+.regionAffectedBanner {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(216, 59, 1, 0.07);
+  border: 1px solid rgba(216, 59, 1, 0.18);
+  color: rgba(216, 59, 1, 0.88);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.regionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.regionCard {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 8px;
+  transition: box-shadow 120ms ease;
+}
+
+.regionCardGood {
+  border-color: rgba(16, 137, 62, 0.20);
+  background: rgba(16, 137, 62, 0.03);
+}
+
+.regionCardAffected {
+  border-color: rgba(216, 59, 1, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.regionCardAffected:hover {
+  box-shadow: 0 2px 12px rgba(216, 59, 1, 0.10);
+}
+
+.regionCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.regionDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.regionDot[data-state="ok"] {
+  background: rgba(16, 137, 62, 0.70);
+}
+
+.regionDot[data-state="affected"] {
+  background: rgba(216, 59, 1, 0.80);
+}
+
+.regionName {
+  font-size: 13px;
+  font-weight: 700;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.regionStatusBadge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.regionStatusOk {
+  background: rgba(16, 137, 62, 0.10);
+  color: rgba(16, 137, 62, 0.82);
+}
+
+.regionStatusAffected {
+  background: rgba(216, 59, 1, 0.10);
+  color: rgba(216, 59, 1, 0.88);
+}
+
+.regionIssueRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.regionIssueChip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.regionIssueChip[data-type="issue"] {
+  background: rgba(216, 59, 1, 0.10);
+  color: rgba(216, 59, 1, 0.88);
+}
+
+.regionIssueChip[data-type="maintenance"] {
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.88);
+}
+
+.regionServices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+.regionEventsExpanded {
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+  padding-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.regionEventItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.regionEventTitle {
+  font-size: 11px;
+  color: rgba(20, 21, 23, 0.70);
+  line-height: 1.4;
+}
+
+.regionalNote {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── Instance Health Permissions Box ── */
+
+.permissionsBox {
+  grid-column: span 12;
+  border: 1px solid rgba(0, 120, 212, 0.20);
+  border-radius: var(--radius-lg);
+  background: rgba(0, 120, 212, 0.04);
+  padding: 14px 16px;
+}
+
+.permissionsTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(0, 120, 212, 0.88);
+  margin-bottom: 8px;
+}
+
+.permissionsBody {
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.70);
+  line-height: 1.6;
+}
+
+.permissionsBody p {
+  margin: 0 0 6px;
+}
+
+.permissionsBody ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.permissionsBody li {
+  margin-bottom: 3px;
+}
+
+.permissionsBody code {
+  font-size: 11px;
+  background: rgba(0, 120, 212, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: monospace;
+}
+
+/* ── Translated content badge ── */
+
+.translatedBadge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: rgba(112, 48, 160, 0.10);
+  color: rgba(112, 48, 160, 0.82);
+  border: 1px solid rgba(112, 48, 160, 0.16);
+}
+
+/* ── Translation toggle row ── */
+
+.translateRow {
+  grid-column: span 12;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.translateToggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.translateToggleBtn {
+  all: unset;
+  cursor: pointer;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.translateToggleBtn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
+.translateToggleBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.translateToggleBtnActive {
+  background: rgba(112, 48, 160, 0.10);
+  color: rgba(112, 48, 160, 0.88);
+}
+
+.translateSpinner {
+  font-size: 11px;
+  color: rgba(112, 48, 160, 0.70);
+  font-weight: 700;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.translateNote {
+  font-size: 11px;
+  color: rgba(209, 132, 0, 0.80);
+  font-weight: 700;
+  background: rgba(209, 132, 0, 0.08);
+  border: 1px solid rgba(209, 132, 0, 0.16);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+/* ── Timestamp timeline grid ── */
+
+.timestampGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.60);
+}
+
+.timestampItem {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+}
+
+.timestampItem:last-child {
+  border-right: none;
+}
+
+.timestampDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  margin-bottom: 2px;
+  flex: none;
+}
+
+.timestampDot[data-kind="start"] {
+  background: rgba(216, 59, 1, 0.80);
+  box-shadow: 0 0 0 3px rgba(216, 59, 1, 0.12);
+}
+
+.timestampDot[data-kind="end"] {
+  background: rgba(16, 137, 62, 0.80);
+  box-shadow: 0 0 0 3px rgba(16, 137, 62, 0.12);
+}
+
+.timestampDot[data-kind="update"] {
+  background: rgba(0, 120, 212, 0.80);
+  box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.12);
+}
+
+.timestampLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.timestampValue {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: rgba(20, 21, 23, 0.85);
+  line-height: 1.2;
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 1100px) {
@@ -684,4 +1182,5 @@
   .tableCard { grid-column: span 12; }
   .summaryStrip { grid-template-columns: repeat(2, 1fr); }
   .eventSummaryStrip { grid-template-columns: repeat(2, 1fr); }
+  .regionGrid { grid-template-columns: repeat(2, 1fr); }
 }

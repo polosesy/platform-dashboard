@@ -135,6 +135,18 @@ const T: Translations = {
   "health.allSubscriptions": { ko: "모든 구독", en: "All Subscriptions" },
   "health.occurred": { ko: "발생", en: "Occurred" },
 
+  // Tab 1 supplement — Regional Status
+  "health.yourRegions": { ko: "배포된 리전 상태", en: "Your Deployed Regions" },
+  "health.yourRegionsSub": { ko: "구독 내 리소스가 배포된 리전별 서비스 상태", en: "Service health for regions where your resources are deployed" },
+  "health.regionOperational": { ko: "정상", en: "Operational" },
+  "health.regionAffected": { ko: "영향 받음", en: "Affected" },
+  "health.regionServiceIssue": { ko: "서비스 문제", en: "service issue" },
+  "health.regionMaintenance": { ko: "유지 보수 예정", en: "maintenance" },
+  "health.globalIncidents": { ko: "글로벌 인시던트", en: "Global Incidents" },
+  "health.permissionsRequired": { ko: "필요 권한", en: "Required Permissions" },
+  "health.permissionsNote": { ko: "실데이터 연동을 위해 서비스 주체에 Reader 역할이 필요합니다", en: "Reader role on each subscription is required for real data" },
+  "health.isMockData": { ko: "Mock 데이터 표시 중", en: "Showing mock data" },
+
   // Tab 3 — Service Events
   "health.noEvents": { ko: "활성 이벤트 없음", en: "No active events" },
   "health.impactStart": { ko: "영향 시작", en: "Impact Start" },
@@ -144,6 +156,13 @@ const T: Translations = {
   "health.eventType.PlannedMaintenance": { ko: "계획된 유지 보수", en: "Planned Maintenance" },
   "health.eventType.HealthAdvisory": { ko: "상태 권고", en: "Health Advisory" },
   "health.eventType.SecurityAdvisory": { ko: "보안 권고", en: "Security Advisory" },
+  "health.viewInPortal": { ko: "Azure Portal에서 보기", en: "View in Azure Portal" },
+  "health.clickToExpand": { ko: "클릭하여 펼치기", en: "Click to expand" },
+
+  // Translation feature
+  "health.translating": { ko: "번역 중...", en: "Translating..." },
+  "health.translateNotConfigured": { ko: "번역 서비스 미설정 (AZURE_TRANSLATOR_KEY 필요)", en: "Translation not configured (AZURE_TRANSLATOR_KEY required)" },
+  "health.translateError": { ko: "번역 실패 — 잠시 후 다시 시도하세요", en: "Translation failed — please try again" },
 };
 
 type I18nContextValue = {
