@@ -3,6 +3,8 @@ import type {
   CostSummary, CostTrendResponse, BudgetsResponse,
   SecureScoreSummary, SecurityAlertsResponse,
   HealthSummary,
+  GlobalStatusResponse,
+  ServiceHealthEventsResponse,
 } from "@aud/types";
 
 export const mockArchitectureGraph: ArchitectureGraph = {
@@ -233,6 +235,66 @@ export const mockHealthSummary: HealthSummary = {
     { resourceId: "/sub/mock/rg/rg-staging/providers/Microsoft.ContainerService/managedClusters/aks-staging", resourceName: "aks-staging", resourceType: "Microsoft.ContainerService/managedClusters", resourceGroup: "rg-staging", availabilityState: "Degraded", summary: "Pending system node pool update" },
     { resourceId: "/sub/mock/rg/rg-staging/providers/Microsoft.Sql/servers/sql-staging/databases/staging-db", resourceName: "staging-db", resourceType: "Microsoft.Sql/servers/databases", resourceGroup: "rg-staging", availabilityState: "Unknown" },
     { resourceId: "/sub/mock/rg/rg-dev/providers/Microsoft.Compute/virtualMachines/vm-dev-01", resourceName: "vm-dev-01", resourceType: "Microsoft.Compute/virtualMachines", resourceGroup: "rg-dev", availabilityState: "Unknown" },
+  ],
+  note: "mock data",
+};
+
+// ---------- Health — Global Status Mock ----------
+
+export const mockGlobalStatus: GlobalStatusResponse = {
+  generatedAt: new Date().toISOString(),
+  activeIncidents: 0,
+  incidents: [],
+  note: "mock data — no active incidents",
+};
+
+// ---------- Health — Service Health Events Mock ----------
+
+export const mockServiceHealthEvents: ServiceHealthEventsResponse = {
+  generatedAt: new Date().toISOString(),
+  totalEvents: 3,
+  byType: { serviceIssue: 1, plannedMaintenance: 1, healthAdvisory: 1, securityAdvisory: 0 },
+  events: [
+    {
+      id: "mock-evt-001",
+      eventType: "ServiceIssue",
+      title: "Azure Kubernetes Service — Connectivity Issue in Korea Central",
+      summary: "Some customers using AKS in Korea Central may experience intermittent connectivity issues. Engineering teams are actively investigating the root cause.",
+      status: "Active",
+      level: "Error",
+      impactStartTime: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      lastUpdateTime: new Date(Date.now() - 30 * 60_000).toISOString(),
+      affectedServices: ["Azure Kubernetes Service"],
+      affectedRegions: ["Korea Central"],
+      isResolved: false,
+    },
+    {
+      id: "mock-evt-002",
+      eventType: "PlannedMaintenance",
+      title: "Azure SQL Database — Planned Maintenance Window",
+      summary: "Routine maintenance for Azure SQL Database in East US 2. Expected duration: 2 hours. Minimal impact is anticipated with automatic failover enabled.",
+      status: "Active",
+      level: "Informational",
+      impactStartTime: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+      impactMitigationTime: new Date(Date.now() + 26 * 3_600_000).toISOString(),
+      lastUpdateTime: new Date(Date.now() - 12 * 3_600_000).toISOString(),
+      affectedServices: ["Azure SQL Database"],
+      affectedRegions: ["East US 2"],
+      isResolved: false,
+    },
+    {
+      id: "mock-evt-003",
+      eventType: "HealthAdvisory",
+      title: "Azure App Service — Managed Certificate Rotation Advisory",
+      summary: "Managed SSL certificates for Azure App Service will undergo routine rotation. Action required for customers using certificate pinning in their applications.",
+      status: "Active",
+      level: "Warning",
+      impactStartTime: new Date(Date.now() - 48 * 3_600_000).toISOString(),
+      lastUpdateTime: new Date(Date.now() - 6 * 3_600_000).toISOString(),
+      affectedServices: ["Azure App Service"],
+      affectedRegions: ["Korea Central", "East US", "West Europe"],
+      isResolved: false,
+    },
   ],
   note: "mock data",
 };

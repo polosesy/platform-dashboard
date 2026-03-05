@@ -105,6 +105,43 @@ const T: Translations = {
   "settings.language": { ko: "언어", en: "Language" },
   "settings.korean": { ko: "한국어", en: "Korean" },
   "settings.english": { ko: "영어", en: "English" },
+
+  // ── Health Page ──
+  "health.title": { ko: "서비스 상태", en: "Service Health" },
+  "health.tabGlobal": { ko: "글로벌 상태", en: "Global Status" },
+  "health.tabInstance": { ko: "인스턴스 상태", en: "Instance Health" },
+  "health.tabService": { ko: "서비스 이벤트", en: "Service Events" },
+  "health.generatedAt": { ko: "갱신", en: "Updated" },
+  "health.loading": { ko: "로딩 중...", en: "Loading..." },
+  "health.error": { ko: "로드 실패", en: "Failed to load" },
+
+  // Tab 1 — Global Status
+  "health.allOperational": { ko: "모든 Azure 서비스가 정상 운영 중입니다", en: "All Azure services are operating normally" },
+  "health.allOperationalSub": { ko: "현재 활성 인시던트가 없습니다", en: "There are no active incidents at this time" },
+  "health.activeIncidents": { ko: "활성 인시던트", en: "Active Incidents" },
+  "health.azureStatusLink": { ko: "Azure 공식 상태 페이지", en: "Azure Official Status Page" },
+  "health.incident.Active": { ko: "활성", en: "Active" },
+  "health.incident.Investigating": { ko: "조사 중", en: "Investigating" },
+  "health.incident.Mitigated": { ko: "완화됨", en: "Mitigated" },
+  "health.incident.Resolved": { ko: "해결됨", en: "Resolved" },
+  "health.affectedRegions": { ko: "영향 리전", en: "Affected Regions" },
+  "health.affectedServices": { ko: "영향 서비스", en: "Affected Services" },
+  "health.viewDetails": { ko: "상세 보기", en: "View Details" },
+
+  // Tab 2 — Instance Health
+  "health.resources": { ko: "리소스", en: "Resources" },
+  "health.healthDistribution": { ko: "상태 분포", en: "Health Distribution" },
+  "health.filterAll": { ko: "전체", en: "All" },
+
+  // Tab 3 — Service Events
+  "health.noEvents": { ko: "활성 이벤트 없음", en: "No active events" },
+  "health.impactStart": { ko: "영향 시작", en: "Impact Start" },
+  "health.impactEnd": { ko: "영향 종료", en: "Impact End" },
+  "health.lastUpdate": { ko: "최종 업데이트", en: "Last Update" },
+  "health.eventType.ServiceIssue": { ko: "서비스 문제", en: "Service Issue" },
+  "health.eventType.PlannedMaintenance": { ko: "계획된 유지 보수", en: "Planned Maintenance" },
+  "health.eventType.HealthAdvisory": { ko: "상태 권고", en: "Health Advisory" },
+  "health.eventType.SecurityAdvisory": { ko: "보안 권고", en: "Security Advisory" },
 };
 
 type I18nContextValue = {
