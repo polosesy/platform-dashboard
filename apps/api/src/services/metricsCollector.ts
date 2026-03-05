@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import type { MetricBinding, MetricAggregation, DiagramEdgeSpec, DiagramNodeSpec, PowerState } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcher } from "../infra/azureClientFactory";
+import { getArmFetcher, getArmFetcherAuto } from "../infra/azureClientFactory";
 
 // ────────────────────────────────────────────
 // Azure Monitor Metrics REST client
@@ -263,19 +263,19 @@ function parsePowerState(code: string): PowerState {
 
 async function collectResourcePowerState(
   env: Env,
-  bearerToken: string,
+  bearerToken: string | undefined,
   azureResourceId: string,
   resourceKind: string,
 ): Promise<PowerState> {
-  const prefix = bearerKeyPrefix(bearerToken);
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
   const cacheKey = `${prefix}:powerstate:${azureResourceId}`;
   const cached = powerStateCache.get(cacheKey);
   if (cached) return cached;
 
-  const fetcher = await getArmFetcher(env, bearerToken);
   let state: PowerState = "unknown";
 
   try {
+    const fetcher = await getArmFetcherAuto(env, bearerToken);
     if (resourceKind === "vm") {
       const resp = await fetcher.fetchJson<{
         statuses?: Array<{ code: string }>;
@@ -356,7 +356,7 @@ async function collectResourcePowerState(
  */
 export async function collectBatchPowerStates(
   env: Env,
-  bearerToken: string,
+  bearerToken: string | undefined,
   nodes: Array<{ azureResourceId: string; resourceKind: string }>,
 ): Promise<Map<string, PowerState>> {
   const CONCURRENCY = 6;

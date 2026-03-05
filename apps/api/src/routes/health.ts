@@ -11,43 +11,40 @@ import {
 
 export function registerHealthRoutes(router: Router, env: Env) {
   // Tab 1: Global Region Health (Azure Status RSS feed proxy — no auth required)
-  router.get("/api/health/global-status", (_req: Request, res: Response) => {
-    tryGetGlobalStatus(env)
-      .then((data) => res.json(data ?? mockGlobalStatus))
-      .catch((e: unknown) => {
-        res.json({
-          ...mockGlobalStatus,
-          note: e instanceof Error ? e.message : "global status error",
-        });
-      });
+  router.get("/api/health/global-status", async (_req: Request, res: Response) => {
+    try {
+      const data = await tryGetGlobalStatus(env);
+      res.json(data ?? mockGlobalStatus);
+    } catch (e: unknown) {
+      console.error("[health] global-status error:", e instanceof Error ? e.message : e);
+      res.json({ ...mockGlobalStatus, note: e instanceof Error ? e.message : "global status error" });
+    }
   });
 
   // Tab 2: Instance Health (existing)
-  router.get("/api/health/summary", (req: Request, res: Response) => {
+  router.get("/api/health/summary", async (req: Request, res: Response) => {
     const subscriptionId =
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
-    tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId })
-      .then((data) => res.json(data ?? mockHealthSummary))
-      .catch((e: unknown) => {
-        res.json({
-          ...mockHealthSummary,
-          note: e instanceof Error ? e.message : "health summary error",
-        });
-      });
+    try {
+      const data = await tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId });
+      res.json(data ?? mockHealthSummary);
+    } catch (e: unknown) {
+      console.error("[health] summary error:", e instanceof Error ? e.message : e);
+      res.json({ ...mockHealthSummary, note: e instanceof Error ? e.message : "health summary error" });
+    }
   });
 
   // Tab 3: Service Health Events (service issues, maintenance, advisories)
-  router.get("/api/health/events", (req: Request, res: Response) => {
+  router.get("/api/health/events", async (req: Request, res: Response) => {
     const subscriptionId =
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
-    tryGetServiceHealthEvents(env, req.auth?.bearerToken, { subscriptionId })
-      .then((data) => res.json(data ?? mockServiceHealthEvents))
-      .catch((e: unknown) => {
-        res.json({
-          ...mockServiceHealthEvents,
-          note: e instanceof Error ? e.message : "service health events error",
-        });
-      });
+    try {
+      const data = await tryGetServiceHealthEvents(env, req.auth?.bearerToken, { subscriptionId });
+      res.json(data ?? mockServiceHealthEvents);
+    } catch (e: unknown) {
+      console.error("[health] events error:", e instanceof Error ? e.message : e);
+      res.json({ ...mockServiceHealthEvents, note: e instanceof Error ? e.message : "service health events error" });
+    }
   });
 
   // Translation proxy (optional — requires AZURE_TRANSLATOR_KEY)
@@ -73,16 +70,15 @@ export function registerHealthRoutes(router: Router, env: Env) {
 
   // Tab 1 supplement: Regional Status (user's deployed regions × service health)
   // Required RBAC: Reader on each subscription (ResourceGraph + ResourceHealth)
-  router.get("/api/health/regional-status", (req: Request, res: Response) => {
+  router.get("/api/health/regional-status", async (req: Request, res: Response) => {
     const subscriptionId =
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
-    tryGetRegionalStatus(env, req.auth?.bearerToken, { subscriptionId })
-      .then((data) => res.json(data ?? mockRegionalStatus))
-      .catch((e: unknown) => {
-        res.json({
-          ...mockRegionalStatus,
-          note: e instanceof Error ? e.message : "regional status error",
-        });
-      });
+    try {
+      const data = await tryGetRegionalStatus(env, req.auth?.bearerToken, { subscriptionId });
+      res.json(data ?? mockRegionalStatus);
+    } catch (e: unknown) {
+      console.error("[health] regional-status error:", e instanceof Error ? e.message : e);
+      res.json({ ...mockRegionalStatus, note: e instanceof Error ? e.message : "regional status error" });
+    }
   });
 }

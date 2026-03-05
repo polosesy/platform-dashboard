@@ -196,13 +196,14 @@ export async function buildLiveSnapshot(
   // ── Collect PowerState for compute resources ──
   let powerStateMap = new Map<string, PowerState>();
 
-  if (azureEnabled && hasBearerToken) {
+  if (azureEnabled) {
+    // Use SP fallback when no bearer token — collectBatchPowerStates handles undefined
     const computeNodes = spec.nodes
       .filter((n) => n.azureResourceId && n.resourceKind)
       .map((n) => ({ azureResourceId: n.azureResourceId!, resourceKind: n.resourceKind! }));
     if (computeNodes.length > 0) {
       try {
-        powerStateMap = await collectBatchPowerStates(env, bearerToken!, computeNodes);
+        powerStateMap = await collectBatchPowerStates(env, bearerToken, computeNodes);
       } catch {
         // Non-critical
       }
