@@ -3,7 +3,7 @@
 import "reactflow/dist/style.css";
 
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot } from "@aud/types";
+import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
@@ -13,6 +13,7 @@ import { LiveCanvas } from "./components/LiveCanvas";
 import { AlertSidebar } from "./components/AlertSidebar";
 import { FaultTimeline } from "./components/FaultTimeline";
 import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
+import { EdgeDetailPanel } from "./components/EdgeDetailPanel";
 import styles from "./styles.module.css";
 
 const Canvas3D = lazy(() =>
@@ -57,9 +58,18 @@ export default function LiveDiagramPage() {
   const [mode, setMode] = useState<UpdateMode>("polling");
   const [vizMode, setVizMode] = useState<VisualizationMode>("2d-animated");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [edgeDetail, setEdgeDetail] = useState<EdgeNetworkDetail | null>(null);
+  const [edgeDetailLoading, setEdgeDetailLoading] = useState(false);
 
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
+    if (nodeId) setSelectedEdgeId(null);
+  }, []);
+
+  const handleEdgeSelect = useCallback((edgeId: string | null) => {
+    setSelectedEdgeId(edgeId);
+    if (edgeId) setSelectedNodeId(null);
   }, []);
 
   // Overlay toggles
@@ -355,6 +365,29 @@ export default function LiveDiagramPage() {
     return buildConnectedEdges(filteredSpec, snapshot, selectedNodeId);
   }, [selectedNodeId, filteredSpec, snapshot]);
 
+  // Edge detail fetch + 1-minute auto-refresh
+  useEffect(() => {
+    if (!selectedEdgeId || !filteredSpec) { setEdgeDetail(null); return; }
+    let cancelled = false;
+
+    async function load() {
+      setEdgeDetailLoading(true);
+      try {
+        const token = await getApiToken().catch(() => null);
+        const data = await fetchJsonWithBearer<EdgeNetworkDetail>(
+          `${apiBaseUrl()}/api/live/edge-detail?diagramId=${diagramId}&edgeId=${encodeURIComponent(selectedEdgeId!)}`,
+          token,
+        );
+        if (!cancelled) setEdgeDetail(data);
+      } catch { /* ignore */ }
+      finally { if (!cancelled) setEdgeDetailLoading(false); }
+    }
+
+    void load();
+    const timer = setInterval(() => { void load(); }, 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [selectedEdgeId, filteredSpec, diagramId, getApiToken]);
+
   return (
     <div className={styles.page}>
       {/* Header */}
@@ -587,6 +620,7 @@ export default function LiveDiagramPage() {
               spec={filteredSpec}
               snapshot={snapshot}
               onNodeSelect={handleNodeSelect}
+              onEdgeSelect={handleEdgeSelect}
               vizMode={vizMode}
               showNetworkFlow={showNetworkFlow}
               showParticles={showParticles}
@@ -595,9 +629,17 @@ export default function LiveDiagramPage() {
             />
           )}
 
-          {/* Right sidebar: detail panel, alerts, or timeline */}
+          {/* Right sidebar: edge detail, node detail, alerts, or timeline */}
           <div className={styles.sidebarStack}>
-            {selectedNodeId ? (
+            {selectedEdgeId ? (
+              <EdgeDetailPanel
+                detail={edgeDetail}
+                loading={edgeDetailLoading}
+                edgeSpec={filteredSpec.edges.find((e) => e.id === selectedEdgeId) ?? null}
+                liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}
+                onClose={() => handleEdgeSelect(null)}
+              />
+            ) : selectedNodeId ? (
               <ResourceDetailPanel
                 nodeSpec={filteredSpec.nodes.find((n) => n.id === selectedNodeId) ?? null}
                 liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}

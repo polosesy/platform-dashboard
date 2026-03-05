@@ -135,6 +135,7 @@ function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind
   if (t === "microsoft.servicebus/namespaces") return "serviceBus";
   if (t === "microsoft.eventhub/namespaces") return "eventHub";
   if (t === "microsoft.network/dnszones" || t === "microsoft.network/privatednszones") return "dns";
+  if (t === "microsoft.network/publicipaddresses") return "publicIP";
   if (t === "microsoft.web/sites") {
     const k = (resourceKind ?? "").toLowerCase();
     return k.includes("functionapp") ? "functionApp" : "appService";
@@ -247,6 +248,11 @@ function extractEndpoint(type: string | undefined, name: string | undefined, pro
   // AKS — fqdn
   if (t === "microsoft.containerservice/managedclusters") {
     return safeString(p.fqdn) ?? safeString(p.privateFQDN);
+  }
+
+  // Public IP address — ipAddress
+  if (t === "microsoft.network/publicipaddresses") {
+    return safeString(p.ipAddress);
   }
 
   // Container App — configuration.ingress.fqdn or latestRevisionFqdn
@@ -604,7 +610,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     "'microsoft.operationalinsights/workspaces'," +
     "'microsoft.web/sites'," +
     "'microsoft.servicebus/namespaces'," +
-    "'microsoft.eventhub/namespaces'" +
+    "'microsoft.eventhub/namespaces'," +
+    "'microsoft.network/publicipaddresses'" +
     ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
   // Query 4: Diagnostic Settings (separate resource type)
@@ -668,6 +675,15 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
 
+  // Build publicIpById map: resource id → IP address properties (for resolving publicIPAddress references)
+  const publicIpById = new Map<string, Record<string, unknown>>();
+  for (const r of resRows) {
+    if (!r.id) continue;
+    if ((r.type ?? "").toLowerCase() === "microsoft.network/publicipaddresses") {
+      publicIpById.set(r.id, (r.properties ?? {}) as Record<string, unknown>);
+    }
+  }
+
   // resources
   const resourceById = new Map<string, AzureResourceRow>();
   const nicById = new Map<string, AzureResourceRow>();
@@ -680,6 +696,24 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
 
     const kind = mapKind(r.type, r.kind);
     const endpoint = extractEndpoint(r.type, r.name, r.properties);
+    const nodeMetadata: Record<string, unknown> = {};
+
+    // Public IP — mark as absorbed if attached to another resource (has ipConfiguration)
+    if (kind === "publicIP") {
+      const props = (r.properties ?? {}) as Record<string, unknown>;
+      const ipConfig = props.ipConfiguration as Record<string, unknown> | undefined;
+      if (ipConfig?.id) nodeMetadata.absorbed = true;
+    }
+
+    // AKS — store private cluster flag and privateFqdn for diagram representation
+    if (kind === "aks") {
+      const props = (r.properties ?? {}) as Record<string, unknown>;
+      const accessProfile = props.apiServerAccessProfile as Record<string, unknown> | undefined;
+      nodeMetadata.isPrivateCluster = !!accessProfile?.enablePrivateCluster;
+      const privateFqdn = safeString(props.privateFQDN);
+      if (privateFqdn) nodeMetadata.privateFqdn = privateFqdn;
+    }
+
     nodes.push({
       id: r.id,
       kind,
@@ -689,7 +723,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       endpoint,
       resourceGroup: r.resourceGroup,
       tags: r.tags,
-      health: "unknown"
+      health: "unknown",
+      ...(Object.keys(nodeMetadata).length > 0 ? { metadata: nodeMetadata } : {}),
     });
 
     if (r.subscriptionId && r.resourceGroup) {
@@ -703,6 +738,38 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         });
       }
     }
+  }
+
+  // ── Post-process: resolve public IPs for LBs and NICs ──
+
+  // LBs without a private-IP endpoint may have a public IP referenced in frontendIPConfigurations
+  for (const node of nodes) {
+    if (node.kind !== "lb" || node.endpoint) continue;
+    const r = resRows.find(row => row.id === node.id);
+    if (!r) continue;
+    const feConfigs = ((r.properties as Record<string, unknown>)?.frontendIPConfigurations ?? []) as Array<{
+      properties?: { publicIPAddress?: { id?: string } };
+    }>;
+    for (const fe of feConfigs) {
+      const pubIpId = fe.properties?.publicIPAddress?.id?.toLowerCase();
+      if (!pubIpId) continue;
+      const ip = safeString(publicIpById.get(pubIpId)?.ipAddress);
+      if (ip) { node.endpoint = ip; break; }
+    }
+  }
+
+  // NICs with a public IP reference — store in metadata for specGenerator to use as sub-resource
+  for (const node of nodes) {
+    if (node.kind !== "nic") continue;
+    const r = nicById.get(node.id);
+    if (!r) continue;
+    const ipCfgs = ((r.properties as Record<string, unknown>)?.ipConfigurations ?? []) as Array<{
+      properties?: { publicIPAddress?: { id?: string } };
+    }>;
+    const pubRef = ipCfgs[0]?.properties?.publicIPAddress?.id?.toLowerCase();
+    if (!pubRef) continue;
+    const pubIp = safeString(publicIpById.get(pubRef)?.ipAddress);
+    if (pubIp) node.metadata = { ...node.metadata, publicIP: pubIp };
   }
 
   // ── Ensure subnets are in the graph ──

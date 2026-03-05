@@ -52,6 +52,7 @@ const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
   aks: "aks",
   containerApp: "containerApp",
   privateEndpoint: "privateEndpoint",
+  publicIP: "publicIP",
   storage: "storage",
   sql: "sql",
   cosmosDb: "cosmosDb",
@@ -403,7 +404,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
       sampleChains.push(
         `Subnet "${nodeNameMap.get(edge.source) ?? "?"}" → NIC "${nodeNameMap.get(edge.target) ?? "?"}" [${edge.kind}]`,
       );
-    } else if (srcKind === "subnet" && tgtKind && !NETWORK_CONTAINER_KINDS.has(tgtKind)) {
+    } else if (srcKind === "subnet" && tgtKind && !NETWORK_CONTAINER_KINDS.has(tgtKind) && tgtKind !== "aks") {
       resourceSubnet.set(edge.target, edge.source);
       pass2Other++;
       if (pass2Other <= 5) {
@@ -452,6 +453,8 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     // Skip PaaS resources — they belong outside VNet (connected via PE if at all)
     if (DATA_KINDS.has(node.kind)) continue;
     if (node.kind === "appInsights" || node.kind === "logAnalytics") continue;
+    // Public IP addresses are not subnet resources — always external
+    if (node.kind === "publicIP") continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
     if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -548,6 +551,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
           // Skip PaaS resources — external to VNet
           if (DATA_KINDS.has(node.kind)) continue;
           if (node.kind === "appInsights" || node.kind === "logAnalytics") continue;
+          if (node.kind === "publicIP") continue;
           const rg = node.resourceGroup.toLowerCase();
           const rgSubnets = subRgMap5.get(rg);
           if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -791,14 +795,21 @@ export async function generateDiagramSpec(
   }
 
   // ── Build LB Frontend IP absorption map ──
+  function isPrivateIp(ip: string): boolean {
+    return /^10\./.test(ip)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(ip)
+      || /^192\.168\./.test(ip);
+  }
+
   const lbFrontendIPs = new Map<string, SubResource[]>();
   for (const node of graph.nodes) {
     if (node.kind !== "lb") continue;
     if (!node.endpoint) continue;
+    const isPublic = !isPrivateIp(node.endpoint);
     lbFrontendIPs.set(node.id, [{
       id: `${node.id}/frontendIP/0`,
-      label: "Frontend IP",
-      kind: "frontendIP" as SubResourceKind,
+      label: isPublic ? "Public IP" : "Frontend IP",
+      kind: (isPublic ? "publicIP" : "frontendIP") as SubResourceKind,
       endpoint: node.endpoint,
       azureResourceId: node.azureId,
     }]);
@@ -827,18 +838,44 @@ export async function generateDiagramSpec(
           endpoint: nic.endpoint,
           azureResourceId: nic.azureId,
         });
+        // If the NIC has a public IP (resolved in azure.ts), add as a separate sub-resource
+        const pubIp = typeof nic.metadata?.publicIP === "string" ? nic.metadata.publicIP : undefined;
+        if (pubIp) {
+          subs.push({
+            id: `${idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id)}/publicip`,
+            label: "Public IP",
+            kind: "publicIP" as SubResourceKind,
+            endpoint: pubIp,
+          });
+        }
       }
     }
     const feIPs = appGwFrontendIPs.get(nodeOrigId);
     if (feIPs) subs.push(...feIPs);
     const lbFeIPs = lbFrontendIPs.get(nodeOrigId);
     if (lbFeIPs) subs.push(...lbFeIPs);
+
+    // AKS — show API server connectivity type (private vs public)
+    const aksNode = graph.nodes.find((n) => n.id === nodeOrigId && n.kind === "aks");
+    if (aksNode?.endpoint) {
+      const isPrivate = aksNode.metadata?.isPrivateCluster === true;
+      subs.push({
+        id: `${nodeOrigId}/apiserver`,
+        label: isPrivate ? "Private API" : "Public API",
+        kind: "frontendIP" as SubResourceKind,
+        endpoint: aksNode.endpoint,
+      });
+    }
+
     return subs.length > 0 ? subs : undefined;
   }
 
-  // Filter nodes — exclude infra-only kinds + absorbed NICs (but keep VNet/Subnet)
+  // Filter nodes — exclude infra-only kinds + absorbed NICs + absorbed Public IPs (but keep VNet/Subnet)
   const filteredNodes = graph.nodes.filter(
-    (n) => !EXCLUDED_KINDS.has(n.kind) && !(n.kind === "nic" && nicToVmBound.has(n.id)),
+    (n) =>
+      !EXCLUDED_KINDS.has(n.kind) &&
+      !(n.kind === "nic" && nicToVmBound.has(n.id)) &&
+      !(n.kind === "publicIP" && n.metadata?.absorbed === true),
   );
 
   // Build node ID set for edge filtering

@@ -298,7 +298,7 @@ export function ResourceDetailPanel({
             {nodeSpec.subResources.map((sr: SubResource) => (
               <div key={sr.id} className={styles.subResourceDetailCard}>
                 <img
-                  src={getAzureIconUrl(sr.kind === "nic" ? "nic" : "appGateway")}
+                  src={getAzureIconUrl(sr.kind === "nic" ? "nic" : sr.kind === "publicIP" ? "publicIP" : "appGateway")}
                   alt={sr.kind}
                   width={16}
                   height={16}

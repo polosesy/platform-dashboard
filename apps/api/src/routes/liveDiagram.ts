@@ -13,6 +13,7 @@ import {
 } from "../services/liveDiagramMock";
 import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure";
 import { generateDiagramSpec } from "../services/specGenerator";
+import { fetchEdgeNetworkDetail } from "../services/edgeDetailService";
 
 // Seed the mock diagram on startup
 saveDiagramSpec(mockDiagramSpec);
@@ -191,6 +192,19 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
     req.on("close", () => {
       clearInterval(timer);
     });
+  });
+
+  // ── Edge Network Detail (on-demand, 30s cached) ──
+  router.get("/api/live/edge-detail", (req: Request, res: Response) => {
+    const diagramId = typeof req.query.diagramId === "string" ? req.query.diagramId : "prod-infra";
+    const edgeId = typeof req.query.edgeId === "string" ? req.query.edgeId : "";
+    if (!edgeId) return void res.status(400).json({ error: "edgeId_required" });
+
+    fetchEdgeNetworkDetail(env, req.auth?.bearerToken, diagramId, edgeId)
+      .then((data) => res.json(data))
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "edge_detail_error" });
+      });
   });
 
   // ── Data source status ──

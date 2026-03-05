@@ -34,6 +34,7 @@ type LiveCanvasProps = {
   spec: DiagramSpec;
   snapshot: LiveDiagramSnapshot | null;
   onNodeSelect: (nodeId: string | null) => void;
+  onEdgeSelect?: (edgeId: string | null) => void;
   onSubResourceSelect?: (sr: SubResource) => void;
   vizMode: VisualizationMode;
   showNetworkFlow: boolean;
@@ -54,6 +55,7 @@ function LiveCanvasInner({
   spec,
   snapshot,
   onNodeSelect,
+  onEdgeSelect,
   onSubResourceSelect,
   vizMode,
   showNetworkFlow,
@@ -64,6 +66,7 @@ function LiveCanvasInner({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, zoom: 1 });
+  const [showMiniMap, setShowMiniMap] = useState(true);
   const reactFlowInstance = useReactFlow();
 
   // ── Hover highlight state ──
@@ -504,7 +507,8 @@ function LiveCanvasInner({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={(_e, node) => onNodeSelect(node.id)}
-        onPaneClick={() => onNodeSelect(null)}
+        onEdgeClick={(_e, edge) => onEdgeSelect?.(edge.id)}
+        onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); }}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
         fitView
@@ -512,18 +516,29 @@ function LiveCanvasInner({
         minZoom={0.05}
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
+        elevateEdgesOnSelect={true}
       >
         <Background gap={20} size={1} color="rgba(20,21,23,0.06)" />
         <Controls />
-        <MiniMap
-          nodeColor={(n) => {
-            const health = (n.data as LiveNodeData | undefined)?.health ?? "unknown";
-            return nodeColor(health).ringStroke;
-          }}
-          maskColor="rgba(247,248,250,0.85)"
-          style={{ borderRadius: 12, border: "1px solid rgba(20,21,23,0.10)" }}
-        />
+        {showMiniMap && (
+          <MiniMap
+            nodeColor={(n) => {
+              const health = (n.data as LiveNodeData | undefined)?.health ?? "unknown";
+              return nodeColor(health).ringStroke;
+            }}
+            maskColor="rgba(247,248,250,0.85)"
+            style={{ borderRadius: 12, border: "1px solid rgba(20,21,23,0.10)" }}
+          />
+        )}
       </ReactFlow>
+      <button
+        type="button"
+        className={styles.miniMapToggle}
+        onClick={() => setShowMiniMap((v) => !v)}
+        title={showMiniMap ? "Hide mini-map" : "Show mini-map"}
+      >
+        {showMiniMap ? "⊟" : "⊞"}
+      </button>
 
       {/* Fault Ripple overlay */}
       {showFaultRipple && faultImpacts.length > 0 && (

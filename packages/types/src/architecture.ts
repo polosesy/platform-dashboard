@@ -30,6 +30,7 @@ export type GraphNodeKind =
   | "serviceBus"
   | "eventHub"
   | "dns"
+  | "publicIP"
   | "unknown";
 
 export type EdgeKind =
@@ -55,6 +56,7 @@ export type ArchitectureNode = {
   tags?: Record<string, string>;
   health?: "ok" | "warning" | "critical" | "unknown";
   metrics?: Record<string, number>;
+  metadata?: Record<string, unknown>;
 };
 
 export type ArchitectureEdge = {

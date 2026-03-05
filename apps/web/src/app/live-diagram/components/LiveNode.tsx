@@ -172,7 +172,7 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
               title={`${sr.label}${sr.endpoint ? `: ${sr.endpoint}` : ""}`}
             >
               <img
-                src={getAzureIconUrl(sr.kind === "nic" ? "nic" : "appGateway")}
+                src={getAzureIconUrl(sr.kind === "nic" ? "nic" : sr.kind === "publicIP" ? "publicIP" : "appGateway")}
                 alt={sr.kind}
                 width={12}
                 height={12}

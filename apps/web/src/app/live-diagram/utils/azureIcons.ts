@@ -31,6 +31,7 @@ const ICON_FILE: Record<DiagramIconKind, string> = {
   appService: "app-service",
   serviceBus: "service-bus",
   eventHub: "event-hub",
+  publicIP: "public-ip",
   custom: "custom",
 };
 

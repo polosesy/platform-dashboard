@@ -72,6 +72,22 @@ const T: Translations = {
   "detail.alertRules": { ko: "경고 규칙", en: "Alert Rules" },
   "detail.disabled": { ko: "비활성", en: "Disabled" },
 
+  // ── Edge Detail Panel ──
+  "detail.edge.overview": { ko: "개요", en: "Overview" },
+  "detail.edge.endpoints": { ko: "엔드포인트", en: "Endpoints" },
+  "detail.edge.nsg": { ko: "NSG 규칙", en: "NSG Rules" },
+  "detail.edge.udr": { ko: "UDR 라우트", en: "UDR Routes" },
+  "detail.edge.inboundFlows": { ko: "인바운드 플로우", en: "Inbound Flows" },
+  "detail.edge.outboundFlows": { ko: "아웃바운드 플로우", en: "Outbound Flows" },
+  "detail.edge.portSummary": { ko: "포트 요약", en: "Port Summary" },
+  "detail.edge.lastUpdated": { ko: "마지막 업데이트", en: "Last updated" },
+  "detail.edge.noFlows": { ko: "플로우 없음", en: "No flows" },
+  "detail.edge.noNsg": { ko: "NSG 없음", en: "No NSG" },
+  "detail.edge.noUdr": { ko: "UDR 없음", en: "No UDR" },
+  "detail.edge.internet": { ko: "인터넷", en: "Internet" },
+  "detail.edge.allow": { ko: "허용", en: "Allow" },
+  "detail.edge.deny": { ko: "차단", en: "Deny" },
+
   // ── Tenant / Subscription Selector ──
   "live.tenant": { ko: "테넌트", en: "Tenant" },
   "live.selectTenant": { ko: "테넌트 선택", en: "Select Tenant" },

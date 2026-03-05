@@ -243,6 +243,32 @@
   backdrop-filter: blur(12px);
 }
 
+/* ── MiniMap Toggle Button ── */
+.miniMapToggle {
+  position: absolute;
+  bottom: 130px;
+  right: 10px;
+  z-index: 10;
+  all: unset;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  color: rgba(20, 21, 23, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(20, 21, 23, 0.12);
+  backdrop-filter: blur(4px);
+  transition: background 150ms ease, color 150ms ease;
+}
+.miniMapToggle:hover {
+  background: rgba(255, 255, 255, 0.98);
+  color: rgba(20, 21, 23, 0.8);
+}
+
 .sidebarStack {
   display: grid;
   gap: 12px;
@@ -464,6 +490,7 @@
   width: 100%;
   height: 100%;
   border-radius: 16px;
+  pointer-events: none; /* allow edge clicks to pass through to SVG layer */
   /* border-color, border-style, border-width, background set via inline style from scopeStyle() */
 }
 
@@ -472,6 +499,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
+  pointer-events: auto; /* header remains interactive for node selection */
 }
 
 .groupResizeHandle {
@@ -1372,7 +1400,7 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   width: 100%;
   font-size: 11px;
   font-weight: 800;
@@ -1380,6 +1408,7 @@
   letter-spacing: 0.03em;
   color: var(--muted);
   padding: 4px 0 2px;
+  overflow: hidden;
   transition: color 150ms ease;
 }
 
@@ -1390,6 +1419,300 @@
 .toggleChevron {
   font-size: 9px;
   color: var(--muted);
+}
+
+/* ── Edge Detail Panel ── */
+
+.edgeHeaderTitle {
+  flex: 1;
+  font-weight: 700;
+  font-size: 11px;
+  white-space: normal;
+  word-break: break-all;
+  overflow: hidden;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.edgeHeaderArrow {
+  font-size: 14px;
+  color: rgba(0, 120, 212, 0.72);
+  font-weight: 800;
+  flex: none;
+}
+
+.edgeProtocolBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  background: rgba(0, 120, 212, 0.08);
+  color: rgba(0, 120, 212, 0.82);
+  border: 1px solid rgba(0, 120, 212, 0.16);
+  flex: none;
+}
+
+.edgeRefreshInfo {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 2px 0 4px;
+}
+
+.edgeLoadingNote {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 12px 0;
+  text-align: center;
+}
+
+.edgeSubSection {
+  display: grid;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.edgeSubSectionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(20, 21, 23, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 0;
+}
+
+.edgeEmptyNote {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.edgeEndpointGroup {
+  display: grid;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.edgeEndpointLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 120, 212, 0.72);
+  padding-bottom: 2px;
+}
+
+/* NSG Rules */
+
+.nsgRuleItem {
+  display: grid;
+  grid-template-columns: 42px 16px 36px 1fr 1fr 40px;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nsgRuleAllow {
+  background: rgba(16, 137, 62, 0.07);
+  color: rgba(20, 21, 23, 0.80);
+}
+
+.nsgRuleDeny {
+  background: rgba(216, 59, 1, 0.07);
+  color: rgba(20, 21, 23, 0.80);
+}
+
+.nsgRuleAccess {
+  font-weight: 800;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nsgRuleAllow .nsgRuleAccess { color: rgba(16, 137, 62, 0.88); }
+.nsgRuleDeny .nsgRuleAccess { color: rgba(216, 59, 1, 0.88); }
+
+.nsgRuleDir {
+  text-align: center;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.nsgRuleProto {
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.nsgRulePort {
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nsgRuleSrc {
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nsgRulePriority {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* UDR Routes */
+
+.udrRouteItem {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.udrRoutePrefix {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 11px;
+  color: rgba(20, 21, 23, 0.75);
+}
+
+.udrRouteArrow {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.udrRouteHop {
+  font-size: 11px;
+  color: rgba(0, 120, 212, 0.80);
+  font-weight: 600;
+}
+
+/* Flow Records */
+
+.flowList {
+  display: grid;
+  gap: 4px;
+}
+
+.flowRecord {
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(20, 21, 23, 0.07);
+  background: rgba(255, 255, 255, 0.55);
+  display: grid;
+  gap: 3px;
+}
+
+.flowRecordExternal {
+  border-color: rgba(0, 120, 212, 0.18);
+  background: rgba(0, 120, 212, 0.03);
+}
+
+.flowRecordTop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.internetIcon {
+  font-size: 11px;
+  flex: none;
+}
+
+.flowIp {
+  font-family: monospace;
+  font-size: 10px;
+  color: rgba(20, 21, 23, 0.80);
+  font-weight: 600;
+}
+
+.flowArrow {
+  font-size: 10px;
+  color: var(--muted);
+  flex: none;
+}
+
+.flowProtoBadge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(20, 21, 23, 0.07);
+  color: rgba(20, 21, 23, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  flex: none;
+}
+
+.flowActionBadge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex: none;
+}
+
+.flowActionAllow {
+  background: rgba(16, 137, 62, 0.10);
+  color: rgba(16, 137, 62, 0.88);
+}
+
+.flowActionDeny {
+  background: rgba(216, 59, 1, 0.10);
+  color: rgba(216, 59, 1, 0.88);
+}
+
+.flowBytes {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--muted);
+}
+
+/* Port Summary */
+
+.portSummaryGrid {
+  display: grid;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(20, 21, 23, 0.07);
+  margin-top: 4px;
+}
+
+.portSummaryRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.portSummaryPort {
+  font-family: monospace;
+  font-weight: 700;
+  color: rgba(20, 21, 23, 0.75);
+}
+
+.portSummaryCount {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.portSummaryExternal {
+  font-size: 10px;
+  color: rgba(0, 120, 212, 0.70);
+  font-weight: 600;
+  padding-top: 2px;
 }
 
 /* ── Responsive ── */

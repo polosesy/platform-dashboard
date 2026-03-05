@@ -269,6 +269,7 @@ export type DiagramIconKind =
   | "keyVault" | "appInsights" | "logAnalytics"
   | "privateEndpoint" | "dns" | "firewall" | "waf"
   | "functionApp" | "appService" | "serviceBus" | "eventHub"
+  | "publicIP"
   | "custom";
 
 // ────────────────────────────────────────────
@@ -340,4 +341,93 @@ export type CanvasParticleTokens = {
   glowRadius: number;
   trailLength: number;
   trailOpacity: number;
+};
+
+// ────────────────────────────────────────────
+// 9. Edge Network Detail (엣지 클릭 시 on-demand fetch)
+// ────────────────────────────────────────────
+
+export type NicEndpointInfo = {
+  name: string;
+  privateIp?: string;
+  publicIp?: string;
+};
+
+export type NsgRuleEntry = {
+  name: string;
+  priority: number;
+  direction: "Inbound" | "Outbound";
+  access: "Allow" | "Deny";
+  protocol: string;
+  sourcePortRange: string;
+  destinationPortRange: string;
+  sourceAddressPrefix: string;
+  destinationAddressPrefix: string;
+};
+
+export type NsgInfo = {
+  name: string;
+  resourceId?: string;
+  effectiveRules: NsgRuleEntry[];
+};
+
+export type UdrRoute = {
+  name: string;
+  addressPrefix: string;
+  nextHopType: "VirtualNetworkGateway" | "VnetLocal" | "Internet" | "VirtualAppliance" | "None";
+  nextHopIpAddress?: string;
+};
+
+export type UdrInfo = {
+  name: string;
+  routes: UdrRoute[];
+};
+
+export type NetworkFlowRecord = {
+  srcIp: string;
+  destIp: string;
+  srcPort: number;
+  destPort: number;
+  protocol: "TCP" | "UDP";
+  direction: "Inbound" | "Outbound";
+  action: "Allow" | "Deny";
+  bytesSrcToDest?: number;
+  bytesDestToSrc?: number;
+  isExternalSrc: boolean;
+  isExternalDest: boolean;
+  flowState?: string; // B=Begin C=Continuing E=End D=Denied
+};
+
+export type FlowSummary = {
+  flowCount: number;
+  totalBytesBps: number;
+  topPorts: Array<{ port: number; protocol: string; flowCount: number }>;
+  externalSourceCount: number;
+};
+
+export type EdgeNetworkDetail = {
+  edgeId: string;
+  generatedAt: string;
+  sourceNodeId: string;
+  sourceNodeLabel: string;
+  targetNodeId: string;
+  targetNodeLabel: string;
+  protocol?: string;
+  edgeKind?: DiagramEdgeKind;
+  liveMetrics?: {
+    throughputBps?: number;
+    latencyMs?: number;
+    errorRate?: number;
+    requestsPerSec?: number;
+  };
+  sourceNics: NicEndpointInfo[];
+  targetNics: NicEndpointInfo[];
+  sourceNsg?: NsgInfo;
+  targetNsg?: NsgInfo;
+  udr?: UdrInfo;
+  inboundFlows: NetworkFlowRecord[];
+  outboundFlows: NetworkFlowRecord[];
+  inboundSummary: FlowSummary;
+  outboundSummary: FlowSummary;
+  note?: string;
 };

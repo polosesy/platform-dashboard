@@ -11,17 +11,18 @@ import type {
 } from "@aud/types";
 
 // ────────────────────────────────────────────
-// Mock Diagram Spec — Network-Centric Architecture
+// Mock Diagram Spec — Network-Centric Architecture (Azure Official)
 //
 // Layout:
 // ┌── VNet: prod-vnet (10.0.0.0/16) ────────────────────────────────────────────────────┐
 // │ ┌── gw-subnet (10.0.0.0/24) ────┐ ┌── app-subnet (10.0.1.0/24) ──────────────────┐ │
-// │ │ [App Gateway]                  │ │ [AKS Platform]     [Functions]                │ │
-// │ │   └ nic-appgw (chip)           │ │   └ nic-aks (chip)   └ nic-func (chip)        │ │
+// │ │ [App Gateway]                  │ │ [AKS NodePool]     [Functions]                │ │
+// │ │   └ nic-appgw (chip)           │ │   └ nic-nodepool     └ nic-func (chip)        │ │
 // │ └────────────────────────────────┘ │ [PE-sql]            [PE-redis]                │ │
 // │                                    └───────────────────────────────────────────────┘ │
 // └──────────────────────────────────────────────────────────────────────────────────────┘
 //
+// [AKS Control Plane] ──Manages──> [AKS NodePool]  (control plane is Azure-managed, external)
 // [SQL Database] ──privateLink── PE-sql      [Redis Cache] ──privateLink── PE-redis
 // [Blob Storage]   (no PE, general placement)
 // ────────────────────────────────────────────
@@ -135,16 +136,16 @@ export const mockDiagramSpec: DiagramSpec = {
         },
       ] as SubResource[],
     },
-    // ── AKS (inside app-subnet, with NIC as subResource) ──
+    // ── AKS Control Plane (Azure-managed, OUTSIDE VNet — official Azure architecture) ──
     {
       id: "aks",
-      label: "AKS Platform",
+      label: "AKS Control Plane",
       icon: "aks",
       groupId: "compute",
-      parentId: "app-subnet",
+      // No parentId — control plane is managed by Azure, external to user VNet
       azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod",
-      endpoint: "10.0.1.10",
-      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
+      endpoint: "aks-prod.hcp.koreacentral.azmk8s.io",
+      position: { x: APP_SUBNET_ABS_X + 2 * (NODE_W + 36), y: PAAS_Y },
       bindings: {
         cpu: { source: "monitor", metric: "node_cpu_usage_percentage", aggregation: "avg" },
         memory: { source: "monitor", metric: "node_memory_rss_percentage", aggregation: "avg" },
@@ -155,14 +156,29 @@ export const mockDiagramSpec: DiagramSpec = {
           { metric: "pods", op: ">", threshold: 10, weight: 0.3 },
         ]},
       },
+      metadata: { dnsName: "aks-prod.hcp.koreacentral.azmk8s.io" },
+    },
+    // ── AKS NodePool / VMSS (inside app-subnet — worker nodes in user VNet) ──
+    {
+      id: "aks-nodepool",
+      label: "AKS NodePool",
+      icon: "vmss",
+      groupId: "compute",
+      parentId: "app-subnet",
+      azureResourceId: "/subscriptions/mock/resourceGroups/MC_rg-prod_aks-prod_koreacentral/providers/Microsoft.Compute/virtualMachineScaleSets/aks-nodepool1",
+      endpoint: "10.0.1.10",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
+      bindings: {
+        health: { source: "composite", rules: [] },
+      },
       metadata: { privateIP: "10.0.1.10" },
       subResources: [
         {
-          id: "nic-aks",
-          label: "nic-aks-prod",
+          id: "nic-aks-nodepool",
+          label: "nic-nodepool-prod",
           kind: "nic",
           endpoint: "10.0.1.10",
-          azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-aks",
+          azureResourceId: "/subscriptions/mock/resourceGroups/MC_rg-prod_aks-prod_koreacentral/providers/Microsoft.Network/networkInterfaces/nic-aks-nodepool",
         },
       ] as SubResource[],
     },
@@ -311,10 +327,20 @@ export const mockDiagramSpec: DiagramSpec = {
       bindings: {},
       animation: "dash",
     },
-    // ── Service edges: compute → data ──
+    // ── AKS Control Plane → NodePool (Manages relationship) ──
     {
-      id: "aks->pe-sql",
+      id: "aks->aks-nodepool",
       source: "aks",
+      target: "aks-nodepool",
+      label: "Manages",
+      edgeKind: "network",
+      bindings: {},
+      animation: "dash",
+    },
+    // ── Service edges: compute → data (from nodepool pods) ──
+    {
+      id: "aks-nodepool->pe-sql",
+      source: "aks-nodepool",
       target: "pe-sql",
       label: "10.0.1.10 → PE-sql",
       protocol: "TCP",
@@ -327,8 +353,8 @@ export const mockDiagramSpec: DiagramSpec = {
       alerts: [{ condition: "latency > 500", severity: "warning" }],
     },
     {
-      id: "aks->pe-redis",
-      source: "aks",
+      id: "aks-nodepool->pe-redis",
+      source: "aks-nodepool",
       target: "pe-redis",
       label: "10.0.1.10 → PE-redis",
       protocol: "TCP",
@@ -411,6 +437,14 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
         memory: aksHealth ? rand(40, 70) : rand(78, 94),
         pods: rand(18, 30),
       },
+      activeAlertIds: aksHealth ? [] : ["alert-001"],
+      powerState: "running" as PowerState,
+    },
+    {
+      id: "aks-nodepool",
+      health: aksHealth ? "ok" : "warning",
+      healthScore: aksHealth ? rand(0.75, 0.98) : rand(0.4, 0.65),
+      metrics: {},
       activeAlertIds: aksHealth ? [] : ["alert-001"],
       powerState: "running" as PowerState,
     },
@@ -501,7 +535,14 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       activeAlertIds: [],
     },
     {
-      id: "aks->pe-sql",
+      id: "aks->aks-nodepool",
+      status: aksHealth ? "normal" : "degraded",
+      metrics: { throughputBps: 0 },
+      trafficLevel: "low",
+      activeAlertIds: aksHealth ? [] : ["alert-001"],
+    },
+    {
+      id: "aks-nodepool->pe-sql",
       status: sqlLatencySpike ? "degraded" : "normal",
       metrics: {
         throughputBps: aksPeSqlThroughput,
@@ -512,7 +553,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       activeAlertIds: sqlLatencySpike ? ["alert-002"] : [],
     },
     {
-      id: "aks->pe-redis",
+      id: "aks-nodepool->pe-redis",
       status: "normal",
       metrics: { throughputBps: aksPeRedisThroughput, latencyMs: rand(1, 5) },
       trafficLevel: mockTrafficLevel(aksPeRedisThroughput),
@@ -544,8 +585,8 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       firedAt: new Date(Date.now() - 180_000).toISOString(),
       summary: "Node CPU usage has exceeded 80% for 3+ minutes. Consider scaling node pool.",
       rootCauseCandidates: ["High pod density", "Memory pressure causing swap"],
-      affectedNodeIds: ["aks"],
-      affectedEdgeIds: ["appgw->aks", "aks->pe-sql", "aks->pe-redis"],
+      affectedNodeIds: ["aks", "aks-nodepool"],
+      affectedEdgeIds: ["appgw->aks", "aks->aks-nodepool", "aks-nodepool->pe-sql", "aks-nodepool->pe-redis"],
     });
   }
   if (sqlLatencySpike) {
@@ -558,7 +599,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       summary: "P95 query latency exceeded 500ms. DTU usage at 95%. Possible deadlock on orders table.",
       rootCauseCandidates: ["DTU saturation", "Long-running query on orders table", "Missing index on orders.created_at"],
       affectedNodeIds: ["sql", "pe-sql"],
-      affectedEdgeIds: ["aks->pe-sql", "pe-sql->sql", "func->pe-sql"],
+      affectedEdgeIds: ["aks-nodepool->pe-sql", "pe-sql->sql", "func->pe-sql"],
     });
   }
 
