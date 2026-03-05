@@ -139,9 +139,14 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
               {typeAbbr}
             </span>
           )}
-          {powerState && powerState !== "unknown" && (
+          {powerState && (
             <span className={styles.powerStateBadge} data-state={powerState}>
               {POWER_STATE_LABEL[powerState] ?? powerState}
+            </span>
+          )}
+          {!powerState && health !== "unknown" && (
+            <span className={styles.healthStatusBadge} data-health={health}>
+              {health === "ok" ? "OK" : health === "warning" ? "Warn" : "Crit"}
             </span>
           )}
         </div>

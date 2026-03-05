@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { OnBehalfOfCredential, ClientSecretCredential } from "@azure/identity";
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import type { Env } from "../env";
-import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, EdgeKind, GraphNodeKind } from "../types";
+import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "../types";
 
 type AzureResourceRow = {
   id: string;
@@ -1276,11 +1276,20 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   }
 
   // ── Generic fallback: scan ALL resource properties for subnet references ──
+  // NOTE: PaaS services (storage, SQL, Redis, CosmosDB, etc.) are excluded because their
+  // networkAcls.virtualNetworkRules reference subnets via SERVICE ENDPOINTS — not physical
+  // placement. Showing them inside the subnet would misrepresent the architecture.
+  const PAAS_KINDS_NO_SUBNET = new Set([
+    "storage", "sql", "cosmosDb", "redis", "postgres", "keyVault",
+    "serviceBus", "eventHub", "appInsights", "logAnalytics", "dns",
+  ]);
   let genericSubnetEdges = 0;
   for (const r of resRows) {
     if (!r.id || !r.properties) continue;
     const kind = mapKind(r.type, r.kind);
     if (kind === "vnet" || kind === "subnet" || kind === "nic" || kind === "nsg") continue;
+    // Skip PaaS services — service endpoint rules ≠ physical subnet containment
+    if (PAAS_KINDS_NO_SUBNET.has(kind)) continue;
     const hasSubnetEdge = edges.some(e =>
       (e.target === r.id && finalSubnetNodeIds.has(e.source)) ||
       (e.source === r.id && finalSubnetNodeIds.has(e.target)),

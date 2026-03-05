@@ -245,11 +245,11 @@
 
 /* ── MiniMap Toggle Button ── */
 .miniMapToggle {
+  all: unset;
   position: absolute;
   bottom: 130px;
   right: 10px;
   z-index: 10;
-  all: unset;
   cursor: pointer;
   width: 22px;
   height: 22px;
@@ -385,6 +385,36 @@
   color: rgba(0, 120, 212, 0.80);
   background: rgba(0, 120, 212, 0.08);
   animation: powerPulse 1.5s ease-in-out infinite;
+}
+
+.powerStateBadge[data-state="unknown"] {
+  color: rgba(20, 21, 23, 0.35);
+  background: rgba(20, 21, 23, 0.06);
+}
+
+.healthStatusBadge {
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.healthStatusBadge[data-health="ok"] {
+  color: rgba(16, 137, 62, 0.85);
+  background: rgba(16, 137, 62, 0.08);
+}
+
+.healthStatusBadge[data-health="warning"] {
+  color: rgba(209, 132, 0, 0.85);
+  background: rgba(209, 132, 0, 0.10);
+}
+
+.healthStatusBadge[data-health="critical"] {
+  color: rgba(196, 43, 28, 0.90);
+  background: rgba(196, 43, 28, 0.08);
 }
 
 @keyframes powerPulse {
