@@ -44,6 +44,16 @@ const POWER_STATE_LABEL: Record<string, string> = {
   stopping: "Stopping",
 };
 
+// PowerState → ring visual mapping
+type PowerStateRing = { health: HealthStatus; score: number; color: string; spin: boolean };
+const POWER_STATE_RING: Record<string, PowerStateRing> = {
+  running:     { health: "ok",       score: 1,    color: "rgba(16,137,62,0.70)",  spin: true },
+  starting:    { health: "ok",       score: 0.5,  color: "rgba(0,120,212,0.65)",  spin: true },
+  stopping:    { health: "warning",  score: 0.5,  color: "rgba(209,132,0,0.70)",  spin: true },
+  stopped:     { health: "warning",  score: 0.3,  color: "rgba(209,132,0,0.60)",  spin: false },
+  deallocated: { health: "unknown",  score: 0.15, color: "rgba(20,21,23,0.25)",   spin: false },
+};
+
 // Azure CAF resource type abbreviations
 const RESOURCE_TYPE_ABBR: Record<string, string> = {
   vm: "VM", vmss: "VMSS", aks: "AKS", containerApp: "CA",
@@ -60,8 +70,16 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
   const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
-  const colors = nodeColor(health);
-  const pulse = defaultTokens.animation.pulseFrequency[health];
+
+  // ── Derive ring visuals from powerState (when available) or health ──
+  const ringFromPower = powerState ? POWER_STATE_RING[powerState] : undefined;
+  const effectiveHealth: HealthStatus = ringFromPower?.health ?? health;
+  const effectiveScore = ringFromPower?.score ?? healthScore;
+  const isSpinning = ringFromPower?.spin ?? false;
+
+  const colors = nodeColor(effectiveHealth);
+  const ringStroke = ringFromPower?.color ?? colors.ringStroke;
+  const pulse = defaultTokens.animation.pulseFrequency[effectiveHealth];
 
   const topMetrics = Object.entries(metrics)
     .filter(([, v]) => v != null)
@@ -93,16 +111,19 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
             stroke="rgba(20,21,23,0.06)"
             strokeWidth={RING_STROKE}
           />
-          {/* Health arc */}
+          {/* Health / PowerState arc */}
           <circle
             cx="20" cy="20" r={RING_R}
             fill="none"
-            stroke={colors.ringStroke}
+            stroke={ringStroke}
             strokeWidth={RING_STROKE}
-            strokeDasharray={`${healthScore * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
+            strokeDasharray={isSpinning
+              ? `${0.75 * CIRCUMFERENCE} ${0.25 * CIRCUMFERENCE}`
+              : `${effectiveScore * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
             strokeLinecap="round"
             transform="rotate(-90 20 20)"
-            style={{ transition: `stroke-dasharray ${defaultTokens.animation.transitionDuration}ms ease` }}
+            className={isSpinning ? styles.healthRingSpin : undefined}
+            style={isSpinning ? undefined : { transition: `stroke-dasharray ${defaultTokens.animation.transitionDuration}ms ease` }}
           />
           {/* Alert indicator */}
           {hasAlert && (

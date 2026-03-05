@@ -39,10 +39,10 @@ const features = [
     accent: "var(--danger)",
   },
   {
-    href: "/argocd",
-    title: "ArgoCD",
-    desc: "GitOps sync/health/revision status and deployment drift across environments.",
-    accent: "#6b4fbb",
+    href: "/kubernetes",
+    title: "Kubernetes",
+    desc: "AKS cluster overview with pods, deployments, services, and namespace-level object browser.",
+    accent: "#326ce5",
   },
 ];
 
@@ -55,9 +55,9 @@ export default function Home() {
           Azure architecture, network flows, and delivery status.
         </h1>
         <p className={styles.subtitle}>
-          Resource Graph + Monitor + Log Analytics + Defender + ArgoCD in one
-          place. Explore real-time topology, health, cost, security, and
-          delivery across your entire Azure estate.
+          Resource Graph + Monitor + Log Analytics + Defender + Kubernetes in
+          one place. Explore real-time topology, health, cost, security, and
+          workloads across your entire Azure estate.
         </p>
 
         <div className={styles.actions}>

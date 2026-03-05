@@ -3,8 +3,6 @@ import { z } from "zod";
 const EnvSchema = z.object({
   PORT: z.coerce.number().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000,http://localhost:3001"),
-  ARGOCD_BASE_URL: z.string().optional(),
-  ARGOCD_TOKEN: z.string().optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Azure Log Analytics (Traffic Analytics)

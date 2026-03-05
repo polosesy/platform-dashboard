@@ -14,7 +14,7 @@ const links = [
   { href: "/network", label: "Network" },
   { href: "/cost", label: "Cost" },
   { href: "/security", label: "Security" },
-  { href: "/argocd", label: "ArgoCD" },
+  { href: "/kubernetes", label: "Kubernetes" },
 ];
 
 type TopNavProps = {

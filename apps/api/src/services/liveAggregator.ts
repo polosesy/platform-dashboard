@@ -194,6 +194,11 @@ export async function buildLiveSnapshot(
   }
 
   // ── Collect PowerState for compute resources ──
+  const COMPUTE_KINDS = new Set([
+    "vm", "vmss", "aks", "containerApp", "functionApp", "appService",
+    "postgres", "sql", "redis", "cosmosDb", "storage", "keyVault",
+    "appGateway", "lb", "firewall",
+  ]);
   let powerStateMap = new Map<string, PowerState>();
 
   if (azureEnabled) {
@@ -206,6 +211,15 @@ export async function buildLiveSnapshot(
         powerStateMap = await collectBatchPowerStates(env, bearerToken, computeNodes);
       } catch {
         // Non-critical
+      }
+    }
+
+    // Default: assume "running" for compute resources with no collected powerState
+    for (const n of spec.nodes) {
+      if (n.azureResourceId && n.resourceKind && COMPUTE_KINDS.has(n.resourceKind)) {
+        if (!powerStateMap.has(n.azureResourceId)) {
+          powerStateMap.set(n.azureResourceId, "running");
+        }
       }
     }
   }

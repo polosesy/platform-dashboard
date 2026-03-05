@@ -4,7 +4,7 @@ import { registerArchitectureRoutes } from "./architecture";
 import { registerNetworkRoutes } from "./network";
 import { registerAzureRoutes } from "./azure";
 import { registerReservationRoutes } from "./reservations";
-import { registerDevOpsRoutes } from "./devops";
+import { registerKubernetesRoutes } from "./kubernetes";
 import { registerCostRoutes } from "./cost";
 import { registerSecurityRoutes } from "./security";
 import { registerHealthRoutes } from "./health";
@@ -21,7 +21,7 @@ export function registerAllRoutes(router: Router, env: Env) {
   registerArchitectureRoutes(router, env);
   registerNetworkRoutes(router, env);
   registerReservationRoutes(router, env);
-  registerDevOpsRoutes(router, env);
+  registerKubernetesRoutes(router, env);
   registerCostRoutes(router, env);
   registerSecurityRoutes(router, env);
   registerHealthRoutes(router, env);

@@ -1,0 +1,262 @@
+.page {
+  display: grid;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px;
+  flex-wrap: wrap;
+}
+
+.headerLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+}
+
+.subTitle {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Summary cards ── */
+
+.summaryStrip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.summaryCard {
+  flex: 1 1 120px;
+  min-width: 100px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+}
+
+.summaryLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.summaryValue {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.summaryValue[data-accent="running"] {
+  color: #10893e;
+}
+
+.summaryValue[data-accent="pending"] {
+  color: #ff8c00;
+}
+
+.summaryValue[data-accent="failed"] {
+  color: #d83b01;
+}
+
+/* ── Kind filter ── */
+
+.kindFilter {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.kindBtn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(20, 21, 23, 0.72);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.kindBtn:hover {
+  border-color: var(--accent);
+}
+
+.kindBtnActive {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* ── Table ── */
+
+.tableWrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table thead th {
+  text-align: left;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(20, 21, 23, 0.62);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(20, 21, 23, 0.08);
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover {
+  background: rgba(0, 120, 212, 0.04);
+}
+
+.objectName {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.mono {
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
+  color: rgba(20, 21, 23, 0.78);
+}
+
+/* ── Status badge ── */
+
+.statusBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.statusBadge[data-status="Running"],
+.statusBadge[data-status="Ready"],
+.statusBadge[data-status="Active"],
+.statusBadge[data-status="Complete"] {
+  background: rgba(16, 137, 62, 0.12);
+  color: #10893e;
+}
+
+.statusBadge[data-status="Pending"],
+.statusBadge[data-status="Progressing"] {
+  background: rgba(255, 140, 0, 0.12);
+  color: #ff8c00;
+}
+
+.statusBadge[data-status="Failed"],
+.statusBadge[data-status="NotReady"] {
+  background: rgba(216, 59, 1, 0.12);
+  color: #d83b01;
+}
+
+.statusBadge[data-status="Suspended"] {
+  background: rgba(20, 21, 23, 0.08);
+  color: rgba(20, 21, 23, 0.6);
+}
+
+/* ── Kind badge ── */
+
+.kindBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(0, 120, 212, 0.08);
+  color: rgba(0, 120, 212, 0.9);
+}
+
+/* ── Error / Loading ── */
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(216, 59, 1, 0.26);
+  background: rgba(216, 59, 1, 0.10);
+  border-radius: var(--radius-md);
+  color: rgba(216, 59, 1, 0.95);
+  font-size: 13px;
+}
+
+.loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tableHint {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.note {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 120, 212, 0.2);
+  background: rgba(0, 120, 212, 0.06);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: rgba(0, 120, 212, 0.8);
+}

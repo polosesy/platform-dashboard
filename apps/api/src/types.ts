@@ -12,17 +12,6 @@ export type AzureSubscriptionsResponse = {
   note?: string;
 };
 
-export type ArgoAppSummary = {
-  name: string;
-  namespace?: string;
-  project?: string;
-  health?: string;
-  sync?: string;
-  repo?: string;
-  revision?: string;
-  lastDeployedAt?: string;
-};
-
 export type NetworkFlowPair = {
   src: string;
   dest: string;

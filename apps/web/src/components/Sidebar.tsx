@@ -50,7 +50,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       items: [
         { href: "/cost", label: t("nav.costManagement"), icon: "dollar" },
         { href: "/security", label: t("common.security"), icon: "shield" },
-        { href: "/argocd", label: t("common.argocd"), icon: "git" },
+        { href: "/kubernetes", label: t("common.kubernetes"), icon: "grid" },
       ],
     },
   ];

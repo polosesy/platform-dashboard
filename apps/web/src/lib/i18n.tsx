@@ -105,7 +105,7 @@ const T: Translations = {
   "common.security": { ko: "보안", en: "Security" },
   "common.health": { ko: "상태", en: "Health" },
   "common.network": { ko: "네트워크", en: "Network" },
-  "common.argocd": { ko: "ArgoCD", en: "ArgoCD" },
+  "common.kubernetes": { ko: "Kubernetes", en: "Kubernetes" },
 
   // ── Navigation / Sidebar ──
   "nav.dashboard": { ko: "대시보드", en: "Dashboard" },
