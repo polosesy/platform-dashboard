@@ -72,6 +72,11 @@ function LiveCanvasInner({
   const [showMiniMap, setShowMiniMap] = useState(true);
   const reactFlowInstance = useReactFlow();
 
+  // Track pre-drag positions for group node snap-back (overlap prevention)
+  const dragStartPos = useRef<Record<string, { x: number; y: number }>>({});
+  // Track group nodes the user has manually repositioned — preserve through spec refreshes
+  const userPositionedIds = useRef<Set<string>>(new Set());
+
   // ── Hover highlight state ──
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
@@ -335,9 +340,12 @@ function LiveCanvasInner({
             const updated = {
               ...existing,
               data,
-              // Always sync style + position from spec to prevent stale sizes/positions causing overlap
+              // Always sync style from spec to prevent stale sizes causing overlap
               style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
-              position: nodeSpec.position ?? existing.position,
+              // Preserve position for user-dragged nodes; sync from spec for all others
+              position: userPositionedIds.current.has(nodeSpec.id)
+                ? existing.position
+                : (nodeSpec.position ?? existing.position),
             } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
             if (nodeSpec.parentId) {
               updated.parentNode = nodeSpec.parentId;
@@ -568,6 +576,56 @@ function LiveCanvasInner({
     [onNodesChange, setNodes],
   );
 
+  // ── Group node drag: record position before drag begins ──
+  const handleNodeDragStart = useCallback((_e: React.MouseEvent, node: FlowNode) => {
+    if (node.type === "group") {
+      dragStartPos.current[node.id] = { ...node.position };
+    }
+  }, []);
+
+  // ── Group node drag stop: snap back if overlapping a sibling group ──
+  const handleNodeDragStop = useCallback((_e: React.MouseEvent, node: FlowNode) => {
+    if (node.type !== "group") return;
+
+    type AnyNode = FlowNode & { parentNode?: string };
+    const parentId = (node as AnyNode).parentNode;
+
+    setNodes((prev) => {
+      const siblingGroups = prev.filter((n) => {
+        if (n.id === node.id || n.type !== "group") return false;
+        return (n as AnyNode).parentNode === parentId;
+      });
+
+      const dw = (node.style?.width as number) ?? 400;
+      const dh = (node.style?.height as number) ?? 200;
+      const GAP = 10; // minimum clearance between group boxes
+
+      const hasOverlap = siblingGroups.some((sib) => {
+        const sw = (sib.style?.width as number) ?? 400;
+        const sh = (sib.style?.height as number) ?? 200;
+        return !(
+          node.position.x + dw + GAP <= sib.position.x ||
+          sib.position.x + sw + GAP <= node.position.x ||
+          node.position.y + dh + GAP <= sib.position.y ||
+          sib.position.y + sh + GAP <= node.position.y
+        );
+      });
+
+      if (hasOverlap) {
+        // Snap back to pre-drag position
+        const orig = dragStartPos.current[node.id];
+        delete dragStartPos.current[node.id];
+        if (!orig) return prev;
+        return prev.map((n) => (n.id === node.id ? { ...n, position: orig } : n));
+      }
+
+      // Drag successful — mark as user-positioned so spec refreshes don't reset it
+      userPositionedIds.current.add(node.id);
+      delete dragStartPos.current[node.id];
+      return prev;
+    });
+  }, [setNodes]);
+
   // ── Build edges with hover highlight flags ──
   const particlesEnabled = showParticles && vizMode === "2d-animated";
 
@@ -668,6 +726,8 @@ function LiveCanvasInner({
         onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); }}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDragStop={handleNodeDragStop}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         minZoom={0.05}
