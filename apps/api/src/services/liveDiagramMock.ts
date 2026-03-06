@@ -42,6 +42,7 @@ const GW_SUB_W = NODE_W + 2 * SUBNET_PAD;
 const GW_SUB_H = SUBNET_HEAD + NODE_H_SUB + SUBNET_PAD;
 
 // app-subnet: 2 compute nodes (with NIC chips) + 2 PE nodes
+// NSG badges are now embedded inside GroupNode/LiveNode — no extra layout height
 const APP_SUB_W = 2 * NODE_W + 2 * SUBNET_PAD + GAP;
 const APP_SUB_H = SUBNET_HEAD + NODE_H_SUB + GAP + NODE_H + SUBNET_PAD;
 
@@ -158,6 +159,19 @@ export const mockDiagramSpec: DiagramSpec = {
       },
       metadata: { dnsName: "aks-prod.hcp.koreacentral.azmk8s.io" },
     },
+    // ── NSG Badge (Cat 2: NIC-attached, bound to AKS nodepool — embedded in nodepool LiveNode) ──
+    {
+      id: "nsg-nic-nodepool",
+      label: "nsg-nic-nodepool-prod",
+      icon: "nsg",
+      groupId: "network",
+      parentId: "app-subnet",
+      azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-nic-nodepool-prod",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD },
+      bindings: { health: { source: "composite", rules: [] } },
+      resourceKind: "nsg",
+      metadata: { nsgAttachedTo: "aks-nodepool" },
+    },
     // ── AKS NodePool / VMSS (inside app-subnet — worker nodes in user VNet) ──
     {
       id: "aks-nodepool",
@@ -231,6 +245,19 @@ export const mockDiagramSpec: DiagramSpec = {
       position: { x: SUBNET_PAD + NODE_W + GAP, y: SUBNET_HEAD + NODE_H_SUB + GAP },
       bindings: { health: { source: "composite", rules: [] } },
       metadata: { privateIP: "10.0.1.51" },
+    },
+    // ── NSG Badge (Cat 1: subnet-attached — embedded in app-subnet GroupNode header) ──
+    {
+      id: "nsg-app-subnet",
+      label: "nsg-app-subnet-prod",
+      icon: "nsg",
+      groupId: "network",
+      parentId: "app-subnet",
+      azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkSecurityGroups/nsg-app-subnet-prod",
+      position: { x: 4, y: 2 },
+      bindings: { health: { source: "composite", rules: [] } },
+      resourceKind: "nsg",
+      metadata: { nsgAttachedTo: "app-subnet" },
     },
     // ── PaaS resources (outside VNet, positioned near app-subnet PEs) ──
     {
@@ -467,6 +494,20 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       id: "pe-redis",
       health: "ok",
       healthScore: 0.95,
+      metrics: {},
+      activeAlertIds: [],
+    },
+    {
+      id: "nsg-app-subnet",
+      health: "ok",
+      healthScore: 1.0,
+      metrics: {},
+      activeAlertIds: [],
+    },
+    {
+      id: "nsg-nic-nodepool",
+      health: "ok",
+      healthScore: 1.0,
       metrics: {},
       activeAlertIds: [],
     },

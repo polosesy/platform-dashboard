@@ -25,7 +25,6 @@ import ELK from "elkjs";
 const EXCLUDED_KINDS: Set<GraphNodeKind> = new Set([
   "subscription",
   "resourceGroup",
-  "nsg",
   "dns",
   "logAnalytics",
 ]);
@@ -815,6 +814,107 @@ export async function generateDiagramSpec(
     }]);
   }
 
+  // ── Build NSG placement map ──
+  // NSGs are placed based on their associations:
+  //  - If attached to a subnet → place inside that subnet
+  //  - If attached to NIC(s) only → place in the subnet of the NIC's parent resource
+  const NETWORK_EDGE_KINDS_LOOKUP: Set<EdgeKind> = new Set(["connects", "network", "attached-to", "bound-to"]);
+  const nsgToSubnet = new Map<string, string>(); // nsgOrigId → subnetOrigId
+  const nsgToNics = new Map<string, string[]>(); // nsgOrigId → nicOrigIds[]
+
+  for (const edge of graph.edges) {
+    if (!NETWORK_EDGE_KINDS_LOOKUP.has(edge.kind)) continue;
+    const srcKind = nodeKindLookup.get(edge.source);
+    const tgtKind = nodeKindLookup.get(edge.target);
+
+    // subnet → nsg
+    if (srcKind === "subnet" && tgtKind === "nsg") {
+      nsgToSubnet.set(edge.target, edge.source);
+    }
+    // nsg → subnet (reversed direction)
+    if (srcKind === "nsg" && tgtKind === "subnet") {
+      nsgToSubnet.set(edge.source, edge.target);
+    }
+    // nsg → nic
+    if (srcKind === "nsg" && tgtKind === "nic") {
+      const arr = nsgToNics.get(edge.source) ?? [];
+      arr.push(edge.target);
+      nsgToNics.set(edge.source, arr);
+    }
+    // nic → nsg (reversed direction)
+    if (srcKind === "nic" && tgtKind === "nsg") {
+      const arr = nsgToNics.get(edge.target) ?? [];
+      arr.push(edge.source);
+      nsgToNics.set(edge.target, arr);
+    }
+  }
+
+  // ── Categorize NSGs into 4 placement types ──
+  // Cat 1: direct subnet attachment (nsgToSubnet) → badge in subnet header
+  // Cat 2: NIC-attached, NIC bound to VM → badge above VM node
+  // Cat 3: NIC-attached, standalone NIC → badge above NIC node
+  // Cat 4: standalone NSG (no associations) → detached node with X marker
+
+  // Cat 2 & 3: resolve NIC-attached NSGs to their target resource
+  const nsgToVm = new Map<string, string>();        // nsgOrigId → vmOrigId
+  const nsgToStandaloneNic = new Map<string, string>(); // nsgOrigId → nicOrigId
+  const standaloneNsgIds = new Set<string>();        // Cat 4
+
+  for (const [nsgId, nicIds] of nsgToNics) {
+    if (nsgToSubnet.has(nsgId)) continue; // Cat 1 — already mapped to subnet
+    let resolved = false;
+    for (const nicId of nicIds) {
+      const vmId = nicToVmBound.get(nicId);
+      if (vmId) {
+        nsgToVm.set(nsgId, vmId); // Cat 2
+        // Also resolve the subnet for placement
+        const subnetId = containment.resourceSubnet.get(nicId) ?? containment.resourceSubnet.get(vmId);
+        if (subnetId) nsgToSubnet.set(nsgId, subnetId);
+        resolved = true;
+        break;
+      }
+    }
+    if (!resolved) {
+      // Try standalone NIC
+      for (const nicId of nicIds) {
+        if (!nicToVmBound.has(nicId)) {
+          nsgToStandaloneNic.set(nsgId, nicId); // Cat 3
+          const subnetId = containment.resourceSubnet.get(nicId);
+          if (subnetId) nsgToSubnet.set(nsgId, subnetId);
+          resolved = true;
+          break;
+        }
+      }
+    }
+    if (!resolved) {
+      standaloneNsgIds.add(nsgId); // Cat 4
+    }
+  }
+
+  // Cat 4: NSGs with NO associations at all
+  for (const node of graph.nodes) {
+    if (node.kind !== "nsg") continue;
+    if (!nsgToSubnet.has(node.id) && !nsgToVm.has(node.id) && !nsgToStandaloneNic.has(node.id)) {
+      standaloneNsgIds.add(node.id);
+    }
+  }
+
+  // Build reverse maps for layout: target → NSG
+  const vmToNsg = new Map<string, ArchitectureNode>(); // vmOrigId → nsgNode
+  const nicToNsg = new Map<string, ArchitectureNode>(); // nicOrigId → nsgNode
+  for (const [nsgId, vmId] of nsgToVm) {
+    const nsgNode = graph.nodes.find((n) => n.id === nsgId);
+    if (nsgNode) vmToNsg.set(vmId, nsgNode);
+  }
+  for (const [nsgId, nicId] of nsgToStandaloneNic) {
+    const nsgNode = graph.nodes.find((n) => n.id === nsgId);
+    if (nsgNode) nicToNsg.set(nicId, nsgNode);
+  }
+
+  if (nsgToSubnet.size > 0) {
+    console.log(`[specGenerator] NSG placement: ${nsgToSubnet.size} subnet, ${nsgToVm.size} VM-attached, ${nsgToStandaloneNic.size} NIC-attached, ${standaloneNsgIds.size} standalone`);
+  }
+
   if (vmBoundNics.size > 0) {
     console.log(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
   }
@@ -909,8 +1009,25 @@ export async function generateDiagramSpec(
   }
 
   // Build subnet → children map (using short IDs)
+  // NSG placement rules:
+  //  - Cat 1 (direct subnet NSG): placed in subnet as header badge
+  //  - Cat 2 (VM-attached NSG): placed above VM node (not a separate child)
+  //  - Cat 3 (standalone-NIC-attached NSG): placed above NIC node (not a separate child)
+  //  - Cat 4 (standalone NSG): placed as external detached resource
   const subnetChildren = new Map<string, Array<{ node: ArchitectureNode; shortId: string }>>();
   for (const res of resourceNodes) {
+    if (res.kind === "nsg") {
+      // Only Cat 1 (direct subnet) NSGs are placed as subnet children
+      if (nsgToVm.has(res.id) || nsgToStandaloneNic.has(res.id) || standaloneNsgIds.has(res.id)) continue;
+      const subnetOrigId = nsgToSubnet.get(res.id);
+      if (!subnetOrigId) continue;
+      const subnetShortId = idMap.get(subnetOrigId);
+      if (!subnetShortId) continue;
+      const arr = subnetChildren.get(subnetShortId) ?? [];
+      arr.push({ node: res, shortId: idMap.get(res.id)! });
+      subnetChildren.set(subnetShortId, arr);
+      continue;
+    }
     const subnetOrigId = containment.resourceSubnet.get(res.id);
     if (!subnetOrigId) continue;
     const subnetShortId = idMap.get(subnetOrigId);
@@ -950,12 +1067,14 @@ export async function generateDiagramSpec(
   }
 
   // Compute subnet dimensions and tier
+  // NSG badges are now embedded inside GroupNode/LiveNode — no extra layout height needed
   const subnetInfo = new Map<string, { width: number; height: number; tier: number }>();
   for (const [subShortId, children] of subnetChildren) {
     const childKinds = new Set(children.map((c) => c.node.kind));
     const w = NODE_W + 2 * SUBNET_INNER_PAD;
-    const totalChildH = children.reduce((sum, c) => sum + effectiveNodeH(c.node), 0);
-    const h = SUBNET_HEADER + totalChildH + Math.max(0, children.length - 1) * NODE_GAP + SUBNET_INNER_PAD;
+    const nonNsgChildren = children.filter((c) => c.node.kind !== "nsg");
+    const totalChildH = nonNsgChildren.reduce((sum, c) => sum + effectiveNodeH(c.node), 0);
+    const h = SUBNET_HEADER + totalChildH + Math.max(0, nonNsgChildren.length - 1) * NODE_GAP + SUBNET_INNER_PAD;
     subnetInfo.set(subShortId, { width: w, height: Math.max(h, SUBNET_HEADER + NODE_H + SUBNET_INNER_PAD), tier: subnetTier(childKinds) });
   }
 
@@ -1051,11 +1170,56 @@ export async function generateDiagramSpec(
         resourceGroup: sub.node.resourceGroup,
       });
 
-      // Place resources within subnet
+      // Place resources within subnet — NSG badges first (compact), then regular nodes
       const children = subnetChildren.get(sub.shortId) ?? [];
+      const nsgChildren = children.filter((c) => c.node.kind === "nsg");
+      const regularChildren = children.filter((c) => c.node.kind !== "nsg");
+
+      // Cat 1: Subnet NSG badges — embedded in GroupNode header (not separate ReactFlow nodes)
+      for (const nsgChild of nsgChildren) {
+        diagramNodes.push({
+          id: nsgChild.shortId,
+          label: nsgChild.node.name,
+          icon: KIND_TO_ICON[nsgChild.node.kind] ?? "nsg",
+          azureResourceId: nsgChild.node.azureId,
+          parentId: sub.shortId,
+          groupId: inferGroup(nsgChild.node),
+          position: { x: 4, y: 2 },  // not used visually — embedded in parent
+          bindings: { health: { source: "composite", rules: [] } },
+          resourceKind: nsgChild.node.kind,
+          location: nsgChild.node.location,
+          resourceGroup: nsgChild.node.resourceGroup,
+          tags: nsgChild.node.tags,
+          metadata: { nsgAttachedTo: sub.shortId },
+        });
+      }
+
+      // Regular nodes start at normal SUBNET_HEADER (NSG badge overlaps header, no extra row)
       let childY = SUBNET_HEADER;
-      for (let ci = 0; ci < children.length; ci++) {
-        const child = children[ci]!;
+      for (let ci = 0; ci < regularChildren.length; ci++) {
+        const child = regularChildren[ci]!;
+
+        // Cat 2/3: NSG badge — embedded in LiveNode (not separate ReactFlow node)
+        const attachedNsg = vmToNsg.get(child.node.id) ?? nicToNsg.get(child.node.id);
+        if (attachedNsg) {
+          const nsgSid = idMap.get(attachedNsg.id) ?? shortId(attachedNsg.azureId ?? attachedNsg.id);
+          diagramNodes.push({
+            id: nsgSid,
+            label: attachedNsg.name,
+            icon: KIND_TO_ICON[attachedNsg.kind] ?? "nsg",
+            azureResourceId: attachedNsg.azureId,
+            parentId: sub.shortId,
+            groupId: inferGroup(attachedNsg),
+            position: { x: SUBNET_INNER_PAD, y: childY },  // not used visually — embedded in target
+            bindings: { health: { source: "composite", rules: [] } },
+            resourceKind: attachedNsg.kind,
+            location: attachedNsg.location,
+            resourceGroup: attachedNsg.resourceGroup,
+            tags: attachedNsg.tags,
+            metadata: { nsgAttachedTo: child.shortId },
+          });
+          // No extra height — badge is embedded inside target node
+        }
 
         // Build subResources for VM (bound NICs) and AppGW (frontend IPs)
         const childSubResources: SubResource[] = [];
@@ -1113,6 +1277,15 @@ export async function generateDiagramSpec(
   for (const children of subnetChildren.values()) {
     for (const c of children) containedResourceIds.add(c.shortId);
   }
+  // Cat 2/3 NSGs are placed inside subnets (above their target VM/NIC)
+  for (const nsgId of nsgToVm.keys()) {
+    const sid = idMap.get(nsgId);
+    if (sid) containedResourceIds.add(sid);
+  }
+  for (const nsgId of nsgToStandaloneNic.keys()) {
+    const sid = idMap.get(nsgId);
+    if (sid) containedResourceIds.add(sid);
+  }
 
   const vnetSubnetIds = new Set([
     ...vnetNodes.map((n) => idMap.get(n.id)!),
@@ -1156,6 +1329,7 @@ export async function generateDiagramSpec(
       for (let ci = 0; ci < members.length; ci++) {
         const res = members[ci]!;
         const resShortId = idMap.get(res.id)!;
+        const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
         rgContainedIds.add(resShortId);
         diagramNodes.push({
           id: resShortId,
@@ -1172,6 +1346,7 @@ export async function generateDiagramSpec(
           position: { x: VNET_PAD, y: VNET_HEADER + ci * (NODE_H + NODE_GAP) },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
           subResources: collectSubResources(res.id),
+          metadata: isDetachedNsg ? { detached: "true" } : undefined,
         });
       }
       cursorY += rgH + EXTERNAL_GAP;
@@ -1318,6 +1493,7 @@ export async function generateDiagramSpec(
         const res = otherExternal[i]!;
         const row = Math.floor(i / cols);
         const col = i % cols;
+        const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
 
         diagramNodes.push({
           id: idMap.get(res.id)!,
@@ -1338,6 +1514,7 @@ export async function generateDiagramSpec(
             health: { source: "composite", rules: [] },
           },
           subResources: collectSubResources(res.id),
+          metadata: isDetachedNsg ? { detached: "true" } : undefined,
         });
       }
     }

@@ -1,6 +1,6 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env";
-import type { DiagramSpec } from "@aud/types";
+import type { DiagramSpec, NsgRuleEntry } from "@aud/types";
 import {
   saveDiagramSpec,
   getDiagramSpec,
@@ -13,7 +13,7 @@ import {
 } from "../services/liveDiagramMock";
 import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure";
 import { generateDiagramSpec } from "../services/specGenerator";
-import { fetchEdgeNetworkDetail } from "../services/edgeDetailService";
+import { fetchEdgeNetworkDetail, fetchNsgInfo } from "../services/edgeDetailService";
 
 // Seed the mock diagram on startup
 saveDiagramSpec(mockDiagramSpec);
@@ -207,6 +207,30 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
       });
   });
 
+  // ── NSG Detail (on-demand, fetch security rules) ──
+  router.get("/api/live/nsg-detail", (req: Request, res: Response) => {
+    const resourceId = typeof req.query.resourceId === "string" ? req.query.resourceId : "";
+    if (!resourceId) return void res.status(400).json({ error: "resourceId_required" });
+
+    fetchNsgInfo(env, req.auth?.bearerToken, resourceId)
+      .then((nsg) => {
+        if (nsg) {
+          res.json(nsg);
+        } else {
+          // Mock fallback
+          res.json({
+            name: resourceId.split("/").pop() ?? "nsg",
+            resourceId,
+            effectiveRules: mockNsgRules(),
+            note: "mock",
+          });
+        }
+      })
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "nsg_detail_error" });
+      });
+  });
+
   // ── Data source status ──
   router.get("/api/live/status", (_req: Request, res: Response) => {
     res.json({
@@ -244,4 +268,20 @@ function withSource<T extends Record<string, unknown>>(
   error?: string,
 ): T & { _source: string; _error?: string } {
   return { ...data, _source: source, ...(error ? { _error: error } : {}) };
+}
+
+/** Generate realistic mock NSG rules for demo mode */
+function mockNsgRules(): NsgRuleEntry[] {
+  return [
+    { name: "AllowHTTPS", priority: 100, direction: "Inbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "443", sourceAddressPrefix: "*", destinationAddressPrefix: "10.0.1.0/24" },
+    { name: "AllowHTTP", priority: 110, direction: "Inbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "80", sourceAddressPrefix: "*", destinationAddressPrefix: "10.0.1.0/24" },
+    { name: "AllowAKSApi", priority: 120, direction: "Inbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "6443", sourceAddressPrefix: "AzureCloud", destinationAddressPrefix: "10.0.1.0/24" },
+    { name: "AllowSSH", priority: 200, direction: "Inbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "22", sourceAddressPrefix: "10.0.0.0/16", destinationAddressPrefix: "10.0.1.0/24" },
+    { name: "DenyAllInbound", priority: 65500, direction: "Inbound", access: "Deny", protocol: "*", sourcePortRange: "*", destinationPortRange: "*", sourceAddressPrefix: "*", destinationAddressPrefix: "*" },
+    { name: "AllowVnetOutbound", priority: 100, direction: "Outbound", access: "Allow", protocol: "*", sourcePortRange: "*", destinationPortRange: "*", sourceAddressPrefix: "VirtualNetwork", destinationAddressPrefix: "VirtualNetwork" },
+    { name: "AllowInternetOutbound", priority: 200, direction: "Outbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "443", sourceAddressPrefix: "10.0.1.0/24", destinationAddressPrefix: "Internet" },
+    { name: "AllowSQLOutbound", priority: 210, direction: "Outbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "1433", sourceAddressPrefix: "10.0.1.0/24", destinationAddressPrefix: "Sql" },
+    { name: "AllowRedisOutbound", priority: 220, direction: "Outbound", access: "Allow", protocol: "TCP", sourcePortRange: "*", destinationPortRange: "6380", sourceAddressPrefix: "10.0.1.0/24", destinationAddressPrefix: "10.0.1.51" },
+    { name: "DenyAllOutbound", priority: 65500, direction: "Outbound", access: "Deny", protocol: "*", sourcePortRange: "*", destinationPortRange: "*", sourceAddressPrefix: "*", destinationAddressPrefix: "*" },
+  ];
 }

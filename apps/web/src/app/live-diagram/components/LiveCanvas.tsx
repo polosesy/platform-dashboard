@@ -23,6 +23,7 @@ import type {
 } from "@aud/types";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type GroupNodeData } from "./GroupNode";
+import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
 import { FaultRipple } from "./FaultRipple";
 import { ImpactCascade } from "./ImpactCascade";
@@ -43,13 +44,15 @@ type LiveCanvasProps = {
   showHeatmap: boolean;
 };
 
-const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode };
+const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode };
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 
 /** Minimum gap between nodes to prevent overlap (px) */
 const NODE_MIN_GAP = 20;
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 100;
+const NSG_BADGE_WIDTH = 140;
+const NSG_BADGE_HEIGHT = 24;
 
 function LiveCanvasInner({
   spec,
@@ -111,6 +114,39 @@ function LiveCanvasInner({
     }, []),
   });
 
+  // Build NSG → target map for embedded rendering (Cat 1/2/3)
+  // nsgAttachedTo in metadata tells us which node the NSG badge should embed into
+  const nsgByTarget = useMemo(() => {
+    const map = new Map<string, Array<{ nodeId: string; label: string; icon: string; azureResourceId?: string }>>();
+    for (const nodeSpec of spec.nodes) {
+      const targetId = nodeSpec.metadata?.nsgAttachedTo;
+      if (!targetId || nodeSpec.icon !== "nsg") continue;
+      const arr = map.get(targetId) ?? [];
+      arr.push({
+        nodeId: nodeSpec.id,
+        label: nodeSpec.label,
+        icon: nodeSpec.icon,
+        azureResourceId: nodeSpec.azureResourceId,
+      });
+      map.set(targetId, arr);
+    }
+    return map;
+  }, [spec.nodes]);
+
+  // Set of NSG node IDs that are embedded (not rendered as separate ReactFlow nodes)
+  const embeddedNsgIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const nodeSpec of spec.nodes) {
+      if (nodeSpec.metadata?.nsgAttachedTo) ids.add(nodeSpec.id);
+    }
+    return ids;
+  }, [spec.nodes]);
+
+  // Handler: clicking an embedded NSG badge selects the NSG node (for detail panel)
+  const handleNsgSelect = useCallback((nodeId: string) => {
+    onNodeSelect(nodeId);
+  }, [onNodeSelect]);
+
   // Build initial nodes from spec — group nodes first, then resource nodes
   const initialNodes = useMemo(() => {
     // Group nodes MUST come before their children in the array for ReactFlow
@@ -124,8 +160,14 @@ function LiveCanvasInner({
       return aHasParent - bHasParent;
     });
 
-    const result = sorted.map((nodeSpec) => {
+    const result: FlowNode[] = [];
+    for (const nodeSpec of sorted) {
+      // Skip embedded NSGs — they render inside their target's component
+      if (embeddedNsgIds.has(nodeSpec.id)) continue;
+
       if (nodeSpec.nodeType === "group") {
+        // Inject embedded NSG badges for this group (Cat 1: subnet-attached)
+        const attachedNsgs = nsgByTarget.get(nodeSpec.id);
         const groupNode: FlowNode<GroupNodeData> = {
           id: nodeSpec.id,
           type: "group",
@@ -140,16 +182,55 @@ function LiveCanvasInner({
             label: nodeSpec.label,
             icon: nodeSpec.icon,
             subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
+            nsgBadges: attachedNsgs?.map((n) => ({
+              nodeId: n.nodeId,
+              label: n.label,
+              icon: n.icon as GroupNodeData["icon"],
+              azureResourceId: n.azureResourceId,
+            })),
+            onNsgSelect: handleNsgSelect,
           },
         };
         if (nodeSpec.parentId) {
           (groupNode as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
           (groupNode as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
         }
-        return groupNode;
+        result.push(groupNode);
+        continue;
+      }
+
+      // Cat 4: detached/standalone NSG — render as separate nsgBadge node
+      const isNsg = nodeSpec.resourceKind === "nsg" || nodeSpec.icon === "nsg";
+      if (isNsg) {
+        const badgeNode: FlowNode<NsgBadgeData> = {
+          id: nodeSpec.id,
+          type: "nsgBadge",
+          position: nodeSpec.position ?? { x: 0, y: 0 },
+          draggable: true,
+          zIndex: 10,
+          style: { width: NSG_BADGE_WIDTH, height: NSG_BADGE_HEIGHT },
+          data: {
+            label: nodeSpec.label,
+            icon: nodeSpec.icon,
+            resourceKind: nodeSpec.resourceKind,
+            azureResourceId: nodeSpec.azureResourceId,
+            detached: nodeSpec.metadata?.detached === "true",
+          },
+        };
+        if (nodeSpec.parentId) {
+          (badgeNode as FlowNode<NsgBadgeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+          (badgeNode as FlowNode<NsgBadgeData> & { extent: string }).extent = "parent";
+        }
+        result.push(badgeNode);
+        continue;
       }
 
       const live = snapshot?.nodes.find((n) => n.id === nodeSpec.id);
+
+      // Inject embedded NSG badge for this live node (Cat 2/3: VM/NIC-attached)
+      const attachedNsgs = nsgByTarget.get(nodeSpec.id);
+      const firstNsg = attachedNsgs?.[0];
+
       const liveNode: FlowNode<LiveNodeData> = {
         id: nodeSpec.id,
         type: "live",
@@ -169,14 +250,21 @@ function LiveCanvasInner({
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
           powerState: live?.powerState,
+          nsgBadge: firstNsg ? {
+            nodeId: firstNsg.nodeId,
+            label: firstNsg.label,
+            icon: firstNsg.icon as LiveNodeData["icon"],
+            azureResourceId: firstNsg.azureResourceId,
+          } : undefined,
+          onNsgSelect: handleNsgSelect,
         },
       };
       if (nodeSpec.parentId) {
         (liveNode as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
         (liveNode as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
       }
-      return liveNode;
-    });
+      result.push(liveNode);
+    }
 
     // ── Checkpoint 2: Verify parentNode mapping ──
     if (process.env.NODE_ENV !== "production") {
@@ -203,7 +291,7 @@ function LiveCanvasInner({
     }
 
     return result;
-  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect]);
+  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
@@ -222,17 +310,34 @@ function LiveCanvasInner({
         return aHasParent - bHasParent;
       });
 
-      const result = sorted.map((nodeSpec) => {
+      const result: FlowNode[] = [];
+      for (const nodeSpec of sorted) {
+        // Skip embedded NSGs — they render inside their target's component
+        if (embeddedNsgIds.has(nodeSpec.id)) continue;
+
         const existing = prevById.get(nodeSpec.id);
 
         if (nodeSpec.nodeType === "group") {
+          const attachedNsgs = nsgByTarget.get(nodeSpec.id);
           const data: GroupNodeData = {
             label: nodeSpec.label,
             icon: nodeSpec.icon,
             subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
+            nsgBadges: attachedNsgs?.map((n) => ({
+              nodeId: n.nodeId,
+              label: n.label,
+              icon: n.icon as GroupNodeData["icon"],
+              azureResourceId: n.azureResourceId,
+            })),
+            onNsgSelect: handleNsgSelect,
           };
           if (existing) {
-            const updated = { ...existing, data } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
+            const updated = {
+              ...existing,
+              data,
+              // Always sync style from spec to prevent stale sizes causing overlap
+              style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
+            } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
             if (nodeSpec.parentId) {
               updated.parentNode = nodeSpec.parentId;
               updated.extent = "parent";
@@ -240,7 +345,8 @@ function LiveCanvasInner({
               delete updated.parentNode;
               delete updated.extent;
             }
-            return updated;
+            result.push(updated);
+            continue;
           }
           const gn: FlowNode<GroupNodeData> = {
             id: nodeSpec.id,
@@ -255,10 +361,52 @@ function LiveCanvasInner({
             (gn as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
             (gn as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
           }
-          return gn;
+          result.push(gn);
+          continue;
+        }
+
+        // Cat 4: detached/standalone NSG — render as separate nsgBadge node
+        const isNsg = nodeSpec.resourceKind === "nsg" || nodeSpec.icon === "nsg";
+        if (isNsg) {
+          const badgeData: NsgBadgeData = {
+            label: nodeSpec.label,
+            icon: nodeSpec.icon,
+            resourceKind: nodeSpec.resourceKind,
+            azureResourceId: nodeSpec.azureResourceId,
+            detached: nodeSpec.metadata?.detached === "true",
+          };
+          if (existing) {
+            const updated = { ...existing, data: badgeData, type: "nsgBadge", zIndex: 10 } as FlowNode<NsgBadgeData> & { parentNode?: string; extent?: string };
+            if (nodeSpec.parentId) {
+              updated.parentNode = nodeSpec.parentId;
+              updated.extent = "parent";
+            } else {
+              delete updated.parentNode;
+              delete updated.extent;
+            }
+            result.push(updated);
+            continue;
+          }
+          const bn: FlowNode<NsgBadgeData> = {
+            id: nodeSpec.id,
+            type: "nsgBadge",
+            position: nodeSpec.position ?? { x: 0, y: 0 },
+            draggable: true,
+            zIndex: 10,
+            style: { width: NSG_BADGE_WIDTH, height: NSG_BADGE_HEIGHT },
+            data: badgeData,
+          };
+          if (nodeSpec.parentId) {
+            (bn as FlowNode<NsgBadgeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
+            (bn as FlowNode<NsgBadgeData> & { extent: string }).extent = "parent";
+          }
+          result.push(bn);
+          continue;
         }
 
         const live = snapshot?.nodes.find((s) => s.id === nodeSpec.id);
+        const attachedNsgs = nsgByTarget.get(nodeSpec.id);
+        const firstNsg = attachedNsgs?.[0];
         const data: LiveNodeData = {
           label: nodeSpec.label,
           icon: nodeSpec.icon,
@@ -273,6 +421,13 @@ function LiveCanvasInner({
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
           powerState: live?.powerState,
+          nsgBadge: firstNsg ? {
+            nodeId: firstNsg.nodeId,
+            label: firstNsg.label,
+            icon: firstNsg.icon as LiveNodeData["icon"],
+            azureResourceId: firstNsg.azureResourceId,
+          } : undefined,
+          onNsgSelect: handleNsgSelect,
         };
 
         if (existing) {
@@ -284,7 +439,8 @@ function LiveCanvasInner({
             delete updated.parentNode;
             delete updated.extent;
           }
-          return updated;
+          result.push(updated);
+          continue;
         }
 
         const ln: FlowNode<LiveNodeData> = {
@@ -298,8 +454,8 @@ function LiveCanvasInner({
           (ln as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
           (ln as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
         }
-        return ln;
-      });
+        result.push(ln);
+      }
 
       // ── Checkpoint 3: Verify parentNode survives setNodes ──
       if (process.env.NODE_ENV !== "production") {
@@ -314,7 +470,7 @@ function LiveCanvasInner({
 
       return result;
     });
-  }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect]);
+  }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
 
   // ── Fit view when filtered node set changes ──
   const specNodeKey = useMemo(

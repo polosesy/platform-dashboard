@@ -7,14 +7,23 @@ import { scopeStyle } from "../utils/designTokens";
 import type { DiagramIconKind } from "@aud/types";
 import styles from "../styles.module.css";
 
+export type NsgBadgeInfo = {
+  nodeId: string;
+  label: string;
+  icon: DiagramIconKind;
+  azureResourceId?: string;
+};
+
 export type GroupNodeData = {
   label: string;
   icon: DiagramIconKind;
   subtitle?: string;  // CIDR display (addressSpace for VNet, prefix for Subnet)
+  nsgBadges?: NsgBadgeInfo[];
+  onNsgSelect?: (nodeId: string) => void;
 };
 
 export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<GroupNodeData>) {
-  const { label, icon, subtitle } = data;
+  const { label, icon, subtitle, nsgBadges, onNsgSelect } = data;
   const scope = scopeStyle(icon);
 
   return (
@@ -37,6 +46,28 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<G
         }}
       >
         <div className={styles.groupNodeHeader}>
+          {/* NSG badge(s) at top-left — Cat 1: subnet-attached NSGs, compact icon-only */}
+          {nsgBadges && nsgBadges.length > 0 && (
+            <div className={styles.groupNsgBadges}>
+              {nsgBadges.map((nsg) => (
+                <button
+                  key={nsg.nodeId}
+                  type="button"
+                  className={`${styles.nsgBadge} ${styles.nsgBadgeCompact}`}
+                  onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsg.nodeId); }}
+                  title={nsg.label}
+                >
+                  <img
+                    src={getAzureIconUrl(nsg.icon)}
+                    alt="nsg"
+                    width={12}
+                    height={12}
+                    className={styles.nsgBadgeIcon}
+                  />
+                </button>
+              ))}
+            </div>
+          )}
           <img
             src={getAzureIconUrl(icon)}
             alt={icon}

@@ -85,25 +85,83 @@ function fmtDate(iso: string): string {
 
 // ── Sub-components ──
 
+/**
+ * Build a per-service status view from region events.
+ * Groups events by service name and determines each service's worst status.
+ */
+function useRegionServices(region: RegionHealthStatus) {
+  return useMemo(() => {
+    // Collect all unique services mentioned across events for this region
+    const serviceMap = new Map<string, { events: ServiceHealthEvent[]; worst: "ok" | "issue" | "maintenance" | "advisory" }>();
+
+    for (const evt of region.events) {
+      if (evt.isResolved) continue;
+      for (const svc of evt.affectedServices) {
+        if (!serviceMap.has(svc)) {
+          serviceMap.set(svc, { events: [], worst: "ok" });
+        }
+        const entry = serviceMap.get(svc)!;
+        entry.events.push(evt);
+        // Determine worst status: issue > maintenance > advisory > ok
+        if (evt.eventType === "ServiceIssue") entry.worst = "issue";
+        else if (evt.eventType === "PlannedMaintenance" && entry.worst !== "issue") entry.worst = "maintenance";
+        else if (entry.worst === "ok") entry.worst = "advisory";
+      }
+    }
+
+    // Sort: affected services first, then alphabetical
+    const PRIORITY: Record<string, number> = { issue: 0, maintenance: 1, advisory: 2, ok: 3 };
+    return [...serviceMap.entries()]
+      .sort((a, b) => (PRIORITY[a[1].worst] ?? 9) - (PRIORITY[b[1].worst] ?? 9) || a[0].localeCompare(b[0]));
+  }, [region.events]);
+}
+
+const SERVICE_STATUS_STYLE: Record<string, string> = {
+  ok: styles.regionServiceOk ?? "",
+  issue: styles.regionServiceIssue ?? "",
+  maintenance: styles.regionServiceMaintenance ?? "",
+  advisory: styles.regionServiceAdvisory ?? "",
+};
+
+const SERVICE_STATUS_LABEL: Record<string, Record<string, string>> = {
+  ok: { ko: "정상", en: "OK" },
+  issue: { ko: "문제", en: "Issue" },
+  maintenance: { ko: "유지보수", en: "Maintenance" },
+  advisory: { ko: "권고", en: "Advisory" },
+};
+
+const SERVICE_DOT_COLOR: Record<string, string> = {
+  ok: "rgba(16, 137, 62, 0.70)",
+  issue: "rgba(216, 59, 1, 0.80)",
+  maintenance: "rgba(0, 120, 212, 0.80)",
+  advisory: "rgba(209, 132, 0, 0.80)",
+};
+
 function RegionCard({ region }: { region: RegionHealthStatus }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const isAffected = region.hasActiveIssues;
+  const services = useRegionServices(region);
+
+  const cardClass = [
+    styles.regionCard,
+    isAffected ? styles.regionCardAffected : styles.regionCardGood,
+    expanded ? styles.regionCardExpanded : "",
+  ].filter(Boolean).join(" ");
 
   return (
-    <div
-      className={`${styles.regionCard} ${isAffected ? styles.regionCardAffected : styles.regionCardGood}`}
-      onClick={() => isAffected && setExpanded((v) => !v)}
-      style={{ cursor: isAffected ? "pointer" : "default" }}
-    >
+    <div className={cardClass} onClick={() => setExpanded((v) => !v)}>
       <div className={styles.regionCardHeader}>
         <div className={styles.regionDot} data-state={isAffected ? "affected" : "ok"} />
         <span className={styles.regionName}>{region.displayName}</span>
         <span className={`${styles.regionStatusBadge} ${isAffected ? styles.regionStatusAffected : styles.regionStatusOk}`}>
           {isAffected ? t("health.regionAffected") : t("health.regionOperational")}
         </span>
+        <span className={`${styles.regionChevron} ${expanded ? styles.regionChevronOpen : ""}`}>▼</span>
       </div>
-      {isAffected && (
+
+      {/* Collapsed summary chips */}
+      {!expanded && isAffected && (
         <div className={styles.regionIssueRow}>
           {region.serviceIssueCount > 0 && (
             <span className={styles.regionIssueChip} data-type="issue">
@@ -115,25 +173,43 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
               {region.maintenanceCount} {t("health.regionMaintenance")}
             </span>
           )}
-          {region.affectedServices.length > 0 && (
-            <div className={styles.regionServices}>
-              {region.affectedServices.map((s) => (
-                <span key={s} className={styles.serviceBadge}>{s}</span>
-              ))}
-            </div>
-          )}
         </div>
       )}
-      {expanded && region.events.length > 0 && (
-        <div className={styles.regionEventsExpanded}>
-          {region.events.filter((e) => !e.isResolved).map((evt) => (
-            <div key={evt.id} className={styles.regionEventItem}>
-              <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
-                {evt.eventType.replace(/([A-Z])/g, " $1").trim()}
-              </span>
-              <span className={styles.regionEventTitle}>{evt.title}</span>
+
+      {/* Expanded: per-service detail */}
+      {expanded && (
+        <div className={styles.regionDetailSection}>
+          {services.length > 0 ? services.map(([svcName, { events: svcEvents, worst }]) => (
+            <div key={svcName} className={styles.regionServiceGroup}>
+              <div className={styles.regionServiceHeader}>
+                <div className={styles.regionServiceDot} style={{ background: SERVICE_DOT_COLOR[worst] }} />
+                <span className={styles.regionServiceName}>{svcName}</span>
+                <span className={`${styles.regionServiceStatus} ${SERVICE_STATUS_STYLE[worst]}`}>
+                  {SERVICE_STATUS_LABEL[worst]?.[locale] ?? worst}
+                </span>
+              </div>
+              {svcEvents.map((evt) => (
+                <div key={evt.id} className={styles.regionEventItem}>
+                  <div className={styles.regionEventItemHeader}>
+                    <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
+                      {t(`health.eventType.${evt.eventType}`)}
+                    </span>
+                    <span className={styles.regionEventTime}>
+                      {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime) : ""}
+                    </span>
+                  </div>
+                  <div className={styles.regionEventTitle}>{evt.title}</div>
+                  {evt.summary && (
+                    <div className={styles.regionEventSummary}>{evt.summary}</div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          )) : (
+            <div className={styles.regionNoEvents}>
+              {locale === "ko" ? "이 리전에 활성 이벤트가 없습니다" : "No active events in this region"}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -170,7 +246,10 @@ function GlobalStatusPanel({
           <div className={styles.sectionSub}>{t("health.yourRegionsSub")}</div>
         </div>
         {regionalLoading ? (
-          <div className={styles.empty}>{t("health.loading")}</div>
+          <div className={styles.empty}>
+            <div className={styles.spinner} style={{ width: 24, height: 24, borderWidth: 2, margin: "0 auto 8px" }} />
+            {t("health.loading")}
+          </div>
         ) : hasRegions ? (
           <>
             {regionalData.totalAffected > 0 && (
@@ -188,7 +267,11 @@ function GlobalStatusPanel({
             )}
           </>
         ) : (
-          <div className={styles.empty}>{t("health.permissionsNote")}</div>
+          <div className={styles.empty}>
+            {regionalData?.note
+              ? <><strong>{t("health.error")}:</strong> {regionalData.note}</>
+              : t("health.permissionsNote")}
+          </div>
         )}
       </section>
 
@@ -313,8 +396,24 @@ function InstanceHealthPanel({
     });
   }, [data, total]);
 
-  if (loading) return <div className={styles.empty}>{t("health.loading")}</div>;
+  if (loading) return (
+    <div className={styles.loadingSkeleton}>
+      <div className={styles.spinnerRow}>
+        <div className={styles.spinner} />
+        <span className={styles.spinnerLabel}>{t("health.loading")}</span>
+      </div>
+      <div className={styles.shimmerStrip}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className={`${styles.shimmerBar} ${styles.shimmerStat}`} />
+        ))}
+      </div>
+      <div className={`${styles.shimmerBar} ${styles.shimmerDonut}`} />
+      <div className={`${styles.shimmerBar} ${styles.shimmerTable}`} />
+    </div>
+  );
   if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
+
+  const hasFallbackNote = data?.note && (data.note.includes("mock") || data.note.includes("timed out") || data.note.includes("error"));
 
   return (
     <div className={styles.grid}>
@@ -334,9 +433,23 @@ function InstanceHealthPanel({
               </option>
             ))}
           </select>
-          {data?.note && (
-            <span className={styles.instanceNote}>{data.note}</span>
-          )}
+        </div>
+      )}
+
+      {/* Fallback notice — shown when API returned mock/timeout data */}
+      {hasFallbackNote && (
+        <div className={styles.fallbackNotice}>
+          <div className={styles.fallbackNoticeIcon}>!</div>
+          <div>
+            <div className={styles.fallbackNoticeText}>
+              {data.note!.includes("timed out")
+                ? t("health.timeoutFallback")
+                : data.note!.includes("mock")
+                  ? t("health.mockFallback")
+                  : t("health.errorFallback")}
+            </div>
+            <div className={styles.fallbackNoticeHint}>{data.note}</div>
+          </div>
         </div>
       )}
 
@@ -849,15 +962,22 @@ export default function HealthPage() {
       .catch(() => null)
       .then(async (token) => {
         const d = await fetchJsonWithBearer<RegionalStatusResponse>(url, token);
-        if (!cancelled) { setRegionalData(d); setRegionalLoaded(true); }
+        if (!cancelled) {
+          setRegionalData(d);
+          // Only mark loaded when we actually got regions — allows retry on transient failures
+          if (d.regions && d.regions.length > 0) {
+            setRegionalLoaded(true);
+          }
+        }
       })
       .catch(() => {
-        // Mark as loaded even on error so we don't retry and show the fallback message
-        if (!cancelled) setRegionalLoaded(true);
+        if (!cancelled && !regionalData) {
+          setRegionalData(null);
+        }
       })
       .finally(() => { if (!cancelled) setRegionalLoading(false); });
     return () => { cancelled = true; };
-  }, [regionalLoaded, regionalLoading, getApiToken]);
+  }, [regionalLoaded, regionalLoading, getApiToken, regionalData]);
 
   const loadInstance = useCallback((subId?: string) => {
     let cancelled = false;

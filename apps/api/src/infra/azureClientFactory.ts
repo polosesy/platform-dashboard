@@ -14,7 +14,7 @@ export type ArmFetcher = {
 };
 
 export async function getArmFetcher(env: Env, bearerToken: string): Promise<ArmFetcher> {
-  const armToken = await getArmToken(env, bearerToken);
+  const armToken = await withTokenTimeout(getArmToken(env, bearerToken), "OBO ARM");
   return buildFetcher(armToken);
 }
 
@@ -24,7 +24,7 @@ export type LogAnalyticsFetcher = {
 };
 
 export async function getLogAnalyticsFetcher(env: Env, bearerToken: string): Promise<LogAnalyticsFetcher> {
-  const token = await getLogAnalyticsToken(env, bearerToken);
+  const token = await withTokenTimeout(getLogAnalyticsToken(env, bearerToken), "OBO LogAnalytics");
   return buildLogFetcher(token);
 }
 
@@ -43,10 +43,14 @@ function ensureSPConfig(env: Env): { tenantId: string; clientId: string; clientS
   return { tenantId, clientId, clientSecret };
 }
 
+let _spCredential: ClientSecretCredential | undefined;
+
 async function getSPToken(env: Env, scope: string): Promise<string> {
-  const { tenantId, clientId, clientSecret } = ensureSPConfig(env);
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const result = await credential.getToken(scope);
+  if (!_spCredential) {
+    const { tenantId, clientId, clientSecret } = ensureSPConfig(env);
+    _spCredential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+  }
+  const result = await withTokenTimeout(_spCredential.getToken(scope), "SP");
   return result.token;
 }
 
@@ -96,8 +100,27 @@ export function getSPCredential(env: Env): ClientSecretCredential {
 
 // ── Internal helpers ──
 
-/** Default request timeout for Azure ARM / Log Analytics calls (ms). */
-const ARM_FETCH_TIMEOUT_MS = 15_000;
+/** Default request timeout for Azure ARM / Log Analytics calls (ms).
+ *  Resource Health availability statuses can be slow (15s+), so we
+ *  allow 30s per individual request.  Per-operation timeouts in
+ *  callers (e.g. HEALTH_SUMMARY_TIMEOUT_MS) still act as the hard ceiling. */
+const ARM_FETCH_TIMEOUT_MS = 30_000;
+
+/** Timeout for Azure AD token acquisition (ms). */
+const TOKEN_ACQUIRE_TIMEOUT_MS = 10_000;
+
+/** Wrap a token-acquisition promise with a hard timeout. */
+async function withTokenTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}: token acquisition timed out (${TOKEN_ACQUIRE_TIMEOUT_MS}ms)`)), TOKEN_ACQUIRE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
 
 function buildFetcher(armToken: string): ArmFetcher {
   return {

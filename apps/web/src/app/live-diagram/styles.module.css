@@ -288,6 +288,7 @@
 /* ── Live Node ── */
 
 .liveNode {
+  position: relative;
   min-width: 200px;
   max-width: 220px;
   padding: 10px 12px;
@@ -528,6 +529,7 @@
 /* ── Group Node (Subscription / RG / VNet / Subnet containers) ── */
 
 .groupNode {
+  position: relative;
   width: 100%;
   height: 100%;
   border-radius: 16px;
@@ -1606,6 +1608,180 @@
   text-align: right;
 }
 
+/* ── NSG Node Detail (ResourceDetailPanel) ── */
+
+.nsgTabBar {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  background: rgba(20, 21, 23, 0.04);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.nsgTab {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.nsgTab:hover {
+  background: rgba(20, 21, 23, 0.06);
+}
+
+.nsgTabActive {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(0, 120, 212, 0.88);
+  box-shadow: 0 1px 4px rgba(20, 21, 23, 0.08);
+}
+
+.nsgRuleHeader {
+  display: grid;
+  grid-template-columns: 22px 36px 48px 1fr 1fr 44px;
+  gap: 3px;
+  padding: 3px 4px;
+  font-size: 8px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(20, 21, 23, 0.08);
+  margin-bottom: 2px;
+  min-width: 0;
+}
+
+.nsgRuleHeader > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nsgRulesList {
+  display: grid;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.nsgDetailRule {
+  display: grid;
+  grid-template-columns: 22px 36px 48px 1fr 1fr 44px;
+  gap: 3px;
+  align-items: center;
+  padding: 3px 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.nsgDetailRuleAllow {
+  background: rgba(16, 137, 62, 0.06);
+}
+
+.nsgDetailRuleDeny {
+  background: rgba(216, 59, 1, 0.06);
+}
+
+.nsgDetailAccess {
+  font-weight: 800;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1;
+}
+
+.nsgDetailRuleAllow .nsgDetailAccess { color: rgba(16, 137, 62, 0.88); }
+.nsgDetailRuleDeny .nsgDetailAccess { color: rgba(216, 59, 1, 0.88); }
+
+.nsgDetailProto {
+  font-family: monospace;
+  font-size: 9px;
+  color: rgba(20, 21, 23, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nsgDetailPort {
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(20, 21, 23, 0.82);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nsgDetailAddr {
+  font-size: 9px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nsgDetailPriority {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.nsgRuleNameList {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+  display: grid;
+  gap: 2px;
+}
+
+.nsgRuleNameItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: rgba(20, 21, 23, 0.55);
+}
+
+.nsgRuleNameDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.nsgRuleNameDotAllow { background: rgba(16, 137, 62, 0.60); }
+.nsgRuleNameDotDeny { background: rgba(216, 59, 1, 0.60); }
+
+.nsgRuleNamePri {
+  font-weight: 700;
+  font-family: monospace;
+  min-width: 36px;
+}
+
+.nsgRuleNameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* UDR Routes */
 
 .udrRouteItem {
@@ -1774,4 +1950,113 @@
   .overlayToggles {
     flex-wrap: wrap;
   }
+}
+
+/* ── NSG Badge embedded in GroupNode header — top-left inline, between label and border ── */
+.groupNsgBadges {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+/* Compact icon-only variant used in group header */
+.nsgBadgeCompact {
+  padding: 2px 4px !important;
+  gap: 0 !important;
+}
+
+/* ── NSG Badge embedded in LiveNode — corner tag at top-left ── */
+.liveNsgBadge {
+  position: absolute;
+  top: -12px;
+  left: 8px;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+/* ── NSG Badge Node (compact) ── */
+.nsgBadge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px 2px 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 120, 212, 0.25);
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(0, 90, 170, 0.85);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  line-height: 1;
+}
+
+.nsgBadge:hover {
+  background: rgba(0, 120, 212, 0.08);
+  border-color: rgba(0, 120, 212, 0.40);
+  box-shadow: 0 2px 6px rgba(0, 120, 212, 0.15);
+}
+
+.nsgBadgeIcon {
+  flex: none;
+  opacity: 0.88;
+}
+
+.nsgBadgeLabel {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nsgBadgeDetached {
+  background: rgba(216, 59, 1, 0.08);
+  border-color: rgba(216, 59, 1, 0.25);
+  color: rgba(216, 59, 1, 0.80);
+}
+
+.nsgBadgeDetached:hover {
+  background: rgba(216, 59, 1, 0.14);
+  border-color: rgba(216, 59, 1, 0.35);
+}
+
+.nsgDetachedX {
+  font-weight: 800;
+  font-size: 10px;
+  color: rgba(216, 59, 1, 0.72);
+  flex: none;
+}
+
+/* ── Detached NSG hover tooltip ── */
+.nsgDetachedTooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: rgba(20, 21, 23, 0.88);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.nsgBadgeDetached:hover .nsgDetachedTooltip {
+  display: block;
+}
+
+.handleHidden {
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }

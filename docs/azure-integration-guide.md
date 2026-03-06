@@ -263,36 +263,49 @@ OBO 토큰은 **사용자의 Azure 권한**으로 API를 호출합니다.
 SUBSCRIPTION_ID="<your-subscription-id>"
 USER_OBJECT_ID="<user-or-group-object-id>"
 
+$SUBSCRIPTION_ID="4fb319b6-4cbe-48b9-8a38-7de71d184239"
+$USER_OBJECT_ID="ebbca125-f138-45dd-82ec-b22e7f008fd2"
+
+$SP_OBJECT_ID="0479392a-c965-4823-a425-237a40306df8"
+
 # 1. Reader (Architecture, Health, Reservations 커버)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Reader" \
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 2. Monitoring Reader (Live Diagram, Monitor Metrics, Alerts)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Monitoring Reader" \
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Monitoring Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 3. Cost Management Reader (Cost 도메인)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Cost Management Reader" \
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Cost Management Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 4. Security Reader (Defender for Cloud)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Security Reader" \
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Security Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
+
 # 5. Log Analytics Reader (Network — Workspace 범위)
-WORKSPACE_RESOURCE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<ws-name>"
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Log Analytics Reader" \
+$WORKSPACE_RESOURCE_ID="/subscriptions/4fb319b6-4cbe-48b9-8a38-7de71d184239/resourcegroups/defaultresourcegroup-se/providers/microsoft.operationalinsights/workspaces/defaultworkspace-4fb319b6-4cbe-48b9-8a38-7de71d184239-se"
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Log Analytics Reader" `
   --scope "$WORKSPACE_RESOURCE_ID"
+
+# 6. Storage Reader (Defender for Cloud)
+az role assignment create `
+  --assignee "$SP_OBJECT_ID" `
+  --role "Storage Blob Data Reader" `
+  --scope "/subscriptions/$SUBSCRIPTION_ID"
+
 ```
 
 ### Azure Portal에서 역할 할당

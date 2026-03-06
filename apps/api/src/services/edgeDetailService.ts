@@ -90,7 +90,7 @@ interface ArmNsgRule {
   };
 }
 
-async function fetchNsgInfo(env: Env, bearerToken: string | undefined, nsgId: string): Promise<NsgInfo | undefined> {
+export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, nsgId: string): Promise<NsgInfo | undefined> {
   try {
     const fetcher = await getArmFetcherAuto(env, bearerToken);
     const url = `https://management.azure.com${nsgId}?api-version=2024-05-01`;

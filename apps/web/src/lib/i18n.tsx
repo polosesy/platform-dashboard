@@ -72,6 +72,15 @@ const T: Translations = {
   "detail.alertRules": { ko: "경고 규칙", en: "Alert Rules" },
   "detail.disabled": { ko: "비활성", en: "Disabled" },
 
+  // ── NSG Detail Panel ──
+  "detail.nsgRules": { ko: "보안 규칙", en: "Security Rules" },
+  "detail.nsgAccess": { ko: "접근", en: "Access" },
+  "detail.nsgProto": { ko: "프로토콜", en: "Proto" },
+  "detail.nsgPort": { ko: "포트", en: "Port" },
+  "detail.nsgSource": { ko: "소스", en: "Source" },
+  "detail.nsgDest": { ko: "대상", en: "Dest" },
+  "detail.nsgPriority": { ko: "우선순위", en: "Priority" },
+
   // ── Edge Detail Panel ──
   "detail.edge.overview": { ko: "개요", en: "Overview" },
   "detail.edge.endpoints": { ko: "엔드포인트", en: "Endpoints" },
@@ -179,6 +188,11 @@ const T: Translations = {
   "health.translating": { ko: "번역 중...", en: "Translating..." },
   "health.translateNotConfigured": { ko: "번역 서비스 미설정 (AZURE_TRANSLATOR_KEY 필요)", en: "Translation not configured (AZURE_TRANSLATOR_KEY required)" },
   "health.translateError": { ko: "번역 실패 — 잠시 후 다시 시도하세요", en: "Translation failed — please try again" },
+
+  // Fallback / mock data notices
+  "health.timeoutFallback": { ko: "Azure API 응답 시간 초과 — 임시 샘플 데이터를 표시합니다", en: "Azure API timed out — showing sample data" },
+  "health.mockFallback": { ko: "Azure API 미연결 — 임시 샘플 데이터를 표시합니다", en: "Azure API not connected — showing sample data" },
+  "health.errorFallback": { ko: "Azure API 오류 — 임시 샘플 데이터를 표시합니다", en: "Azure API error — showing sample data" },
 };
 
 type I18nContextValue = {

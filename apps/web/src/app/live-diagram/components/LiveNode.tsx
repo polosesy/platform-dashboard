@@ -9,6 +9,13 @@ import { D3Sparkline } from "./D3Sparkline";
 import { RESOURCE_KIND_DISPLAY } from "./ResourceDetailPanel";
 import styles from "../styles.module.css";
 
+export type NsgBadgeInfo = {
+  nodeId: string;
+  label: string;
+  icon: DiagramIconKind;
+  azureResourceId?: string;
+};
+
 export type LiveNodeData = {
   label: string;
   icon: DiagramIconKind;
@@ -23,6 +30,8 @@ export type LiveNodeData = {
   resourceKind?: string;
   azureResourceId?: string;
   powerState?: PowerState;
+  nsgBadge?: NsgBadgeInfo;
+  onNsgSelect?: (nodeId: string) => void;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -62,12 +71,12 @@ const RESOURCE_TYPE_ABBR: Record<string, string> = {
   postgres: "PgSQL", keyVault: "KV", appGateway: "App GW",
   lb: "LB", frontDoor: "AFD", trafficManager: "TM",
   firewall: "FW", appInsights: "App Insights", logAnalytics: "Log Analytics",
-  nic: "NIC", dns: "DNS", privateEndpoint: "PE",
+  nic: "NIC", nsg: "NSG", dns: "DNS", privateEndpoint: "PE",
   serviceBus: "Service Bus", eventHub: "Event Hub",
 };
 
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, nsgBadge, onNsgSelect } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
@@ -100,6 +109,27 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
       }}
     >
       <Handle type="target" position={Position.Left} className={styles.handle} />
+
+      {/* Embedded NSG badge — Cat 2/3: VM/NIC-attached NSG */}
+      {nsgBadge && (
+        <div className={styles.liveNsgBadge}>
+          <button
+            type="button"
+            className={styles.nsgBadge}
+            onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsgBadge.nodeId); }}
+            title={nsgBadge.label}
+          >
+            <img
+              src={getAzureIconUrl(nsgBadge.icon)}
+              alt="nsg"
+              width={12}
+              height={12}
+              className={styles.nsgBadgeIcon}
+            />
+            <span className={styles.nsgBadgeLabel}>{nsgBadge.label}</span>
+          </button>
+        </div>
+      )}
 
       {/* Health ring */}
       <div className={styles.ringWrap}>

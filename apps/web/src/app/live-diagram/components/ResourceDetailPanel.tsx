@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type {
   DiagramNodeSpec,
   DiagramEdgeSpec,
@@ -10,12 +10,16 @@ import type {
   PowerState,
   SparklineData,
   SubResource,
+  NsgInfo,
+  NsgRuleEntry,
 } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { fmtMetric } from "./LiveNode";
 import { D3Sparkline } from "./D3Sparkline";
 import { useI18n } from "@/lib/i18n";
+import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 
 type ConnectedEdge = {
@@ -45,6 +49,7 @@ const healthLabel: Record<HealthStatus, string> = {
 export const RESOURCE_KIND_DISPLAY: Record<string, string> = {
   vnet: "Virtual Network",
   subnet: "Subnet",
+  nsg: "Network Security Group",
   nic: "Network Interface",
   vm: "Virtual Machine",
   vmss: "VM Scale Set",
@@ -81,7 +86,7 @@ const POWER_STATE_LABEL: Record<PowerState, string> = {
 
 /** Resource kinds that have no meaningful operational state */
 const HIDE_STATUS_KINDS = new Set([
-  "vnet", "subnet", "nic", "dns", "privateEndpoint",
+  "vnet", "subnet", "nsg", "nic", "dns", "privateEndpoint",
 ]);
 
 function truncateId(id: string, maxLen = 60): string {
@@ -160,6 +165,127 @@ const SEVERITY_COLORS: Record<number, string> = {
   4: "#95a5a6",
 };
 
+// ── NSG Rules Detail Section ──
+
+function useNsgDetail(azureResourceId: string | undefined, resourceKind: string | undefined) {
+  const [nsg, setNsg] = useState<NsgInfo | null>(null);
+  const [loading, setLoading] = useState(false);
+  const getApiToken = useApiToken();
+
+  useEffect(() => {
+    if (resourceKind !== "nsg" || !azureResourceId) {
+      setNsg(null);
+      return;
+    }
+    setLoading(true);
+    getApiToken()
+      .catch(() => null)
+      .then(async (token) => {
+        const url = `${apiBaseUrl()}/api/live/nsg-detail?resourceId=${encodeURIComponent(azureResourceId)}`;
+        const data = await fetchJsonWithBearer<NsgInfo>(url, token);
+        setNsg(data);
+      })
+      .catch(() => setNsg(null))
+      .finally(() => setLoading(false));
+  }, [azureResourceId, resourceKind, getApiToken]);
+
+  return { nsg, loading };
+}
+
+function NsgRulesSection({ nsg, loading }: { nsg: NsgInfo | null; loading: boolean }) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<"Inbound" | "Outbound">("Inbound");
+
+  if (loading) {
+    return (
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>{t("detail.nsgRules")}</div>
+        <div className={styles.detailEmpty}>{t("live.loading")}</div>
+      </div>
+    );
+  }
+
+  if (!nsg) return null;
+
+  const inbound = nsg.effectiveRules.filter(r => r.direction === "Inbound").sort((a, b) => a.priority - b.priority);
+  const outbound = nsg.effectiveRules.filter(r => r.direction === "Outbound").sort((a, b) => a.priority - b.priority);
+  const rules = tab === "Inbound" ? inbound : outbound;
+
+  return (
+    <div className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>{t("detail.nsgRules")}</div>
+
+      {/* Tab selector */}
+      <div className={styles.nsgTabBar}>
+        <button
+          type="button"
+          className={`${styles.nsgTab} ${tab === "Inbound" ? styles.nsgTabActive : ""}`}
+          onClick={() => setTab("Inbound")}
+        >
+          {t("detail.inbound")} ({inbound.length})
+        </button>
+        <button
+          type="button"
+          className={`${styles.nsgTab} ${tab === "Outbound" ? styles.nsgTabActive : ""}`}
+          onClick={() => setTab("Outbound")}
+        >
+          {t("detail.outbound")} ({outbound.length})
+        </button>
+      </div>
+
+      {/* Column header */}
+      <div className={styles.nsgRuleHeader}>
+        <span>{t("detail.nsgAccess")}</span>
+        <span>{t("detail.nsgProto")}</span>
+        <span>{t("detail.nsgPort")}</span>
+        <span>{t("detail.nsgSource")}</span>
+        <span>{t("detail.nsgDest")}</span>
+        <span>{t("detail.nsgPriority")}</span>
+      </div>
+
+      {/* Rules list */}
+      <div className={styles.nsgRulesList}>
+        {rules.map((rule) => (
+          <div
+            key={`${rule.direction}-${rule.priority}-${rule.name}`}
+            className={`${styles.nsgDetailRule} ${rule.access === "Allow" ? styles.nsgDetailRuleAllow : styles.nsgDetailRuleDeny}`}
+            title={rule.name}
+          >
+            <span className={styles.nsgDetailAccess}>
+              {rule.access === "Allow" ? "✓" : "✕"}
+            </span>
+            <span className={styles.nsgDetailProto}>{rule.protocol}</span>
+            <span className={styles.nsgDetailPort}>{rule.destinationPortRange}</span>
+            <span className={styles.nsgDetailAddr} title={rule.sourceAddressPrefix}>
+              {rule.sourceAddressPrefix.length > 18 ? rule.sourceAddressPrefix.slice(0, 16) + "…" : rule.sourceAddressPrefix}
+            </span>
+            <span className={styles.nsgDetailAddr} title={rule.destinationAddressPrefix}>
+              {rule.destinationAddressPrefix.length > 18 ? rule.destinationAddressPrefix.slice(0, 16) + "…" : rule.destinationAddressPrefix}
+            </span>
+            <span className={styles.nsgDetailPriority}>{rule.priority}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Rule name legend at bottom */}
+      {rules.length > 0 && (
+        <div className={styles.nsgRuleNameList}>
+          {rules.map((rule) => (
+            <div
+              key={`${rule.direction}-${rule.priority}-${rule.name}-label`}
+              className={styles.nsgRuleNameItem}
+            >
+              <span className={`${styles.nsgRuleNameDot} ${rule.access === "Allow" ? styles.nsgRuleNameDotAllow : styles.nsgRuleNameDotDeny}`} />
+              <span className={styles.nsgRuleNamePri}>{rule.priority}</span>
+              <span className={styles.nsgRuleNameText}>{rule.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ResourceDetailPanel({
   nodeSpec,
   liveNode,
@@ -172,6 +298,7 @@ export function ResourceDetailPanel({
   const [alertsOpen, setAlertsOpen] = useState(true);
   const [alertRulesOpen, setAlertRulesOpen] = useState(true);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const { nsg: nsgDetail, loading: nsgLoading } = useNsgDetail(nodeSpec?.azureResourceId, nodeSpec?.resourceKind);
 
   if (!nodeSpec) return null;
 
@@ -330,6 +457,11 @@ export function ResourceDetailPanel({
               </div>
             ))}
           </div>
+        )}
+
+        {/* NSG Security Rules (shown for NSG nodes) */}
+        {nodeSpec.resourceKind === "nsg" && (
+          <NsgRulesSection nsg={nsgDetail} loading={nsgLoading} />
         )}
 
         {/* Tags */}

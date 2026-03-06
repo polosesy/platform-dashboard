@@ -373,6 +373,124 @@
   border-radius: 14px;
 }
 
+/* ── Loading shimmer skeleton ── */
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loadingSkeleton {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.spinnerRow {
+  grid-column: span 12;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 0 8px;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(0, 120, 212, 0.12);
+  border-top-color: rgba(0, 120, 212, 0.72);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.spinnerLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.shimmerBar {
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    90deg,
+    rgba(20, 21, 23, 0.04) 0%,
+    rgba(20, 21, 23, 0.10) 40%,
+    rgba(20, 21, 23, 0.04) 80%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.shimmerStrip {
+  grid-column: span 12;
+  display: flex;
+  gap: 8px;
+}
+
+.shimmerStat {
+  flex: 1;
+  height: 68px;
+}
+
+.shimmerDonut {
+  grid-column: span 4;
+  height: 200px;
+}
+
+.shimmerTable {
+  grid-column: span 8;
+  height: 200px;
+}
+
+/* ── Mock data / fallback notice banner ── */
+
+.fallbackNotice {
+  grid-column: span 12;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(209, 132, 0, 0.30);
+  background: rgba(209, 132, 0, 0.06);
+  border-radius: var(--radius-lg);
+}
+
+.fallbackNoticeIcon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(209, 132, 0, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 900;
+  color: rgba(209, 132, 0, 0.88);
+}
+
+.fallbackNoticeText {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(209, 132, 0, 0.88);
+  line-height: 1.4;
+}
+
+.fallbackNoticeHint {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(20, 21, 23, 0.50);
+  margin-top: 2px;
+}
+
 /* ── Tab Bar ── */
 
 .tabBar {
@@ -867,7 +985,14 @@
   background: rgba(255, 255, 255, 0.72);
   display: grid;
   gap: 8px;
-  transition: box-shadow 120ms ease;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.regionCard:hover {
+  box-shadow: 0 2px 8px rgba(20, 21, 23, 0.06);
 }
 
 .regionCardGood {
@@ -884,10 +1009,19 @@
   box-shadow: 0 2px 12px rgba(216, 59, 1, 0.10);
 }
 
+.regionCardExpanded {
+  grid-column: 1 / -1;
+  border-color: rgba(0, 120, 212, 0.28);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 16px rgba(0, 120, 212, 0.08);
+}
+
 .regionCardHeader {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .regionDot {
@@ -965,23 +1099,127 @@
   width: 100%;
 }
 
-.regionEventsExpanded {
-  border-top: 1px solid rgba(20, 21, 23, 0.06);
-  padding-top: 8px;
+.regionDetailSection {
+  border-top: 1px solid rgba(20, 21, 23, 0.08);
+  padding-top: 10px;
   display: grid;
+  gap: 10px;
+}
+
+.regionServiceGroup {
+  display: grid;
+  gap: 4px;
+}
+
+.regionServiceHeader {
+  display: flex;
+  align-items: center;
   gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(20, 21, 23, 0.03);
+  border: 1px solid rgba(20, 21, 23, 0.06);
+}
+
+.regionServiceDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.regionServiceName {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(20, 21, 23, 0.82);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.regionServiceStatus {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex: none;
+}
+
+.regionServiceOk {
+  background: rgba(16, 137, 62, 0.10);
+  color: rgba(16, 137, 62, 0.82);
+}
+
+.regionServiceIssue {
+  background: rgba(216, 59, 1, 0.10);
+  color: rgba(216, 59, 1, 0.88);
+}
+
+.regionServiceMaintenance {
+  background: rgba(0, 120, 212, 0.10);
+  color: rgba(0, 120, 212, 0.88);
+}
+
+.regionServiceAdvisory {
+  background: rgba(209, 132, 0, 0.10);
+  color: rgba(209, 132, 0, 0.88);
 }
 
 .regionEventItem {
+  padding: 6px 10px 6px 24px;
+  display: grid;
+  gap: 3px;
+}
+
+.regionEventItemHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .regionEventTitle {
   font-size: 11px;
   color: rgba(20, 21, 23, 0.70);
   line-height: 1.4;
+}
+
+.regionEventSummary {
+  font-size: 10px;
+  color: rgba(20, 21, 23, 0.50);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.regionEventTime {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.regionNoEvents {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.regionChevron {
+  font-size: 9px;
+  color: var(--muted);
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.regionChevronOpen {
+  transform: rotate(180deg);
 }
 
 .regionalNote {

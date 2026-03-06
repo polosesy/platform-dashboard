@@ -9,15 +9,28 @@ import {
   translateTexts,
 } from "../services/health";
 
+/**
+ * Safely send JSON response — guards against writing to a destroyed/closed socket.
+ * Prevents the "write after end" / unhandled error that causes ECONNRESET cascades.
+ */
+function safeJson(res: Response, data: unknown): void {
+  try {
+    if (res.headersSent || res.writableEnded) return;
+    res.json(data);
+  } catch (e: unknown) {
+    console.error("[health] safeJson write failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 export function registerHealthRoutes(router: Router, env: Env) {
   // Tab 1: Global Region Health (Azure Status RSS feed proxy — no auth required)
   router.get("/api/health/global-status", async (_req: Request, res: Response) => {
     try {
       const data = await tryGetGlobalStatus(env);
-      res.json(data ?? mockGlobalStatus);
+      safeJson(res, data ?? mockGlobalStatus);
     } catch (e: unknown) {
       console.error("[health] global-status error:", e instanceof Error ? e.message : e);
-      res.json({ ...mockGlobalStatus, note: e instanceof Error ? e.message : "global status error" });
+      safeJson(res, { ...mockGlobalStatus, note: e instanceof Error ? e.message : "global status error" });
     }
   });
 
@@ -27,10 +40,10 @@ export function registerHealthRoutes(router: Router, env: Env) {
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
     try {
       const data = await tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId });
-      res.json(data ?? mockHealthSummary);
+      safeJson(res, data ?? mockHealthSummary);
     } catch (e: unknown) {
       console.error("[health] summary error:", e instanceof Error ? e.message : e);
-      res.json({ ...mockHealthSummary, note: e instanceof Error ? e.message : "health summary error" });
+      safeJson(res, { ...mockHealthSummary, note: e instanceof Error ? e.message : "health summary error" });
     }
   });
 
@@ -40,14 +53,15 @@ export function registerHealthRoutes(router: Router, env: Env) {
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
     try {
       const data = await tryGetServiceHealthEvents(env, req.auth?.bearerToken, { subscriptionId });
-      res.json(data ?? mockServiceHealthEvents);
+      safeJson(res, data ?? mockServiceHealthEvents);
     } catch (e: unknown) {
       console.error("[health] events error:", e instanceof Error ? e.message : e);
-      res.json({ ...mockServiceHealthEvents, note: e instanceof Error ? e.message : "service health events error" });
+      safeJson(res, { ...mockServiceHealthEvents, note: e instanceof Error ? e.message : "service health events error" });
     }
   });
 
-  // Translation proxy (optional — requires AZURE_TRANSLATOR_KEY)
+  // Translation proxy — uses AZURE_TRANSLATOR_KEY when available,
+  // falls back to built-in translations for known mock events.
   router.post("/api/health/translate", (req: Request, res: Response) => {
     const body = req.body as { texts?: unknown; to?: unknown; from?: unknown };
     const texts = Array.isArray(body.texts) ? body.texts.map(String) : [];
@@ -57,14 +71,19 @@ export function registerHealthRoutes(router: Router, env: Env) {
     if (texts.length === 0) {
       return void res.status(400).json({ error: "texts_required" });
     }
-    if (!env.AZURE_TRANSLATOR_KEY) {
-      return void res.json({ error: "not_configured", translations: null });
-    }
 
     translateTexts(env, texts, to, from)
-      .then((translations) => res.json({ translations, from, to }))
+      .then((translations) => {
+        if (translations) {
+          safeJson(res, { translations, from, to });
+        } else {
+          safeJson(res, { error: "not_configured", translations: null });
+        }
+      })
       .catch((e: unknown) => {
-        res.status(500).json({ error: e instanceof Error ? e.message : "translate_error" });
+        try {
+          if (!res.headersSent) res.status(500).json({ error: e instanceof Error ? e.message : "translate_error" });
+        } catch { /* socket dead */ }
       });
   });
 
@@ -75,10 +94,10 @@ export function registerHealthRoutes(router: Router, env: Env) {
       typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
     try {
       const data = await tryGetRegionalStatus(env, req.auth?.bearerToken, { subscriptionId });
-      res.json(data ?? mockRegionalStatus);
+      safeJson(res, data ?? mockRegionalStatus);
     } catch (e: unknown) {
       console.error("[health] regional-status error:", e instanceof Error ? e.message : e);
-      res.json({ ...mockRegionalStatus, note: e instanceof Error ? e.message : "regional status error" });
+      safeJson(res, { ...mockRegionalStatus, note: e instanceof Error ? e.message : "regional status error" });
     }
   });
 }

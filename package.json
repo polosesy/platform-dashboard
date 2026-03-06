@@ -9,7 +9,10 @@
     "predev": "node scripts/predev.js",
     "dev": "node scripts/predev.js && concurrently --kill-others-on-fail -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
     "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
-    "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web"
+    "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web",
+    "gp": "bash scripts/gp.sh",
+    "gp:status": "bash scripts/gp.sh --status",
+    "gp:dry": "bash scripts/gp.sh --dry-run"
   },
   "devDependencies": {
     "concurrently": "^9.2.0"
