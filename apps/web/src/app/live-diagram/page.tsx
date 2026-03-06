@@ -2,7 +2,7 @@
 
 import "reactflow/dist/style.css";
 
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -21,6 +21,78 @@ const Canvas3D = lazy(() =>
 );
 
 type UpdateMode = "polling" | "sse";
+
+// ── Multi-select dropdown (Region / VNet filter) ──
+type MultiSelectDropdownProps = {
+  label: string;
+  allLabel: string;
+  options: { id: string; label: string }[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  disabled?: boolean;
+};
+
+function MultiSelectDropdown({ label, allLabel, options, selected, onChange, disabled }: MultiSelectDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const toggle = useCallback((id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(next);
+  }, [selected, onChange]);
+
+  const btnLabel = selected.size === 0
+    ? allLabel
+    : selected.size === 1
+      ? (options.find((o) => selected.has(o.id))?.label ?? `1 ${label}`)
+      : `${selected.size} ${label}`;
+
+  return (
+    <div style={{ position: "relative" }} ref={wrapRef}>
+      <button
+        type="button"
+        className={styles.multiSelectBtn}
+        aria-expanded={open}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+      >
+        {btnLabel}
+        {selected.size > 0 && (
+          <span className={styles.multiSelectBtnCount}>{selected.size}</span>
+        )}
+        <span style={{ opacity: 0.5, fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className={styles.multiSelectDropdown}>
+          {options.map((opt) => (
+            <label key={opt.id} className={styles.multiSelectOption}>
+              <input
+                type="checkbox"
+                checked={selected.has(opt.id)}
+                onChange={() => toggle(opt.id)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function buildConnectedEdges(
   spec: DiagramSpec,
@@ -87,9 +159,9 @@ export default function LiveDiagramPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  // VNet / Region filter state
-  const [selectedVnet, setSelectedVnet] = useState<string>("");     // "" = 전체
-  const [selectedRegion, setSelectedRegion] = useState<string>(""); // "" = 전체
+  // VNet / Region filter state (multi-select)
+  const [selectedVnets, setSelectedVnets] = useState<Set<string>>(new Set());
+  const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
 
   // Fetch tenants on mount
   useEffect(() => {
@@ -242,31 +314,31 @@ export default function LiveDiagramPage() {
     return [...new Set(spec.nodes.map((n) => n.location).filter(Boolean))] as string[];
   }, [spec]);
 
-  // ── Filtered spec (VNet + Region) ──
+  // ── Filtered spec (VNet + Region — multi-select) ──
   const filteredSpec = useMemo(() => {
     if (!spec) return spec;
-    if (!selectedVnet && !selectedRegion) return spec;
+    if (selectedVnets.size === 0 && selectedRegions.size === 0) return spec;
 
     // Build set of visible node IDs
     let visibleNodeIds: Set<string>;
 
-    if (selectedVnet) {
-      // Include the VNet group itself + all children (parentId chain)
+    if (selectedVnets.size > 0) {
+      // Include all selected VNets and their descendants (union)
       visibleNodeIds = new Set<string>();
-      visibleNodeIds.add(selectedVnet);
-
-      // BFS: find all descendants via parentId
-      const queue = [selectedVnet];
-      while (queue.length > 0) {
-        const parentId = queue.shift()!;
-        for (const n of spec.nodes) {
-          if (n.parentId === parentId && !visibleNodeIds.has(n.id)) {
-            visibleNodeIds.add(n.id);
-            queue.push(n.id);
+      for (const vnetId of selectedVnets) {
+        visibleNodeIds.add(vnetId);
+        // BFS: find all descendants via parentId
+        const queue = [vnetId];
+        while (queue.length > 0) {
+          const parentId = queue.shift()!;
+          for (const n of spec.nodes) {
+            if (n.parentId === parentId && !visibleNodeIds.has(n.id)) {
+              visibleNodeIds.add(n.id);
+              queue.push(n.id);
+            }
           }
         }
       }
-
       // Also include external resources connected via edges from visible nodes
       for (const edge of spec.edges) {
         if (visibleNodeIds.has(edge.source) && !visibleNodeIds.has(edge.target)) {
@@ -280,12 +352,12 @@ export default function LiveDiagramPage() {
       visibleNodeIds = new Set(spec.nodes.map((n) => n.id));
     }
 
-    // Region filter: further restrict
-    if (selectedRegion) {
+    // Region filter: further restrict (union of all selected regions)
+    if (selectedRegions.size > 0) {
       const regionNodeIds = new Set(
-        spec.nodes.filter((n) => n.location === selectedRegion).map((n) => n.id),
+        spec.nodes.filter((n) => n.location && selectedRegions.has(n.location)).map((n) => n.id),
       );
-      // Walk parent chain upward for each matching node (subnet → VNet)
+      // Walk parent chain upward for each matching node
       for (const n of spec.nodes) {
         if (regionNodeIds.has(n.id)) {
           let cur = n;
@@ -297,8 +369,7 @@ export default function LiveDiagramPage() {
           }
         }
       }
-      // Also include child groups that contain region-matching nodes
-      // (e.g., subnets that contain matching resources)
+      // Include child groups that contain region-matching nodes
       for (const n of spec.nodes) {
         if (n.nodeType === "group" && !regionNodeIds.has(n.id)) {
           const hasChild = spec.nodes.some((c) => c.parentId === n.id && regionNodeIds.has(c.id));
@@ -310,12 +381,10 @@ export default function LiveDiagramPage() {
     }
 
     // Ensure all parent chains are fully included
-    // (add missing ancestors so parentId refs don't break)
     for (const n of spec.nodes) {
       if (visibleNodeIds.has(n.id) && n.parentId) {
         let cur = n;
         while (cur.parentId && !visibleNodeIds.has(cur.parentId)) {
-          // Only add parent if it's in the original spec
           const parent = spec.nodes.find((p) => p.id === cur.parentId);
           if (!parent) break;
           visibleNodeIds.add(parent.id);
@@ -324,8 +393,6 @@ export default function LiveDiagramPage() {
       }
     }
 
-    // Build filtered nodes — strip parentId if parent is still not visible
-    // (edge-connected external nodes from other VNets)
     const filteredNodes = spec.nodes
       .filter((n) => visibleNodeIds.has(n.id))
       .map((n) => {
@@ -340,7 +407,7 @@ export default function LiveDiagramPage() {
     );
 
     return { ...spec, nodes: filteredNodes, edges: filteredEdges };
-  }, [spec, selectedVnet, selectedRegion]);
+  }, [spec, selectedVnets, selectedRegions]);
 
   // Reset selected node when filter changes (node may no longer be visible)
   useEffect(() => {
@@ -349,6 +416,12 @@ export default function LiveDiagramPage() {
       if (!stillVisible) setSelectedNodeId(null);
     }
   }, [filteredSpec, selectedNodeId]);
+
+  // Convert region options to id/label shape for MultiSelectDropdown
+  const regionOptionsMapped = useMemo(
+    () => regionOptions.map((r) => ({ id: r, label: r })),
+    [regionOptions],
+  );
 
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     const nodeId = alert.affectedNodeIds[0];
@@ -489,34 +562,26 @@ export default function LiveDiagramPage() {
             <div className={styles.selectorDivider} />
             <div className={styles.selectorGroup}>
               <span className={styles.selectorLabel}>{t("live.region")}</span>
-              <select
-                className={styles.select}
-                value={selectedRegion}
-                onChange={(e) => setSelectedRegion(e.target.value)}
+              <MultiSelectDropdown
+                label={t("live.region")}
+                allLabel={t("live.allRegions")}
+                options={regionOptionsMapped}
+                selected={selectedRegions}
+                onChange={setSelectedRegions}
                 disabled={regionOptions.length === 0}
-                aria-label={t("live.region")}
-              >
-                <option value="">{t("live.allRegions")}</option>
-                {regionOptions.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
+              />
             </div>
             <div className={styles.selectorDivider} />
             <div className={styles.selectorGroup}>
               <span className={styles.selectorLabel}>{t("live.vnet")}</span>
-              <select
-                className={styles.select}
-                value={selectedVnet}
-                onChange={(e) => setSelectedVnet(e.target.value)}
+              <MultiSelectDropdown
+                label={t("live.vnet")}
+                allLabel={t("live.allVnets")}
+                options={vnetOptions}
+                selected={selectedVnets}
+                onChange={setSelectedVnets}
                 disabled={vnetOptions.length === 0}
-                aria-label={t("live.vnet")}
-              >
-                <option value="">{t("live.allVnets")}</option>
-                {vnetOptions.map((v) => (
-                  <option key={v.id} value={v.id}>{v.label}</option>
-                ))}
-              </select>
+              />
             </div>
           </>
         )}

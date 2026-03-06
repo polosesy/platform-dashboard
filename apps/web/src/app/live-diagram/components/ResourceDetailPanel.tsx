@@ -12,6 +12,7 @@ import type {
   SubResource,
   NsgInfo,
   NsgRuleEntry,
+  BackendPoolInfo,
 } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
@@ -165,6 +166,114 @@ const SEVERITY_COLORS: Record<number, string> = {
   4: "#95a5a6",
 };
 
+// ── Backend Pool Detail Section (LB / Application Gateway) ──
+
+const BACKEND_POOL_KINDS = new Set(["lb", "appGateway"]);
+
+function useBackendPool(azureResourceId: string | undefined, resourceKind: string | undefined) {
+  const [pools, setPools] = useState<BackendPoolInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const getApiToken = useApiToken();
+
+  useEffect(() => {
+    if (!resourceKind || !BACKEND_POOL_KINDS.has(resourceKind) || !azureResourceId) {
+      setPools([]);
+      return;
+    }
+    setLoading(true);
+    getApiToken()
+      .catch(() => null)
+      .then(async (token) => {
+        const url = `${apiBaseUrl()}/api/live/backend-pool?resourceId=${encodeURIComponent(azureResourceId)}&resourceKind=${encodeURIComponent(resourceKind)}`;
+        const data = await fetchJsonWithBearer<{ pools: BackendPoolInfo[] }>(url, token);
+        setPools(data.pools ?? []);
+      })
+      .catch(() => setPools([]))
+      .finally(() => setLoading(false));
+  }, [azureResourceId, resourceKind, getApiToken]);
+
+  return { pools, loading };
+}
+
+const MEMBER_STATE_COLOR: Record<string, string> = {
+  Healthy: "#10893e",
+  Unhealthy: "#d83b01",
+  Unknown: "#797775",
+};
+
+function BackendPoolSection({ pools, loading }: { pools: BackendPoolInfo[]; loading: boolean }) {
+  const { t } = useI18n();
+
+  if (loading) {
+    return (
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>{t("detail.backendPool")}</div>
+        <div className={styles.detailEmpty}>{t("live.loading")}</div>
+      </div>
+    );
+  }
+
+  if (pools.length === 0) return null;
+
+  return (
+    <>
+      {pools.map((pool) => (
+        <div key={pool.name} className={styles.detailSection}>
+          <div className={styles.detailSectionTitle}>
+            {t("detail.backendPool")}: <span style={{ fontWeight: 700, color: "var(--text)" }}>{pool.name}</span>
+          </div>
+
+          {/* LB Rules */}
+          {pool.loadBalancingRules && pool.loadBalancingRules.length > 0 && (
+            <div className={styles.backendPoolRules}>
+              <span className={styles.backendPoolRulesLabel}>{t("detail.backendPool.rules")}:</span>
+              {pool.loadBalancingRules.map((r) => (
+                <span key={r} className={styles.backendPoolRuleTag}>{r}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Health Probe */}
+          {pool.probe && (
+            <div className={styles.backendPoolProbe}>
+              <span className={styles.backendPoolProbeLabel}>{t("detail.backendPool.probe")}</span>
+              <span className={styles.backendPoolProbeDetail}>
+                {pool.probe.protocol}/{pool.probe.port}
+                {pool.probe.path ? ` ${pool.probe.path}` : ""}
+                {" · "}{pool.probe.intervalSec}s interval
+                {" · "}{pool.probe.unhealthyThreshold}x threshold
+              </span>
+            </div>
+          )}
+
+          {/* Members */}
+          <div className={styles.backendPoolMemberHeader}>
+            {t("detail.backendPool.members")} ({pool.members.length})
+          </div>
+          <div className={styles.backendPoolMemberList}>
+            {pool.members.map((m, i) => (
+              <div key={`${m.name}-${i}`} className={styles.backendPoolMemberRow}>
+                <span
+                  className={styles.backendPoolMemberState}
+                  style={{ color: MEMBER_STATE_COLOR[m.state ?? "Unknown"] }}
+                  title={m.state}
+                >
+                  {m.state === "Healthy" ? "●" : m.state === "Unhealthy" ? "●" : "○"}
+                </span>
+                <span className={styles.backendPoolMemberName}>{m.name}</span>
+                <span className={styles.backendPoolMemberAddr}>
+                  {m.ipAddress ?? m.fqdn ?? ""}
+                  {m.port ? `:${m.port}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // ── NSG Rules Detail Section ──
 
 function useNsgDetail(azureResourceId: string | undefined, resourceKind: string | undefined) {
@@ -299,6 +408,7 @@ export function ResourceDetailPanel({
   const [alertRulesOpen, setAlertRulesOpen] = useState(true);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const { nsg: nsgDetail, loading: nsgLoading } = useNsgDetail(nodeSpec?.azureResourceId, nodeSpec?.resourceKind);
+  const { pools: backendPools, loading: backendPoolLoading } = useBackendPool(nodeSpec?.azureResourceId, nodeSpec?.resourceKind);
 
   if (!nodeSpec) return null;
 
@@ -462,6 +572,11 @@ export function ResourceDetailPanel({
         {/* NSG Security Rules (shown for NSG nodes) */}
         {nodeSpec.resourceKind === "nsg" && (
           <NsgRulesSection nsg={nsgDetail} loading={nsgLoading} />
+        )}
+
+        {/* Backend Pool (shown for LB / Application Gateway nodes) */}
+        {(nodeSpec.resourceKind === "lb" || nodeSpec.resourceKind === "appGateway") && (
+          <BackendPoolSection pools={backendPools} loading={backendPoolLoading} />
         )}
 
         {/* Tags */}

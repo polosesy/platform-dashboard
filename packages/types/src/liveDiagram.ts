@@ -405,6 +405,38 @@ export type FlowSummary = {
   externalSourceCount: number;
 };
 
+// ────────────────────────────────────────────
+// 10. Backend Pool Detail (LB / Application Gateway)
+// ────────────────────────────────────────────
+
+export type BackendPoolMember = {
+  name: string;
+  ipAddress?: string;
+  fqdn?: string;
+  port?: number;
+  state?: "Healthy" | "Unhealthy" | "Unknown";
+  provisioningState?: string;
+  kind: "vm" | "ip" | "fqdn";
+};
+
+export type BackendPoolProbe = {
+  name: string;
+  protocol: string;
+  port: number;
+  path?: string;
+  intervalSec: number;
+  unhealthyThreshold: number;
+};
+
+export type BackendPoolInfo = {
+  name: string;
+  resourceId?: string;
+  loadBalancingRules?: string[];
+  members: BackendPoolMember[];
+  probe?: BackendPoolProbe;
+  note?: string;
+};
+
 export type EdgeNetworkDetail = {
   edgeId: string;
   generatedAt: string;

@@ -72,6 +72,15 @@ const T: Translations = {
   "detail.alertRules": { ko: "경고 규칙", en: "Alert Rules" },
   "detail.disabled": { ko: "비활성", en: "Disabled" },
 
+  // ── Backend Pool Detail ──
+  "detail.backendPool": { ko: "백엔드 풀", en: "Backend Pool" },
+  "detail.backendPool.members": { ko: "멤버", en: "Members" },
+  "detail.backendPool.probe": { ko: "상태 프로브", en: "Health Probe" },
+  "detail.backendPool.healthy": { ko: "정상", en: "Healthy" },
+  "detail.backendPool.unhealthy": { ko: "비정상", en: "Unhealthy" },
+  "detail.backendPool.unknown": { ko: "알 수 없음", en: "Unknown" },
+  "detail.backendPool.rules": { ko: "로드밸런싱 규칙", en: "LB Rules" },
+
   // ── NSG Detail Panel ──
   "detail.nsgRules": { ko: "보안 규칙", en: "Security Rules" },
   "detail.nsgAccess": { ko: "접근", en: "Access" },

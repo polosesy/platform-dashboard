@@ -9,6 +9,8 @@ import type {
   FlowSummary,
   DiagramEdgeSpec,
   DiagramNodeSpec,
+  BackendPoolInfo,
+  BackendPoolMember,
 } from "@aud/types";
 import { getDiagramSpec } from "./liveAggregator";
 import { getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -396,4 +398,170 @@ export async function fetchEdgeNetworkDetail(
 
   edgeDetailCache.set(cacheKey, result);
   return result;
+}
+
+// ──────────────────────────────────────────────
+// Backend Pool Info (LB / Application Gateway)
+// ──────────────────────────────────────────────
+
+const backendPoolCache = new CacheManager<BackendPoolInfo[]>(50, 60_000);
+
+interface ArmLbResponse {
+  properties?: {
+    backendAddressPools?: Array<{
+      name?: string;
+      id?: string;
+      properties?: {
+        loadBalancingRules?: Array<{ id?: string }>;
+        loadBalancerBackendAddresses?: Array<{
+          name?: string;
+          properties?: { ipAddress?: string };
+        }>;
+        backendIPConfigurations?: Array<{ id?: string }>;
+      };
+    }>;
+    probes?: Array<{
+      name?: string;
+      properties?: {
+        protocol?: string;
+        port?: number;
+        requestPath?: string;
+        intervalInSeconds?: number;
+        numberOfProbes?: number;
+      };
+    }>;
+  };
+}
+
+interface ArmAgwResponse {
+  properties?: {
+    backendAddressPools?: Array<{
+      name?: string;
+      id?: string;
+      properties?: {
+        backendAddresses?: Array<{ ipAddress?: string; fqdn?: string }>;
+      };
+    }>;
+    probes?: Array<{
+      name?: string;
+      properties?: {
+        protocol?: string;
+        path?: string;
+        interval?: number;
+        unhealthyThreshold?: number;
+        port?: number;
+      };
+    }>;
+  };
+}
+
+function mockBackendPools(resourceKind: string): BackendPoolInfo[] {
+  if (resourceKind === "lb") {
+    return [
+      {
+        name: "backendPool-web",
+        loadBalancingRules: ["HTTP-Rule-80", "HTTPS-Rule-443"],
+        members: [
+          { name: "vm-web-01", ipAddress: "10.0.1.4", port: 80, state: "Healthy", kind: "ip" },
+          { name: "vm-web-02", ipAddress: "10.0.1.5", port: 80, state: "Healthy", kind: "ip" },
+          { name: "vm-web-03", ipAddress: "10.0.1.6", port: 80, state: "Unhealthy", kind: "ip" },
+        ],
+        probe: { name: "http-probe", protocol: "Http", port: 80, path: "/health", intervalSec: 15, unhealthyThreshold: 2 },
+        note: "mock",
+      },
+    ];
+  }
+  // appGateway
+  return [
+    {
+      name: "appGwBackendPool",
+      members: [
+        { name: "app-01", ipAddress: "10.0.2.10", state: "Healthy", kind: "ip" },
+        { name: "app-svc", fqdn: "myapp.azurewebsites.net", state: "Healthy", kind: "fqdn" },
+      ],
+      probe: { name: "http-probe", protocol: "Http", port: 80, path: "/healthz", intervalSec: 30, unhealthyThreshold: 3 },
+      note: "mock",
+    },
+  ];
+}
+
+export async function fetchBackendPoolInfo(
+  env: Env,
+  bearerToken: string | undefined,
+  resourceId: string,
+  resourceKind: string,
+): Promise<BackendPoolInfo[]> {
+  const cacheKey = `${bearerToken ? bearerKeyPrefix(bearerToken) : "anon"}:backend-pool:${resourceId}`;
+  const cached = backendPoolCache.get(cacheKey);
+  if (cached) return cached;
+
+  if (!env.AZURE_LIVE_DIAGRAM_ENABLED) {
+    const result = mockBackendPools(resourceKind);
+    backendPoolCache.set(cacheKey, result);
+    return result;
+  }
+
+  try {
+    const fetcher = await getArmFetcherAuto(env, bearerToken);
+    const url = `https://management.azure.com${resourceId}?api-version=2024-05-01`;
+
+    if (resourceKind === "lb") {
+      const data = await fetcher.fetchJson<ArmLbResponse>(url);
+      const pools = data.properties?.backendAddressPools ?? [];
+      const firstProbe = data.properties?.probes?.[0];
+      const probe = firstProbe ? {
+        name: firstProbe.name ?? "probe",
+        protocol: firstProbe.properties?.protocol ?? "Http",
+        port: firstProbe.properties?.port ?? 80,
+        path: firstProbe.properties?.requestPath,
+        intervalSec: firstProbe.properties?.intervalInSeconds ?? 15,
+        unhealthyThreshold: firstProbe.properties?.numberOfProbes ?? 2,
+      } : undefined;
+
+      const result: BackendPoolInfo[] = pools.map((pool) => {
+        const members: BackendPoolMember[] = (pool.properties?.loadBalancerBackendAddresses ?? []).map((addr) => ({
+          name: addr.name ?? "member",
+          ipAddress: addr.properties?.ipAddress,
+          state: "Unknown" as const,
+          kind: "ip" as const,
+        }));
+        const rules = (pool.properties?.loadBalancingRules ?? [])
+          .map((r) => r.id?.split("/").pop())
+          .filter((r): r is string => !!r);
+        return { name: pool.name ?? "pool", resourceId: pool.id, loadBalancingRules: rules, members, probe };
+      });
+      backendPoolCache.set(cacheKey, result);
+      return result;
+    }
+
+    // appGateway
+    const data = await fetcher.fetchJson<ArmAgwResponse>(url);
+    const pools = data.properties?.backendAddressPools ?? [];
+    const firstProbe = data.properties?.probes?.[0];
+    const probe = firstProbe ? {
+      name: firstProbe.name ?? "probe",
+      protocol: firstProbe.properties?.protocol ?? "Http",
+      port: firstProbe.properties?.port ?? 80,
+      path: firstProbe.properties?.path,
+      intervalSec: firstProbe.properties?.interval ?? 30,
+      unhealthyThreshold: firstProbe.properties?.unhealthyThreshold ?? 3,
+    } : undefined;
+
+    const result: BackendPoolInfo[] = pools.map((pool) => {
+      const members: BackendPoolMember[] = (pool.properties?.backendAddresses ?? []).map((addr, i) => ({
+        name: addr.fqdn ?? addr.ipAddress ?? `member-${i}`,
+        ipAddress: addr.ipAddress,
+        fqdn: addr.fqdn,
+        state: "Unknown" as const,
+        kind: addr.fqdn ? "fqdn" as const : "ip" as const,
+      }));
+      return { name: pool.name ?? "pool", resourceId: pool.id, members, probe };
+    });
+    backendPoolCache.set(cacheKey, result);
+    return result;
+  } catch {
+    const result = mockBackendPools(resourceKind);
+    backendPoolCache.set(cacheKey, result);
+    return result;
+  }
 }

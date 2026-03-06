@@ -13,7 +13,7 @@ import {
 } from "../services/liveDiagramMock";
 import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure";
 import { generateDiagramSpec } from "../services/specGenerator";
-import { fetchEdgeNetworkDetail, fetchNsgInfo } from "../services/edgeDetailService";
+import { fetchEdgeNetworkDetail, fetchNsgInfo, fetchBackendPoolInfo } from "../services/edgeDetailService";
 
 // Seed the mock diagram on startup
 saveDiagramSpec(mockDiagramSpec);
@@ -228,6 +228,19 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
       })
       .catch((e: unknown) => {
         res.status(500).json({ error: e instanceof Error ? e.message : "nsg_detail_error" });
+      });
+  });
+
+  // ── Backend Pool Detail (LB / Application Gateway, 60s cached) ──
+  router.get("/api/live/backend-pool", (req: Request, res: Response) => {
+    const resourceId = typeof req.query.resourceId === "string" ? req.query.resourceId : "";
+    const resourceKind = typeof req.query.resourceKind === "string" ? req.query.resourceKind : "lb";
+    if (!resourceId) return void res.status(400).json({ error: "resourceId_required" });
+
+    fetchBackendPoolInfo(env, req.auth?.bearerToken, resourceId, resourceKind)
+      .then((pools) => res.json({ pools }))
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "backend_pool_error" });
       });
   });
 

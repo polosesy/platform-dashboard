@@ -584,46 +584,59 @@ function LiveCanvasInner({
   }, []);
 
   // ── Group node drag stop: snap back if overlapping a sibling group ──
+  // setTimeout(0) is required: in React 18, onNodeDragStop fires BEFORE the final
+  // onNodesChange(dragging: false) update is batched. Without the timeout, prev
+  // inside setNodes has the pre-final position, and the subsequent onNodesChange
+  // batch overrides our snap-back. Running after the tick ensures prev reflects
+  // the actual committed final position.
   const handleNodeDragStop = useCallback((_e: React.MouseEvent, node: FlowNode) => {
     if (node.type !== "group") return;
 
-    type AnyNode = FlowNode & { parentNode?: string };
-    const parentId = (node as AnyNode).parentNode;
+    setTimeout(() => {
+      setNodes((prev) => {
+        type AnyNode = FlowNode & { parentNode?: string };
 
-    setNodes((prev) => {
-      const siblingGroups = prev.filter((n) => {
-        if (n.id === node.id || n.type !== "group") return false;
-        return (n as AnyNode).parentNode === parentId;
-      });
+        // Look up node from latest state — has the final dragged position
+        const dragged = prev.find((n) => n.id === node.id);
+        if (!dragged) {
+          delete dragStartPos.current[node.id];
+          return prev;
+        }
 
-      const dw = (node.style?.width as number) ?? 400;
-      const dh = (node.style?.height as number) ?? 200;
-      const GAP = 10; // minimum clearance between group boxes
+        const parentId = (dragged as AnyNode).parentNode;
+        const dw = (dragged.style?.width as number) ?? 400;
+        const dh = (dragged.style?.height as number) ?? 200;
+        const GAP = 10;
 
-      const hasOverlap = siblingGroups.some((sib) => {
-        const sw = (sib.style?.width as number) ?? 400;
-        const sh = (sib.style?.height as number) ?? 200;
-        return !(
-          node.position.x + dw + GAP <= sib.position.x ||
-          sib.position.x + sw + GAP <= node.position.x ||
-          node.position.y + dh + GAP <= sib.position.y ||
-          sib.position.y + sh + GAP <= node.position.y
-        );
-      });
+        const siblingGroups = prev.filter((n) => {
+          if (n.id === node.id || n.type !== "group") return false;
+          return (n as AnyNode).parentNode === parentId;
+        });
 
-      if (hasOverlap) {
-        // Snap back to pre-drag position
-        const orig = dragStartPos.current[node.id];
+        const hasOverlap = siblingGroups.some((sib) => {
+          const sw = (sib.style?.width as number) ?? 400;
+          const sh = (sib.style?.height as number) ?? 200;
+          return !(
+            dragged.position.x + dw + GAP <= sib.position.x ||
+            sib.position.x + sw + GAP <= dragged.position.x ||
+            dragged.position.y + dh + GAP <= sib.position.y ||
+            sib.position.y + sh + GAP <= dragged.position.y
+          );
+        });
+
+        if (hasOverlap) {
+          const orig = dragStartPos.current[node.id];
+          delete dragStartPos.current[node.id];
+          if (!orig) return prev;
+          return prev.map((n) => (n.id === node.id ? { ...n, position: orig } : n));
+        }
+
+        // Drag successful — mark as user-positioned so spec refreshes don't reset it
+        userPositionedIds.current.add(node.id);
         delete dragStartPos.current[node.id];
-        if (!orig) return prev;
-        return prev.map((n) => (n.id === node.id ? { ...n, position: orig } : n));
-      }
-
-      // Drag successful — mark as user-positioned so spec refreshes don't reset it
-      userPositionedIds.current.add(node.id);
-      delete dragStartPos.current[node.id];
-      return prev;
-    });
+        return prev;
+      });
+    }, 0);
   }, [setNodes]);
 
   // ── Build edges with hover highlight flags ──
