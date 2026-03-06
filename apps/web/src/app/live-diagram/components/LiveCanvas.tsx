@@ -335,8 +335,9 @@ function LiveCanvasInner({
             const updated = {
               ...existing,
               data,
-              // Always sync style from spec to prevent stale sizes causing overlap
+              // Always sync style + position from spec to prevent stale sizes/positions causing overlap
               style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
+              position: nodeSpec.position ?? existing.position,
             } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
             if (nodeSpec.parentId) {
               updated.parentNode = nodeSpec.parentId;
