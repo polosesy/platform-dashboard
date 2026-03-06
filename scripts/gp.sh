@@ -44,7 +44,6 @@ print_status() {
   echo -e "  Branch : ${CYAN}${branch}${RESET}  (↑${ahead} ahead, ↓${behind} behind)"
   echo -e "\n${BOLD}  Modified files:${RESET}"
 
-  # Staged
   local staged
   staged=$(git diff --name-only --cached 2>/dev/null)
   if [[ -n "$staged" ]]; then
@@ -52,7 +51,6 @@ print_status() {
     echo "$staged" | while read -r f; do echo -e "    ${GREEN}+${RESET} $f"; done
   fi
 
-  # Modified (unstaged)
   local modified
   modified=$(git diff --name-only 2>/dev/null)
   if [[ -n "$modified" ]]; then
@@ -60,15 +58,13 @@ print_status() {
     echo "$modified" | while read -r f; do echo -e "    ${YELLOW}~${RESET} $f"; done
   fi
 
-  # Untracked
   local untracked
-  untracked=$(git ls-files --others --exclude-standard 2>/dev/null)
+  untracked=$(git ls-files --others --exclude-standard 2>/dev/null | grep -v "^\.claude/" || true)
   if [[ -n "$untracked" ]]; then
     echo -e "  ${BLUE}[untracked]${RESET}"
     echo "$untracked" | while read -r f; do echo -e "    ${BLUE}?${RESET} $f"; done
   fi
 
-  # Diff stat (compact)
   echo -e "\n${BOLD}  Diff stat:${RESET}"
   git diff --stat HEAD 2>/dev/null | tail -5 | while read -r line; do
     echo "  $line"
@@ -81,7 +77,6 @@ auto_commit_msg() {
   local files_changed
   files_changed=$(git diff --name-only HEAD 2>/dev/null | head -20)
 
-  # Detect scope from changed paths
   local scope=""
   if echo "$files_changed" | grep -q "apps/web"; then scope="web"; fi
   if echo "$files_changed" | grep -q "apps/api"; then
@@ -92,46 +87,36 @@ auto_commit_msg() {
   fi
   scope="${scope:-app}"
 
-  # Detect type from file patterns
   local type="feat"
   if echo "$files_changed" | grep -qE "\.(test|spec)\.(ts|tsx)$"; then type="test"; fi
   if echo "$files_changed" | grep -qE "styles?\.module\.css$"; then type="style"; fi
-  if echo "$files_changed" | grep -qiE "(fix|bug|error|patch)" <<< "$files_changed"; then type="fix"; fi
 
-  # Count changes
   local n_files
-  n_files=$(echo "$files_changed" | wc -l | tr -d ' ')
+  n_files=$(echo "$files_changed" | grep -c . 2>/dev/null || echo "0")
 
-  # Build summary from changed file basenames
   local names
-  names=$(echo "$files_changed" | xargs -I{} basename {} | sort -u | head -5 | tr '\n' ', ' | sed 's/,$//')
+  names=$(echo "$files_changed" | xargs -I{} basename {} 2>/dev/null | sort -u | head -5 | tr '\n' ', ' | sed 's/,$//')
 
   echo "${type}(${scope}): update ${names} [${n_files} files]"
 }
 
-# ── Stage files ───────────────────────────────────────────────────────────────
+# ── Stage files (only called when NOT dry-run) ────────────────────────────────
 stage_files() {
   if [[ -n "$SPECIFIC_FILES" ]]; then
     echo -e "${CYAN}Staging specific files:${RESET} $SPECIFIC_FILES"
     # shellcheck disable=SC2086
     git add $SPECIFIC_FILES
   else
-    # Stage all tracked modified files + new files (exclude .env and secrets)
-    git add --update  # stages all modified tracked files
-    # Stage untracked files except sensitive patterns
-    git ls-files --others --exclude-standard \
-      | grep -vE "(\.env$|\.env\.|secrets|credentials|\.pem$|\.key$)" \
-      | xargs -r git add
-    echo -e "${CYAN}Staged all modified + untracked files${RESET} (excluded: .env, secrets)"
-  fi
-}
-
-# ── Exec helper ───────────────────────────────────────────────────────────────
-run() {
-  if [[ "$DRY_RUN" == true ]]; then
-    echo -e "  ${YELLOW}[dry-run]${RESET} $*"
-  else
-    eval "$@"
+    # Stage all tracked modified files
+    git add --update
+    # Stage untracked files — exclude .env/secrets/.claude
+    local untracked
+    untracked=$(git ls-files --others --exclude-standard \
+      | grep -vE "(^\.claude/|\.env$|\.env\.|secrets|credentials|\.pem$|\.key$)" || true)
+    if [[ -n "$untracked" ]]; then
+      echo "$untracked" | xargs git add
+    fi
+    echo -e "${CYAN}Staged all modified + untracked files${RESET} (excluded: .claude, .env, secrets)"
   fi
 }
 
@@ -140,28 +125,41 @@ run() {
 # =============================================================================
 print_status
 
-if [[ "$STATUS_ONLY" == true ]]; then
+[[ "$STATUS_ONLY" == true ]] && exit 0
+
+# ── Dry-run: just preview ─────────────────────────────────────────────────────
+if [[ "$DRY_RUN" == true ]]; then
+  if [[ -z "$COMMIT_MSG" ]]; then
+    COMMIT_MSG=$(auto_commit_msg)
+    echo -e "${CYAN}Auto-generated message:${RESET} ${COMMIT_MSG}"
+  fi
+  BRANCH=$(git branch --show-current)
+  echo -e "\n${BOLD}── Dry-run Preview ──────────────────────────────${RESET}"
+  echo -e "  Message : ${GREEN}${COMMIT_MSG}${RESET}"
+  echo -e "  Branch  : ${CYAN}${BRANCH}${RESET}"
+  echo -e "  ${YELLOW}[dry-run] No changes will be made${RESET}"
+  echo -e "  Would run: git add [files] && git commit -m '...' && git push origin ${BRANCH}"
+  echo -e "${BOLD}────────────────────────────────────────────────${RESET}\n"
   exit 0
 fi
 
-# Check if there's anything to commit
-if git diff --quiet HEAD 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
+# ── Nothing to commit check ───────────────────────────────────────────────────
+if git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
   echo -e "${YELLOW}Nothing to commit. Working tree is clean.${RESET}"
-  # Still try to push if ahead of remote
   BRANCH=$(git branch --show-current)
   AHEAD=$(git rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo "0")
   if [[ "$AHEAD" -gt 0 ]]; then
     echo -e "${CYAN}Pushing ${AHEAD} unpushed commit(s)...${RESET}"
-    run "git push origin ${BRANCH}"
+    git push origin "${BRANCH}"
     echo -e "${GREEN}Pushed.${RESET}"
   fi
   exit 0
 fi
 
-# Stage
+# ── Stage ────────────────────────────────────────────────────────────────────
 stage_files
 
-# Auto-generate message if not provided
+# ── Auto-generate message if not provided ────────────────────────────────────
 if [[ -z "$COMMIT_MSG" ]]; then
   COMMIT_MSG=$(auto_commit_msg)
   echo -e "${CYAN}Auto-generated message:${RESET} ${COMMIT_MSG}"
@@ -172,21 +170,17 @@ BRANCH=$(git branch --show-current)
 echo -e "\n${BOLD}── Commit ───────────────────────────────────────${RESET}"
 echo -e "  Message : ${GREEN}${COMMIT_MSG}${RESET}"
 echo -e "  Branch  : ${CYAN}${BRANCH}${RESET}"
-if [[ "$DRY_RUN" == true ]]; then
-  echo -e "  ${YELLOW}[dry-run] — no changes will be made${RESET}"
-fi
 echo -e "${BOLD}────────────────────────────────────────────────${RESET}\n"
 
-# Commit
-run "git commit -m \"\$(cat <<'EOFMSG'
-${COMMIT_MSG}
+# ── Commit ───────────────────────────────────────────────────────────────────
+FULL_MSG="${COMMIT_MSG}
 
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-EOFMSG
-)\""
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 
-# Push
+git commit -m "$FULL_MSG"
+
+# ── Push ─────────────────────────────────────────────────────────────────────
 echo -e "${CYAN}Pushing to origin/${BRANCH}...${RESET}"
-run "git push origin ${BRANCH}"
+git push origin "${BRANCH}"
 
 echo -e "\n${GREEN}${BOLD}Done.${RESET} Committed and pushed to ${CYAN}origin/${BRANCH}${RESET}\n"
