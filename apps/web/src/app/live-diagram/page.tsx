@@ -14,6 +14,7 @@ import { AlertSidebar } from "./components/AlertSidebar";
 import { FaultTimeline } from "./components/FaultTimeline";
 import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
 import { EdgeDetailPanel } from "./components/EdgeDetailPanel";
+import { formatAzureRegion } from "./utils/regionFormat";
 import styles from "./styles.module.css";
 
 const Canvas3D = lazy(() =>
@@ -30,10 +31,12 @@ type MultiSelectDropdownProps = {
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   disabled?: boolean;
+  searchable?: boolean;
 };
 
-function MultiSelectDropdown({ label, allLabel, options, selected, onChange, disabled }: MultiSelectDropdownProps) {
+function MultiSelectDropdown({ label, allLabel, options, selected, onChange, disabled, searchable }: MultiSelectDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -61,6 +64,10 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
       ? (options.find((o) => selected.has(o.id))?.label ?? `1 ${label}`)
       : `${selected.size} ${label}`;
 
+  const visibleOptions = searchable && search
+    ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
+    : options;
+
   return (
     <div style={{ position: "relative" }} ref={wrapRef}>
       <button
@@ -78,7 +85,18 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
       </button>
       {open && (
         <div className={styles.multiSelectDropdown}>
-          {options.map((opt) => (
+          {searchable && (
+            <input
+              type="text"
+              className={styles.multiSelectSearch}
+              placeholder={`${label} 검색...`}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              autoFocus
+            />
+          )}
+          {visibleOptions.map((opt) => (
             <label key={opt.id} className={styles.multiSelectOption}>
               <input
                 type="checkbox"
@@ -306,7 +324,10 @@ export default function LiveDiagramPage() {
     if (!spec) return [];
     return spec.nodes
       .filter((n) => n.nodeType === "group" && n.icon === "vnet")
-      .map((n) => ({ id: n.id, label: n.label }));
+      .map((n) => ({
+        id: n.id,
+        label: n.location ? `${n.label} (${formatAzureRegion(n.location)})` : n.label,
+      }));
   }, [spec]);
 
   const regionOptions = useMemo(() => {
@@ -588,6 +609,7 @@ export default function LiveDiagramPage() {
                 selected={selectedVnets}
                 onChange={setSelectedVnets}
                 disabled={vnetOptions.length === 0}
+                searchable
               />
             </div>
           </>

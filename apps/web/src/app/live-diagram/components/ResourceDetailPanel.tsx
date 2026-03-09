@@ -219,32 +219,39 @@ function BackendPoolSection({ pools, loading }: { pools: BackendPoolInfo[]; load
     <>
       {pools.map((pool) => (
         <div key={pool.name} className={styles.detailSection}>
-          <div className={styles.detailSectionTitle}>
-            {t("detail.backendPool")}: <span style={{ fontWeight: 700, color: "var(--text)" }}>{pool.name}</span>
+          <div className={styles.detailSectionTitle}>{t("detail.backendPool")}</div>
+          <div className={styles.essentialsList}>
+            {/* Pool Name */}
+            <div className={styles.essentialsRow}>
+              <span className={styles.essentialsLabel}>{t("detail.backendPool.name")}</span>
+              <span className={styles.essentialsValue}>{pool.name}</span>
+            </div>
+
+            {/* LB Rules */}
+            {pool.loadBalancingRules && pool.loadBalancingRules.length > 0 && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.backendPool.rules")}</span>
+                <div className={styles.backendPoolRuleTags}>
+                  {pool.loadBalancingRules.map((r) => (
+                    <span key={r} className={styles.backendPoolRuleTag}>{r}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Health Probe */}
+            {pool.probe && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>{t("detail.backendPool.probe")}</span>
+                <span className={styles.essentialsValue}>
+                  {pool.probe.protocol}/{pool.probe.port}
+                  {pool.probe.path ? ` ${pool.probe.path}` : ""}
+                  {" · "}{pool.probe.intervalSec}s
+                  {" · "}{pool.probe.unhealthyThreshold}x
+                </span>
+              </div>
+            )}
           </div>
-
-          {/* LB Rules */}
-          {pool.loadBalancingRules && pool.loadBalancingRules.length > 0 && (
-            <div className={styles.backendPoolRules}>
-              <span className={styles.backendPoolRulesLabel}>{t("detail.backendPool.rules")}:</span>
-              {pool.loadBalancingRules.map((r) => (
-                <span key={r} className={styles.backendPoolRuleTag}>{r}</span>
-              ))}
-            </div>
-          )}
-
-          {/* Health Probe */}
-          {pool.probe && (
-            <div className={styles.backendPoolProbe}>
-              <span className={styles.backendPoolProbeLabel}>{t("detail.backendPool.probe")}</span>
-              <span className={styles.backendPoolProbeDetail}>
-                {pool.probe.protocol}/{pool.probe.port}
-                {pool.probe.path ? ` ${pool.probe.path}` : ""}
-                {" · "}{pool.probe.intervalSec}s interval
-                {" · "}{pool.probe.unhealthyThreshold}x threshold
-              </span>
-            </div>
-          )}
 
           {/* Members */}
           <div className={styles.backendPoolMemberHeader}>

@@ -80,6 +80,7 @@ const T: Translations = {
   "detail.backendPool.unhealthy": { ko: "비정상", en: "Unhealthy" },
   "detail.backendPool.unknown": { ko: "알 수 없음", en: "Unknown" },
   "detail.backendPool.rules": { ko: "로드밸런싱 규칙", en: "LB Rules" },
+  "detail.backendPool.name": { ko: "풀 이름", en: "Pool Name" },
 
   // ── NSG Detail Panel ──
   "detail.nsgRules": { ko: "보안 규칙", en: "Security Rules" },

@@ -340,6 +340,25 @@ function getSubnetIdsFromAksProps(properties: unknown): string[] {
   return [...new Set(ids)];
 }
 
+function getSubnetIdsFromVmssProps(properties: unknown): string[] {
+  if (!properties || typeof properties !== "object") return [];
+  const vmProfile = (properties as { virtualMachineProfile?: { networkProfile?: { networkInterfaceConfigurations?: unknown } } }).virtualMachineProfile;
+  const nicConfigs = vmProfile?.networkProfile?.networkInterfaceConfigurations;
+  if (!Array.isArray(nicConfigs)) return [];
+
+  const ids: string[] = [];
+  for (const nic of nicConfigs) {
+    const ipConfigs = (nic as { properties?: { ipConfigurations?: unknown } }).properties?.ipConfigurations;
+    if (!Array.isArray(ipConfigs)) continue;
+    for (const ipCfg of ipConfigs) {
+      const subnetId = (ipCfg as { properties?: { subnet?: { id?: unknown } } }).properties?.subnet?.id;
+      const s = safeId(subnetId);
+      if (s) ids.push(s);
+    }
+  }
+  return [...new Set(ids)];
+}
+
 function getSubnetIdsFromAppGatewayProps(properties: unknown): string[] {
   if (!properties || typeof properties !== "object") return [];
   const configs = (properties as { gatewayIPConfigurations?: unknown }).gatewayIPConfigurations;
@@ -684,6 +703,16 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
 
+  // Pre-pass: AKS nodeResourceGroup → AKS resource ID mapping
+  // AKS clusters expose `nodeResourceGroup` (the MC_* RG) — any VMSS in that RG is a node pool VM
+  const aksNodeRgToId = new Map<string, string>(); // nodeResourceGroup.lower() → aksId
+  for (const r of resRows) {
+    if (!r.id) continue;
+    if ((r.type ?? "").toLowerCase() !== "microsoft.containerservice/managedclusters") continue;
+    const nodeRg = safeString((r.properties as Record<string, unknown>)?.nodeResourceGroup);
+    if (nodeRg) aksNodeRgToId.set(nodeRg.toLowerCase(), r.id);
+  }
+
   // resources
   const resourceById = new Map<string, AzureResourceRow>();
   const nicById = new Map<string, AzureResourceRow>();
@@ -965,6 +994,26 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         edges.push({
           id: `e:subnet->aks:${subnetId}:${r.id}`,
           source: subnetId,
+          target: r.id,
+          kind: "connects"
+        });
+      }
+    }
+    if (t === "microsoft.compute/virtualmachinescalesets") {
+      for (const subnetId of getSubnetIdsFromVmssProps(r.properties)) {
+        edges.push({
+          id: `e:subnet->vmss:${subnetId}:${r.id}`,
+          source: subnetId,
+          target: r.id,
+          kind: "network"
+        });
+      }
+      // AKS → VMSS ownership: VMSS in the AKS nodeResourceGroup (MC_*) belongs to the cluster
+      const aksOwner = r.resourceGroup ? aksNodeRgToId.get(r.resourceGroup.toLowerCase()) : undefined;
+      if (aksOwner) {
+        edges.push({
+          id: `e:aks->vmss:${aksOwner}:${r.id}`,
+          source: aksOwner,
           target: r.id,
           kind: "connects"
         });

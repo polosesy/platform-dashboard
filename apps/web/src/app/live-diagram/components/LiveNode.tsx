@@ -201,7 +201,7 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
             </span>
           )}
         </div>
-        {endpoint && (
+        {endpoint && !subResources?.some((sr) => sr.endpoint === endpoint) && (
           <div className={styles.nodeEndpoint} title={endpoint}>{endpoint}</div>
         )}
       </div>

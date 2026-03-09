@@ -195,6 +195,7 @@ function LiveCanvasInner({
             label: nodeSpec.label,
             icon: nodeSpec.icon,
             subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
+            region: nodeSpec.icon === "vnet" ? (nodeSpec.location ?? undefined) : undefined,
             nsgBadges: attachedNsgs?.map((n) => ({
               nodeId: n.nodeId,
               label: n.label,
@@ -456,8 +457,108 @@ function LiveCanvasInner({
       }
     }
 
-    // Store pre-computed bounds for the fitBounds effect
-    fitBoundsRef.current = compactPlan?.bounds ?? null;
+    // ── External standalone node delta-offset (multi-focus subgraph layout) ──
+    // VNet group children (parentId set) follow parents automatically via ReactFlow transform.
+    // But external standalone nodes (no parentId, not VNet groups) connected via edges
+    // to VNet descendants stay at spec coordinates — creating long dangling edges.
+    // Fix: compute each selected VNet's positional delta (compact − spec), then apply
+    // that same delta to any external node reachable via edge traversal from the subgraph.
+    let externalDeltaPos: Map<string, { x: number; y: number }> | null = null;
+
+    if (mode === "multi-focus" && compactPlan) {
+      const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
+      const topGroupIdSet = new Set(topGroupsFromSpec.map((n) => n.id));
+
+      // Step 1: Walk parentId chain up to find each node's root VNet
+      const nodeToRootVnet = new Map<string, string>();
+      for (const n of spec.nodes) {
+        let cursor: (typeof spec.nodes)[0] | undefined = n;
+        while (cursor?.parentId) cursor = nodeById.get(cursor.parentId);
+        if (cursor && topGroupIdSet.has(cursor.id)) nodeToRootVnet.set(n.id, cursor.id);
+      }
+
+      // Step 2: Compute positional delta for each selected VNet
+      const vnetDelta = new Map<string, { dx: number; dy: number }>();
+      for (const vnet of topGroupsFromSpec) {
+        const sp = vnet.position;
+        const cp = compactPlan.pos.get(vnet.id);
+        if (sp && cp) vnetDelta.set(vnet.id, { dx: cp.x - sp.x, dy: cp.y - sp.y });
+      }
+
+      // Step 3: Assign unassigned external nodes to VNets via edge traversal
+      for (const edge of spec.edges) {
+        const sv = nodeToRootVnet.get(edge.source);
+        const tv = nodeToRootVnet.get(edge.target);
+        if (sv && !nodeToRootVnet.has(edge.target)) nodeToRootVnet.set(edge.target, sv);
+        else if (tv && !nodeToRootVnet.has(edge.source)) nodeToRootVnet.set(edge.source, tv);
+      }
+
+      // Step 4: Compute delta-offset positions for external standalone nodes
+      externalDeltaPos = new Map();
+      for (const n of spec.nodes) {
+        if (n.parentId || topGroupIdSet.has(n.id)) continue;
+        const ownerVnet = nodeToRootVnet.get(n.id);
+        if (!ownerVnet) continue;
+        const delta = vnetDelta.get(ownerVnet);
+        if (!delta || !n.position) continue;
+        externalDeltaPos.set(n.id, { x: n.position.x + delta.dx, y: n.position.y + delta.dy });
+      }
+
+      if (process.env.NODE_ENV !== "production") {
+        const unmovedRelatedNodeIds = spec.nodes
+          .filter((n) => !n.parentId && !topGroupIdSet.has(n.id) && !externalDeltaPos!.has(n.id))
+          .map((n) => n.id);
+        const longEdges = spec.edges
+          .filter((e) => {
+            const si = nodeToRootVnet.has(e.source);
+            const ti = nodeToRootVnet.has(e.target);
+            return (si && !ti) || (ti && !si);
+          })
+          .map((e) => ({ source: e.source, target: e.target,
+            sourceInSubgraph: nodeToRootVnet.has(e.source),
+            targetInSubgraph: nodeToRootVnet.has(e.target) }));
+        console.log("[compact-layout] subgraph", {
+          selectedVnetIds: topGroupsFromSpec.map((n) => n.id),
+          movedNodeIds: [...compactPlan.pos.keys(), ...externalDeltaPos.keys()],
+          unmovedRelatedNodeIds,
+          longEdges,
+          externalDelta: [...externalDeltaPos.entries()].map(([id, pos]) => ({
+            id, ownerVnet: nodeToRootVnet.get(id), newPos: pos,
+            specPos: nodeById.get(id)?.position,
+          })),
+          vnetDescendants: topGroupsFromSpec.map((vnet) => ({
+            vnetId: vnet.id,
+            descendants: [...nodeToRootVnet.entries()]
+              .filter(([nid, vid]) => vid === vnet.id && nid !== vnet.id)
+              .map(([nid]) => nid),
+          })),
+        });
+      }
+    }
+
+    // fitBounds: extend to include external delta-offset nodes so viewport covers full subgraph
+    if (compactPlan) {
+      if (externalDeltaPos && externalDeltaPos.size > 0) {
+        let minX = compactPlan.bounds.x;
+        let minY = compactPlan.bounds.y;
+        let maxX = compactPlan.bounds.x + compactPlan.bounds.width;
+        let maxY = compactPlan.bounds.y + compactPlan.bounds.height;
+        for (const [nodeId, pos] of externalDeltaPos) {
+          const sn = spec.nodes.find((n) => n.id === nodeId);
+          const w = sn?.width ?? NODE_WIDTH;
+          const h = sn?.height ?? NODE_HEIGHT;
+          minX = Math.min(minX, pos.x);
+          minY = Math.min(minY, pos.y);
+          maxX = Math.max(maxX, pos.x + w);
+          maxY = Math.max(maxY, pos.y + h);
+        }
+        fitBoundsRef.current = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      } else {
+        fitBoundsRef.current = compactPlan.bounds;
+      }
+    } else {
+      fitBoundsRef.current = null;
+    }
 
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]));
@@ -482,6 +583,7 @@ function LiveCanvasInner({
             label: nodeSpec.label,
             icon: nodeSpec.icon,
             subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
+            region: nodeSpec.icon === "vnet" ? (nodeSpec.location ?? undefined) : undefined,
             nsgBadges: attachedNsgs?.map((n) => ({
               nodeId: n.nodeId,
               label: n.label,
@@ -551,14 +653,17 @@ function LiveCanvasInner({
             } else {
               delete updated.parentNode;
               delete updated.extent;
+              const extPos = externalDeltaPos?.get(nodeSpec.id);
+              if (extPos) updated.position = extPos;
             }
             result.push(updated);
             continue;
           }
+          const extPosBadge = !nodeSpec.parentId ? externalDeltaPos?.get(nodeSpec.id) : undefined;
           const bn: FlowNode<NsgBadgeData> = {
             id: nodeSpec.id,
             type: "nsgBadge",
-            position: nodeSpec.position ?? { x: 0, y: 0 },
+            position: extPosBadge ?? nodeSpec.position ?? { x: 0, y: 0 },
             draggable: true,
             zIndex: 10,
             style: { width: NSG_BADGE_WIDTH, height: NSG_BADGE_HEIGHT },
@@ -608,14 +713,17 @@ function LiveCanvasInner({
           } else {
             delete updated.parentNode;
             delete updated.extent;
+            const extPos = externalDeltaPos?.get(nodeSpec.id);
+            if (extPos) updated.position = extPos;
           }
           result.push(updated);
           continue;
         }
+        const extPosLive = !nodeSpec.parentId ? externalDeltaPos?.get(nodeSpec.id) : undefined;
         const ln: FlowNode<LiveNodeData> = {
           id: nodeSpec.id,
           type: "live" as const,
-          position: nodeSpec.position ?? { x: 0, y: 0 },
+          position: extPosLive ?? nodeSpec.position ?? { x: 0, y: 0 },
           draggable: true,
           data,
         };

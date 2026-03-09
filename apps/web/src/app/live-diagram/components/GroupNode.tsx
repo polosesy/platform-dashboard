@@ -4,6 +4,7 @@ import { memo } from "react";
 import { type NodeProps, NodeResizer } from "reactflow";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { scopeStyle } from "../utils/designTokens";
+import { formatAzureRegion } from "../utils/regionFormat";
 import type { DiagramIconKind } from "@aud/types";
 import styles from "../styles.module.css";
 
@@ -18,12 +19,13 @@ export type GroupNodeData = {
   label: string;
   icon: DiagramIconKind;
   subtitle?: string;  // CIDR display (addressSpace for VNet, prefix for Subnet)
+  region?: string;    // Azure region code — shown as badge on VNet nodes
   nsgBadges?: NsgBadgeInfo[];
   onNsgSelect?: (nodeId: string) => void;
 };
 
 export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<GroupNodeData>) {
-  const { label, icon, subtitle, nsgBadges, onNsgSelect } = data;
+  const { label, icon, subtitle, region, nsgBadges, onNsgSelect } = data;
   const scope = scopeStyle(icon);
 
   return (
@@ -76,6 +78,7 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<G
             className={styles.groupNodeIcon}
           />
           <span className={styles.groupNodeLabel}>{label}</span>
+          {region && <span className={styles.groupNodeRegion}>{formatAzureRegion(region)}</span>}
           {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
         </div>
       </div>
