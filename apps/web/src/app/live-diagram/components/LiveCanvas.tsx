@@ -7,6 +7,7 @@ import ReactFlow, {
   MiniMap,
   ReactFlowProvider,
   useNodesState,
+  useNodesInitialized,
   useOnViewportChange,
   useReactFlow,
   type Node as FlowNode,
@@ -42,6 +43,8 @@ type LiveCanvasProps = {
   showParticles: boolean;
   showFaultRipple: boolean;
   showHeatmap: boolean;
+  fitViewTrigger?: string;
+  isFiltered?: boolean;
 };
 
 const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode };
@@ -65,6 +68,8 @@ function LiveCanvasInner({
   showParticles,
   showFaultRipple,
   showHeatmap,
+  fitViewTrigger,
+  isFiltered,
 }: LiveCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -300,6 +305,49 @@ function LiveCanvasInner({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
+  // Stable ref to reactFlowInstance.
+  // useReactFlow() returns a new object on every render in ReactFlow v11,
+  // so storing it in a ref lets us call fitView without unstable deps.
+  const rfRef = useRef(reactFlowInstance);
+  rfRef.current = reactFlowInstance;
+
+  // ── Auto-fitView when filtered node set changes ──
+  // useNodesInitialized() returns true once ReactFlow has DOM-measured all nodes.
+  // We set a "pending" flag when the visible node set changes, then fire fitView
+  // exactly once when initialization completes — no setTimeout race condition.
+  const nodesInitialized = useNodesInitialized();
+  const specNodeKey = useMemo(
+    () => spec.nodes.map((n) => n.id).sort().join(","),
+    [spec.nodes],
+  );
+  const prevSpecNodeKey = useRef<string | null>(null);
+  const fitPendingRef = useRef(false);
+  const compactLayoutPendingRef = useRef(false);
+  // isFilteredRef is updated every render so the specNodeKey effect always reads the latest value
+  const isFilteredRef = useRef(isFiltered ?? false);
+  isFilteredRef.current = isFiltered ?? false;
+
+  // When visible node set changes, mark fitView as pending;
+  // if filter is currently active, also mark compact re-layout as pending
+  useEffect(() => {
+    if (prevSpecNodeKey.current !== null && prevSpecNodeKey.current !== specNodeKey) {
+      fitPendingRef.current = true;
+      if (isFilteredRef.current) {
+        compactLayoutPendingRef.current = true;
+      }
+    }
+    prevSpecNodeKey.current = specNodeKey;
+  }, [specNodeKey]);
+
+  // Execute fitView once ReactFlow has measured all the new nodes
+  useEffect(() => {
+    if (!nodesInitialized || !fitPendingRef.current) return;
+    fitPendingRef.current = false;
+    rfRef.current.fitView({ padding: 0.15, duration: 400 });
+  // rfRef.current is stable; nodesInitialized is the correct trigger
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodesInitialized]);
+
   // Sync nodes with spec: update data for existing, preserve positions
   useEffect(() => {
     setNodes((prev) => {
@@ -477,31 +525,46 @@ function LiveCanvasInner({
         );
       }
 
+      // Compact re-layout: when filter is active and the visible node set just changed,
+      // re-position top-level group nodes (VNets) side-by-side starting from x=0
+      // so fitView centers exactly the selected nodes, not the original full-diagram coordinates.
+      if (compactLayoutPendingRef.current) {
+        compactLayoutPendingRef.current = false;
+        type AnyResult = FlowNode & { parentNode?: string };
+        const COMPACT_GAP = 60;
+
+        const topGroups = result
+          .filter((n) => n.type === "group" && !(n as AnyResult).parentNode)
+          .sort((a, b) => a.position.x - b.position.x); // preserve left-to-right order
+
+        if (topGroups.length > 0) {
+          const compactPos = new Map<string, { x: number; y: number }>();
+          let cx = 0;
+          let maxH = 0;
+          for (const g of topGroups) {
+            const w = (g.style?.width as number) ?? 400;
+            const h = (g.style?.height as number) ?? 200;
+            compactPos.set(g.id, { x: cx, y: 0 });
+            cx += w + COMPACT_GAP;
+            maxH = Math.max(maxH, h);
+          }
+          // Standalone top-level non-group nodes (if any) go below the groups
+          let sx = 0;
+          for (const n of result.filter((n) => n.type !== "group" && !(n as AnyResult).parentNode)) {
+            const w = (n.style?.width as number) ?? 220;
+            compactPos.set(n.id, { x: sx, y: maxH + COMPACT_GAP });
+            sx += w + COMPACT_GAP;
+          }
+          return result.map((n) => {
+            const pos = compactPos.get(n.id);
+            return pos ? { ...n, position: pos } : n;
+          });
+        }
+      }
+
       return result;
     });
   }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
-
-  // ── Fit view when filtered node set changes ──
-  const specNodeKey = useMemo(
-    () => spec.nodes.map((n) => n.id).sort().join(","),
-    [spec.nodes],
-  );
-  const prevNodeKeyRef = useRef(specNodeKey);
-  useEffect(() => {
-    if (prevNodeKeyRef.current !== specNodeKey) {
-      prevNodeKeyRef.current = specNodeKey;
-      // Two-phase fitView: quick settle + delayed final fit.
-      // ReactFlow needs time to measure and position new nodes,
-      // especially when group/parent relationships change.
-      const t1 = setTimeout(() => {
-        reactFlowInstance.fitView({ padding: 0.18, duration: 200 });
-      }, 100);
-      const t2 = setTimeout(() => {
-        reactFlowInstance.fitView({ padding: 0.18, duration: 350 });
-      }, 450);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
-    }
-  }, [specNodeKey, reactFlowInstance]);
 
   // ── Hover: set node className for CSS dimming ──
   useEffect(() => {

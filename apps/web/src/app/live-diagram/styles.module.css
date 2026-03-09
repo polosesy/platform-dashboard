@@ -1222,6 +1222,8 @@
 /* ── Tenant/Subscription Selector Bar ── */
 
 .selectorBar {
+  position: relative;
+  z-index: 50;
   display: flex;
   align-items: center;
   gap: 16px;

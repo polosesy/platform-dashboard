@@ -423,6 +423,13 @@ export default function LiveDiagramPage() {
     [regionOptions],
   );
 
+  // fitView trigger: changes when VNet/Region filter changes → LiveCanvas centers visible nodes
+  const fitViewTrigger = useMemo(
+    () => JSON.stringify([[...selectedVnets].sort(), [...selectedRegions].sort()]),
+    [selectedVnets, selectedRegions],
+  );
+  const isFiltered = selectedVnets.size > 0 || selectedRegions.size > 0;
+
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     const nodeId = alert.affectedNodeIds[0];
     if (nodeId) handleNodeSelect(nodeId);
@@ -691,6 +698,8 @@ export default function LiveDiagramPage() {
               showParticles={showParticles}
               showFaultRipple={showFaultRipple}
               showHeatmap={showHeatmap}
+              fitViewTrigger={fitViewTrigger}
+              isFiltered={isFiltered}
             />
           )}
 
