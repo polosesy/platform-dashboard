@@ -7,7 +7,7 @@ import ReactFlow, {
   MiniMap,
   ReactFlowProvider,
   useNodesState,
-  useNodesInitialized,
+
   useOnViewportChange,
   useReactFlow,
   type Node as FlowNode,
@@ -31,6 +31,9 @@ import { ImpactCascade } from "./ImpactCascade";
 import { TrafficHeatmap } from "./TrafficHeatmap";
 import { nodeColor } from "../utils/designTokens";
 import styles from "../styles.module.css";
+
+/** Filter mode determines layout and fitView behavior */
+type FilterMode = "overview" | "single-focus" | "multi-focus";
 
 type LiveCanvasProps = {
   spec: DiagramSpec;
@@ -311,61 +314,164 @@ function LiveCanvasInner({
   const rfRef = useRef(reactFlowInstance);
   rfRef.current = reactFlowInstance;
 
-  // ── Auto-fitView when filtered node set changes ──
-  // useNodesInitialized() returns true once ReactFlow has DOM-measured all nodes.
-  // We set a "pending" flag when the visible node set changes, then fire fitView
-  // exactly once when initialization completes — no setTimeout race condition.
-  const nodesInitialized = useNodesInitialized();
-  const specNodeKey = useMemo(
-    () => spec.nodes.map((n) => n.id).sort().join(","),
+  // Stable ref for snapshot — read in the filter-change effect without being in its deps.
+  // The snapshot-update effect (Effect B) handles health/status refreshes independently.
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  // Stable ref for isFiltered — lets Effect A read current value without deps.
+  const isFilteredRef = useRef(isFiltered);
+  isFilteredRef.current = isFiltered;
+
+  // Pre-computed fitBounds from compact layout (avoids relying on DOM-measured node.width/height).
+  // Set in Effect A before calling setFitVersion; read in the fitBounds effect.
+  const fitBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  // Spec-derived top-level group IDs — authoritative source for both compact layout and fitBounds.
+  const topGroupIds = useMemo(
+    () => spec.nodes.filter((n) => n.nodeType === "group" && !n.parentId).map((n) => n.id),
     [spec.nodes],
   );
-  const prevSpecNodeKey = useRef<string | null>(null);
-  const fitPendingRef = useRef(false);
-  const compactLayoutPendingRef = useRef(false);
-  // isFilteredRef is updated every render so the specNodeKey effect always reads the latest value
-  const isFilteredRef = useRef(isFiltered ?? false);
-  isFilteredRef.current = isFiltered ?? false;
+  const topGroupIdsRef = useRef(topGroupIds);
+  topGroupIdsRef.current = topGroupIds;
 
-  // When visible node set changes, mark fitView as pending;
-  // if filter is currently active, also mark compact re-layout as pending
+  // fitVersion incremented by Effect A on every filter/spec change; drives the fitBounds effect.
+  const [fitVersion, setFitVersion] = useState(0);
+  const fitModeRef = useRef<FilterMode>("overview");
+  const executedFitVersionRef = useRef(0);
+
+  // ── Viewport fit: fires once per fitVersion, deferred to rAF ──
+  // Uses pre-computed bounds (fitBoundsRef) for multi-focus to bypass stale DOM measurements.
+  // overview    → fitView all nodes
+  // single-focus → fitView explicit node IDs
+  // multi-focus  → fitBounds with pre-computed centered bounds
   useEffect(() => {
-    if (prevSpecNodeKey.current !== null && prevSpecNodeKey.current !== specNodeKey) {
-      fitPendingRef.current = true;
-      if (isFilteredRef.current) {
-        compactLayoutPendingRef.current = true;
+    if (fitVersion === 0) return;
+    if (fitVersion === executedFitVersionRef.current) return;
+    executedFitVersionRef.current = fitVersion;
+
+    const mode = fitModeRef.current;
+    const bounds = fitBoundsRef.current;
+    const targetIds = topGroupIdsRef.current.slice();
+
+    const rafId = requestAnimationFrame(() => {
+      const rf = rfRef.current;
+
+      if (process.env.NODE_ENV !== "production") {
+        const liveTargets = rf.getNodes().filter((n) => new Set(targetIds).has(n.id));
+        console.log("[fitBounds] viewport adjust", {
+          mode,
+          computedBounds: bounds,
+          targetIds,
+          liveTargets: liveTargets.map((n) => ({
+            id: n.id,
+            pos: n.position,
+            w: n.width,
+            h: n.height,
+          })),
+        });
+      }
+
+      if (mode === "overview") {
+        rf.fitView({ padding: 0.15, duration: 400 });
+      } else if (bounds) {
+        // multi-focus: use pre-computed centered bounds — bypasses stale DOM measurements
+        rf.fitBounds(bounds, { padding: 0.2, duration: 400 });
+      } else {
+        // single-focus: fitView with explicit node IDs
+        rf.fitView({
+          nodes: targetIds.length > 0 ? targetIds.map((id) => ({ id })) : undefined,
+          padding: 0.2,
+          duration: 400,
+        });
+      }
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  // rfRef, fitModeRef, fitBoundsRef, topGroupIdsRef are stable refs — intentionally excluded
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitVersion]);
+
+  // ── Effect A: Filter change — full node rebuild + compact layout ──
+  // Triggered only by spec.nodes changes (filter/diagram changes).
+  // Snapshot health updates are handled separately in Effect B.
+  useEffect(() => {
+    const currentSnapshot = snapshotRef.current;
+    const currentIsFiltered = isFilteredRef.current;
+    const COMPACT_GAP = 60;
+
+    // Determine mode from spec
+    const topGroupsFromSpec = spec.nodes.filter((n) => n.nodeType === "group" && !n.parentId);
+    const mode: FilterMode = !currentIsFiltered
+      ? "overview"
+      : topGroupsFromSpec.length <= 1
+      ? "single-focus"
+      : "multi-focus";
+
+    fitModeRef.current = mode;
+
+    // ── Pre-compute compact plan OUTSIDE setNodes (safe to write refs here) ──
+    // Compact positions are centered around x=0 so the layout feels balanced.
+    // Computed from spec dimensions (nodeSpec.width/height) — no DOM measurement needed.
+    type CompactPlan = {
+      pos: Map<string, { x: number; y: number }>;
+      bounds: { x: number; y: number; width: number; height: number };
+    };
+    let compactPlan: CompactPlan | null = null;
+
+    if (mode === "multi-focus" && topGroupsFromSpec.length > 1) {
+      const sorted = [...topGroupsFromSpec].sort(
+        (a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0),
+      );
+      const widths = sorted.map((n) => n.width ?? 400);
+      const heights = sorted.map((n) => n.height ?? 200);
+      const totalWidth =
+        widths.reduce((s, w) => s + w, 0) + COMPACT_GAP * (sorted.length - 1);
+      const maxH = heights.length > 0 ? Math.max(...heights) : 200;
+      const startX = -Math.round(totalWidth / 2);
+
+      const pos = new Map<string, { x: number; y: number }>();
+      let cx = startX;
+      for (let i = 0; i < sorted.length; i++) {
+        pos.set(sorted[i].id, { x: cx, y: 0 });
+        cx += widths[i] + COMPACT_GAP;
+      }
+      compactPlan = { pos, bounds: { x: startX, y: 0, width: totalWidth, height: maxH } };
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[compact-layout] plan", {
+          selectedVnetIds: sorted.map((n) => n.id),
+          compactTargets: sorted.map((n, i) => ({
+            id: n.id,
+            specPos: n.position,
+            compactPos: pos.get(n.id),
+            specW: widths[i],
+            specH: heights[i],
+            directChildren: spec.nodes
+              .filter((sn) => sn.parentId === n.id)
+              .map((sn) => ({ id: sn.id, relativePos: sn.position })),
+          })),
+          bounds: { x: startX, y: 0, width: totalWidth, height: maxH },
+        });
       }
     }
-    prevSpecNodeKey.current = specNodeKey;
-  }, [specNodeKey]);
 
-  // Execute fitView once ReactFlow has measured all the new nodes
-  useEffect(() => {
-    if (!nodesInitialized || !fitPendingRef.current) return;
-    fitPendingRef.current = false;
-    rfRef.current.fitView({ padding: 0.15, duration: 400 });
-  // rfRef.current is stable; nodesInitialized is the correct trigger
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodesInitialized]);
+    // Store pre-computed bounds for the fitBounds effect
+    fitBoundsRef.current = compactPlan?.bounds ?? null;
 
-  // Sync nodes with spec: update data for existing, preserve positions
-  useEffect(() => {
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]));
 
-      // Sort: groups first, parents before children
+      // Sort: groups first, then parents before children
       const sorted = [...spec.nodes].sort((a, b) => {
         const aGroup = a.nodeType === "group" ? 0 : 1;
         const bGroup = b.nodeType === "group" ? 0 : 1;
         if (aGroup !== bGroup) return aGroup - bGroup;
-        const aHasParent = a.parentId ? 1 : 0;
-        const bHasParent = b.parentId ? 1 : 0;
-        return aHasParent - bHasParent;
+        return (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0);
       });
 
       const result: FlowNode[] = [];
       for (const nodeSpec of sorted) {
-        // Skip embedded NSGs — they render inside their target's component
         if (embeddedNsgIds.has(nodeSpec.id)) continue;
 
         const existing = prevById.get(nodeSpec.id);
@@ -384,16 +490,21 @@ function LiveCanvasInner({
             })),
             onNsgSelect: handleNsgSelect,
           };
+          // Position: compact plan > user-dragged existing > spec > existing > origin
+          // compact plan always wins for multi-focus top-level VNets (no existing.position preserve)
+          const compactPos = compactPlan?.pos.get(nodeSpec.id);
+          const position = compactPos
+            ? compactPos
+            : userPositionedIds.current.has(nodeSpec.id)
+            ? (existing?.position ?? nodeSpec.position ?? { x: 0, y: 0 })
+            : (nodeSpec.position ?? existing?.position ?? { x: 0, y: 0 });
+
           if (existing) {
             const updated = {
               ...existing,
               data,
-              // Always sync style from spec to prevent stale sizes causing overlap
               style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
-              // Preserve position for user-dragged nodes; sync from spec for all others
-              position: userPositionedIds.current.has(nodeSpec.id)
-                ? existing.position
-                : (nodeSpec.position ?? existing.position),
+              position,
             } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
             if (nodeSpec.parentId) {
               updated.parentNode = nodeSpec.parentId;
@@ -408,7 +519,7 @@ function LiveCanvasInner({
           const gn: FlowNode<GroupNodeData> = {
             id: nodeSpec.id,
             type: "group",
-            position: nodeSpec.position ?? { x: 0, y: 0 },
+            position,
             draggable: true,
             selectable: true,
             style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
@@ -422,7 +533,7 @@ function LiveCanvasInner({
           continue;
         }
 
-        // Cat 4: detached/standalone NSG — render as separate nsgBadge node
+        // Cat 4: detached/standalone NSG
         const isNsg = nodeSpec.resourceKind === "nsg" || nodeSpec.icon === "nsg";
         if (isNsg) {
           const badgeData: NsgBadgeData = {
@@ -461,7 +572,8 @@ function LiveCanvasInner({
           continue;
         }
 
-        const live = snapshot?.nodes.find((s) => s.id === nodeSpec.id);
+        // Live resource node
+        const live = currentSnapshot?.nodes.find((s) => s.id === nodeSpec.id);
         const attachedNsgs = nsgByTarget.get(nodeSpec.id);
         const firstNsg = attachedNsgs?.[0];
         const data: LiveNodeData = {
@@ -478,15 +590,16 @@ function LiveCanvasInner({
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
           powerState: live?.powerState,
-          nsgBadge: firstNsg ? {
-            nodeId: firstNsg.nodeId,
-            label: firstNsg.label,
-            icon: firstNsg.icon as LiveNodeData["icon"],
-            azureResourceId: firstNsg.azureResourceId,
-          } : undefined,
+          nsgBadge: firstNsg
+            ? {
+                nodeId: firstNsg.nodeId,
+                label: firstNsg.label,
+                icon: firstNsg.icon as LiveNodeData["icon"],
+                azureResourceId: firstNsg.azureResourceId,
+              }
+            : undefined,
           onNsgSelect: handleNsgSelect,
         };
-
         if (existing) {
           const updated = { ...existing, data } as FlowNode<LiveNodeData> & { parentNode?: string; extent?: string };
           if (nodeSpec.parentId) {
@@ -499,7 +612,6 @@ function LiveCanvasInner({
           result.push(updated);
           continue;
         }
-
         const ln: FlowNode<LiveNodeData> = {
           id: nodeSpec.id,
           type: "live" as const,
@@ -514,57 +626,69 @@ function LiveCanvasInner({
         result.push(ln);
       }
 
-      // ── Checkpoint 3: Verify parentNode survives setNodes ──
       if (process.env.NODE_ENV !== "production") {
-        type AnyFlowNode = FlowNode & { parentNode?: string };
-        const withParent = result.filter((n) => (n as AnyFlowNode).parentNode);
-        const prevWithParent = prev.filter((n) => (n as AnyFlowNode).parentNode);
-        console.log(
-          `[CP3] setNodes sync: prev ${prev.length} nodes (${prevWithParent.length} with parentNode)` +
-          ` → next ${result.length} nodes (${withParent.length} with parentNode)`,
-        );
-      }
-
-      // Compact re-layout: when filter is active and the visible node set just changed,
-      // re-position top-level group nodes (VNets) side-by-side starting from x=0
-      // so fitView centers exactly the selected nodes, not the original full-diagram coordinates.
-      if (compactLayoutPendingRef.current) {
-        compactLayoutPendingRef.current = false;
-        type AnyResult = FlowNode & { parentNode?: string };
-        const COMPACT_GAP = 60;
-
-        const topGroups = result
-          .filter((n) => n.type === "group" && !(n as AnyResult).parentNode)
-          .sort((a, b) => a.position.x - b.position.x); // preserve left-to-right order
-
-        if (topGroups.length > 0) {
-          const compactPos = new Map<string, { x: number; y: number }>();
-          let cx = 0;
-          let maxH = 0;
-          for (const g of topGroups) {
-            const w = (g.style?.width as number) ?? 400;
-            const h = (g.style?.height as number) ?? 200;
-            compactPos.set(g.id, { x: cx, y: 0 });
-            cx += w + COMPACT_GAP;
-            maxH = Math.max(maxH, h);
-          }
-          // Standalone top-level non-group nodes (if any) go below the groups
-          let sx = 0;
-          for (const n of result.filter((n) => n.type !== "group" && !(n as AnyResult).parentNode)) {
-            const w = (n.style?.width as number) ?? 220;
-            compactPos.set(n.id, { x: sx, y: maxH + COMPACT_GAP });
-            sx += w + COMPACT_GAP;
-          }
-          return result.map((n) => {
-            const pos = compactPos.get(n.id);
-            return pos ? { ...n, position: pos } : n;
+        type AnyFN = FlowNode & { parentNode?: string };
+        if (compactPlan) {
+          const targetIds = [...compactPlan.pos.keys()];
+          const finalPositions = result
+            .filter((n) => targetIds.includes(n.id))
+            .map((n) => ({ id: n.id, finalPos: n.position, parentNode: (n as AnyFN).parentNode }));
+          const liveChildrenByVnet = targetIds.map((vnetId) => ({
+            vnetId,
+            children: result
+              .filter((n) => (n as AnyFN).parentNode === vnetId)
+              .map((n) => n.id),
+          }));
+          console.log("[compact-layout] committed", {
+            targetIds,
+            finalPositions,
+            liveChildrenByVnet,
+            bounds: compactPlan.bounds,
           });
         }
       }
 
       return result;
     });
-  }, [spec.nodes, snapshot?.nodes, setNodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
+
+    // Trigger viewport fit after layout is committed
+    setFitVersion((v) => v + 1);
+  // snapshotRef, isFilteredRef, fitBoundsRef, fitModeRef are stable refs — intentionally excluded
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec.nodes, onSubResourceSelect, setNodes, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
+
+  // ── Effect B: Snapshot update — health/status only, positions untouched ──
+  // Triggered only by snapshot changes. Never modifies positions, parentNode, or structure.
+  useEffect(() => {
+    if (!snapshot?.nodes) return;
+    const liveNodes = snapshot.nodes;
+    setNodes((prev) =>
+      prev.map((n) => {
+        if (n.type !== "live") return n;
+        const live = liveNodes.find((s) => s.id === n.id);
+        if (!live) return n;
+        const prev_ = n.data as LiveNodeData;
+        const next: LiveNodeData = {
+          ...prev_,
+          health: live.health ?? "unknown",
+          healthScore: live.healthScore ?? 0.5,
+          metrics: live.metrics ?? {},
+          hasAlert: (live.activeAlertIds?.length ?? 0) > 0,
+          sparklines: live.sparklines,
+          powerState: live.powerState,
+        };
+        // Skip update if nothing changed
+        if (
+          prev_.health === next.health &&
+          prev_.healthScore === next.healthScore &&
+          prev_.powerState === next.powerState &&
+          prev_.hasAlert === next.hasAlert
+        )
+          return n;
+        return { ...n, data: next };
+      }),
+    );
+  }, [snapshot?.nodes, setNodes]);
 
   // ── Hover: set node className for CSS dimming ──
   useEffect(() => {
