@@ -30,6 +30,8 @@ export type LiveNodeData = {
   resourceKind?: string;
   azureResourceId?: string;
   powerState?: PowerState;
+  archRole?: string;
+  archGroupId?: string;
   nsgBadge?: NsgBadgeInfo;
   onNsgSelect?: (nodeId: string) => void;
 };
@@ -75,8 +77,23 @@ const RESOURCE_TYPE_ABBR: Record<string, string> = {
   serviceBus: "Service Bus", eventHub: "Event Hub",
 };
 
+// Architecture role badges — only shown when role provides extra context beyond type
+const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
+  "aks-cluster":      { abbr: "AKS",  label: "AKS Cluster" },
+  "aks-vmss":         { abbr: "Pool", label: "AKS Node Pool (VMSS)" },
+  "aks-ingress":      { abbr: "Ing",  label: "AKS Ingress Controller" },
+  "aks-egress":       { abbr: "Egr",  label: "AKS Egress (Firewall)" },
+  "gateway":          { abbr: "GW",   label: "Application Gateway" },
+  "load-balancer":    { abbr: "LB",   label: "Load Balancer" },
+  "firewall":         { abbr: "FW",   label: "Firewall" },
+  "db":               { abbr: "DB",   label: "Database" },
+  "cache":            { abbr: "Cache", label: "Cache (Redis)" },
+  "private-endpoint": { abbr: "PE",   label: "Private Endpoint" },
+  "messaging":        { abbr: "Msg",  label: "Messaging Service" },
+};
+
 export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, nsgBadge, onNsgSelect } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
@@ -188,6 +205,11 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
           {typeAbbr && (
             <span className={styles.nodeTypeAbbr} title={RESOURCE_KIND_DISPLAY[resourceKind!] ?? resourceKind}>
               {typeAbbr}
+            </span>
+          )}
+          {archRole && ARCH_ROLE_BADGE[archRole] && (
+            <span className={styles.archRoleBadge} title={ARCH_ROLE_BADGE[archRole]!.label}>
+              {ARCH_ROLE_BADGE[archRole]!.abbr}
             </span>
           )}
           {powerState && (

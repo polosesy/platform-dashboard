@@ -264,6 +264,8 @@ function LiveCanvasInner({
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
           powerState: live?.powerState,
+          archRole: nodeSpec.metadata?.archRole,
+          archGroupId: nodeSpec.metadata?.archGroupId,
           nsgBadge: firstNsg ? {
             nodeId: firstNsg.nodeId,
             label: firstNsg.label,
@@ -695,6 +697,8 @@ function LiveCanvasInner({
           resourceKind: nodeSpec.resourceKind,
           azureResourceId: nodeSpec.azureResourceId,
           powerState: live?.powerState,
+          archRole: nodeSpec.metadata?.archRole,
+          archGroupId: nodeSpec.metadata?.archGroupId,
           nsgBadge: firstNsg
             ? {
                 nodeId: firstNsg.nodeId,
@@ -953,6 +957,7 @@ function LiveCanvasInner({
           trafficLevel: live?.trafficLevel ?? "none",
           label: edgeSpec.label,
           edgeKind: edgeSpec.edgeKind,
+          flowType: edgeSpec.flowType,
           confidence: edgeSpec.confidence,
           isHighlighted,
           isDimmed,

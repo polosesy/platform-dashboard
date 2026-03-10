@@ -144,6 +144,18 @@ export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle 
   return EDGE_KIND_STYLES[kind] ?? EDGE_KIND_STYLES.network;
 }
 
+// ── Flow type tints (subtle color overlay for architecture flow semantics) ──
+
+export type FlowTypeTint = { tint: string; glowWidth: number };
+
+export const FLOW_TYPE_TINTS: Record<string, FlowTypeTint> = {
+  ingress:    { tint: "rgba(16,185,129,0.12)",  glowWidth: 4 },
+  egress:     { tint: "rgba(239,68,68,0.10)",   glowWidth: 4 },
+  dependency: { tint: "rgba(139,92,246,0.10)",  glowWidth: 4 },
+  control:    { tint: "rgba(107,113,122,0.08)", glowWidth: 3 },
+  // east-west: no tint (uses default edgeKind styling)
+};
+
 // ── GroupNode scope visual tokens ──
 
 export type ScopeStyle = {

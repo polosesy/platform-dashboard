@@ -283,11 +283,38 @@ async function collectResourcePowerState(
       const psStatus = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
       if (psStatus) state = parsePowerState(psStatus.code);
     } else if (resourceKind === "vmss") {
+      // VMSS scale-set-level instanceView doesn't contain PowerState.
+      // Query individual VM instances and aggregate their power states.
       const resp = await fetcher.fetchJson<{
-        statuses?: Array<{ code: string }>;
-      }>(`https://management.azure.com${azureResourceId}/instanceView?api-version=2024-07-01`);
-      const psStatus = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
-      if (psStatus) state = parsePowerState(psStatus.code);
+        value?: Array<{
+          instanceId: string;
+          properties?: { instanceView?: { statuses?: Array<{ code: string }> } };
+        }>;
+      }>(`https://management.azure.com${azureResourceId}/virtualMachines?api-version=2024-07-01&$expand=instanceView`);
+
+      const instances = resp.value ?? [];
+      if (instances.length > 0) {
+        const instanceStates: PowerState[] = [];
+        for (const inst of instances) {
+          const ps = inst.properties?.instanceView?.statuses?.find(
+            (s) => s.code.startsWith("PowerState/"),
+          );
+          instanceStates.push(ps ? parsePowerState(ps.code) : "unknown");
+        }
+        // Aggregate: all same → that state, mixed → worst state wins
+        const allSame = instanceStates.every((s) => s === instanceStates[0]);
+        if (allSame) {
+          state = instanceStates[0]!;
+        } else if (instanceStates.some((s) => s === "deallocated")) {
+          state = "stopped";
+        } else if (instanceStates.some((s) => s === "stopped")) {
+          state = "stopped";
+        } else if (instanceStates.some((s) => s === "starting" || s === "stopping")) {
+          state = "starting";
+        } else {
+          state = "running";
+        }
+      }
     } else if (resourceKind === "aks") {
       const resp = await fetcher.fetchJson<{
         properties?: { powerState?: { code: string } };

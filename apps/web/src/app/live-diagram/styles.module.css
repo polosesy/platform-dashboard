@@ -354,6 +354,17 @@
   letter-spacing: 0.02em;
 }
 
+.archRoleBadge {
+  font-size: 8px;
+  font-weight: 600;
+  color: rgba(139, 92, 246, 0.70);
+  background: rgba(139, 92, 246, 0.08);
+  padding: 1px 3px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  margin-left: 2px;
+}
+
 /* ── PowerState Badge ── */
 
 .powerStateBadge {

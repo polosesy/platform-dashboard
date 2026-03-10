@@ -2,13 +2,14 @@
 
 import { type EdgeProps, getBezierPath, BaseEdge } from "reactflow";
 import type { EdgeStatus, EdgeTrafficLevel, DiagramEdgeKind } from "@aud/types";
-import { edgeColor, edgeWidth, particleCount, particleDuration, defaultTokens, edgeKindStyle } from "../utils/designTokens";
+import { edgeColor, edgeWidth, particleCount, particleDuration, defaultTokens, edgeKindStyle, FLOW_TYPE_TINTS } from "../utils/designTokens";
 
 export type AnimatedEdgeData = {
   status: EdgeStatus;
   trafficLevel: EdgeTrafficLevel;
   label?: string;
   edgeKind?: DiagramEdgeKind;
+  flowType?: string;
   confidence?: number;
   isHighlighted: boolean;
   isDimmed: boolean;
@@ -35,6 +36,7 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const showParticles = data?.showParticles ?? false;
   const label = data?.label;
   const edgeKind = data?.edgeKind;
+  const flowType = data?.flowType;
 
   // EdgeKind-based styling (takes precedence over status-based for stroke color)
   const kindStyle = edgeKindStyle(edgeKind);
@@ -94,6 +96,19 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
             filter: `blur(${isHighlighted ? 6 : 4}px)`,
             opacity: isHighlighted ? 0.35 : 1,
             transition: `stroke ${transition}, stroke-width ${transition}, opacity ${transition}`,
+          }}
+        />
+      )}
+
+      {/* Flow type tint — subtle color overlay for architecture flow semantics */}
+      {flowType && FLOW_TYPE_TINTS[flowType] && !isDimmed && (
+        <BaseEdge
+          path={edgePath}
+          style={{
+            stroke: FLOW_TYPE_TINTS[flowType]!.tint,
+            strokeWidth: width + FLOW_TYPE_TINTS[flowType]!.glowWidth,
+            filter: "blur(3px)",
+            opacity: 0.6,
           }}
         />
       )}

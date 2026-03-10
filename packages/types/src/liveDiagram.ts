@@ -56,6 +56,23 @@ export type SubResource = {
   health?: HealthStatus;
 };
 
+// ── Architecture metadata types ──
+export type DiagramFlowType =
+  | "ingress"
+  | "egress"
+  | "east-west"
+  | "control"
+  | "dependency";
+
+export type ArchRole =
+  | "aks-cluster" | "aks-nodepool" | "aks-vmss"
+  | "aks-ingress" | "aks-egress"
+  | "vm" | "vmss" | "db" | "cache"
+  | "private-endpoint" | "gateway" | "load-balancer"
+  | "firewall" | "waf" | "messaging"
+  | "compute" | "storage" | "function" | "app-service"
+  | "generic";
+
 export type DiagramEdgeKind =
   | "network"
   | "peering"
@@ -74,6 +91,7 @@ export type DiagramEdgeSpec = {
   protocol?: string;
   edgeKind?: DiagramEdgeKind;
   confidence?: number;         // 0-1, for inferred edges
+  flowType?: DiagramFlowType;   // network flow semantics (ingress/egress/east-west/control/dependency)
   bindings: Record<string, MetricBinding>;
   animation: EdgeAnimationKind;
   alerts?: AlertCondition[];

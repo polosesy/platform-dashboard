@@ -10,6 +10,7 @@ import type {
   DiagramNodeSpec,
   DiagramEdgeSpec,
   DiagramEdgeKind,
+  DiagramFlowType,
   DiagramGroupSpec,
   DiagramIconKind,
   DiagramLayoutKind,
@@ -272,6 +273,149 @@ function subnetTier(childKinds: Set<string>): number {
     if (COMPUTE_KINDS.has(k)) return 1;
   }
   return 2;
+}
+
+// ── Architecture pattern detection ──
+// Enriches nodes with archRole / archGroupId / flowHint metadata
+// without changing parentId or containment hierarchy.
+
+type ArchMeta = { archRole: string; archGroupId: string; flowHint: string };
+
+const ARCH_ROLE_MAP: Record<string, { role: string; hint: string }> = {
+  appGateway:      { role: "gateway",          hint: "ingress" },
+  frontDoor:       { role: "gateway",          hint: "ingress" },
+  trafficManager:  { role: "gateway",          hint: "ingress" },
+  lb:              { role: "load-balancer",     hint: "ingress" },
+  firewall:        { role: "firewall",          hint: "egress" },
+  waf:             { role: "waf",               hint: "ingress" },
+  vm:              { role: "vm",                hint: "east-west" },
+  vmss:            { role: "vmss",              hint: "east-west" },
+  aks:             { role: "aks-cluster",        hint: "control" },
+  containerApp:    { role: "compute",            hint: "east-west" },
+  appService:      { role: "app-service",        hint: "east-west" },
+  functionApp:     { role: "function",           hint: "east-west" },
+  sql:             { role: "db",                 hint: "dependency" },
+  postgres:        { role: "db",                 hint: "dependency" },
+  cosmosDb:        { role: "db",                 hint: "dependency" },
+  redis:           { role: "cache",              hint: "dependency" },
+  storage:         { role: "storage",            hint: "dependency" },
+  keyVault:        { role: "storage",            hint: "dependency" },
+  privateEndpoint: { role: "private-endpoint",   hint: "dependency" },
+  serviceBus:      { role: "messaging",          hint: "east-west" },
+  eventHub:        { role: "messaging",          hint: "east-west" },
+};
+
+function detectArchitecturePatterns(
+  graph: ArchitectureGraph,
+  filteredNodes: ArchitectureNode[],
+  containment: { subnetParent: Map<string, string>; resourceSubnet: Map<string, string> },
+): Map<string, ArchMeta> {
+  const result = new Map<string, ArchMeta>();
+
+  // Step 1: AKS cluster pattern — find AKS→VMSS edges
+  const aksNodes = filteredNodes.filter((n) => n.kind === "aks");
+  const aksVmssIds = new Set<string>(); // VMSS IDs belonging to an AKS cluster
+
+  for (const aks of aksNodes) {
+    const clusterName = aks.name.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    const groupId = `aks-${clusterName}`;
+
+    // Mark AKS cluster itself
+    result.set(aks.id, { archRole: "aks-cluster", archGroupId: groupId, flowHint: "control" });
+
+    // Find connected VMSS (agent pool node pools)
+    for (const edge of graph.edges) {
+      if (edge.kind !== "connects" && edge.kind !== "network") continue;
+      const isFromAks = edge.source === aks.id;
+      const isToAks = edge.target === aks.id;
+      if (!isFromAks && !isToAks) continue;
+
+      const otherId = isFromAks ? edge.target : edge.source;
+      const otherNode = filteredNodes.find((n) => n.id === otherId);
+      if (!otherNode) continue;
+
+      if (otherNode.kind === "vmss") {
+        aksVmssIds.add(otherId);
+        result.set(otherId, { archRole: "aks-vmss", archGroupId: groupId, flowHint: "east-west" });
+      }
+    }
+
+    // Find ingress/egress in the same subnet(s) as AKS resources
+    const aksSubnets = new Set<string>();
+    const aksResourceIds = new Set([aks.id, ...aksVmssIds]);
+    for (const rid of aksResourceIds) {
+      const sub = containment.resourceSubnet.get(rid);
+      if (sub) aksSubnets.add(sub);
+    }
+
+    for (const node of filteredNodes) {
+      if (aksResourceIds.has(node.id) || result.has(node.id)) continue;
+      const nodeSub = containment.resourceSubnet.get(node.id);
+      if (!nodeSub) continue;
+
+      // Check same VNet (via subnet parent) rather than same subnet only
+      const nodeVnet = containment.subnetParent.get(nodeSub);
+      let sameVnet = false;
+      for (const asSub of aksSubnets) {
+        if (containment.subnetParent.get(asSub) === nodeVnet) { sameVnet = true; break; }
+      }
+      if (!sameVnet) continue;
+
+      if (node.kind === "appGateway" || node.kind === "lb") {
+        result.set(node.id, { archRole: "aks-ingress", archGroupId: groupId, flowHint: "ingress" });
+      } else if (node.kind === "firewall") {
+        result.set(node.id, { archRole: "aks-egress", archGroupId: groupId, flowHint: "egress" });
+      }
+    }
+  }
+
+  // Step 2: Generic role assignment for unmatched nodes
+  for (const node of filteredNodes) {
+    if (result.has(node.id)) continue;
+    if (node.kind === "vnet" || node.kind === "subnet" || node.kind === "nsg" || node.kind === "nic") continue;
+
+    const mapping = ARCH_ROLE_MAP[node.kind];
+    const role = mapping?.role ?? "generic";
+    const hint = mapping?.hint ?? "east-west";
+
+    // Step 3: archGroupId = "{resourceGroup}-{tier}"
+    const tier = INGRESS_KINDS.has(node.kind) ? "ingress"
+      : COMPUTE_KINDS.has(node.kind) ? "compute"
+      : DATA_KINDS.has(node.kind) || node.kind === "privateEndpoint" ? "data"
+      : "other";
+    const rg = (node.resourceGroup ?? "default").toLowerCase().replace(/[^a-z0-9-]/g, "");
+    const groupId = `${rg}-${tier}`;
+
+    result.set(node.id, { archRole: role, archGroupId: groupId, flowHint: hint });
+  }
+
+  return result;
+}
+
+// ── Edge flow type resolution ──
+
+function resolveFlowType(
+  srcMeta: ArchMeta | undefined,
+  tgtMeta: ArchMeta | undefined,
+  edgeKind: DiagramEdgeKind | undefined,
+): DiagramFlowType | undefined {
+  // Priority 1: edge kind takes precedence
+  if (edgeKind === "routes" && (srcMeta?.archRole === "gateway" || srcMeta?.archRole === "load-balancer" || srcMeta?.archRole === "aks-ingress")) return "ingress";
+  if (edgeKind === "privateLink") return "dependency";
+  if (edgeKind === "logging") return "control";
+
+  // Priority 2: flow hint pair resolution
+  const sh = srcMeta?.flowHint;
+  const th = tgtMeta?.flowHint;
+  if (sh === "ingress" && th === "east-west") return "ingress";
+  if (sh === "ingress" && th === "control") return "ingress";
+  if (sh === "east-west" && th === "dependency") return "dependency";
+  if (sh === "east-west" && th === "egress") return "egress";
+  if (sh === "control" && th === "east-west") return "control";
+  if (sh === "east-west" && th === "east-west") return "east-west";
+
+  // Only return flowType when we have clear signal
+  return undefined;
 }
 
 // ── Derive short stable ID from Azure resource ID ──
@@ -984,6 +1128,9 @@ export async function generateDiagramSpec(
   // Map original IDs → unique short IDs
   const idMap = buildUniqueIdMap(filteredNodes);
 
+  // ── Detect architecture patterns (metadata only, no parentId changes) ──
+  const archMetaMap = detectArchitecturePatterns(graph, filteredNodes, containment);
+
   // Categorize nodes
   const vnetNodes = filteredNodes.filter((n) => n.kind === "vnet");
   const subnetNodes = filteredNodes.filter((n) => n.kind === "subnet");
@@ -1175,6 +1322,13 @@ export async function generateDiagramSpec(
       const nsgChildren = children.filter((c) => c.node.kind === "nsg");
       const regularChildren = children.filter((c) => c.node.kind !== "nsg");
 
+      // Sort by archGroupId so related resources are placed consecutively
+      regularChildren.sort((a, b) => {
+        const ga = archMetaMap.get(a.node.id)?.archGroupId ?? "";
+        const gb = archMetaMap.get(b.node.id)?.archGroupId ?? "";
+        return ga.localeCompare(gb);
+      });
+
       // Cat 1: Subnet NSG badges — embedded in GroupNode header (not separate ReactFlow nodes)
       for (const nsgChild of nsgChildren) {
         diagramNodes.push({
@@ -1244,6 +1398,7 @@ export async function generateDiagramSpec(
           childSubResources.push(...lbFeIPs);
         }
 
+        const childArchMeta = archMetaMap.get(child.node.id);
         diagramNodes.push({
           id: child.shortId,
           label: child.node.name,
@@ -1256,7 +1411,10 @@ export async function generateDiagramSpec(
           bindings: NODE_BINDINGS[child.node.kind] ?? {
             health: { source: "composite", rules: [] },
           },
-          metadata: child.node.endpoint ? { privateIP: child.node.endpoint } : undefined,
+          metadata: {
+            ...(child.node.endpoint ? { privateIP: child.node.endpoint } : {}),
+            ...(childArchMeta ? { archRole: childArchMeta.archRole, archGroupId: childArchMeta.archGroupId, flowHint: childArchMeta.flowHint } : {}),
+          },
           resourceKind: child.node.kind,
           location: child.node.location,
           resourceGroup: child.node.resourceGroup,
@@ -1270,6 +1428,16 @@ export async function generateDiagramSpec(
     }
 
     cursorY += vSize.height + EXTERNAL_GAP;
+  }
+
+  // ── Apply small position corrections based on architecture metadata ──
+  for (const node of diagramNodes) {
+    if (!node.parentId || node.nodeType === "group") continue;
+    const hint = node.metadata?.flowHint;
+    if (!hint) continue;
+    if (hint === "ingress") node.position!.x -= 8;
+    else if (hint === "dependency") node.position!.x += 8;
+    if (hint === "egress") node.position!.y += 12;
   }
 
   // Identify resources NOT inside any subnet
@@ -1331,6 +1499,7 @@ export async function generateDiagramSpec(
         const resShortId = idMap.get(res.id)!;
         const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
         rgContainedIds.add(resShortId);
+        const rgArchMeta = archMetaMap.get(res.id);
         diagramNodes.push({
           id: resShortId,
           label: res.name,
@@ -1346,7 +1515,10 @@ export async function generateDiagramSpec(
           position: { x: VNET_PAD, y: VNET_HEADER + ci * (NODE_H + NODE_GAP) },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
           subResources: collectSubResources(res.id),
-          metadata: isDetachedNsg ? { detached: "true" } : undefined,
+          metadata: {
+            ...(isDetachedNsg ? { detached: "true" } : {}),
+            ...(rgArchMeta ? { archRole: rgArchMeta.archRole, archGroupId: rgArchMeta.archGroupId, flowHint: rgArchMeta.flowHint } : {}),
+          },
         });
       }
       cursorY += rgH + EXTERNAL_GAP;
@@ -1365,6 +1537,7 @@ export async function generateDiagramSpec(
         const res = ungrouped[i]!;
         const row = Math.floor(i / cols);
         const col = i % cols;
+        const ugArchMeta = archMetaMap.get(res.id);
         diagramNodes.push({
           id: idMap.get(res.id)!,
           label: res.name,
@@ -1382,6 +1555,7 @@ export async function generateDiagramSpec(
           },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
           subResources: collectSubResources(res.id),
+          metadata: ugArchMeta ? { archRole: ugArchMeta.archRole, archGroupId: ugArchMeta.archGroupId, flowHint: ugArchMeta.flowHint } : undefined,
         });
       }
     }
@@ -1459,6 +1633,7 @@ export async function generateDiagramSpec(
         usedPositions.push({ x: targetX, y: targetY });
         placed.add(sid);
 
+        const peArchMeta = archMetaMap.get(res.id);
         diagramNodes.push({
           id: sid,
           label: res.name,
@@ -1473,6 +1648,7 @@ export async function generateDiagramSpec(
           position: { x: targetX, y: targetY },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
           subResources: collectSubResources(res.id),
+          metadata: peArchMeta ? { archRole: peArchMeta.archRole, archGroupId: peArchMeta.archGroupId, flowHint: peArchMeta.flowHint } : undefined,
         });
       }
 
@@ -1494,6 +1670,7 @@ export async function generateDiagramSpec(
         const row = Math.floor(i / cols);
         const col = i % cols;
         const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
+        const extArchMeta = archMetaMap.get(res.id);
 
         diagramNodes.push({
           id: idMap.get(res.id)!,
@@ -1514,7 +1691,10 @@ export async function generateDiagramSpec(
             health: { source: "composite", rules: [] },
           },
           subResources: collectSubResources(res.id),
-          metadata: isDetachedNsg ? { detached: "true" } : undefined,
+          metadata: {
+            ...(isDetachedNsg ? { detached: "true" } : {}),
+            ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
+          },
         });
       }
     }
@@ -1644,6 +1824,7 @@ export async function generateDiagramSpec(
     protocol?: string,
     edgeKind?: DiagramEdgeKind,
     confidence?: number,
+    flowType?: DiagramFlowType,
   ): DiagramEdgeSpec {
     let edgeId = `${srcId}-to-${tgtId}`;
     if (edgeIdSeen.has(edgeId)) {
@@ -1661,6 +1842,7 @@ export async function generateDiagramSpec(
       protocol,
       edgeKind,
       confidence,
+      flowType,
       bindings: EDGE_BINDINGS[srcKind] ?? {},
       animation: edgeKind === "logging" || edgeKind === "inferred" ? "dash" as const : "flow" as const,
     };
@@ -1702,7 +1884,9 @@ export async function generateDiagramSpec(
     const srcKind = srcNode?.kind ?? "unknown";
     const label = edgeKindLabel(edge.kind, edge) ?? buildEdgeLabel(srcNode, tgtNode);
     const protocol = edge.metadata?.protocol;
-    return makeEdge(srcId, tgtId, srcKind, label, protocol, toDiagramEdgeKind(edge.kind));
+    const diagEdgeKind = toDiagramEdgeKind(edge.kind);
+    const ft = resolveFlowType(archMetaMap.get(edge.source), archMetaMap.get(edge.target), diagEdgeKind);
+    return makeEdge(srcId, tgtId, srcKind, label, protocol, diagEdgeKind, undefined, ft);
   });
 
   // Dependency-based edges: proximity-scored inference (replaces Cartesian product)
@@ -1722,7 +1906,8 @@ export async function generateDiagramSpec(
     const srcNode = filteredNodes.find((n) => n.id === inf.source);
     const tgtNode = filteredNodes.find((n) => n.id === inf.target);
     const label = buildEdgeLabel(srcNode, tgtNode);
-    diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", label, inf.metadata.protocol, "inferred", inf.confidence));
+    const ft = resolveFlowType(archMetaMap.get(inf.source), archMetaMap.get(inf.target), "inferred");
+    diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", label, inf.metadata.protocol, "inferred", inf.confidence, ft));
     existingPairs.add(`${cId}→${dId}`);
   }
 
