@@ -1,44 +1,37 @@
 # CLAUDE.md
 
 ## Project
-
 Azure Unified Dashboard — TypeScript monorepo. Enterprise Azure Operations Platform.
 
 ## Structure
-
 | Path | Role |
 |------|------|
-| `packages/types/` | `@aud/types` — 공유 타입 패키지 (11개 도메인 모듈) |
+| `packages/types/` | `@aud/types` — 공유 타입 (11 domain modules) |
 | `apps/api/` | Express 4 (port 4000) — Azure SDK, Zod, OBO auth |
 | `apps/web/` | Next.js 16 (port 3000) — React 19, ReactFlow, MSAL |
 | `apps/api/src/infra/` | OBOTokenPool, CacheManager, AzureClientFactory |
-| `apps/api/src/routes/` | 도메인별 라우트 모듈 (index.ts 오케스트레이터) |
+| `apps/api/src/routes/` | 도메인별 라우트 (index.ts 오케스트레이터) |
 | `apps/api/src/middleware/` | subscriptionContext, requestId |
 
 ## Commands
-
 | Command | Action |
 |---------|--------|
-| `npm run dev` | 양쪽 앱 동시 시작 (concurrently) |
+| `npm run dev` | 양쪽 앱 동시 시작 |
 | `npm run build` | API tsc → Web next build |
 | `npm run typecheck` | 양쪽 --noEmit |
 
-## Key Files
-
-- `skill.md` — 프로젝트 skill 정의 (항상 먼저 로드)
+## Critical Files
 - `packages/types/src/index.ts` — 전체 공유 타입 re-export
-- `apps/api/src/routes/index.ts` — registerAllRoutes 오케스트레이터
-- `apps/api/src/infra/oboTokenPool.ts` — OBO credential 중앙 풀
-- `apps/api/src/infra/cacheManager.ts` — LRU 캐시 + bearerKeyPrefix
-- `apps/api/src/infra/azureClientFactory.ts` — Azure SDK 클라이언트 팩토리
+- `apps/api/src/routes/index.ts` — registerAllRoutes
+- `apps/api/src/infra/oboTokenPool.ts` — OBO credential pool
+- `apps/api/src/infra/cacheManager.ts` — LRU cache
 - `apps/api/src/env.ts` — Zod 환경변수 스키마
 
 ## Env
-
 `.env.example` 참조. 필수: `AZURE_AD_*`, `AZURE_SUBSCRIPTION_IDS`
 
-## Common-Skill
-
-공통 skill 모듈: `c:\Users\User\workspace\common-skill\`
-- Always load: `core/coding-standards.md`, `token-strategy/optimization.md`
-- On-demand: `master-skill.md` Module Map 참조
+## Session Rules
+- `skill.md` 항상 로드. 기능 단위로 세션 분리 (10~15턴).
+- `/compact` = 수동 트리거 (세션 중반 8~10턴 기점).
+- 세션 종료 전 `SESSION_SUMMARY.md` 업데이트.
+- subagent: 세션당 최대 2개 (Explore/Plan 타입만).

@@ -193,6 +193,78 @@
   padding: 4px 2px;
 }
 
+/* ── Resource Search ── */
+.resourceSearch {
+  position: relative;
+  flex-shrink: 0;
+}
+.resourceSearchInput {
+  width: 200px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--fg);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.resourceSearchInput:focus {
+  border-color: #0078d4;
+}
+.resourceSearchInput::placeholder {
+  color: var(--muted);
+}
+.resourceSearchDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  padding: 4px;
+}
+.resourceSearchItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.resourceSearchItem:hover {
+  background: rgba(0, 120, 212, 0.08);
+}
+.resourceSearchName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.resourceSearchKind {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 .overlayToggles {
   display: inline-flex;
   gap: 8px;
@@ -2304,4 +2376,421 @@
   color: var(--muted);
   font-family: "SF Mono", "Fira Code", monospace;
   white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════
+   AKS 3-Plane Detail (접속면 / 실행면 / 노출면)
+   ═══════════════════════════════════════════════════════ */
+
+.aksPlaneContainer {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 4px;
+}
+
+/* ── AKS API Server FQDN row ── */
+
+.aksApiServerRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 6px;
+}
+
+.aksApiServerFqdn {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  color: var(--text);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+/* ── 접속면 (Control Plane) ── */
+
+.aksAccessBadge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.aksAccessBadge[data-private="true"] {
+  background: rgba(16, 137, 62, 0.15);
+  color: #10893e;
+  border: 1px solid rgba(16, 137, 62, 0.3);
+}
+.aksAccessBadge[data-private="false"] {
+  background: rgba(0, 120, 212, 0.12);
+  color: #0078d4;
+  border: 1px solid rgba(0, 120, 212, 0.25);
+}
+
+.aksFlowPath {
+  margin: 6px 0 2px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  border-left: 3px solid rgba(0, 120, 212, 0.4);
+}
+.aksFlowLabel {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+}
+
+/* ── 실행면 (Node Pools) ── */
+
+.aksNodePoolCard {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.aksNodePoolHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.aksNodePoolHeader:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.aksPoolModeBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.aksPoolModeBadge[data-mode="System"] {
+  background: rgba(209, 132, 0, 0.15);
+  color: #d18400;
+  border: 1px solid rgba(209, 132, 0, 0.3);
+}
+.aksPoolModeBadge[data-mode="User"] {
+  background: rgba(0, 120, 212, 0.12);
+  color: #0078d4;
+  border: 1px solid rgba(0, 120, 212, 0.25);
+}
+
+.aksPoolName {
+  font-weight: 700;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aksPoolCount {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  flex-shrink: 0;
+}
+
+.aksPoolPowerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.aksPoolPowerDot[data-state="running"] {
+  background: #10893e;
+  box-shadow: 0 0 4px rgba(16, 137, 62, 0.5);
+}
+.aksPoolPowerDot[data-state="stopped"] {
+  background: #d18400;
+}
+.aksPoolPowerDot[data-state="deallocated"] {
+  background: #555;
+}
+
+.aksPoolSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 10px 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* VMSS Instance list (tree format) */
+
+.aksVmssInstanceList {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 4px 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.aksInstanceTreeRoot {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg);
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+
+.aksInstanceTreeRow {
+  display: grid;
+  grid-template-columns: 16px 1fr 70px 90px;
+  gap: 2px;
+  padding: 2px 10px;
+  font-size: 11px;
+  align-items: center;
+}
+.aksInstanceTreeRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.aksInstanceTreeBranch {
+  color: var(--muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  opacity: 0.5;
+  user-select: none;
+}
+
+.aksVmssInstanceName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+}
+
+.aksVmssInstanceState {
+  font-size: 10px;
+}
+.aksVmssInstanceState[data-state="running"] {
+  color: #10893e;
+}
+.aksVmssInstanceState[data-state="stopped"] {
+  color: #d18400;
+}
+.aksVmssInstanceState[data-state="deallocated"] {
+  color: #555;
+}
+
+/* ── VMSS Instance Node (캔버스 확장 노드 — mini card) ── */
+
+.vmssInstanceNode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 5px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  min-width: 180px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.vmssInstanceNode:hover {
+  border-color: rgba(0, 120, 212, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 120, 212, 0.12);
+}
+
+.vmssInstRing {
+  flex-shrink: 0;
+}
+
+.vmssInstInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.vmssInstIconRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.vmssInstName {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a1a1a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.vmssInstMeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vmssInstBadge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(16, 137, 62, 0.10);
+  color: #10893e;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.vmssInstBadge[data-state="stopped"],
+.vmssInstBadge[data-state="stopping"] {
+  background: rgba(209, 132, 0, 0.10);
+  color: #d18400;
+}
+.vmssInstBadge[data-state="starting"] {
+  background: rgba(0, 120, 212, 0.10);
+  color: #0078d4;
+}
+.vmssInstBadge[data-state="deallocated"],
+.vmssInstBadge[data-state="unknown"] {
+  background: rgba(0, 0, 0, 0.06);
+  color: #888;
+}
+
+.vmssInstIp {
+  font-size: 9px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: #888;
+}
+
+/* VMSS expand toggle on LiveNode */
+.vmssExpandBtn {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border: 1px solid rgba(0, 120, 212, 0.35);
+  border-radius: 10px;
+  padding: 2px 10px;
+  font-size: 10px;
+  color: #333;
+  cursor: pointer;
+  z-index: 5;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.vmssExpandBtn:hover {
+  color: #fff;
+  background: #0078d4;
+  border-color: #0078d4;
+}
+
+/* ── 노출면 (Exposure / Ingress-Egress) ── */
+
+.aksExposureGroup {
+  margin-bottom: 6px;
+}
+
+.aksExposureGroupLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 0 2px;
+}
+
+.aksExposureCard {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+
+.aksExposureHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.aksExposureHeader:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.aksExposureDirBadge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+.aksExposureDirBadge[data-dir="ingress"] {
+  background: rgba(0, 120, 212, 0.15);
+  color: #0078d4;
+}
+.aksExposureDirBadge[data-dir="egress"] {
+  background: rgba(209, 132, 0, 0.15);
+  color: #d18400;
+}
+
+.aksExposureLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aksExposureResources {
+  padding: 4px 8px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.aksExposureResRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.aksExposureRoleBadge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: center;
+}
+
+.aksExposureSku {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
 }

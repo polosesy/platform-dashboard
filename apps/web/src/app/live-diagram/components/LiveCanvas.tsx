@@ -21,10 +21,14 @@ import type {
   LiveDiagramSnapshot,
   VisualizationMode,
   SubResource,
+  AksVmssInstance,
 } from "@aud/types";
+import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiToken } from "@/lib/useApiToken";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type GroupNodeData } from "./GroupNode";
 import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
+import { VmssInstanceNode, type VmssInstanceNodeData } from "./VmssInstanceNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
 import { FaultRipple } from "./FaultRipple";
 import { ImpactCascade } from "./ImpactCascade";
@@ -48,9 +52,11 @@ type LiveCanvasProps = {
   showHeatmap: boolean;
   fitViewTrigger?: string;
   isFiltered?: boolean;
+  focusNodeId?: string | null;
+  onVmssInstanceSelect?: (data: VmssInstanceNodeData) => void;
 };
 
-const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode };
+const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode };
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 
 /** Minimum gap between nodes to prevent overlap (px) */
@@ -73,6 +79,8 @@ function LiveCanvasInner({
   showHeatmap,
   fitViewTrigger,
   isFiltered,
+  focusNodeId,
+  onVmssInstanceSelect,
 }: LiveCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -84,6 +92,19 @@ function LiveCanvasInner({
   const dragStartPos = useRef<Record<string, { x: number; y: number }>>({});
   // Track group nodes the user has manually repositioned — preserve through spec refreshes
   const userPositionedIds = useRef<Set<string>>(new Set());
+
+  // ── VMSS expand state: ref-based to avoid triggering fitView on expand/collapse ──
+  const expandedVmssIds = useRef<Set<string>>(new Set());
+  const vmssInstanceCache = useRef<Map<string, AksVmssInstance[]>>(new Map());
+  const getApiToken = useApiToken();
+  // Stable ref for onVmssInstanceSelect — avoids stale closure in inject callback
+  const onVmssInstanceSelectRef = useRef(onVmssInstanceSelect);
+  onVmssInstanceSelectRef.current = onVmssInstanceSelect;
+  // handleVmssExpand ref — handler defined after useNodesState, but needs to be accessible in initialNodes
+  const handleVmssExpandRef = useRef<((nodeId: string, azureResourceId: string) => void) | null>(null);
+  const stableVmssExpand = useCallback((nodeId: string, azureResourceId: string) => {
+    handleVmssExpandRef.current?.(nodeId, azureResourceId);
+  }, []);
 
   // ── Hover highlight state ──
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -273,6 +294,8 @@ function LiveCanvasInner({
             azureResourceId: firstNsg.azureResourceId,
           } : undefined,
           onNsgSelect: handleNsgSelect,
+          vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
+          onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
         },
       };
       if (nodeSpec.parentId) {
@@ -307,9 +330,105 @@ function LiveCanvasInner({
     }
 
     return result;
-  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
+  // expandedVmssIds is a ref — intentionally excluded from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect, stableVmssExpand]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+
+  // ── VMSS expand handler (needs setNodes from above) ──
+  const handleVmssExpand = useCallback(async (vmssNodeId: string, azureResourceId: string) => {
+    const isExpanded = expandedVmssIds.current.has(vmssNodeId);
+
+    // Toggle: if already expanded, collapse
+    if (isExpanded) {
+      expandedVmssIds.current.delete(vmssNodeId);
+      setNodes((prev: FlowNode[]) => prev
+        .filter((n: FlowNode) => {
+          const d = n.data as VmssInstanceNodeData | undefined;
+          return n.type !== "vmssInstance" || d?.parentVmssId !== vmssNodeId;
+        })
+        .map((n: FlowNode) =>
+          n.id === vmssNodeId
+            ? { ...n, data: { ...n.data, vmssExpanded: false } }
+            : n,
+        ));
+      return;
+    }
+
+    // Mark expanded + update button label immediately
+    expandedVmssIds.current.add(vmssNodeId);
+    setNodes((prev: FlowNode[]) => prev.map((n: FlowNode) =>
+      n.id === vmssNodeId
+        ? { ...n, data: { ...n.data, vmssExpanded: true } }
+        : n,
+    ));
+
+    // Fetch instances if not cached
+    if (!vmssInstanceCache.current.has(vmssNodeId)) {
+      try {
+        const token = await getApiToken().catch(() => null);
+        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}`;
+        const data = await fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(url, token);
+        vmssInstanceCache.current.set(vmssNodeId, data.instances ?? []);
+      } catch {
+        vmssInstanceCache.current.set(vmssNodeId, []);
+      }
+    }
+
+    const instances = vmssInstanceCache.current.get(vmssNodeId) ?? [];
+    if (instances.length === 0) return;
+
+    // Inject instance nodes below the VMSS node
+    setNodes((prev: FlowNode[]) => {
+      const vmssNode = prev.find((n: FlowNode) => n.id === vmssNodeId);
+      if (!vmssNode) return prev;
+
+      // Instance nodes are direct children of the VMSS node so they follow when dragged.
+      // Position is relative to the VMSS node's top-left corner.
+      const INST_W = 190;
+      const INST_H = 50;
+      const INST_GAP = 8;
+      const cols = Math.min(instances.length, 2);
+      const vmssW = vmssNode.width ?? NODE_WIDTH;
+      const vmssH = vmssNode.height ?? NODE_HEIGHT;
+
+      const instanceNodes: (FlowNode<VmssInstanceNodeData> & { parentNode: string })[] = instances.map((inst, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const totalW = cols * INST_W + (cols - 1) * INST_GAP;
+        return {
+          id: `vmss-inst-${vmssNodeId}-${inst.instanceId}`,
+          type: "vmssInstance" as const,
+          parentNode: vmssNodeId,
+          position: {
+            // Centre the grid under the VMSS node
+            x: (vmssW - totalW) / 2 + col * (INST_W + INST_GAP),
+            y: vmssH + 20 + row * (INST_H + INST_GAP),
+          },
+          draggable: false,
+          selectable: true,
+          style: { width: INST_W, height: INST_H },
+          data: {
+            label: inst.computerName || `instance-${inst.instanceId}`,
+            computerName: inst.computerName || `instance-${inst.instanceId}`,
+            powerState: inst.powerState,
+            privateIp: inst.privateIp,
+            parentVmssId: vmssNodeId,
+            onSelect: onVmssInstanceSelectRef.current,
+          },
+        };
+      });
+
+      // Remove old instances for this VMSS (if any), then add new
+      const filtered = prev.filter((n: FlowNode) => {
+        const d = n.data as VmssInstanceNodeData | undefined;
+        return n.type !== "vmssInstance" || d?.parentVmssId !== vmssNodeId;
+      });
+      return [...filtered, ...instanceNodes];
+    });
+  }, [getApiToken, setNodes]);
+  handleVmssExpandRef.current = handleVmssExpand;
 
   // Stable ref to reactFlowInstance.
   // useReactFlow() returns a new object on every render in ReactFlow v11,
@@ -394,6 +513,24 @@ function LiveCanvasInner({
   // rfRef, fitModeRef, fitBoundsRef, topGroupIdsRef are stable refs — intentionally excluded
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitVersion]);
+
+  // ── Focus node: zoom to a specific node when focusNodeId changes ──
+  // focusNodeId format: "nodeId:timestamp" (timestamp ensures re-trigger for same node)
+  useEffect(() => {
+    if (!focusNodeId) return;
+    const nodeId = focusNodeId.replace(/:\d+$/, "");
+    const rf = rfRef.current;
+    if (!rf) return;
+    const rafId = requestAnimationFrame(() => {
+      rf.fitView({
+        nodes: [{ id: nodeId }],
+        padding: 0.5,
+        duration: 500,
+      });
+    });
+    return () => cancelAnimationFrame(rafId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNodeId]);
 
   // ── Effect A: Filter change — full node rebuild + compact layout ──
   // Triggered only by spec.nodes changes (filter/diagram changes).
@@ -708,6 +845,8 @@ function LiveCanvasInner({
               }
             : undefined,
           onNsgSelect: handleNsgSelect,
+          vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
+          onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
         };
         if (existing) {
           const updated = { ...existing, data } as FlowNode<LiveNodeData> & { parentNode?: string; extent?: string };
@@ -760,6 +899,12 @@ function LiveCanvasInner({
         }
       }
 
+      // Preserve expanded VMSS instance nodes from previous state
+      const vmssInstNodes = prev.filter((n) => n.type === "vmssInstance");
+      if (vmssInstNodes.length > 0) {
+        result.push(...vmssInstNodes);
+      }
+
       return result;
     });
 
@@ -767,7 +912,8 @@ function LiveCanvasInner({
     setFitVersion((v) => v + 1);
   // snapshotRef, isFilteredRef, fitBoundsRef, fitModeRef are stable refs — intentionally excluded
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.nodes, onSubResourceSelect, setNodes, embeddedNsgIds, nsgByTarget, handleNsgSelect]);
+  // expandedVmssIds is a ref — intentionally excluded from deps
+  }, [spec.nodes, onSubResourceSelect, setNodes, embeddedNsgIds, nsgByTarget, handleNsgSelect, stableVmssExpand]);
 
   // ── Effect B: Snapshot update — health/status only, positions untouched ──
   // Triggered only by snapshot changes. Never modifies positions, parentNode, or structure.
@@ -1034,7 +1180,15 @@ function LiveCanvasInner({
         onNodesChange={handleNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={(_e, node) => onNodeSelect(node.id)}
+        onNodeClick={(_e, node) => {
+          if (node.type === "vmssInstance") {
+            // Route vmssInstance clicks to dedicated callback, not node selection
+            const d = node.data as VmssInstanceNodeData;
+            onVmssInstanceSelect?.(d);
+          } else {
+            onNodeSelect(node.id);
+          }
+        }}
         onEdgeClick={(_e, edge) => onEdgeSelect?.(edge.id)}
         onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); }}
         onNodeMouseEnter={handleNodeMouseEnter}

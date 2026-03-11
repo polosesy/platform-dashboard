@@ -11,6 +11,12 @@ import type {
   DiagramNodeSpec,
   BackendPoolInfo,
   BackendPoolMember,
+  AksPlaneDetail,
+  AksControlPlaneInfo,
+  AksNodePoolInfo,
+  AksExposurePathInfo,
+  AksExposureResource,
+  AksVmssInstance,
 } from "@aud/types";
 import { getDiagramSpec } from "./liveAggregator";
 import { getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -564,4 +570,398 @@ export async function fetchBackendPoolInfo(
     backendPoolCache.set(cacheKey, result);
     return result;
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// AKS Plane Detail (접속면 / 실행면 / 노출면)
+// On-demand detail for AKS cluster resource
+// ══════════════════════════════════════════════════════════════
+
+const aksPlaneCache = new CacheManager<AksPlaneDetail>(20, 60_000);
+const vmssInstanceCache = new CacheManager<AksVmssInstance[]>(30, 60_000);
+
+/**
+ * Fetch VMSS instances for an AKS node pool VMSS.
+ * Returns instance list with computerName, powerState, privateIp.
+ */
+export async function fetchVmssInstances(
+  env: Env,
+  bearerToken: string | undefined,
+  vmssResourceId: string,
+): Promise<AksVmssInstance[]> {
+  const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}vmss-inst:${vmssResourceId}`;
+  const cached = vmssInstanceCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const arm = await getArmFetcherAuto(env, bearerToken);
+    const data = await arm.fetchJson<Record<string, unknown>>(
+      `https://management.azure.com${vmssResourceId}/virtualMachines?api-version=2024-03-01&$expand=instanceView`,
+    );
+    const instances = ((data?.value ?? []) as Array<Record<string, unknown>>).slice(0, 50);
+
+    const result: AksVmssInstance[] = instances.map((inst) => {
+      const instProps = (inst.properties ?? {}) as Record<string, unknown>;
+      const osProfile = (instProps.osProfile ?? {}) as Record<string, unknown>;
+
+      // Power state from instance view statuses
+      const statuses = ((instProps.instanceView as Record<string, unknown>)?.statuses ?? []) as Array<Record<string, unknown>>;
+      const powerStatus = statuses.find((s) => String(s.code ?? "").startsWith("PowerState/"));
+      const powerState = powerStatus ? String(powerStatus.code).replace("PowerState/", "") : "unknown";
+
+      // Private IP from network interfaces
+      const netProfile = (instProps.networkProfile ?? {}) as Record<string, unknown>;
+      const netInterfaces = (netProfile.networkInterfaces ?? []) as Array<Record<string, unknown>>;
+      const firstNic = netInterfaces[0];
+      const nicProps = (firstNic?.properties ?? {}) as Record<string, unknown>;
+      const ipConfigs = (nicProps.ipConfigurations ?? []) as Array<Record<string, unknown>>;
+      const firstIpProps = (ipConfigs[0]?.properties ?? {}) as Record<string, unknown>;
+      const privateIp = firstIpProps.privateIPAddress ? String(firstIpProps.privateIPAddress) : undefined;
+
+      return {
+        instanceId: String(inst.instanceId ?? inst.name ?? ""),
+        computerName: String(osProfile.computerName ?? inst.name ?? ""),
+        provisioningState: String(instProps.provisioningState ?? "Succeeded"),
+        powerState,
+        privateIp,
+      };
+    });
+
+    vmssInstanceCache.set(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error(`[vmss-instances] Failed for ${vmssResourceId}:`, err);
+    // Return mock instances
+    const result = mockVmssInstances(vmssResourceId);
+    vmssInstanceCache.set(cacheKey, result);
+    return result;
+  }
+}
+
+function mockVmssInstances(vmssResourceId: string): AksVmssInstance[] {
+  const name = vmssResourceId.split("/").pop() ?? "vmss";
+  return Array.from({ length: 3 }, (_, i) => ({
+    instanceId: String(i),
+    computerName: `${name}00000${i}`,
+    provisioningState: "Succeeded",
+    powerState: "running",
+    privateIp: `10.0.1.${4 + i}`,
+  }));
+}
+
+/**
+ * Fetch AKS plane detail: control plane, node pools, exposure paths.
+ * Uses ARM API to get full cluster properties + VMSS instances on demand.
+ */
+export async function fetchAksPlaneDetail(
+  env: Env,
+  bearerToken: string | undefined,
+  resourceId: string,
+): Promise<AksPlaneDetail> {
+  const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}aks-plane:${resourceId}`;
+  const cached = aksPlaneCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const arm = await getArmFetcherAuto(env, bearerToken);
+
+    // Fetch AKS cluster properties via ARM
+    const clusterData = await arm.fetchJson<Record<string, unknown>>(`https://management.azure.com${resourceId}?api-version=2024-02-01`);
+    const props = (clusterData?.properties ?? {}) as Record<string, unknown>;
+    const clusterName = String(clusterData?.name ?? resourceId.split("/").pop() ?? "aks");
+
+    // ── 접속면 (Control Plane) ──
+    const accessProfile = (props.apiServerAccessProfile ?? {}) as Record<string, unknown>;
+    const isPrivate = !!accessProfile.enablePrivateCluster;
+    const fqdn = String(props.fqdn ?? "");
+    const privateFqdn = String(props.privateFQDN ?? "");
+
+    let accessPath: AksControlPlaneInfo["accessPath"] = "internet";
+    if (isPrivate) {
+      if (accessProfile.privateDNSZone as string) accessPath = "private-link";
+      else accessPath = "vnet-integration";
+    }
+
+    const controlPlane: AksControlPlaneInfo = {
+      fqdn,
+      privateFqdn: privateFqdn || undefined,
+      isPrivateCluster: isPrivate,
+      apiServerEndpoint: isPrivate ? (privateFqdn || fqdn) : fqdn,
+      authorizedIpRanges: (accessProfile.authorizedIPRanges as string[] | undefined) ?? undefined,
+      enablePrivateClusterPublicFqdn: (accessProfile.enablePrivateClusterPublicFQDN as boolean | undefined) ?? undefined,
+      privateDnsZone: (accessProfile.privateDNSZone as string | undefined) ?? undefined,
+      accessPath,
+    };
+
+    // ── 실행면 (Node Pools) ──
+    const agentPools = (props.agentPoolProfiles ?? []) as Array<Record<string, unknown>>;
+    const nodeResourceGroup = (props.nodeResourceGroup ?? "") as string;
+    const subscriptionId = resourceId.split("/")[2] ?? "";
+
+    const nodePools: AksNodePoolInfo[] = agentPools.map((ap) => {
+      const poolName = String(ap.name ?? "");
+      // Construct VMSS resource ID from convention: MC_rg_cluster_region / aks-{poolname}-{hash}-vmss
+      const vmssId = nodeResourceGroup
+        ? `/subscriptions/${subscriptionId}/resourceGroups/${nodeResourceGroup}/providers/Microsoft.Compute/virtualMachineScaleSets/aks-${poolName}-00000000-vmss`
+        : undefined;
+
+      return {
+        name: poolName,
+        mode: (String(ap.mode ?? "User") as "System" | "User"),
+        vmSize: String(ap.vmSize ?? ""),
+        nodeCount: typeof ap.count === "number" ? ap.count : 0,
+        minCount: typeof ap.minCount === "number" ? ap.minCount : undefined,
+        maxCount: typeof ap.maxCount === "number" ? ap.maxCount : undefined,
+        enableAutoScaling: !!ap.enableAutoScaling,
+        osType: String(ap.osType ?? "Linux"),
+        osSKU: ap.osSKU ? String(ap.osSKU) : undefined,
+        orchestratorVersion: ap.orchestratorVersion ? String(ap.orchestratorVersion) : undefined,
+        powerState: String((ap.powerState as Record<string, unknown>)?.code ?? "Running"),
+        provisioningState: String(ap.provisioningState ?? "Succeeded"),
+        availabilityZones: Array.isArray(ap.availabilityZones) ? ap.availabilityZones.map(String) : undefined,
+        vnetSubnetId: ap.vnetSubnetID ? String(ap.vnetSubnetID) : undefined,
+        vmssResourceId: vmssId,
+      };
+    });
+
+    // Try to fetch VMSS instances for each node pool (best-effort)
+    if (nodeResourceGroup) {
+      for (const pool of nodePools) {
+        try {
+          // List VMSS in MC_* RG and match by pool name
+          const vmssListUrl = `https://management.azure.com/subscriptions/${subscriptionId}/resourceGroups/${nodeResourceGroup}/providers/Microsoft.Compute/virtualMachineScaleSets?api-version=2024-03-01`;
+          const vmssList = await arm.fetchJson<Record<string, unknown>>(vmssListUrl);
+          const vmssArr = (vmssList?.value ?? []) as Array<Record<string, unknown>>;
+          const matchedVmss = vmssArr.find((v) => {
+            const name = String(v.name ?? "").toLowerCase();
+            return name.includes(pool.name.toLowerCase());
+          });
+
+          if (matchedVmss) {
+            pool.vmssResourceId = String(matchedVmss.id ?? pool.vmssResourceId);
+            // Fetch instances
+            try {
+              const instancesData = await arm.fetchJson<Record<string, unknown>>(`https://management.azure.com${matchedVmss.id}/instances?api-version=2024-03-01`);
+              const instances = (instancesData?.value ?? []) as Array<Record<string, unknown>>;
+              pool.vmssInstances = instances.slice(0, 20).map((inst) => {
+                const instProps = (inst.properties ?? {}) as Record<string, unknown>;
+                const osProfile = (instProps.osProfile ?? {}) as Record<string, unknown>;
+                const netProfile = (instProps.networkProfile ?? {}) as Record<string, unknown>;
+                const netInterfaces = ((netProfile.networkInterfaces ?? []) as Array<Record<string, unknown>>);
+                const firstIpConfig = ((netInterfaces[0]?.properties as Record<string, unknown>)?.ipConfigurations as Array<Record<string, unknown>> | undefined)?.[0];
+                const privateIp = firstIpConfig ? String((firstIpConfig.properties as Record<string, unknown>)?.privateIPAddress ?? "") : undefined;
+
+                const statuses = ((instProps.instanceView as Record<string, unknown>)?.statuses ?? []) as Array<Record<string, unknown>>;
+                const powerStatus = statuses.find((s) => String(s.code ?? "").startsWith("PowerState/"));
+                const powerState = powerStatus ? String(powerStatus.code).replace("PowerState/", "") : "unknown";
+
+                return {
+                  instanceId: String(inst.instanceId ?? inst.name ?? ""),
+                  computerName: String(osProfile.computerName ?? inst.name ?? ""),
+                  provisioningState: String(instProps.provisioningState ?? "Succeeded"),
+                  powerState,
+                  privateIp: privateIp || undefined,
+                };
+              });
+            } catch {
+              // VMSS instance fetch failed — leave empty
+            }
+          }
+        } catch {
+          // VMSS list fetch failed — leave empty
+        }
+      }
+    }
+
+    // ── 노출면 (Exposure Paths) ──
+    const exposurePaths: AksExposurePathInfo[] = [];
+    const netProfile = (props.networkProfile ?? {}) as Record<string, unknown>;
+    const outboundType = String(netProfile.outboundType ?? "loadBalancer");
+    const lbSku = String(netProfile.loadBalancerSku ?? "standard");
+
+    // Ingress: detect LB or AppGW from the diagram spec if available
+    const diagramSpec = getDiagramSpec(`auto-${subscriptionId.slice(0, 8)}`);
+    if (diagramSpec) {
+      const aksArchGroupPrefix = `aks-${clusterName.toLowerCase().replace(/[^a-z0-9-]/g, "")}`;
+      const ingressResources: AksExposureResource[] = [];
+      const egressResources: AksExposureResource[] = [];
+
+      for (const node of diagramSpec.nodes) {
+        const archRole = node.metadata?.archRole;
+        const archGroup = node.metadata?.archGroupId;
+        if (!archGroup || !archGroup.startsWith(aksArchGroupPrefix)) continue;
+
+        if (archRole === "aks-ingress") {
+          ingressResources.push({
+            role: node.resourceKind === "appGateway" ? "app-gateway" : "lb",
+            name: node.label,
+            azureResourceId: node.azureResourceId,
+            endpoint: node.endpoint,
+            sku: lbSku,
+          });
+        } else if (archRole === "aks-egress") {
+          egressResources.push({
+            role: "firewall",
+            name: node.label,
+            azureResourceId: node.azureResourceId,
+            endpoint: node.endpoint,
+          });
+        }
+      }
+
+      if (ingressResources.length > 0) {
+        exposurePaths.push({
+          direction: "ingress",
+          label: `인터넷 → ${ingressResources.map((r) => r.name).join(" → ")} → AKS`,
+          resources: ingressResources,
+        });
+      }
+
+      // Egress path based on outboundType
+      if (outboundType === "userDefinedRouting" && egressResources.length > 0) {
+        exposurePaths.push({
+          direction: "egress",
+          label: `AKS → ${egressResources.map((r) => r.name).join(" → ")} → 인터넷`,
+          resources: egressResources,
+        });
+      } else if (outboundType === "loadBalancer") {
+        exposurePaths.push({
+          direction: "egress",
+          label: "AKS → Load Balancer (SNAT) → 인터넷",
+          resources: [{ role: "lb", name: "AKS Standard LB", sku: lbSku }],
+        });
+      } else if (outboundType === "managedNATGateway") {
+        exposurePaths.push({
+          direction: "egress",
+          label: "AKS → NAT Gateway → 인터넷",
+          resources: [{ role: "nat-gateway", name: "Managed NAT Gateway" }],
+        });
+      }
+    }
+
+    // Fallback: always include LB egress if no paths found
+    if (exposurePaths.length === 0) {
+      exposurePaths.push({
+        direction: "egress",
+        label: `AKS → ${outboundType === "userDefinedRouting" ? "UDR (Firewall)" : outboundType} → 인터넷`,
+        resources: [{
+          role: outboundType === "managedNATGateway" ? "nat-gateway" : "lb",
+          name: outboundType === "userDefinedRouting" ? "Firewall (UDR)" : `AKS ${lbSku} LB`,
+          sku: lbSku,
+        }],
+      });
+    }
+
+    const result: AksPlaneDetail = {
+      clusterId: resourceId,
+      clusterName,
+      generatedAt: new Date().toISOString(),
+      controlPlane,
+      nodePools,
+      exposurePaths,
+      networkProfile: {
+        networkPlugin: String(netProfile.networkPlugin ?? "azure"),
+        networkPolicy: netProfile.networkPolicy ? String(netProfile.networkPolicy) : undefined,
+        serviceCidr: netProfile.serviceCidr ? String(netProfile.serviceCidr) : undefined,
+        dnsServiceIp: netProfile.dnsServiceIP ? String(netProfile.dnsServiceIP) : undefined,
+        podCidr: netProfile.podCidr ? String(netProfile.podCidr) : undefined,
+        outboundType,
+        loadBalancerSku: lbSku,
+      },
+    };
+
+    aksPlaneCache.set(cacheKey, result);
+    return result;
+  } catch (err) {
+    console.error(`[aks-plane-detail] Failed for ${resourceId}:`, err);
+    // Return mock/minimal data
+    const result = mockAksPlaneDetail(resourceId);
+    aksPlaneCache.set(cacheKey, result);
+    return result;
+  }
+}
+
+/** Mock AKS plane detail for dev/demo mode */
+function mockAksPlaneDetail(resourceId: string): AksPlaneDetail {
+  const clusterName = resourceId.split("/").pop() ?? "aks-cluster";
+  return {
+    clusterId: resourceId,
+    clusterName,
+    generatedAt: new Date().toISOString(),
+    controlPlane: {
+      fqdn: `${clusterName}-dns-abcd1234.hcp.koreacentral.azmk8s.io`,
+      isPrivateCluster: false,
+      apiServerEndpoint: `${clusterName}-dns-abcd1234.hcp.koreacentral.azmk8s.io`,
+      accessPath: "internet",
+    },
+    nodePools: [
+      {
+        name: "systempool",
+        mode: "System",
+        vmSize: "Standard_D4s_v5",
+        nodeCount: 3,
+        minCount: 3,
+        maxCount: 5,
+        enableAutoScaling: true,
+        osType: "Linux",
+        osSKU: "AzureLinux",
+        orchestratorVersion: "1.29.2",
+        powerState: "Running",
+        provisioningState: "Succeeded",
+        availabilityZones: ["1", "2", "3"],
+        vmssInstances: [
+          { instanceId: "0", computerName: "aks-systempool-00000-vmss000000", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.1.4" },
+          { instanceId: "1", computerName: "aks-systempool-00000-vmss000001", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.1.5" },
+          { instanceId: "2", computerName: "aks-systempool-00000-vmss000002", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.1.6" },
+        ],
+      },
+      {
+        name: "userpool",
+        mode: "User",
+        vmSize: "Standard_D8s_v5",
+        nodeCount: 5,
+        minCount: 2,
+        maxCount: 10,
+        enableAutoScaling: true,
+        osType: "Linux",
+        osSKU: "AzureLinux",
+        orchestratorVersion: "1.29.2",
+        powerState: "Running",
+        provisioningState: "Succeeded",
+        availabilityZones: ["1", "2", "3"],
+        vmssInstances: [
+          { instanceId: "0", computerName: "aks-userpool-00000-vmss000000", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.2.4" },
+          { instanceId: "1", computerName: "aks-userpool-00000-vmss000001", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.2.5" },
+          { instanceId: "2", computerName: "aks-userpool-00000-vmss000002", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.2.6" },
+          { instanceId: "3", computerName: "aks-userpool-00000-vmss000003", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.2.7" },
+          { instanceId: "4", computerName: "aks-userpool-00000-vmss000004", provisioningState: "Succeeded", powerState: "running", privateIp: "10.0.2.8" },
+        ],
+      },
+    ],
+    exposurePaths: [
+      {
+        direction: "ingress",
+        label: "인터넷 → Application Gateway → AKS",
+        resources: [
+          { role: "app-gateway", name: "appgw-aks-prod", endpoint: "20.200.100.50", sku: "WAF_v2" },
+        ],
+      },
+      {
+        direction: "egress",
+        label: "AKS → Load Balancer (SNAT) → 인터넷",
+        resources: [
+          { role: "lb", name: "kubernetes", sku: "standard" },
+        ],
+      },
+    ],
+    networkProfile: {
+      networkPlugin: "azure",
+      networkPolicy: "calico",
+      serviceCidr: "10.0.0.0/16",
+      dnsServiceIp: "10.0.0.10",
+      podCidr: "10.244.0.0/16",
+      outboundType: "loadBalancer",
+      loadBalancerSku: "standard",
+    },
+  };
 }

@@ -152,9 +152,20 @@ export default function LiveDiagramPage() {
   const [edgeDetail, setEdgeDetail] = useState<EdgeNetworkDetail | null>(null);
   const [edgeDetailLoading, setEdgeDetailLoading] = useState(false);
 
+  const [selectedVmssInstance, setSelectedVmssInstance] = useState<{
+    computerName: string; powerState: string; privateIp?: string; parentVmssId: string; label: string;
+  } | null>(null);
+
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
+    setSelectedVmssInstance(null);
     if (nodeId) setSelectedEdgeId(null);
+  }, []);
+
+  const handleVmssInstanceSelect = useCallback((data: { computerName: string; powerState: string; privateIp?: string; parentVmssId: string; label: string }) => {
+    setSelectedVmssInstance(data);
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
   }, []);
 
   const handleEdgeSelect = useCallback((edgeId: string | null) => {
@@ -180,6 +191,12 @@ export default function LiveDiagramPage() {
   // VNet / Region filter state (multi-select)
   const [selectedVnets, setSelectedVnets] = useState<Set<string>>(new Set());
   const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
+
+  // Resource search
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   // Fetch tenants on mount
   useEffect(() => {
@@ -438,6 +455,35 @@ export default function LiveDiagramPage() {
     }
   }, [filteredSpec, selectedNodeId]);
 
+  // ── Resource search results (filter nodes by label match) ──
+  const searchResults = useMemo(() => {
+    if (!filteredSpec || searchQuery.length < 2) return [];
+    const q = searchQuery.toLowerCase();
+    return filteredSpec.nodes
+      .filter((n) => n.nodeType !== "group" && n.label.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [filteredSpec, searchQuery]);
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    if (!searchOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [searchOpen]);
+
+  const handleSearchSelect = useCallback((nodeId: string) => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    handleNodeSelect(nodeId);
+    // Use a unique trigger to force focusNode effect even if same nodeId
+    setFocusNodeId(nodeId + ":" + Date.now());
+  }, [handleNodeSelect]);
+
   // Convert region options to id/label shape for MultiSelectDropdown
   const regionOptionsMapped = useMemo(
     () => regionOptions.map((r) => ({ id: r, label: r })),
@@ -622,6 +668,36 @@ export default function LiveDiagramPage() {
 
       {/* Overlay controls + Topology stats */}
       <div className={styles.controlBar}>
+        {/* Resource search */}
+        {filteredSpec && (
+          <div className={styles.resourceSearch} ref={searchRef}>
+            <input
+              className={styles.resourceSearchInput}
+              type="text"
+              placeholder={t("live.searchResource")}
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+              onFocus={() => setSearchOpen(true)}
+            />
+            {searchOpen && searchResults.length > 0 && (
+              <div className={styles.resourceSearchDropdown}>
+                {searchResults.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className={styles.resourceSearchItem}
+                    onClick={() => handleSearchSelect(n.id)}
+                  >
+                    <span className={styles.resourceSearchName}>{n.label}</span>
+                    {n.resourceKind && (
+                      <span className={styles.resourceSearchKind}>{n.resourceKind}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div className={styles.statsBar}>
           {snapshot?.topology && (
             <>
@@ -722,6 +798,8 @@ export default function LiveDiagramPage() {
               showHeatmap={showHeatmap}
               fitViewTrigger={fitViewTrigger}
               isFiltered={isFiltered}
+              focusNodeId={focusNodeId}
+              onVmssInstanceSelect={handleVmssInstanceSelect}
             />
           )}
 
@@ -735,14 +813,15 @@ export default function LiveDiagramPage() {
                 liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}
                 onClose={() => handleEdgeSelect(null)}
               />
-            ) : selectedNodeId ? (
+            ) : (selectedNodeId || selectedVmssInstance) ? (
               <ResourceDetailPanel
-                nodeSpec={filteredSpec.nodes.find((n) => n.id === selectedNodeId) ?? null}
-                liveNode={snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null}
-                alerts={snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []}
-                alertRules={snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []}
-                connectedEdges={connectedEdges}
-                onClose={() => handleNodeSelect(null)}
+                nodeSpec={selectedNodeId ? (filteredSpec.nodes.find((n) => n.id === selectedNodeId) ?? null) : null}
+                liveNode={selectedNodeId ? (snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null) : null}
+                alerts={selectedNodeId ? (snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
+                alertRules={selectedNodeId ? (snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
+                connectedEdges={selectedNodeId ? connectedEdges : []}
+                onClose={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
+                vmssInstance={selectedVmssInstance}
               />
             ) : showTimeline && alertCount > 0 ? (
               <FaultTimeline

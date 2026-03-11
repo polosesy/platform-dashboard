@@ -31,6 +31,7 @@ const T: Translations = {
   "live.alerts": { ko: "알림", en: "Alerts" },
   "live.faults": { ko: "장애", en: "Faults" },
   "live.loading3d": { ko: "3D 로딩 중...", en: "Loading 3D..." },
+  "live.searchResource": { ko: "리소스 검색...", en: "Search resources..." },
 
   // ── Visualization Modes ──
   "viz.2d": { ko: "2D 기본", en: "2D Standard" },

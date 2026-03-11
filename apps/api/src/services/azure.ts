@@ -390,6 +390,13 @@ function getSubnetIdsFromLoadBalancerProps(properties: unknown): string[] {
   return [...new Set(ids)];
 }
 
+/** Returns true when the LB has outbound rules — AKS default outboundType=loadBalancer adds SNAT rules. */
+function hasLbOutboundRules(properties: unknown): boolean {
+  if (!properties || typeof properties !== "object") return false;
+  const rules = (properties as { outboundRules?: unknown }).outboundRules;
+  return Array.isArray(rules) && rules.length > 0;
+}
+
 function getBackendNicIdsFromLoadBalancerProps(properties: unknown): string[] {
   if (!properties || typeof properties !== "object") return [];
   const pools = (properties as { backendAddressPools?: unknown }).backendAddressPools;
@@ -734,13 +741,69 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       if (ipConfig?.id) nodeMetadata.absorbed = true;
     }
 
-    // AKS — store private cluster flag and privateFqdn for diagram representation
+    // AKS — store rich metadata for 3-plane diagram (접속면/실행면/노출면)
     if (kind === "aks") {
       const props = (r.properties ?? {}) as Record<string, unknown>;
       const accessProfile = props.apiServerAccessProfile as Record<string, unknown> | undefined;
       nodeMetadata.isPrivateCluster = !!accessProfile?.enablePrivateCluster;
       const privateFqdn = safeString(props.privateFQDN);
       if (privateFqdn) nodeMetadata.privateFqdn = privateFqdn;
+      const fqdn = safeString(props.fqdn);
+      if (fqdn) nodeMetadata.fqdn = fqdn;
+
+      // API server access profile details
+      if (accessProfile?.authorizedIPRanges) {
+        nodeMetadata.authorizedIpRanges = accessProfile.authorizedIPRanges;
+      }
+      if (accessProfile?.enablePrivateClusterPublicFQDN != null) {
+        nodeMetadata.enablePrivateClusterPublicFqdn = accessProfile.enablePrivateClusterPublicFQDN;
+      }
+      if (accessProfile?.privateDNSZone) {
+        nodeMetadata.privateDnsZone = accessProfile.privateDNSZone;
+      }
+
+      // Agent pool profiles (실행면)
+      const agentPools = props.agentPoolProfiles as Array<Record<string, unknown>> | undefined;
+      if (agentPools && Array.isArray(agentPools)) {
+        nodeMetadata.agentPoolProfiles = agentPools.map((ap) => ({
+          name: safeString(ap.name),
+          mode: safeString(ap.mode) || "User",
+          vmSize: safeString(ap.vmSize),
+          count: typeof ap.count === "number" ? ap.count : 0,
+          minCount: typeof ap.minCount === "number" ? ap.minCount : undefined,
+          maxCount: typeof ap.maxCount === "number" ? ap.maxCount : undefined,
+          enableAutoScaling: !!ap.enableAutoScaling,
+          osType: safeString(ap.osType) || "Linux",
+          osSKU: safeString(ap.osSKU),
+          orchestratorVersion: safeString(ap.orchestratorVersion),
+          powerState: safeString((ap.powerState as Record<string, unknown>)?.code) || "Running",
+          provisioningState: safeString(ap.provisioningState) || "Succeeded",
+          availabilityZones: Array.isArray(ap.availabilityZones) ? ap.availabilityZones.map(String) : undefined,
+          vnetSubnetId: safeString(ap.vnetSubnetID),
+        }));
+      }
+
+      // Network profile (노출면)
+      const netProfile = props.networkProfile as Record<string, unknown> | undefined;
+      if (netProfile) {
+        nodeMetadata.networkProfile = {
+          networkPlugin: safeString(netProfile.networkPlugin) || "azure",
+          networkPolicy: safeString(netProfile.networkPolicy) || undefined,
+          serviceCidr: safeString(netProfile.serviceCidr),
+          dnsServiceIp: safeString(netProfile.dnsServiceIP),
+          podCidr: safeString(netProfile.podCidr),
+          outboundType: safeString(netProfile.outboundType) || "loadBalancer",
+          loadBalancerSku: safeString(netProfile.loadBalancerSku),
+        };
+      }
+
+      // Node resource group (MC_* RG)
+      const nodeRgName = safeString(props.nodeResourceGroup);
+      if (nodeRgName) nodeMetadata.nodeResourceGroup = nodeRgName;
+
+      // Kubernetes version
+      const k8sVersion = safeString(props.kubernetesVersion);
+      if (k8sVersion) nodeMetadata.kubernetesVersion = k8sVersion;
     }
 
     nodes.push({
@@ -1049,14 +1112,51 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         });
       }
 
-      for (const nicId of getBackendNicIdsFromLoadBalancerProps(r.properties)) {
-        if (!nicById.has(nicId)) continue;
-        edges.push({
-          id: `e:lb->nic:${r.id}:${nicId}`,
-          source: r.id,
-          target: nicId,
-          kind: "routes"
-        });
+      const lbBackendNicIds = getBackendNicIdsFromLoadBalancerProps(r.properties);
+      const lbVmssTargets = new Set<string>();
+      for (const nicId of lbBackendNicIds) {
+        if (nicById.has(nicId)) {
+          edges.push({
+            id: `e:lb->nic:${r.id}:${nicId}`,
+            source: r.id,
+            target: nicId,
+            kind: "routes"
+          });
+        } else {
+          // AKS VMSS instance NIC: extract VMSS resource ID
+          const vmssMatch = nicId.match(/(\/subscriptions\/.*?\/providers\/microsoft\.compute\/virtualmachinescalesets\/[^/]+)/i);
+          if (vmssMatch) lbVmssTargets.add(vmssMatch[1].toLowerCase());
+        }
+      }
+      // Create LB → VMSS edges for AKS-managed load balancers
+      for (const vmssIdLower of lbVmssTargets) {
+        // Case-insensitive lookup in resourceById
+        let vmssId: string | undefined;
+        for (const [id] of resourceById) {
+          if (id.toLowerCase() === vmssIdLower) { vmssId = id; break; }
+        }
+        if (vmssId) {
+          // Inbound: LB → VMSS (Service LoadBalancer traffic)
+          edges.push({
+            id: `e:lb->vmss:${r.id}:${vmssId}`,
+            source: r.id,
+            target: vmssId,
+            kind: "routes",
+            metadata: { protocol: "TCP" },
+          });
+          // Outbound SNAT: VMSS → LB (AKS default outboundType=loadBalancer)
+          // AKS nodes use the public LB for outbound internet traffic via SNAT rules
+          const hasOutboundRules = hasLbOutboundRules(r.properties);
+          if (hasOutboundRules) {
+            edges.push({
+              id: `e:vmss->lb:snat:${vmssId}:${r.id}`,
+              source: vmssId,
+              target: r.id,
+              kind: "routes",
+              metadata: { protocol: "SNAT" },
+            });
+          }
+        }
       }
     }
     if (t === "microsoft.network/privateendpoints") {

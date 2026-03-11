@@ -45,7 +45,7 @@ export type DiagramNodeSpec = {
   subResources?: SubResource[];  // Embedded child objects (NICs in VM, Frontend IPs in AppGW)
 };
 
-export type SubResourceKind = "nic" | "frontendIP" | "publicIP";
+export type SubResourceKind = "nic" | "frontendIP" | "publicIP" | "apiEndpoint";
 
 export type SubResource = {
   id: string;
@@ -67,6 +67,7 @@ export type DiagramFlowType =
 export type ArchRole =
   | "aks-cluster" | "aks-nodepool" | "aks-vmss"
   | "aks-ingress" | "aks-egress"
+  | "aks-control-plane" | "aks-nat-gateway"
   | "vm" | "vmss" | "db" | "cache"
   | "private-endpoint" | "gateway" | "load-balancer"
   | "firewall" | "waf" | "messaging"
@@ -479,5 +480,87 @@ export type EdgeNetworkDetail = {
   outboundFlows: NetworkFlowRecord[];
   inboundSummary: FlowSummary;
   outboundSummary: FlowSummary;
+  note?: string;
+};
+
+// ────────────────────────────────────────────
+// 11. AKS Plane Detail (접속면 / 실행면 / 노출면)
+// ────────────────────────────────────────────
+
+/** 접속면 (Control Plane / API Endpoint) */
+export type AksControlPlaneInfo = {
+  fqdn: string;
+  privateFqdn?: string;
+  isPrivateCluster: boolean;
+  apiServerEndpoint: string;           // IP or FQDN used for API server access
+  authorizedIpRanges?: string[];       // allowed IP ranges (public cluster)
+  enablePrivateClusterPublicFqdn?: boolean;
+  privateDnsZone?: string;
+  /** Connectivity path description */
+  accessPath: "internet" | "private-link" | "vnet-integration" | "vpn-er";
+};
+
+/** 실행면 — Individual NodePool (Agent Pool) */
+export type AksNodePoolInfo = {
+  name: string;
+  mode: "System" | "User";
+  vmSize: string;
+  nodeCount: number;
+  minCount?: number;
+  maxCount?: number;
+  enableAutoScaling: boolean;
+  osType: string;
+  osSKU?: string;
+  orchestratorVersion?: string;
+  powerState: string;              // "Running" | "Stopped"
+  provisioningState: string;
+  availabilityZones?: string[];
+  vnetSubnetId?: string;
+  /** Backing VMSS info (expanded on demand) */
+  vmssResourceId?: string;
+  vmssInstances?: AksVmssInstance[];
+};
+
+/** VMSS Instance (실행면 확장 시 표시) */
+export type AksVmssInstance = {
+  instanceId: string;
+  computerName: string;
+  provisioningState: string;
+  powerState: string;              // "running" | "stopped" | "deallocated"
+  privateIp?: string;
+};
+
+/** 노출면 — Ingress / Egress flow path */
+export type AksExposurePathInfo = {
+  direction: "ingress" | "egress";
+  label: string;                     // e.g., "Application Gateway → AKS"
+  resources: AksExposureResource[];
+};
+
+export type AksExposureResource = {
+  role: "lb" | "nat-gateway" | "firewall" | "public-ip" | "app-gateway" | "service" | "ingress-controller";
+  name: string;
+  azureResourceId?: string;
+  endpoint?: string;
+  sku?: string;
+};
+
+/** Full AKS Plane Detail (on-demand response) */
+export type AksPlaneDetail = {
+  clusterId: string;
+  clusterName: string;
+  generatedAt: string;
+  controlPlane: AksControlPlaneInfo;
+  nodePools: AksNodePoolInfo[];
+  exposurePaths: AksExposurePathInfo[];
+  networkProfile?: {
+    networkPlugin: string;            // "azure" | "kubenet" | "none"
+    networkPolicy?: string;           // "calico" | "azure" | "cilium"
+    serviceCidr?: string;
+    dnsServiceIp?: string;
+    podCidr?: string;
+    outboundType?: string;            // "loadBalancer" | "userDefinedRouting" | "managedNATGateway"
+    loadBalancerSku?: string;
+  };
   note?: string;
 };

@@ -34,6 +34,8 @@ export type LiveNodeData = {
   archGroupId?: string;
   nsgBadge?: NsgBadgeInfo;
   onNsgSelect?: (nodeId: string) => void;
+  vmssExpanded?: boolean;
+  onVmssExpand?: (nodeId: string, azureResourceId: string) => void;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -92,8 +94,8 @@ const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
   "messaging":        { abbr: "Msg",  label: "Messaging Service" },
 };
 
-export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect } = data;
+export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, vmssExpanded, onVmssExpand } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
@@ -207,7 +209,7 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
               {typeAbbr}
             </span>
           )}
-          {archRole && ARCH_ROLE_BADGE[archRole] && (
+          {archRole && ARCH_ROLE_BADGE[archRole] && ARCH_ROLE_BADGE[archRole]!.abbr !== typeAbbr && (
             <span className={styles.archRoleBadge} title={ARCH_ROLE_BADGE[archRole]!.label}>
               {ARCH_ROLE_BADGE[archRole]!.abbr}
             </span>
@@ -265,6 +267,17 @@ export const LiveNode = memo(function LiveNode({ data }: NodeProps<LiveNodeData>
       )}
 
       <Handle type="source" position={Position.Right} className={styles.handle} />
+
+      {/* VMSS expand/collapse toggle */}
+      {archRole === "aks-vmss" && azureResourceId && onVmssExpand && (
+        <button
+          type="button"
+          className={styles.vmssExpandBtn}
+          onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId); }}
+        >
+          {vmssExpanded ? "▲ 접기" : "▼ 인스턴스 보기"}
+        </button>
+      )}
     </div>
   );
 });

@@ -401,6 +401,8 @@ function resolveFlowType(
 ): DiagramFlowType | undefined {
   // Priority 1: edge kind takes precedence
   if (edgeKind === "routes" && (srcMeta?.archRole === "gateway" || srcMeta?.archRole === "load-balancer" || srcMeta?.archRole === "aks-ingress")) return "ingress";
+  // VMSS → LB = SNAT outbound egress (AKS outboundType=loadBalancer)
+  if (edgeKind === "routes" && tgtMeta?.archRole === "load-balancer" && (srcMeta?.archRole === "aks-vmss" || srcMeta?.archRole === "vmss")) return "egress";
   if (edgeKind === "privateLink") return "dependency";
   if (edgeKind === "logging") return "control";
 
@@ -1099,14 +1101,14 @@ export async function generateDiagramSpec(
     const lbFeIPs = lbFrontendIPs.get(nodeOrigId);
     if (lbFeIPs) subs.push(...lbFeIPs);
 
-    // AKS — show API server connectivity type (private vs public)
+    // AKS — show API server connectivity type (private vs public) + node pool summary
     const aksNode = graph.nodes.find((n) => n.id === nodeOrigId && n.kind === "aks");
     if (aksNode?.endpoint) {
       const isPrivate = aksNode.metadata?.isPrivateCluster === true;
       subs.push({
         id: `${nodeOrigId}/apiserver`,
         label: isPrivate ? "Private API" : "Public API",
-        kind: "frontendIP" as SubResourceKind,
+        kind: "apiEndpoint" as SubResourceKind,
         endpoint: aksNode.endpoint,
       });
     }
@@ -1399,6 +1401,55 @@ export async function generateDiagramSpec(
         }
 
         const childArchMeta = archMetaMap.get(child.node.id);
+
+        // AKS plane metadata enrichment — pass through agentPoolProfiles, networkProfile, etc.
+        const aksPlaneMetadata: Record<string, string> = {};
+        if (child.node.kind === "aks" && child.node.metadata) {
+          const m = child.node.metadata;
+          if (m.fqdn) aksPlaneMetadata.fqdn = String(m.fqdn);
+          if (m.privateFqdn) aksPlaneMetadata.privateFqdn = String(m.privateFqdn);
+          if (m.isPrivateCluster != null) aksPlaneMetadata.isPrivateCluster = String(m.isPrivateCluster);
+          if (m.kubernetesVersion) aksPlaneMetadata.kubernetesVersion = String(m.kubernetesVersion);
+          if (m.nodeResourceGroup) aksPlaneMetadata.nodeResourceGroup = String(m.nodeResourceGroup);
+          if (m.agentPoolProfiles) aksPlaneMetadata.agentPoolProfiles = JSON.stringify(m.agentPoolProfiles);
+          if (m.networkProfile) aksPlaneMetadata.networkProfile = JSON.stringify(m.networkProfile);
+          if (m.authorizedIpRanges) aksPlaneMetadata.authorizedIpRanges = JSON.stringify(m.authorizedIpRanges);
+          if (m.enablePrivateClusterPublicFqdn != null) aksPlaneMetadata.enablePrivateClusterPublicFqdn = String(m.enablePrivateClusterPublicFqdn);
+          if (m.privateDnsZone) aksPlaneMetadata.privateDnsZone = String(m.privateDnsZone);
+          const netProfile = m.networkProfile as Record<string, unknown> | undefined;
+          if (netProfile?.outboundType) aksPlaneMetadata.outboundType = String(netProfile.outboundType);
+        }
+
+        // AKS-VMSS: enrich with nodepool info from parent AKS cluster
+        if (child.node.kind === "vmss" && childArchMeta?.archRole === "aks-vmss") {
+          // Find the parent AKS cluster and match this VMSS to its agent pool
+          const parentAksId = [...archMetaMap.entries()].find(
+            ([, meta]) => meta.archRole === "aks-cluster" && meta.archGroupId === childArchMeta.archGroupId
+          )?.[0];
+          if (parentAksId) {
+            const parentAksNode = graph.nodes.find((n) => n.id === parentAksId);
+            const pools = parentAksNode?.metadata?.agentPoolProfiles as Array<Record<string, unknown>> | undefined;
+            if (pools && pools.length > 0) {
+              // Match by VMSS name convention: aks-{poolname}-{hash}-vmss
+              const vmssName = child.node.name.toLowerCase();
+              const matchedPool = pools.find((p) => {
+                const poolName = String(p.name ?? "").toLowerCase();
+                return vmssName.includes(poolName);
+              }) ?? pools[0]; // fallback to first pool
+              if (matchedPool) {
+                aksPlaneMetadata.nodepoolName = String(matchedPool.name ?? "");
+                aksPlaneMetadata.nodepoolMode = String(matchedPool.mode ?? "User");
+                aksPlaneMetadata.nodepoolVmSize = String(matchedPool.vmSize ?? "");
+                aksPlaneMetadata.nodepoolCount = String(matchedPool.count ?? 0);
+                aksPlaneMetadata.nodepoolPowerState = String(matchedPool.powerState ?? "Running");
+                if (matchedPool.enableAutoScaling) {
+                  aksPlaneMetadata.nodepoolAutoScale = `${matchedPool.minCount ?? 0}-${matchedPool.maxCount ?? 0}`;
+                }
+              }
+            }
+          }
+        }
+
         diagramNodes.push({
           id: child.shortId,
           label: child.node.name,
@@ -1414,6 +1465,7 @@ export async function generateDiagramSpec(
           metadata: {
             ...(child.node.endpoint ? { privateIP: child.node.endpoint } : {}),
             ...(childArchMeta ? { archRole: childArchMeta.archRole, archGroupId: childArchMeta.archGroupId, flowHint: childArchMeta.flowHint } : {}),
+            ...aksPlaneMetadata,
           },
           resourceKind: child.node.kind,
           location: child.node.location,
@@ -1782,6 +1834,45 @@ export async function generateDiagramSpec(
     console.log(`[force-parentId] Forced ${forceSubnetParent} subnet→VNet + ${forceResourceParent} resource→subnet parentIds`);
   }
 
+  // ── AKS API Endpoint: synthetic external node above VNet (접속면) ──
+  const aksApiEndpointNodes: DiagramNodeSpec[] = [];
+  for (const node of diagramNodes) {
+    if (node.resourceKind !== "aks") continue;
+    const meta = node.metadata ?? {};
+    const fqdn = meta.fqdn;
+    if (!fqdn) continue;
+
+    // Resolve VNet position by following parentId chain
+    let vnetNode: DiagramNodeSpec | undefined;
+    const parentSubnet = diagramNodes.find(n => n.id === node.parentId);
+    if (parentSubnet) {
+      vnetNode = diagramNodes.find(n => n.id === parentSubnet.parentId);
+    }
+
+    const isPrivate = meta.isPrivateCluster === "true";
+    const apiEndpointId = `aks-api-${node.id}`;
+    const vnetX = vnetNode?.position?.x ?? node.position?.x ?? 40;
+    const vnetY = vnetNode?.position?.y ?? node.position?.y ?? 200;
+
+    aksApiEndpointNodes.push({
+      id: apiEndpointId,
+      label: `AKS API (${isPrivate ? "Private" : "Public"})`,
+      icon: "aks",
+      position: { x: vnetX + 40, y: vnetY - NODE_H - EXTERNAL_GAP },
+      bindings: {},
+      metadata: {
+        archRole: "aks-control-plane",
+        aksClusterId: node.id,
+        fqdn,
+        isPrivateCluster: String(isPrivate),
+        aksClusterName: node.label,
+      },
+      resourceKind: "aks",
+      endpoint: fqdn,
+    });
+  }
+  diagramNodes.push(...aksApiEndpointNodes);
+
   // ── Retarget edges from embedded NICs to their parent VMs ──
   // When a NIC is absorbed as a sub-resource of a VM, edges like LB→NIC
   // would be dropped because the NIC is no longer a separate node.
@@ -1909,6 +2000,14 @@ export async function generateDiagramSpec(
     const ft = resolveFlowType(archMetaMap.get(inf.source), archMetaMap.get(inf.target), "inferred");
     diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", label, inf.metadata.protocol, "inferred", inf.confidence, ft));
     existingPairs.add(`${cId}→${dId}`);
+  }
+
+  // ── AKS API Endpoint → AKS Cluster control flow edges ──
+  for (const apiNode of aksApiEndpointNodes) {
+    const aksClusterId = apiNode.metadata?.aksClusterId;
+    if (!aksClusterId) continue;
+    diagramEdges.push(makeEdge(apiNode.id, aksClusterId, "aks", "control flow", undefined, "network", undefined, "control"));
+    existingPairs.add(`${apiNode.id}→${aksClusterId}`);
   }
 
   // Build groups

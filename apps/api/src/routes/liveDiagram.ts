@@ -13,7 +13,7 @@ import {
 } from "../services/liveDiagramMock";
 import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure";
 import { generateDiagramSpec } from "../services/specGenerator";
-import { fetchEdgeNetworkDetail, fetchNsgInfo, fetchBackendPoolInfo } from "../services/edgeDetailService";
+import { fetchEdgeNetworkDetail, fetchNsgInfo, fetchBackendPoolInfo, fetchAksPlaneDetail, fetchVmssInstances } from "../services/edgeDetailService";
 
 // Seed the mock diagram on startup
 saveDiagramSpec(mockDiagramSpec);
@@ -241,6 +241,30 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
       .then((pools) => res.json({ pools }))
       .catch((e: unknown) => {
         res.status(500).json({ error: e instanceof Error ? e.message : "backend_pool_error" });
+      });
+  });
+
+  // ── AKS Plane Detail (접속면 / 실행면 / 노출면, 60s cached) ──
+  router.get("/api/live/aks-plane", (req: Request, res: Response) => {
+    const resourceId = typeof req.query.resourceId === "string" ? req.query.resourceId : "";
+    if (!resourceId) return void res.status(400).json({ error: "resourceId_required" });
+
+    fetchAksPlaneDetail(env, req.auth?.bearerToken, resourceId)
+      .then((detail) => res.json(detail))
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "aks_plane_error" });
+      });
+  });
+
+  // ── VMSS Instances (for AKS nodepool VMSS, 60s cached) ──
+  router.get("/api/live/vmss-instances", (req: Request, res: Response) => {
+    const resourceId = typeof req.query.resourceId === "string" ? req.query.resourceId : "";
+    if (!resourceId) return void res.status(400).json({ error: "resourceId_required" });
+
+    fetchVmssInstances(env, req.auth?.bearerToken, resourceId)
+      .then((instances) => res.json({ instances }))
+      .catch((e: unknown) => {
+        res.status(500).json({ error: e instanceof Error ? e.message : "vmss_instances_error" });
       });
   });
 

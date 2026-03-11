@@ -13,6 +13,10 @@ import type {
   NsgInfo,
   NsgRuleEntry,
   BackendPoolInfo,
+  AksPlaneDetail,
+  AksNodePoolInfo,
+  AksExposurePathInfo,
+  AksVmssInstance,
 } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
@@ -30,6 +34,14 @@ type ConnectedEdge = {
   direction: "inbound" | "outbound";
 };
 
+type VmssInstancePanelData = {
+  computerName: string;
+  powerState: string;
+  privateIp?: string;
+  parentVmssId: string;
+  label: string;
+};
+
 type ResourceDetailPanelProps = {
   nodeSpec: DiagramNodeSpec | null;
   liveNode: LiveNode | null;
@@ -37,6 +49,7 @@ type ResourceDetailPanelProps = {
   alertRules: AlertRuleInfo[];
   connectedEdges: ConnectedEdge[];
   onClose: () => void;
+  vmssInstance?: VmssInstancePanelData | null;
 };
 
 const healthLabel: Record<HealthStatus, string> = {
@@ -402,6 +415,479 @@ function NsgRulesSection({ nsg, loading }: { nsg: NsgInfo | null; loading: boole
   );
 }
 
+// ── AKS Plane Detail (접속면 / 실행면 / 노출면) ──
+
+function useAksPlaneDetail(azureResourceId: string | undefined, resourceKind: string | undefined, archRole: string | undefined) {
+  const [detail, setDetail] = useState<AksPlaneDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const getApiToken = useApiToken();
+
+  useEffect(() => {
+    // Only fetch for real AKS cluster nodes, not synthetic API Endpoint nodes
+    if (resourceKind !== "aks" || !azureResourceId || archRole === "aks-control-plane") {
+      setDetail(null);
+      return;
+    }
+    setLoading(true);
+    getApiToken()
+      .catch(() => null)
+      .then(async (token) => {
+        const url = `${apiBaseUrl()}/api/live/aks-plane?resourceId=${encodeURIComponent(azureResourceId)}`;
+        const data = await fetchJsonWithBearer<AksPlaneDetail>(url, token);
+        setDetail(data);
+      })
+      .catch(() => setDetail(null))
+      .finally(() => setLoading(false));
+  }, [azureResourceId, resourceKind, archRole, getApiToken]);
+
+  return { detail, loading };
+}
+
+// ── VMSS Instance list (for AKS nodepool VMSS) ──
+
+function useVmssInstances(azureResourceId: string | undefined, archRole: string | undefined) {
+  const [instances, setInstances] = useState<AksVmssInstance[]>([]);
+  const [loading, setLoading] = useState(false);
+  const getApiToken = useApiToken();
+
+  useEffect(() => {
+    if (archRole !== "aks-vmss" || !azureResourceId) {
+      setInstances([]);
+      return;
+    }
+    setLoading(true);
+    getApiToken()
+      .catch(() => null)
+      .then(async (token) => {
+        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}`;
+        const data = await fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(url, token);
+        setInstances(data.instances ?? []);
+      })
+      .catch(() => setInstances([]))
+      .finally(() => setLoading(false));
+  }, [azureResourceId, archRole, getApiToken]);
+
+  return { instances, loading };
+}
+
+const EXPOSURE_ROLE_ICON: Record<string, string> = {
+  lb: "LB",
+  "nat-gateway": "NAT",
+  firewall: "FW",
+  "public-ip": "PIP",
+  "app-gateway": "AGW",
+  service: "Svc",
+  "ingress-controller": "Ing",
+};
+
+// ── AKS Essentials (클러스터 정보 — 접속면 포함) ──
+
+function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
+  const cp = detail.controlPlane;
+  const np = detail.networkProfile;
+
+  return (
+    <div className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>클러스터 정보</div>
+      <div className={styles.essentialsList}>
+        {/* API 서버 주소 */}
+        <div className={styles.aksApiServerRow}>
+          <span className={styles.essentialsLabel}>API 서버 주소</span>
+          <CopyableValue value={cp.apiServerEndpoint} className={styles.aksApiServerFqdn}>
+            {cp.apiServerEndpoint}
+          </CopyableValue>
+        </div>
+
+        {/* 네트워크 구성 */}
+        {np && (
+          <>
+            <div className={styles.essentialsRow}>
+              <span className={styles.essentialsLabel}>네트워크 구성</span>
+              <span className={styles.essentialsValue}>
+                {np.networkPlugin === "azure" ? "Azure CNI" : np.networkPlugin}
+                {np.networkPolicy ? ` + ${np.networkPolicy}` : ""}
+              </span>
+            </div>
+            {np.podCidr && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>Pod CIDR</span>
+                <span className={styles.essentialsValueMono}>{np.podCidr}</span>
+              </div>
+            )}
+            {np.serviceCidr && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>서비스 CIDR</span>
+                <span className={styles.essentialsValueMono}>{np.serviceCidr}</span>
+              </div>
+            )}
+            {np.dnsServiceIp && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>DNS 서비스 IP</span>
+                <span className={styles.essentialsValueMono}>{np.dnsServiceIp}</span>
+              </div>
+            )}
+            {np.networkPolicy && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>네트워크 정책 엔진</span>
+                <span className={styles.essentialsValue}>{np.networkPolicy}</span>
+              </div>
+            )}
+            {np.loadBalancerSku && (
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>부하 분산 장치</span>
+                <span className={styles.essentialsValue}>{np.loadBalancerSku}</span>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* 프라이빗 클러스터 */}
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>프라이빗 클러스터</span>
+          <span className={styles.essentialsValue}>
+            {cp.isPrivateCluster ? (
+              <span className={styles.aksAccessBadge} data-private="true">사용</span>
+            ) : (
+              "사용 안 함"
+            )}
+          </span>
+        </div>
+
+        {/* 권한 있는 IP 범위 */}
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>권한 있는 IP 범위</span>
+          <span className={styles.essentialsValue}>
+            {cp.authorizedIpRanges && cp.authorizedIpRanges.length > 0
+              ? cp.authorizedIpRanges.join(", ")
+              : "사용 안 함"}
+          </span>
+        </div>
+
+        {cp.privateFqdn && (
+          <div className={styles.essentialsRow}>
+            <span className={styles.essentialsLabel}>Private FQDN</span>
+            <CopyableValue value={cp.privateFqdn} className={styles.essentialsValueMono}>
+              {cp.privateFqdn}
+            </CopyableValue>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 실행면 (NODE POOLS) ──
+
+function AksNodePoolSection({ pools }: { pools: AksNodePoolInfo[] }) {
+  const [expandedPool, setExpandedPool] = useState<string | null>(null);
+
+  return (
+    <div className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>
+        실행면 (NODE POOLS) ({pools.length})
+      </div>
+      {pools.map((pool) => {
+        const isExpanded = expandedPool === pool.name;
+        return (
+          <div key={pool.name} className={styles.aksNodePoolCard}>
+            <button
+              type="button"
+              className={styles.aksNodePoolHeader}
+              onClick={() => setExpandedPool(isExpanded ? null : pool.name)}
+            >
+              <span className={styles.aksPoolModeBadge} data-mode={pool.mode}>
+                {pool.mode}
+              </span>
+              <span className={styles.aksPoolName}>{pool.name}</span>
+              <span
+                className={styles.aksPoolPowerDot}
+                data-state={pool.powerState.toLowerCase()}
+              />
+              <span className={styles.toggleChevron}>
+                {isExpanded ? "\u25B2" : "\u25BC"}
+              </span>
+            </button>
+            {/* Summary: vmSize · OS · version · AZ */}
+            <div className={styles.aksPoolSummary}>
+              <span>{pool.vmSize}</span>
+              <span>{pool.osType}{pool.osSKU ? ` (${pool.osSKU})` : ""}</span>
+              {pool.orchestratorVersion && <span>v{pool.orchestratorVersion}</span>}
+              {pool.availabilityZones && (
+                <span>AZ: {pool.availabilityZones.join(",")}</span>
+              )}
+            </div>
+            {/* Node count + autoscale */}
+            <div className={styles.aksPoolSummary}>
+              <span>
+                노드: {pool.nodeCount}
+                {pool.enableAutoScaling && ` (auto ${pool.minCount ?? 0}–${pool.maxCount ?? 0})`}
+              </span>
+            </div>
+            {/* Expanded: VMSS instances */}
+            {isExpanded && pool.vmssInstances && pool.vmssInstances.length > 0 && (
+              <VmssInstanceGrid instances={pool.vmssInstances} poolName={pool.name} />
+            )}
+            {isExpanded && (!pool.vmssInstances || pool.vmssInstances.length === 0) && (
+              <div className={styles.detailEmpty}>
+                VMSS 인스턴스 정보를 가져올 수 없습니다
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── VMSS Instance Grid (트리 형태 — AKS 노드풀 + VMSS 노드 공유) ──
+
+function VmssInstanceGrid({ instances, poolName }: { instances: AksVmssInstance[]; poolName?: string }) {
+  return (
+    <div className={styles.aksVmssInstanceList}>
+      {poolName && (
+        <div className={styles.aksInstanceTreeRoot}>
+          {poolName}
+        </div>
+      )}
+      {instances.map((inst, idx) => {
+        const isLast = idx === instances.length - 1;
+        return (
+          <div key={inst.instanceId} className={styles.aksInstanceTreeRow}>
+            <span className={styles.aksInstanceTreeBranch}>
+              {isLast ? "└" : "├"}
+            </span>
+            <span className={styles.aksVmssInstanceName}>
+              {inst.computerName || `instance-${inst.instanceId}`}
+            </span>
+            <span className={styles.aksVmssInstanceState} data-state={inst.powerState}>
+              {inst.powerState === "running" ? "●" : "○"} {inst.powerState}
+            </span>
+            <span className={styles.essentialsValueMono}>
+              {inst.privateIp ?? "-"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── 노출면 (Ingress / Egress) ──
+
+function AksExposureSection({ paths }: { paths: AksExposurePathInfo[] }) {
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+
+  const ingressPaths = paths.filter((p) => p.direction === "ingress");
+  const egressPaths = paths.filter((p) => p.direction === "egress");
+
+  const renderGroup = (groupPaths: AksExposurePathInfo[], dir: "ingress" | "egress") => (
+    <div className={styles.aksExposureGroup}>
+      <div className={styles.aksExposureGroupLabel}>{dir === "ingress" ? "Ingress" : "Egress"}</div>
+      {groupPaths.map((path, idx) => {
+        const key = `${dir}-${idx}`;
+        const isExp = expandedPath === key;
+        return (
+          <div key={key} className={styles.aksExposureCard}>
+            <button
+              type="button"
+              className={styles.aksExposureHeader}
+              onClick={() => setExpandedPath(isExp ? null : key)}
+            >
+              <span className={styles.aksExposureDirBadge} data-dir={dir}>
+                {dir === "ingress" ? "IN" : "OUT"}
+              </span>
+              <span className={styles.aksExposureLabel}>{path.label}</span>
+              <span className={styles.toggleChevron}>{isExp ? "\u25B2" : "\u25BC"}</span>
+            </button>
+            {isExp && (
+              <div className={styles.aksExposureResources}>
+                {path.resources.map((r, ri) => (
+                  <div key={ri} className={styles.aksExposureResRow}>
+                    <span className={styles.aksExposureRoleBadge}>
+                      {EXPOSURE_ROLE_ICON[r.role] ?? r.role}
+                    </span>
+                    <span>{r.name}</span>
+                    {r.endpoint && <span className={styles.essentialsValueMono}>{r.endpoint}</span>}
+                    {r.sku && <span className={styles.aksExposureSku}>{r.sku}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className={styles.detailSection}>
+      <div className={styles.detailSectionTitle}>노출면 (Ingress / Egress)</div>
+      {ingressPaths.length > 0 && renderGroup(ingressPaths, "ingress")}
+      {egressPaths.length > 0 && renderGroup(egressPaths, "egress")}
+      {paths.length === 0 && <div className={styles.detailEmpty}>경로 정보 없음</div>}
+    </div>
+  );
+}
+
+// ── AKS API Endpoint 노드 (접속면 카드, 캔버스 외부 노드 클릭 시) ──
+
+function AksApiEndpointSection({ nodeSpec }: { nodeSpec: DiagramNodeSpec }) {
+  const meta = nodeSpec.metadata ?? {};
+  const fqdn = meta.fqdn ?? "";
+  const isPrivate = meta.isPrivateCluster === "true";
+  const clusterName = meta.aksClusterName ?? "AKS Cluster";
+
+  return (
+    <div className={styles.aksPlaneContainer}>
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>접속면 (Control Plane)</div>
+        <div className={styles.essentialsList}>
+          <div className={styles.essentialsRow}>
+            <span className={styles.essentialsLabel}>클러스터</span>
+            <span className={styles.essentialsValue}>{clusterName}</span>
+          </div>
+          <div className={styles.aksApiServerRow}>
+            <span className={styles.essentialsLabel}>API 서버 FQDN</span>
+            <CopyableValue value={fqdn} className={styles.aksApiServerFqdn}>
+              {fqdn}
+            </CopyableValue>
+          </div>
+          <div className={styles.essentialsRow}>
+            <span className={styles.essentialsLabel}>접근 유형</span>
+            <span className={styles.essentialsValue}>
+              <span className={styles.aksAccessBadge} data-private={String(isPrivate)}>
+                {isPrivate ? "Private" : "Public"}
+              </span>
+            </span>
+          </div>
+          <div className={styles.essentialsRow}>
+            <span className={styles.essentialsLabel}>접속 경로</span>
+            <span className={styles.essentialsValue}>
+              {isPrivate ? "VNet / Private DNS → API Server" : "Internet → API Server"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AKS 전체 플레인 섹션 (AKS 노드 클릭 시) ──
+
+function AksPlaneDetailSection({
+  detail,
+  loading,
+}: {
+  detail: AksPlaneDetail | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>AKS 클러스터 정보</div>
+        <div className={styles.detailEmpty}>로딩 중...</div>
+      </div>
+    );
+  }
+  if (!detail) return null;
+
+  return (
+    <div className={styles.aksPlaneContainer}>
+      <AksEssentialsSection detail={detail} />
+      <AksNodePoolSection pools={detail.nodePools} />
+      <AksExposureSection paths={detail.exposurePaths} />
+    </div>
+  );
+}
+
+// ── AKS-VMSS 노드 클릭 시 (nodepool 상세 + 인스턴스 그리드) ──
+
+function AksVmssDetailSection({
+  nodeSpec,
+  instances,
+  loading,
+}: {
+  nodeSpec: DiagramNodeSpec;
+  instances: AksVmssInstance[];
+  loading: boolean;
+}) {
+  const meta = nodeSpec.metadata ?? {};
+  const poolName = meta.nodepoolName;
+  const poolMode = meta.nodepoolMode;
+  const vmSize = meta.nodepoolVmSize;
+  const nodeCount = meta.nodepoolCount;
+  const autoScale = meta.nodepoolAutoScale;
+  const powerState = meta.nodepoolPowerState;
+
+  if (!poolName) return null;
+
+  return (
+    <div className={styles.aksPlaneContainer}>
+      {/* Nodepool summary */}
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>Node Pool 정보</div>
+        <div className={styles.essentialsList}>
+          <div className={styles.essentialsRow}>
+            <span className={styles.essentialsLabel}>Pool 이름</span>
+            <span className={styles.essentialsValue}>
+              {poolMode && (
+                <span className={styles.aksPoolModeBadge} data-mode={poolMode}>
+                  {poolMode}
+                </span>
+              )}{" "}
+              {poolName}
+            </span>
+          </div>
+          {vmSize && (
+            <div className={styles.essentialsRow}>
+              <span className={styles.essentialsLabel}>VM 크기</span>
+              <span className={styles.essentialsValue}>{vmSize}</span>
+            </div>
+          )}
+          {nodeCount && (
+            <div className={styles.essentialsRow}>
+              <span className={styles.essentialsLabel}>노드 수</span>
+              <span className={styles.essentialsValue}>
+                {nodeCount}
+                {autoScale && ` (auto ${autoScale})`}
+              </span>
+            </div>
+          )}
+          {powerState && (
+            <div className={styles.essentialsRow}>
+              <span className={styles.essentialsLabel}>상태</span>
+              <span className={styles.essentialsValue}>
+                <span
+                  className={styles.aksPoolPowerDot}
+                  data-state={powerState.toLowerCase()}
+                  style={{ display: "inline-block", marginRight: 6, verticalAlign: "middle" }}
+                />
+                {powerState}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* VMSS Instances */}
+      <div className={styles.detailSection}>
+        <div className={styles.detailSectionTitle}>
+          VMSS Instances ({loading ? "..." : instances.length})
+        </div>
+        {loading ? (
+          <div className={styles.detailEmpty}>인스턴스 로딩 중...</div>
+        ) : instances.length > 0 ? (
+          <VmssInstanceGrid instances={instances} poolName={poolName} />
+        ) : (
+          <div className={styles.detailEmpty}>
+            인스턴스 정보를 가져올 수 없습니다
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ResourceDetailPanel({
   nodeSpec,
   liveNode,
@@ -409,6 +895,7 @@ export function ResourceDetailPanel({
   alertRules,
   connectedEdges,
   onClose,
+  vmssInstance,
 }: ResourceDetailPanelProps) {
   const { t } = useI18n();
   const [alertsOpen, setAlertsOpen] = useState(true);
@@ -416,6 +903,69 @@ export function ResourceDetailPanel({
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const { nsg: nsgDetail, loading: nsgLoading } = useNsgDetail(nodeSpec?.azureResourceId, nodeSpec?.resourceKind);
   const { pools: backendPools, loading: backendPoolLoading } = useBackendPool(nodeSpec?.azureResourceId, nodeSpec?.resourceKind);
+  const vmssArchRole = nodeSpec?.metadata?.archRole;
+  const { detail: aksPlaneDetail, loading: aksPlaneLoading } = useAksPlaneDetail(nodeSpec?.azureResourceId, nodeSpec?.resourceKind, vmssArchRole);
+  const { instances: vmssInstances, loading: vmssInstancesLoading } = useVmssInstances(nodeSpec?.azureResourceId, vmssArchRole);
+
+  // ── VMSS Instance detail (canvas instance node click) ──
+  if (!nodeSpec && vmssInstance) {
+    const instPowerInfo: Record<string, { color: string; label: string }> = {
+      running:     { color: "#10893e", label: "Running" },
+      starting:    { color: "#0078d4", label: "Starting" },
+      stopping:    { color: "#d18400", label: "Stopping" },
+      stopped:     { color: "#d18400", label: "Stopped" },
+      deallocated: { color: "#888",    label: "Deallocated" },
+      unknown:     { color: "#aaa",    label: "Unknown" },
+    };
+    const pInfo = instPowerInfo[vmssInstance.powerState] ?? instPowerInfo.unknown;
+    return (
+      <aside className={styles.detailPanel}>
+        <div className={styles.detailHeader}>
+          <div className={styles.detailHeaderLeft}>
+            <img src={getAzureIconUrl("vm")} alt="vm" width={22} height={22} />
+            <div>
+              <div className={styles.detailTitle}>{vmssInstance.computerName}</div>
+              <div className={styles.detailSubtitle}>VM Instance (VMSS)</div>
+            </div>
+          </div>
+          <button className={styles.detailClose} onClick={onClose} type="button">×</button>
+        </div>
+        <div className={styles.detailBody}>
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionTitle}>인스턴스 상태</div>
+            <div className={styles.essentialsList}>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>Power State</span>
+                <span className={styles.essentialsValue} style={{ color: pInfo.color, fontWeight: 700 }}>
+                  {pInfo.label}
+                </span>
+              </div>
+              {vmssInstance.privateIp && (
+                <div className={styles.essentialsRow}>
+                  <span className={styles.essentialsLabel}>Private IP</span>
+                  <span className={styles.essentialsValue} style={{ fontFamily: "monospace" }}>
+                    {vmssInstance.privateIp}
+                  </span>
+                </div>
+              )}
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>Computer Name</span>
+                <span className={styles.essentialsValue} style={{ fontFamily: "monospace", fontSize: 11 }}>
+                  {vmssInstance.computerName}
+                </span>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>Parent VMSS</span>
+                <span className={styles.essentialsValue} style={{ fontSize: 10, color: "var(--muted)" }}>
+                  {vmssInstance.parentVmssId.split("/").pop()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   if (!nodeSpec) return null;
 
@@ -468,6 +1018,7 @@ export function ResourceDetailPanel({
       {/* Body */}
       <div className={styles.detailBody}>
         {/* ── Essentials (Azure Portal style) ── */}
+        {/* For AKS nodes: minimal essentials (kind, location, RG, azureId) — real info comes from AksPlaneDetail */}
         <div className={styles.detailSection}>
           <div className={styles.detailSectionTitle}>{t("detail.essentials")}</div>
           <div className={styles.essentialsList}>
@@ -479,7 +1030,8 @@ export function ResourceDetailPanel({
                 </CopyableValue>
               </div>
             )}
-            {!HIDE_STATUS_KINDS.has(nodeSpec.resourceKind ?? "") && (
+            {/* AKS/VMSS: skip generic status — shown in plane detail */}
+            {!HIDE_STATUS_KINDS.has(nodeSpec.resourceKind ?? "") && nodeSpec.resourceKind !== "aks" && vmssArchRole !== "aks-vmss" && (
               <div className={styles.essentialsRow}>
                 <span className={styles.essentialsLabel}>{t("detail.status")}</span>
                 <span className={styles.essentialsValue}>
@@ -512,7 +1064,8 @@ export function ResourceDetailPanel({
                 </CopyableValue>
               </div>
             )}
-            {nodeSpec.endpoint && (
+            {/* AKS: skip generic endpoint — shown better in AksEssentials */}
+            {nodeSpec.endpoint && nodeSpec.resourceKind !== "aks" && (
               <div className={styles.essentialsRow}>
                 <span className={styles.essentialsLabel}>{t("detail.endpoint")}</span>
                 <CopyableValue value={nodeSpec.endpoint} className={styles.essentialsValueMono}>
@@ -584,6 +1137,25 @@ export function ResourceDetailPanel({
         {/* Backend Pool (shown for LB / Application Gateway nodes) */}
         {(nodeSpec.resourceKind === "lb" || nodeSpec.resourceKind === "appGateway") && (
           <BackendPoolSection pools={backendPools} loading={backendPoolLoading} />
+        )}
+
+        {/* AKS API Endpoint (접속면 외부 노드) */}
+        {nodeSpec.resourceKind === "aks" && vmssArchRole === "aks-control-plane" && (
+          <AksApiEndpointSection nodeSpec={nodeSpec} />
+        )}
+
+        {/* AKS 3-Plane Detail (접속면 / 실행면 / 노출면) — only for real AKS cluster nodes */}
+        {nodeSpec.resourceKind === "aks" && vmssArchRole !== "aks-control-plane" && (
+          <AksPlaneDetailSection detail={aksPlaneDetail} loading={aksPlaneLoading} />
+        )}
+
+        {/* AKS-owned VMSS — Nodepool detail + Instance grid */}
+        {vmssArchRole === "aks-vmss" && nodeSpec.resourceKind === "vmss" && (
+          <AksVmssDetailSection
+            nodeSpec={nodeSpec}
+            instances={vmssInstances}
+            loading={vmssInstancesLoading}
+          />
         )}
 
         {/* Tags */}

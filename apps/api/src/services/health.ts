@@ -46,20 +46,22 @@ type ArmAvailabilityStatusPage = {
 const MAX_PAGINATION_PAGES = 20;
 
 /** Overall timeout for the entire health summary operation (ms).
- *  Individual ARM calls may take up to 30s, so 45s gives room for
- *  token acquisition + at least one full pagination round-trip. */
-const HEALTH_SUMMARY_TIMEOUT_MS = 45_000;
+ *  Individual ARM calls may take up to 60s for large subscriptions. */
+const HEALTH_SUMMARY_TIMEOUT_MS = 90_000;
 
 /**
  * Fetch all availability statuses for a subscription, following nextLink pagination.
  */
+/** Per-page timeout for health ARM calls (60s — larger responses need more time). */
+const HEALTH_PAGE_TIMEOUT_MS = 60_000;
+
 async function fetchAllAvailabilityStatuses(
-  fetcher: { fetchJson: <T>(url: string) => Promise<T> },
+  fetcher: { armToken: string },
   subId: string,
 ): Promise<ArmAvailabilityStatus[]> {
   const all: ArmAvailabilityStatus[] = [];
   let url: string | undefined =
-    `https://management.azure.com/subscriptions/${subId}/providers/Microsoft.ResourceHealth/availabilityStatuses?api-version=2024-02-01`;
+    `https://management.azure.com/subscriptions/${subId}/providers/Microsoft.ResourceHealth/availabilityStatuses?api-version=2024-02-01&$top=200`;
   let page_count = 0;
 
   while (url) {
@@ -68,9 +70,20 @@ async function fetchAllAvailabilityStatuses(
       break;
     }
     const currentUrl: string = url;
-    const page: ArmAvailabilityStatusPage = await fetcher.fetchJson<ArmAvailabilityStatusPage>(currentUrl);
-    all.push(...(page.value ?? []));
-    url = page.nextLink;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HEALTH_PAGE_TIMEOUT_MS);
+    try {
+      const res = await fetch(currentUrl, {
+        headers: { Authorization: `Bearer ${fetcher.armToken}`, "Content-Type": "application/json" },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`ARM ${res.status}: ${await res.text()}`);
+      const page = (await res.json()) as ArmAvailabilityStatusPage;
+      all.push(...(page.value ?? []));
+      url = page.nextLink;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   return all;
 }
