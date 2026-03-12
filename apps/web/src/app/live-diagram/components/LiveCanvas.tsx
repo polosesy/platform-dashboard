@@ -534,11 +534,11 @@ function LiveCanvasInner({
         });
       }
 
-      if (mode === "overview") {
-        rf.fitView({ padding: 0.15, duration: 400 });
-      } else if (bounds) {
-        // multi-focus: use pre-computed centered bounds — bypasses stale DOM measurements
+      if (bounds) {
+        // overview/multi-focus: use pre-computed centered bounds — bypasses stale DOM measurements
         rf.fitBounds(bounds, { padding: 0.2, duration: 400 });
+      } else if (mode === "overview") {
+        rf.fitView({ padding: 0.15, duration: 400 });
       } else {
         // single-focus: fitView with explicit node IDs
         rf.fitView({
@@ -599,7 +599,7 @@ function LiveCanvasInner({
     };
     let compactPlan: CompactPlan | null = null;
 
-    if (mode === "multi-focus" && topGroupsFromSpec.length > 1) {
+    if ((mode === "multi-focus" || mode === "overview") && topGroupsFromSpec.length > 1) {
       const sorted = [...topGroupsFromSpec].sort(
         (a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0),
       );
@@ -644,7 +644,7 @@ function LiveCanvasInner({
     // that same delta to any external node reachable via edge traversal from the subgraph.
     let externalDeltaPos: Map<string, { x: number; y: number }> | null = null;
 
-    if (mode === "multi-focus" && compactPlan) {
+    if ((mode === "multi-focus" || mode === "overview") && compactPlan) {
       const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
       const topGroupIdSet = new Set(topGroupsFromSpec.map((n) => n.id));
 

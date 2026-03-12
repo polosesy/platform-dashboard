@@ -683,8 +683,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 220px;
 }
 
 .groupNodeSubtitle {

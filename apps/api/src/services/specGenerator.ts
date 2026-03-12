@@ -1747,7 +1747,7 @@ export async function generateDiagramSpec(
     // ── Build PE → PaaS target mapping ──
     // privateLink edges: PE → target PaaS resource
     const peTargetMap = new Map<string, string>(); // PE origId → PaaS origId
-    const paasToSubnetPos = new Map<string, { subnetX: number; vnetX: number }>(); // PaaS shortId → position hint
+    const paasToSubnetPos = new Map<string, { subnetX: number; vnetX: number; vnetShortId: string }>(); // PaaS shortId → position hint
     for (const edge of graph.edges) {
       if (edge.kind !== "privateLink") continue;
       const srcKind = nodeKindLookup.get(edge.source);
@@ -1776,7 +1776,7 @@ export async function generateDiagramSpec(
 
       // Compute absolute X position of the subnet
       const subnetAbsX = (vnetSpec.position?.x ?? 0) + (subnetSpec.position?.x ?? 0);
-      paasToSubnetPos.set(paasShortId, { subnetX: subnetAbsX, vnetX: vnetSpec.position?.x ?? 0 });
+      paasToSubnetPos.set(paasShortId, { subnetX: subnetAbsX, vnetX: vnetSpec.position?.x ?? 0, vnetShortId: vnetSpec.id });
     }
 
     // Split external resources: PE-connected PaaS vs others
@@ -1791,29 +1791,60 @@ export async function generateDiagramSpec(
       }
     }
 
-    // Place PE-connected PaaS near their PE's subnet (aligned horizontally)
+    // Place PE-connected PaaS BELOW their associated VNet (not in global grid)
     if (peConnectedPaaS.length > 0) {
-      console.log(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned near their PE subnet`);
-      // Group by approximate X position to avoid overlaps
-      const placed = new Set<string>();
-      const usedPositions: Array<{ x: number; y: number }> = [];
+      console.log(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned below their VNet`);
 
+      // Group PaaS resources by VNet short ID
+      const paasByVnet = new Map<string, Array<{ res: ArchitectureNode; sid: string }>>();
+      const unassocPaaS: Array<{ res: ArchitectureNode; sid: string }> = [];
       for (const res of peConnectedPaaS) {
         const sid = idMap.get(res.id)!;
         const posHint = paasToSubnetPos.get(sid)!;
-        let targetX = posHint.subnetX;
-        let targetY = cursorY;
-
-        // Avoid overlaps with previously placed PaaS nodes
-        for (const used of usedPositions) {
-          if (Math.abs(targetX - used.x) < NODE_W + NODE_GAP && Math.abs(targetY - used.y) < NODE_H + NODE_GAP) {
-            targetX = used.x + NODE_W + NODE_GAP + 20;
-          }
+        if (posHint.vnetShortId) {
+          const arr = paasByVnet.get(posHint.vnetShortId) ?? [];
+          arr.push({ res, sid });
+          paasByVnet.set(posHint.vnetShortId, arr);
+        } else {
+          unassocPaaS.push({ res, sid });
         }
+      }
 
-        usedPositions.push({ x: targetX, y: targetY });
-        placed.add(sid);
+      // Place each VNet's PaaS group directly below that VNet
+      for (const [vnetShortId, paasGroup] of paasByVnet) {
+        const vnetSpec = diagramNodes.find(n => n.id === vnetShortId);
+        if (!vnetSpec) continue;
+        const baseX = vnetSpec.position?.x ?? 40;
+        const baseY = (vnetSpec.position?.y ?? 0) + (vnetSpec.height ?? 300) + EXTERNAL_GAP;
 
+        paasGroup.forEach(({ res, sid }, i) => {
+          const col = i % 4;
+          const row = Math.floor(i / 4);
+          const peArchMeta = archMetaMap.get(res.id);
+          diagramNodes.push({
+            id: sid,
+            label: res.name,
+            icon: KIND_TO_ICON[res.kind] ?? "custom",
+            azureResourceId: res.azureId,
+            endpoint: res.endpoint,
+            groupId: inferGroup(res),
+            resourceKind: res.kind,
+            location: res.location,
+            resourceGroup: res.resourceGroup,
+            tags: res.tags,
+            position: { x: baseX + col * (NODE_W + NODE_GAP), y: baseY + row * (NODE_H + NODE_GAP) },
+            bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+            subResources: collectSubResources(res.id),
+            metadata: peArchMeta ? { archRole: peArchMeta.archRole, archGroupId: peArchMeta.archGroupId, flowHint: peArchMeta.flowHint } : undefined,
+          });
+        });
+      }
+
+      // Unassociated PaaS: fall back to global cursorY grid
+      for (let i = 0; i < unassocPaaS.length; i++) {
+        const { res, sid } = unassocPaaS[i]!;
+        const col = i % 5;
+        const row = Math.floor(i / 5);
         const peArchMeta = archMetaMap.get(res.id);
         diagramNodes.push({
           id: sid,
@@ -1826,15 +1857,13 @@ export async function generateDiagramSpec(
           location: res.location,
           resourceGroup: res.resourceGroup,
           tags: res.tags,
-          position: { x: targetX, y: targetY },
+          position: { x: 40 + col * (NODE_W + NODE_GAP + 20), y: cursorY + row * (NODE_H + NODE_GAP) },
           bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
           subResources: collectSubResources(res.id),
           metadata: peArchMeta ? { archRole: peArchMeta.archRole, archGroupId: peArchMeta.archGroupId, flowHint: peArchMeta.flowHint } : undefined,
         });
       }
-
-      // Advance cursor past PE-connected PaaS row
-      cursorY += NODE_H + EXTERNAL_GAP;
+      if (unassocPaaS.length > 0) cursorY += NODE_H + EXTERNAL_GAP;
     }
 
     // Place remaining external resources in a flat row

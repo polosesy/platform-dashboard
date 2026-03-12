@@ -352,6 +352,41 @@ export default function LiveDiagramPage() {
     return [...new Set(spec.nodes.map((n) => n.location).filter(Boolean))] as string[];
   }, [spec]);
 
+  // ── Auto-select primary VNet on new spec load ──
+  // Fires when spec object reference changes (new Generate), not on filter changes.
+  // Picks the VNet with the most descendant nodes for the best initial focused view.
+  useEffect(() => {
+    if (!spec) return;
+    const vnets = spec.nodes.filter((n) => n.nodeType === "group" && n.icon === "vnet");
+    if (vnets.length === 0) return;
+
+    // Count all descendants per VNet (walk parentId chain up to root)
+    const vnetDescendantCount = new Map<string, number>(vnets.map((v) => [v.id, 0]));
+    for (const node of spec.nodes) {
+      if (!node.parentId) continue;
+      // Walk up to find root VNet
+      let cur = node;
+      while (cur.parentId) {
+        const parent = spec.nodes.find((p) => p.id === cur.parentId);
+        if (!parent) break;
+        cur = parent;
+      }
+      if (cur.nodeType === "group" && cur.icon === "vnet") {
+        vnetDescendantCount.set(cur.id, (vnetDescendantCount.get(cur.id) ?? 0) + 1);
+      }
+    }
+
+    // Select the VNet with the most resources (fall back to first)
+    let primaryId = vnets[0]!.id;
+    let maxCount = vnetDescendantCount.get(primaryId) ?? 0;
+    for (const vnet of vnets) {
+      const count = vnetDescendantCount.get(vnet.id) ?? 0;
+      if (count > maxCount) { maxCount = count; primaryId = vnet.id; }
+    }
+    setSelectedVnets(new Set([primaryId]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec]); // Re-run only when spec object changes (new Generate)
+
   // ── Filtered spec (VNet + Region — multi-select) ──
   const filteredSpec = useMemo(() => {
     if (!spec) return spec;
