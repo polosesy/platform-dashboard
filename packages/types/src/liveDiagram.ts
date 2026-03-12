@@ -68,6 +68,7 @@ export type ArchRole =
   | "aks-cluster" | "aks-nodepool" | "aks-vmss"
   | "aks-ingress" | "aks-egress"
   | "aks-control-plane" | "aks-nat-gateway"
+  | "nat-gateway"
   | "vm" | "vmss" | "db" | "cache"
   | "private-endpoint" | "gateway" | "load-balancer"
   | "firewall" | "waf" | "messaging"
@@ -81,8 +82,10 @@ export type DiagramEdgeKind =
   | "routes"
   | "logging"
   | "inferred"
-  | "attached-to"  // Subnet → NIC
-  | "bound-to";    // NIC → VM
+  | "attached-to"        // Subnet → NIC
+  | "bound-to"           // NIC → VM
+  | "outbound-internet"  // Resource → Internet (NAT GW / LB SNAT / PIP / default)
+  | "natgw-association"; // Subnet → NAT GW (visible when NAT GW card is expanded)
 
 export type DiagramEdgeSpec = {
   id: string;
@@ -289,6 +292,8 @@ export type DiagramIconKind =
   | "privateEndpoint" | "dns" | "firewall" | "waf"
   | "functionApp" | "appService" | "serviceBus" | "eventHub"
   | "publicIP"
+  | "natGateway"
+  | "internet"
   | "custom";
 
 // ────────────────────────────────────────────
@@ -512,6 +517,7 @@ export type AksNodePoolInfo = {
   osType: string;
   osSKU?: string;
   orchestratorVersion?: string;
+  nodeImageVersion?: string;       // e.g. "AKSUbuntu-2204gen2containerd-202402.12.0"
   powerState: string;              // "Running" | "Stopped"
   provisioningState: string;
   availabilityZones?: string[];
@@ -521,6 +527,14 @@ export type AksNodePoolInfo = {
   vmssInstances?: AksVmssInstance[];
 };
 
+/** Kubernetes node condition (from K8s Node API) */
+export type AksNodeCondition = {
+  type: string;                    // "Ready" | "MemoryPressure" | "DiskPressure" | "PIDPressure" | "NetworkUnavailable"
+  status: "True" | "False" | "Unknown";
+  reason?: string;
+  message?: string;
+};
+
 /** VMSS Instance (실행면 확장 시 표시) */
 export type AksVmssInstance = {
   instanceId: string;
@@ -528,6 +542,9 @@ export type AksVmssInstance = {
   provisioningState: string;
   powerState: string;              // "running" | "stopped" | "deallocated"
   privateIp?: string;
+  nodePoolName?: string;           // Parent node pool name
+  nodeImageVersion?: string;       // From K8s label or parent pool
+  conditions?: AksNodeCondition[]; // K8s node conditions (Ready, MemoryPressure, etc.)
 };
 
 /** 노출면 — Ingress / Egress flow path */

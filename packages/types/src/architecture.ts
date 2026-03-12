@@ -31,6 +31,7 @@ export type GraphNodeKind =
   | "eventHub"
   | "dns"
   | "publicIP"
+  | "natGateway"
   | "unknown";
 
 export type EdgeKind =

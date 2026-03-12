@@ -17,6 +17,7 @@ import type {
   AksNodePoolInfo,
   AksExposurePathInfo,
   AksVmssInstance,
+  AksNodeCondition,
 } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
 import { getAzureIconUrl } from "../utils/azureIcons";
@@ -37,7 +38,11 @@ type ConnectedEdge = {
 type VmssInstancePanelData = {
   computerName: string;
   powerState: string;
+  provisioningState?: string;
   privateIp?: string;
+  nodePoolName?: string;
+  nodeImageVersion?: string;
+  conditions?: AksNodeCondition[];
   parentVmssId: string;
   label: string;
 };
@@ -87,6 +92,8 @@ export const RESOURCE_KIND_DISPLAY: Record<string, string> = {
   appService: "App Service",
   serviceBus: "Service Bus",
   eventHub: "Event Hub",
+  natGateway: "NAT Gateway",
+  publicIP: "Public IP Address",
 };
 
 const POWER_STATE_LABEL: Record<PowerState, string> = {
@@ -906,60 +913,153 @@ export function ResourceDetailPanel({
   const vmssArchRole = nodeSpec?.metadata?.archRole;
   const { detail: aksPlaneDetail, loading: aksPlaneLoading } = useAksPlaneDetail(nodeSpec?.azureResourceId, nodeSpec?.resourceKind, vmssArchRole);
   const { instances: vmssInstances, loading: vmssInstancesLoading } = useVmssInstances(nodeSpec?.azureResourceId, vmssArchRole);
+  const nodeOutboundType = nodeSpec?.metadata?.outboundType;
 
   // ── VMSS Instance detail (canvas instance node click) ──
   if (!nodeSpec && vmssInstance) {
-    const instPowerInfo: Record<string, { color: string; label: string }> = {
-      running:     { color: "#10893e", label: "Running" },
-      starting:    { color: "#0078d4", label: "Starting" },
-      stopping:    { color: "#d18400", label: "Stopping" },
-      stopped:     { color: "#d18400", label: "Stopped" },
-      deallocated: { color: "#888",    label: "Deallocated" },
-      unknown:     { color: "#aaa",    label: "Unknown" },
+    const INST_POWER_COLOR: Record<string, string> = {
+      running: "rgba(16,137,62,0.85)", starting: "rgba(0,120,212,0.85)",
+      stopping: "rgba(209,132,0,0.85)", stopped: "rgba(209,132,0,0.85)",
+      deallocated: "rgba(20,21,23,0.45)", unknown: "rgba(20,21,23,0.35)",
     };
-    const pInfo = instPowerInfo[vmssInstance.powerState] ?? instPowerInfo.unknown;
+    const dotColor = INST_POWER_COLOR[vmssInstance.powerState] ?? INST_POWER_COLOR.unknown;
+    // Node pool name: prefer explicit nodePoolName, fall back to parsing parentVmssId
+    const poolName = vmssInstance.nodePoolName
+      ?? vmssInstance.parentVmssId.split("/").pop()?.replace(/^aks-/, "").replace(/-[0-9a-f]+-vmss$/i, "")
+      ?? vmssInstance.parentVmssId;
+    const PROVISIONING_LABEL: Record<string, string> = {
+      Succeeded: "준비됨", Creating: "생성 중", Updating: "업데이트 중",
+      Deleting: "삭제 중", Failed: "실패",
+    };
+    const provLabel = vmssInstance.provisioningState
+      ? (PROVISIONING_LABEL[vmssInstance.provisioningState] ?? vmssInstance.provisioningState)
+      : "준비됨";
+    // K8s conditions (from real K8s Node API), or fall back to ARM-derived estimate
+    const k8sConditions = vmssInstance.conditions;
+    const conditionMap = k8sConditions
+      ? Object.fromEntries(k8sConditions.map((c) => [c.type, c]))
+      : null;
+
     return (
       <aside className={styles.detailPanel}>
         <div className={styles.detailHeader}>
-          <div className={styles.detailHeaderLeft}>
-            <img src={getAzureIconUrl("vm")} alt="vm" width={22} height={22} />
-            <div>
-              <div className={styles.detailTitle}>{vmssInstance.computerName}</div>
-              <div className={styles.detailSubtitle}>VM Instance (VMSS)</div>
-            </div>
+          <img src={getAzureIconUrl("vm")} alt="vm" className={styles.detailHeaderIcon} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span className={styles.detailHeaderName}>{vmssInstance.computerName}</span>
+            <div className={styles.detailHeaderSubtitle}>AKS 노드 (VM Instance)</div>
           </div>
-          <button className={styles.detailClose} onClick={onClose} type="button">×</button>
+          <div className={styles.detailHealthDot} style={{ background: dotColor }} title={vmssInstance.powerState} />
+          <button className={styles.detailCloseBtn} onClick={onClose} type="button" aria-label="Close">&times;</button>
         </div>
         <div className={styles.detailBody}>
+          {/* 필수 항목 — Azure portal 개요 기준 */}
           <div className={styles.detailSection}>
-            <div className={styles.detailSectionTitle}>인스턴스 상태</div>
+            <div className={styles.detailSectionTitle}>필수</div>
             <div className={styles.essentialsList}>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>Power State</span>
-                <span className={styles.essentialsValue} style={{ color: pInfo.color, fontWeight: 700 }}>
-                  {pInfo.label}
-                </span>
-              </div>
-              {vmssInstance.privateIp && (
-                <div className={styles.essentialsRow}>
-                  <span className={styles.essentialsLabel}>Private IP</span>
-                  <span className={styles.essentialsValue} style={{ fontFamily: "monospace" }}>
-                    {vmssInstance.privateIp}
+                <span className={styles.essentialsLabel}>상태</span>
+                <div>
+                  <span className={styles.powerStateBadgeDetail} data-state={vmssInstance.powerState}>
+                    {POWER_STATE_LABEL[vmssInstance.powerState as PowerState] ?? vmssInstance.powerState}
                   </span>
                 </div>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>프로비저닝 상태</span>
+                <span className={styles.essentialsValue}>{provLabel}</span>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>노드 풀</span>
+                <span className={styles.essentialsValue}>{poolName}</span>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>내부 IP</span>
+                <span className={styles.essentialsValueMono}>
+                  {vmssInstance.privateIp ?? "—"}
+                </span>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>외부 IP</span>
+                <span className={styles.essentialsValue}>해당 없음</span>
+              </div>
+              <div className={styles.essentialsRow}>
+                <span className={styles.essentialsLabel}>호스트 이름</span>
+                <span className={styles.essentialsValueMono}>{vmssInstance.computerName}</span>
+              </div>
+              {vmssInstance.nodeImageVersion && (
+                <div className={styles.essentialsRow}>
+                  <span className={styles.essentialsLabel}>노드 이미지 버전</span>
+                  <span className={styles.essentialsValueMono}>{vmssInstance.nodeImageVersion}</span>
+                </div>
               )}
-              <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>Computer Name</span>
-                <span className={styles.essentialsValue} style={{ fontFamily: "monospace", fontSize: 11 }}>
-                  {vmssInstance.computerName}
-                </span>
-              </div>
-              <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>Parent VMSS</span>
-                <span className={styles.essentialsValue} style={{ fontSize: 10, color: "var(--muted)" }}>
-                  {vmssInstance.parentVmssId.split("/").pop()}
-                </span>
-              </div>
+              {(() => {
+                const outboundType = nodeOutboundType;
+                if (!outboundType) return null;
+                const OUTBOUND_LABEL: Record<string, { label: string; badge: string }> = {
+                  loadBalancer:            { label: "Load Balancer (SNAT)",      badge: "lb" },
+                  userDefinedRouting:      { label: "UDR / 방화벽 (사용자 정의)", badge: "udr" },
+                  managedNATGateway:       { label: "NAT Gateway (관리형)",       badge: "nat" },
+                  userAssignedNATGateway:  { label: "NAT Gateway (사용자 지정)",  badge: "nat" },
+                };
+                const info = OUTBOUND_LABEL[outboundType];
+                return (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>아웃바운드</span>
+                    <span
+                      className={styles.outboundTypeBadge}
+                      data-outbound={info?.badge ?? "other"}
+                      title={`AKS outboundType: ${outboundType}`}
+                    >
+                      {info?.label ?? outboundType}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+          {/* 조건 — K8s Node API 기반 (없으면 ARM 추정) */}
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionTitle}>조건</div>
+            <div className={styles.essentialsList}>
+              {(["Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"] as const).map((type) => {
+                const CONDITION_LABEL: Record<string, string> = {
+                  Ready: "준비 상태", MemoryPressure: "메모리 압력",
+                  DiskPressure: "디스크 압력", PIDPressure: "PID 압력",
+                  NetworkUnavailable: "네트워크 불가",
+                };
+                if (conditionMap) {
+                  const c = conditionMap[type];
+                  // Ready=True is good; pressure/unavailable=False is good
+                  const isNormal = type === "Ready" ? c?.status === "True" : c?.status === "False";
+                  const condAttr = !c ? "unknown" : isNormal ? "true" : "false";
+                  const label = !c ? "알 수 없음" : isNormal ? "정상" : "비정상";
+                  return (
+                    <div key={type} className={styles.essentialsRow}>
+                      <span className={styles.essentialsLabel}>{CONDITION_LABEL[type]}</span>
+                      <div>
+                        <span className={styles.nodeConditionBadge} data-condition={condAttr} title={c?.message}>
+                          {label}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                // Fallback: ARM-derived estimate (no K8s data)
+                // Running+Succeeded node = all standard conditions assumed normal
+                const armReady = vmssInstance.powerState === "running" && vmssInstance.provisioningState === "Succeeded";
+                const condAttr = armReady ? "true" : (type === "Ready" ? "false" : "unknown");
+                const label = armReady ? "정상" : (type === "Ready" ? "비정상" : "알 수 없음");
+                return (
+                  <div key={type} className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{CONDITION_LABEL[type]}</span>
+                    <div>
+                      <span className={styles.nodeConditionBadge} data-condition={condAttr}>
+                        {label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

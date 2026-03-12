@@ -136,6 +136,7 @@ function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind
   if (t === "microsoft.eventhub/namespaces") return "eventHub";
   if (t === "microsoft.network/dnszones" || t === "microsoft.network/privatednszones") return "dns";
   if (t === "microsoft.network/publicipaddresses") return "publicIP";
+  if (t === "microsoft.network/natgateways") return "natGateway";
   if (t === "microsoft.web/sites") {
     const k = (resourceKind ?? "").toLowerCase();
     return k.includes("functionapp") ? "functionApp" : "appService";
@@ -253,6 +254,13 @@ function extractEndpoint(type: string | undefined, name: string | undefined, pro
   // Public IP address — ipAddress
   if (t === "microsoft.network/publicipaddresses") {
     return safeString(p.ipAddress);
+  }
+
+  // NAT Gateway — resolve first attached public IP address via publicIpAddresses[0].id
+  // (actual IP lookup is done in post-processing via publicIpById map)
+  if (t === "microsoft.network/natgateways") {
+    const pips = (p.publicIpAddresses ?? []) as Array<{ id?: string }>;
+    return safeId(pips[0]?.id);
   }
 
   // Container App — configuration.ingress.fqdn or latestRevisionFqdn
@@ -637,7 +645,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     "'microsoft.web/sites'," +
     "'microsoft.servicebus/namespaces'," +
     "'microsoft.eventhub/namespaces'," +
-    "'microsoft.network/publicipaddresses'" +
+    "'microsoft.network/publicipaddresses'," +
+    "'microsoft.network/natgateways'" +
     ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
   // Query 4: Diagnostic Settings (separate resource type)
@@ -739,6 +748,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const props = (r.properties ?? {}) as Record<string, unknown>;
       const ipConfig = props.ipConfiguration as Record<string, unknown> | undefined;
       if (ipConfig?.id) nodeMetadata.absorbed = true;
+    }
+
+    // Subnet — store defaultOutboundAccess for outbound flow visualization
+    if (kind === "subnet") {
+      const props = (r.properties ?? {}) as Record<string, unknown>;
+      if (props.defaultOutboundAccess != null) {
+        nodeMetadata.defaultOutboundAccess = String(props.defaultOutboundAccess);
+      }
     }
 
     // AKS — store rich metadata for 3-plane diagram (접속면/실행면/노출면)
@@ -864,6 +881,49 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (pubIp) node.metadata = { ...node.metadata, publicIP: pubIp };
   }
 
+  // NAT Gateway: resolve actual public IP from publicIpById, then create subnet→natGateway edges
+  for (const node of nodes) {
+    if (node.kind !== "natGateway") continue;
+    const r = resourceById.get(node.id);
+    if (!r) continue;
+    const props = (r.properties ?? {}) as Record<string, unknown>;
+
+    // Resolve the first public IP address from the attached publicIpAddresses list
+    const pips = (props.publicIpAddresses ?? []) as Array<{ id?: string }>;
+    if (pips.length > 0) {
+      const pipId = safeId(pips[0]?.id);
+      const resolvedIp = pipId ? safeString(publicIpById.get(pipId)?.ipAddress) : undefined;
+      if (resolvedIp) node.endpoint = resolvedIp;
+      // Store pip count as metadata
+      node.metadata = { ...node.metadata, publicIpCount: pips.length };
+    }
+
+    // Create subnet → natGateway edges for each subnet attached to this NAT GW
+    const attachedSubnets = (props.subnets ?? []) as Array<{ id?: string }>;
+    for (const sub of attachedSubnets) {
+      const subnetId = safeId(sub.id);
+      if (!subnetId) continue;
+      edges.push({
+        id: `e:subnet->natgw:${subnetId}:${node.id}`,
+        source: subnetId,
+        target: node.id,
+        kind: "network",
+      });
+    }
+
+    // Create natGateway → publicIP edges (pip becomes sub-resource in diagram)
+    for (const pip of pips) {
+      const pipId = safeId(pip.id);
+      if (!pipId) continue;
+      edges.push({
+        id: `e:natgw->pip:${node.id}:${pipId}`,
+        source: node.id,
+        target: pipId,
+        kind: "network",
+      });
+    }
+  }
+
   // ── Ensure subnets are in the graph ──
   // Azure Resource Graph may not always return subnets as separate resources.
   // Extract subnets from VNet properties as a fallback.
@@ -897,6 +957,11 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           properties: subProps,
         };
         resourceById.set(subId, subRow);
+        const subPropsObj = subProps as Record<string, unknown> | undefined;
+        const subMeta: Record<string, unknown> = {};
+        if (subPropsObj?.defaultOutboundAccess != null) {
+          subMeta.defaultOutboundAccess = String(subPropsObj.defaultOutboundAccess);
+        }
         nodes.push({
           id: subId,
           kind: "subnet",
@@ -906,6 +971,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           endpoint,
           resourceGroup: r.resourceGroup,
           health: "unknown",
+          ...(Object.keys(subMeta).length > 0 ? { metadata: subMeta } : {}),
         });
       }
 

@@ -34,8 +34,9 @@ export type LiveNodeData = {
   archGroupId?: string;
   nsgBadge?: NsgBadgeInfo;
   onNsgSelect?: (nodeId: string) => void;
+  aksClusterArmId?: string;
   vmssExpanded?: boolean;
-  onVmssExpand?: (nodeId: string, azureResourceId: string) => void;
+  onVmssExpand?: (nodeId: string, azureResourceId: string, aksClusterArmId?: string) => void;
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -74,7 +75,7 @@ const RESOURCE_TYPE_ABBR: Record<string, string> = {
   storage: "Storage", redis: "Redis", cosmosDb: "Cosmos",
   postgres: "PgSQL", keyVault: "KV", appGateway: "App GW",
   lb: "LB", frontDoor: "AFD", trafficManager: "TM",
-  firewall: "FW", appInsights: "App Insights", logAnalytics: "Log Analytics",
+  firewall: "FW", natGateway: "NAT GW", appInsights: "App Insights", logAnalytics: "Log Analytics",
   nic: "NIC", nsg: "NSG", dns: "DNS", privateEndpoint: "PE",
   serviceBus: "Service Bus", eventHub: "Event Hub",
 };
@@ -92,10 +93,11 @@ const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
   "cache":            { abbr: "Cache", label: "Cache (Redis)" },
   "private-endpoint": { abbr: "PE",   label: "Private Endpoint" },
   "messaging":        { abbr: "Msg",  label: "Messaging Service" },
+  "nat-gateway":      { abbr: "NAT",  label: "NAT Gateway (명시적 아웃바운드)" },
 };
 
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, vmssExpanded, onVmssExpand } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
@@ -273,7 +275,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         <button
           type="button"
           className={styles.vmssExpandBtn}
-          onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId); }}
+          onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId, aksClusterArmId); }}
         >
           {vmssExpanded ? "▲ 접기" : "▼ 인스턴스 보기"}
         </button>

@@ -259,9 +259,10 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
   // ── VMSS Instances (for AKS nodepool VMSS, 60s cached) ──
   router.get("/api/live/vmss-instances", (req: Request, res: Response) => {
     const resourceId = typeof req.query.resourceId === "string" ? req.query.resourceId : "";
+    const aksClusterId = typeof req.query.aksClusterId === "string" ? req.query.aksClusterId : undefined;
     if (!resourceId) return void res.status(400).json({ error: "resourceId_required" });
 
-    fetchVmssInstances(env, req.auth?.bearerToken, resourceId)
+    fetchVmssInstances(env, req.auth?.bearerToken, resourceId, aksClusterId)
       .then((instances) => res.json({ instances }))
       .catch((e: unknown) => {
         res.status(500).json({ error: e instanceof Error ? e.message : "vmss_instances_error" });

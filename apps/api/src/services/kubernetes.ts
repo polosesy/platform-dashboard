@@ -5,6 +5,7 @@ import type {
   KubernetesClustersResponse,
   KubernetesObject,
   KubernetesClusterOverview,
+  AksNodeCondition,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -16,6 +17,14 @@ import { getArmFetcherAuto } from "../infra/azureClientFactory";
 const clustersCache = new CacheManager<KubernetesClustersResponse>(20, 60_000);
 const overviewCache = new CacheManager<KubernetesClusterOverview>(20, 60_000);
 const kubeconfigCache = new CacheManager<string>(10, 5 * 60_000);
+
+// K8s node info: nodeName → { privateIp, nodeImageVersion, conditions }
+export type K8sNodeInfo = {
+  privateIp?: string;
+  nodeImageVersion?: string;
+  conditions: AksNodeCondition[];
+};
+const k8sNodeInfoCache = new CacheManager<Record<string, K8sNodeInfo>>(10, 60_000);
 
 // ────────────────────────────────────────────
 // 1. List AKS Clusters via Resource Graph
@@ -147,7 +156,54 @@ async function getKubeconfig(
 }
 
 // ────────────────────────────────────────────
-// 3. Get Cluster Overview via K8s API
+// 3. Fetch AKS node info map (nodeName → IP / imageVersion / conditions)
+// ────────────────────────────────────────────
+
+const K8S_MAIN_CONDITIONS = new Set(["Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"]);
+
+export async function fetchAksNodeInfoMap(
+  env: Env,
+  bearerToken: string | undefined,
+  aksClusterArmId: string,
+): Promise<Record<string, K8sNodeInfo>> {
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const cacheKey = `${prefix}:k8s-nodes:${aksClusterArmId}`;
+  const cached = k8sNodeInfoCache.get(cacheKey);
+  if (cached) return cached;
+
+  const kubeconfigYaml = await getKubeconfig(env, bearerToken, aksClusterArmId);
+  const kc = new k8s.KubeConfig();
+  kc.loadFromString(kubeconfigYaml);
+  const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
+
+  const nodeList = await coreV1.listNode();
+  const result: Record<string, K8sNodeInfo> = {};
+
+  for (const node of nodeList.items) {
+    const name = node.metadata?.name;
+    if (!name) continue;
+
+    const privateIp = node.status?.addresses?.find((a) => a.type === "InternalIP")?.address;
+    const nodeImageVersion = node.metadata?.labels?.["kubernetes.azure.com/node-image-version"];
+
+    const conditions: AksNodeCondition[] = (node.status?.conditions ?? [])
+      .filter((c) => K8S_MAIN_CONDITIONS.has(c.type))
+      .map((c) => ({
+        type: c.type,
+        status: (c.status ?? "Unknown") as "True" | "False" | "Unknown",
+        reason: c.reason ?? undefined,
+        message: c.message ?? undefined,
+      }));
+
+    result[name] = { privateIp, nodeImageVersion, conditions };
+  }
+
+  k8sNodeInfoCache.set(cacheKey, result);
+  return result;
+}
+
+// ────────────────────────────────────────────
+// 4. Get Cluster Overview via K8s API
 // ────────────────────────────────────────────
 
 export async function getClusterOverview(

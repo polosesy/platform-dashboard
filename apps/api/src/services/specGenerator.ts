@@ -53,6 +53,7 @@ const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
   containerApp: "containerApp",
   privateEndpoint: "privateEndpoint",
   publicIP: "publicIP",
+  natGateway: "natGateway",
   storage: "storage",
   sql: "sql",
   cosmosDb: "cosmosDb",
@@ -287,6 +288,7 @@ const ARCH_ROLE_MAP: Record<string, { role: string; hint: string }> = {
   trafficManager:  { role: "gateway",          hint: "ingress" },
   lb:              { role: "load-balancer",     hint: "ingress" },
   firewall:        { role: "firewall",          hint: "egress" },
+  natGateway:      { role: "nat-gateway",        hint: "egress" },
   waf:             { role: "waf",               hint: "ingress" },
   vm:              { role: "vm",                hint: "east-west" },
   vmss:            { role: "vmss",              hint: "east-west" },
@@ -403,6 +405,8 @@ function resolveFlowType(
   if (edgeKind === "routes" && (srcMeta?.archRole === "gateway" || srcMeta?.archRole === "load-balancer" || srcMeta?.archRole === "aks-ingress")) return "ingress";
   // VMSS → LB = SNAT outbound egress (AKS outboundType=loadBalancer)
   if (edgeKind === "routes" && tgtMeta?.archRole === "load-balancer" && (srcMeta?.archRole === "aks-vmss" || srcMeta?.archRole === "vmss")) return "egress";
+  // Subnet → NAT Gateway = explicit outbound egress
+  if (tgtMeta?.archRole === "nat-gateway") return "egress";
   if (edgeKind === "privateLink") return "dependency";
   if (edgeKind === "logging") return "control";
 
@@ -598,8 +602,9 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     // Skip PaaS resources — they belong outside VNet (connected via PE if at all)
     if (DATA_KINDS.has(node.kind)) continue;
     if (node.kind === "appInsights" || node.kind === "logAnalytics") continue;
-    // Public IP addresses are not subnet resources — always external
+    // Public IP addresses and NAT Gateways are not subnet resources — always external
     if (node.kind === "publicIP") continue;
+    if (node.kind === "natGateway") continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
     if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -995,6 +1000,43 @@ export async function generateDiagramSpec(
     }
   }
 
+  // ── NAT Gateway → subnet badge map ──
+  // subnet→natGateway edges (source=subnet, target=natGateway, kind="network") from azure.ts
+  const natGwToSubnets = new Map<string, string[]>(); // natGwOrigId → subnetOrigIds[]
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.source) === "subnet" && nodeKindLookup.get(edge.target) === "natGateway") {
+      const arr = natGwToSubnets.get(edge.target) ?? [];
+      arr.push(edge.source);
+      natGwToSubnets.set(edge.target, arr);
+    }
+  }
+  // Reverse: first attached subnet per NAT GW (used in subnet loop)
+  const subnetToNatGw = new Map<string, string>(); // subnetOrigId → natGwOrigId
+  for (const [ngwId, subnets] of natGwToSubnets) {
+    for (const subId of subnets) {
+      if (!subnetToNatGw.has(subId)) subnetToNatGw.set(subId, ngwId);
+    }
+  }
+  // NAT GW IDs that are placed as subnet child cards (excluded from standalone external rendering)
+  const embeddedNatGwOrigIds = new Set(natGwToSubnets.keys());
+
+  // NAT GW → PIP sub-resource map: natGwOrigId → PIP origIds[] (via natgw→pip graph edges)
+  const natGwToPips = new Map<string, string[]>(); // natGwOrigId → publicIP origIds[]
+  for (const edge of graph.edges) {
+    if (nodeKindLookup.get(edge.source) === "natGateway" && nodeKindLookup.get(edge.target) === "publicIP") {
+      const arr = natGwToPips.get(edge.source) ?? [];
+      arr.push(edge.target);
+      natGwToPips.set(edge.source, arr);
+    }
+  }
+  // PIPs that belong to an embedded NAT GW — excluded from external resource rendering
+  const natGwPipOrigIds = new Set<string>();
+  for (const natGwOrigId of embeddedNatGwOrigIds) {
+    for (const pipId of natGwToPips.get(natGwOrigId) ?? []) {
+      natGwPipOrigIds.add(pipId);
+    }
+  }
+
   // ── Categorize NSGs into 4 placement types ──
   // Cat 1: direct subnet attachment (nsgToSubnet) → badge in subnet header
   // Cat 2: NIC-attached, NIC bound to VM → badge above VM node
@@ -1177,6 +1219,8 @@ export async function generateDiagramSpec(
       subnetChildren.set(subnetShortId, arr);
       continue;
     }
+    // natGateway is a VNet-level resource — never placed inside a subnet GroupNode
+    if (res.kind === "natGateway") continue;
     const subnetOrigId = containment.resourceSubnet.get(res.id);
     if (!subnetOrigId) continue;
     const subnetShortId = idMap.get(subnetOrigId);
@@ -1256,19 +1300,28 @@ export async function generateDiagramSpec(
     }
     totalSubW += Math.max(0, subs.length - 1) * SUBNET_GAP;
 
-    const vW = Math.max(totalSubW + 2 * VNET_PAD, 400);
+    // Reserve right column for NAT GW card(s) if any subnet in this VNet has a NAT GW
+    const hasNatGw = subs.some((s) => subnetToNatGw.has(s.node.id));
+    const natGwColW = hasNatGw ? (NODE_W + 40) : 0; // 40 = 20px gap + 20px right pad
+
+    const vW = Math.max(totalSubW + 2 * VNET_PAD + natGwColW, 400);
     const vH = VNET_HEADER + maxSubH + VNET_PAD + 10;
     vnetInfo.set(vShortId, { width: vW, height: Math.max(vH, 200) });
   }
 
   // ── Compute positions ──
   const diagramNodes: DiagramNodeSpec[] = [];
+  // Pending subnet → NAT GW association edges — processed after makeEdge is available
+  const pendingNatGwAssocEdges: Array<{ subnetShortId: string; ngwShortId: string }> = [];
   let cursorY = 40;
+  // Track NAT GW diagramNodes already added — one per unique NAT GW (deduplicate)
+  const addedNatGwShortIds = new Set<string>();
 
   // Place VNets
   for (const vnet of vnetNodes) {
     const vShortId = idMap.get(vnet.id)!;
     const vSize = vnetInfo.get(vShortId) ?? { width: 600, height: 300 };
+    let natGwSlot = 0; // per-VNet counter for stacking multiple NAT GW cards vertically
 
     diagramNodes.push({
       id: vShortId,
@@ -1301,6 +1354,20 @@ export async function generateDiagramSpec(
       const sInfo = subnetInfo.get(sub.shortId);
       if (!sInfo) continue;
 
+      const attachedNatGwOrigId = subnetToNatGw.get(sub.node.id);
+      const subnetMeta: Record<string, string> = {};
+      if (sub.node.endpoint) subnetMeta.prefix = sub.node.endpoint;
+      // Embed NAT GW badge info in subnet metadata so GroupNode can render it
+      if (attachedNatGwOrigId) {
+        const natGwNode = graph.nodes.find((n) => n.id === attachedNatGwOrigId);
+        if (natGwNode) {
+          const ngwShortId = idMap.get(attachedNatGwOrigId) ?? shortId(natGwNode.azureId ?? attachedNatGwOrigId);
+          subnetMeta.natGwBadgeId = ngwShortId;
+          subnetMeta.natGwBadgeLabel = natGwNode.name;
+          if (natGwNode.azureId) subnetMeta.natGwBadgeAzureId = natGwNode.azureId;
+        }
+      }
+
       diagramNodes.push({
         id: sub.shortId,
         label: sub.node.name,
@@ -1313,7 +1380,7 @@ export async function generateDiagramSpec(
         endpoint: sub.node.endpoint,
         position: { x: subX, y: VNET_HEADER },
         bindings: {},
-        metadata: sub.node.endpoint ? { prefix: sub.node.endpoint } : undefined,
+        metadata: Object.keys(subnetMeta).length > 0 ? subnetMeta : undefined,
         resourceKind: "subnet",
         location: sub.node.location,
         resourceGroup: sub.node.resourceGroup,
@@ -1428,6 +1495,15 @@ export async function generateDiagramSpec(
           )?.[0];
           if (parentAksId) {
             const parentAksNode = graph.nodes.find((n) => n.id === parentAksId);
+            // Pass AKS cluster ARM ID for K8s API calls (IP, conditions, nodeImageVersion)
+            if (parentAksNode?.azureId) {
+              aksPlaneMetadata.aksClusterArmId = parentAksNode.azureId;
+            }
+            // Propagate outboundType from parent AKS cluster network profile
+            const aksNetProfile = parentAksNode?.metadata?.networkProfile as Record<string, unknown> | undefined;
+            if (aksNetProfile?.outboundType) {
+              aksPlaneMetadata.outboundType = String(aksNetProfile.outboundType);
+            }
             const pools = parentAksNode?.metadata?.agentPoolProfiles as Array<Record<string, unknown>> | undefined;
             if (pools && pools.length > 0) {
               // Match by VMSS name convention: aks-{poolname}-{hash}-vmss
@@ -1476,6 +1552,57 @@ export async function generateDiagramSpec(
         childY += effectiveNodeH(child.node) + NODE_GAP;
       }
 
+      // NAT GW node — no parentId, positioned globally to the right of the VNet.
+      // Starts embedded as badge in subnet header; expanded to card on user interaction.
+      if (attachedNatGwOrigId) {
+        const natGwNode = graph.nodes.find((n) => n.id === attachedNatGwOrigId);
+        if (natGwNode) {
+          const ngwShortId = idMap.get(attachedNatGwOrigId) ?? shortId(natGwNode.azureId ?? attachedNatGwOrigId);
+          if (!addedNatGwShortIds.has(ngwShortId)) {
+            addedNatGwShortIds.add(ngwShortId);
+            // Collect attached PIPs as sub-resources
+            const natGwSubResources: SubResource[] = [];
+            for (const pipOrigId of natGwToPips.get(attachedNatGwOrigId) ?? []) {
+              const pipNode = graph.nodes.find((n) => n.id === pipOrigId);
+              if (!pipNode) continue;
+              const pipShortId = idMap.get(pipOrigId) ?? shortId(pipNode.azureId ?? pipOrigId);
+              natGwSubResources.push({
+                id: pipShortId, label: pipNode.name, kind: "publicIP" as SubResourceKind,
+                endpoint: pipNode.endpoint, azureResourceId: pipNode.azureId,
+              });
+            }
+            if (natGwSubResources.length === 0 && natGwNode.endpoint) {
+              natGwSubResources.push({
+                id: `${ngwShortId}/pip/0`, label: "Public IP",
+                kind: "publicIP" as SubResourceKind, endpoint: natGwNode.endpoint,
+              });
+            }
+            // Position: inside VNet, right column (after subnets), stacked vertically per VNet
+            const natGwX = vSize.width - NODE_W - VNET_PAD;
+            const natGwY = VNET_HEADER + VNET_PAD + natGwSlot * (NODE_H + 20);
+            natGwSlot++;
+            diagramNodes.push({
+              id: ngwShortId,
+              label: natGwNode.name,
+              icon: "natGateway" as DiagramIconKind,
+              azureResourceId: natGwNode.azureId,
+              groupId: inferGroup(natGwNode),
+              parentId: vShortId,
+              position: { x: natGwX, y: natGwY },
+              bindings: { health: { source: "composite", rules: [] } },
+              resourceKind: natGwNode.kind,
+              location: natGwNode.location,
+              resourceGroup: natGwNode.resourceGroup,
+              tags: natGwNode.tags,
+              endpoint: natGwNode.endpoint,
+              subResources: natGwSubResources.length > 0 ? natGwSubResources : undefined,
+            });
+          }
+          // Store subnet → NAT GW pair; converted to diagram edges after makeEdge is available
+          pendingNatGwAssocEdges.push({ subnetShortId: sub.shortId, ngwShortId });
+        }
+      }
+
       subX += sInfo.width + SUBNET_GAP;
     }
 
@@ -1513,6 +1640,8 @@ export async function generateDiagramSpec(
   ]);
 
   const externalResources = resourceNodes.filter((n) => {
+    if (embeddedNatGwOrigIds.has(n.id)) return false; // NAT GW placed as child card inside subnet
+    if (natGwPipOrigIds.has(n.id)) return false;      // PIP belonging to embedded NAT GW → sub-resource
     const sid = idMap.get(n.id)!;
     return !containedResourceIds.has(sid) && !vnetSubnetIds.has(sid);
   });
@@ -1980,6 +2109,11 @@ export async function generateDiagramSpec(
     return makeEdge(srcId, tgtId, srcKind, label, protocol, diagEdgeKind, undefined, ft);
   });
 
+  // Subnet → NAT GW association edges (collected during node placement, created here)
+  for (const { subnetShortId, ngwShortId } of pendingNatGwAssocEdges) {
+    diagramEdges.push(makeEdge(subnetShortId, ngwShortId, "subnet", "NAT Gateway", undefined, "natgw-association", undefined, "egress"));
+  }
+
   // Dependency-based edges: proximity-scored inference (replaces Cartesian product)
   const existingPairs = new Set<string>();
   for (const e of diagramEdges) {
@@ -2010,12 +2144,173 @@ export async function generateDiagramSpec(
     existingPairs.add(`${apiNode.id}→${aksClusterId}`);
   }
 
+  // ── Outbound Internet: per-VNet Internet node + outbound edges ──
+  // Azure outbound priority: NAT Gateway > LB SNAT > Instance-level PIP > Default outbound
+
+  // Step 1: Build shortId → vnetShortId lookup from diagramNode parentId chain
+  const shortIdToVnet = new Map<string, string>();
+  for (const n of diagramNodes) {
+    if (!n.parentId) continue;
+    const parent = diagramNodes.find((p) => p.id === n.parentId);
+    if (!parent) continue;
+    if (parent.icon === "vnet") {
+      shortIdToVnet.set(n.id, parent.id); // resource/subnet directly under VNet
+    } else if (parent.parentId) {
+      const gp = diagramNodes.find((p) => p.id === parent.parentId);
+      if (gp?.icon === "vnet") shortIdToVnet.set(n.id, gp.id); // resource inside subnet inside VNet
+    }
+  }
+
+  // Step 2: Detect outbound source nodes
+  type OutboundSource = { id: string; label: string; deprecated: boolean };
+  const outboundSources: OutboundSource[] = [];
+  const outboundSourceSet = new Set<string>();
+
+  // 1. NAT Gateway → Internet: edge source = NAT GW resource card node
+  for (const [natGwOrigId, subnetOrigIds] of natGwToSubnets) {
+    const ngwShortId = idMap.get(natGwOrigId);
+    if (!ngwShortId || outboundSourceSet.has(ngwShortId)) continue;
+    // Inherit VNet from one of the attached subnets
+    if (!shortIdToVnet.has(ngwShortId)) {
+      for (const subOrigId of subnetOrigIds) {
+        const subShortId = idMap.get(subOrigId);
+        const vnetId = subShortId ? shortIdToVnet.get(subShortId) : undefined;
+        if (!vnetId && subShortId) {
+          const subSpec = diagramNodes.find((n) => n.id === subShortId);
+          if (subSpec?.parentId) { shortIdToVnet.set(ngwShortId, subSpec.parentId); break; }
+        } else if (vnetId) { shortIdToVnet.set(ngwShortId, vnetId); break; }
+      }
+    }
+    outboundSources.push({ id: ngwShortId, label: "NAT Gateway", deprecated: false });
+    outboundSourceSet.add(ngwShortId);
+  }
+  // Standalone NAT GW resource cards (not embedded as subnet badge)
+  for (const n of diagramNodes) {
+    if (n.resourceKind !== "natGateway" || outboundSourceSet.has(n.id)) continue;
+    outboundSources.push({ id: n.id, label: "NAT Gateway", deprecated: false });
+    outboundSourceSet.add(n.id);
+    // NAT GW is external (no parentId) — resolve VNet via attached subnet edges
+    if (!shortIdToVnet.has(n.id)) {
+      const natOrigId = [...idMap.entries()].find(([, sid]) => sid === n.id)?.[0];
+      if (natOrigId) {
+        for (const edge of graph.edges) {
+          const otherId = edge.source === natOrigId ? edge.target : edge.target === natOrigId ? edge.source : null;
+          if (!otherId || nodeKindLookup.get(otherId) !== "subnet") continue;
+          const subShortId = idMap.get(otherId);
+          const vnetId = subShortId ? shortIdToVnet.get(subShortId) : undefined;
+          if (vnetId) { shortIdToVnet.set(n.id, vnetId); break; }
+        }
+      }
+    }
+  }
+
+  // 2. LB with outbound rules (SNAT) → Internet (VMSS → LB routes/egress edge)
+  for (const e of diagramEdges) {
+    if (e.flowType !== "egress") continue;
+    const targetNode = diagramNodes.find((n) => n.id === e.target);
+    if (targetNode?.resourceKind !== "lb" || outboundSourceSet.has(e.target)) continue;
+    outboundSources.push({ id: e.target, label: "LB SNAT", deprecated: false });
+    outboundSourceSet.add(e.target);
+    // LB is external — inherit VNet from the VMSS source
+    if (!shortIdToVnet.has(e.target)) {
+      const vnetId = shortIdToVnet.get(e.source);
+      if (vnetId) shortIdToVnet.set(e.target, vnetId);
+    }
+  }
+
+  // 3. VM/VMSS with instance-level Public IP → Internet
+  for (const n of diagramNodes) {
+    if (!n.subResources?.some((sr) => sr.kind === "publicIP") || outboundSourceSet.has(n.id)) continue;
+    outboundSources.push({ id: n.id, label: "Public IP", deprecated: false });
+    outboundSourceSet.add(n.id);
+  }
+
+  // 4. Subnets with defaultOutboundAccess=true and no explicit egress → deprecated
+  for (const subnetNode of subnetNodes) {
+    if (subnetNode.metadata?.defaultOutboundAccess !== "true") continue;
+    const subnetShortId = idMap.get(subnetNode.id);
+    if (!subnetShortId || outboundSourceSet.has(subnetShortId)) continue;
+    const hasNatGw = graph.edges.some((e) => {
+      const other = e.source === subnetNode.id ? e.target : e.target === subnetNode.id ? e.source : null;
+      return other !== null && nodeKindLookup.get(other) === "natGateway";
+    });
+    if (hasNatGw) continue;
+    const children = subnetChildren.get(subnetShortId) ?? [];
+    const hasExplicitChild = children.some((c) => outboundSourceSet.has(idMap.get(c.node.id) ?? ""));
+    if (hasExplicitChild) continue;
+    outboundSources.push({ id: subnetShortId, label: "기본 아웃바운드 (지원 중단 예정)", deprecated: true });
+    outboundSourceSet.add(subnetShortId);
+  }
+
+  // Step 3: Group sources by VNet → one Internet node per VNet
+  const outboundByVnet = new Map<string, OutboundSource[]>();
+  for (const src of outboundSources) {
+    const vnetId = shortIdToVnet.get(src.id) ?? "external";
+    const arr = outboundByVnet.get(vnetId) ?? [];
+    arr.push(src);
+    outboundByVnet.set(vnetId, arr);
+  }
+
+  // Step 4: Create per-VNet Internet nodes (placeholder positions — repositioned post-ELK)
+  const internetNodeIds = new Map<string, string>(); // vnetShortId|"external" → internetNodeId
+  for (const [vnetId, sources] of outboundByVnet) {
+    const internetNodeId = vnetId === "external" ? "internet-external" : `internet-${vnetId}`;
+    internetNodeIds.set(vnetId, internetNodeId);
+    const hasDeprecated = sources.some((s) => s.deprecated);
+
+    diagramNodes.push({
+      id: internetNodeId,
+      label: "인터넷",
+      icon: "internet" as DiagramIconKind,
+      position: { x: 9999, y: 0 },
+      bindings: {},
+      resourceKind: "internet",
+      metadata: {
+        outboundMethodCount: String(sources.length),
+        hasDeprecatedPath: String(hasDeprecated),
+        vnetId,
+      },
+    });
+
+    for (const src of sources) {
+      const edge = makeEdge(src.id, internetNodeId, "internet", src.label, undefined, "outbound-internet", undefined, "egress");
+      if (src.deprecated) (edge as { animation: string }).animation = "dash";
+      diagramEdges.push(edge);
+      existingPairs.add(`${src.id}→${internetNodeId}`);
+    }
+  }
+
   // Build groups
   const groups = inferGroups(filteredNodes);
 
   // Apply ELK auto-layout if requested (repositions nodes + resizes containers)
   if (layoutMode === "elk") {
     await applyElkLayout(diagramNodes, diagramEdges);
+  }
+
+  // ── Post-ELK: reposition each per-VNet Internet node to the right of its VNet ──
+  for (const [vnetId, internetNodeId] of internetNodeIds) {
+    const internetSpec = diagramNodes.find((n) => n.id === internetNodeId);
+    if (!internetSpec) continue;
+
+    if (vnetId === "external") {
+      // Position to the right of all root (non-internet) nodes
+      const rootNodes = diagramNodes.filter((n) => !n.parentId && n.resourceKind !== "internet");
+      const allMaxX = rootNodes.map((n) => (n.position?.x ?? 0) + (n.width ?? NODE_W));
+      const allY = rootNodes.map((n) => n.position?.y ?? 0);
+      internetSpec.position = {
+        x: (allMaxX.length > 0 ? Math.max(...allMaxX) : 600) + 220,
+        y: allY.length > 0 ? (Math.min(...allY) + Math.max(...allY)) / 2 : 300,
+      };
+    } else {
+      // Position to the right of the specific VNet box
+      const vnetSpec = diagramNodes.find((n) => n.id === vnetId);
+      if (vnetSpec) {
+        const vnetRight = (vnetSpec.position?.x ?? 0) + (vnetSpec.width ?? 400);
+        const vnetCenterY = (vnetSpec.position?.y ?? 0) + (vnetSpec.height ?? 200) / 2;
+        internetSpec.position = { x: vnetRight + 120, y: vnetCenterY - 65 };
+      }
+    }
   }
 
   // ── Checkpoint 1: Validate parentId references ──

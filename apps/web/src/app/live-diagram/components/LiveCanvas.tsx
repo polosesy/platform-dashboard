@@ -26,9 +26,10 @@ import type {
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
-import { GroupNode, type GroupNodeData } from "./GroupNode";
+import { GroupNode, type GroupNodeData, type NatGwBadgeInfo } from "./GroupNode";
 import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
 import { VmssInstanceNode, type VmssInstanceNodeData } from "./VmssInstanceNode";
+import { InternetNode, type InternetNodeData } from "./InternetNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
 import { FaultRipple } from "./FaultRipple";
 import { ImpactCascade } from "./ImpactCascade";
@@ -56,7 +57,7 @@ type LiveCanvasProps = {
   onVmssInstanceSelect?: (data: VmssInstanceNodeData) => void;
 };
 
-const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode };
+const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode, internet: InternetNode };
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 
 /** Minimum gap between nodes to prevent overlap (px) */
@@ -101,9 +102,9 @@ function LiveCanvasInner({
   const onVmssInstanceSelectRef = useRef(onVmssInstanceSelect);
   onVmssInstanceSelectRef.current = onVmssInstanceSelect;
   // handleVmssExpand ref — handler defined after useNodesState, but needs to be accessible in initialNodes
-  const handleVmssExpandRef = useRef<((nodeId: string, azureResourceId: string) => void) | null>(null);
-  const stableVmssExpand = useCallback((nodeId: string, azureResourceId: string) => {
-    handleVmssExpandRef.current?.(nodeId, azureResourceId);
+  const handleVmssExpandRef = useRef<((nodeId: string, azureResourceId: string, aksClusterArmId?: string) => void) | null>(null);
+  const stableVmssExpand = useCallback((nodeId: string, azureResourceId: string, aksClusterArmId?: string) => {
+    handleVmssExpandRef.current?.(nodeId, azureResourceId, aksClusterArmId);
   }, []);
 
   // ── Hover highlight state ──
@@ -176,8 +177,29 @@ function LiveCanvasInner({
     return ids;
   }, [spec.nodes]);
 
+
+  // Build NAT GW badge map keyed by subnetId (from subnet metadata natGwBadgeId)
+  const natGwBySubnet = useMemo(() => {
+    const map = new Map<string, NatGwBadgeInfo>();
+    for (const nodeSpec of spec.nodes) {
+      const natGwBadgeId = nodeSpec.metadata?.natGwBadgeId;
+      if (!natGwBadgeId || nodeSpec.nodeType !== "group") continue;
+      map.set(nodeSpec.id, {
+        nodeId: natGwBadgeId,
+        label: nodeSpec.metadata?.natGwBadgeLabel ?? "NAT Gateway",
+        azureResourceId: nodeSpec.metadata?.natGwBadgeAzureId,
+      });
+    }
+    return map;
+  }, [spec.nodes]);
+
   // Handler: clicking an embedded NSG badge selects the NSG node (for detail panel)
   const handleNsgSelect = useCallback((nodeId: string) => {
+    onNodeSelect(nodeId);
+  }, [onNodeSelect]);
+
+  // Handler: clicking NAT GW badge selects the NAT GW card (opens detail panel)
+  const handleNatGwSelect = useCallback((nodeId: string) => {
     onNodeSelect(nodeId);
   }, [onNodeSelect]);
 
@@ -196,12 +218,13 @@ function LiveCanvasInner({
 
     const result: FlowNode[] = [];
     for (const nodeSpec of sorted) {
-      // Skip embedded NSGs — they render inside their target's component
+      // Skip embedded NSGs — they render as badges inside parent GroupNode
       if (embeddedNsgIds.has(nodeSpec.id)) continue;
 
       if (nodeSpec.nodeType === "group") {
-        // Inject embedded NSG badges for this group (Cat 1: subnet-attached)
+        // Inject embedded NSG badges + NAT GW badge for this group
         const attachedNsgs = nsgByTarget.get(nodeSpec.id);
+        const attachedNatGw = natGwBySubnet.get(nodeSpec.id);
         const groupNode: FlowNode<GroupNodeData> = {
           id: nodeSpec.id,
           type: "group",
@@ -223,7 +246,9 @@ function LiveCanvasInner({
               icon: n.icon as GroupNodeData["icon"],
               azureResourceId: n.azureResourceId,
             })),
+            natGwBadge: attachedNatGw,
             onNsgSelect: handleNsgSelect,
+            onNatGwToggle: handleNatGwSelect,
           },
         };
         if (nodeSpec.parentId) {
@@ -231,6 +256,24 @@ function LiveCanvasInner({
           (groupNode as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
         }
         result.push(groupNode);
+        continue;
+      }
+
+      // Internet sentinel node — outbound traffic destination (per VNet)
+      if (nodeSpec.resourceKind === "internet") {
+        const methodCount = parseInt(nodeSpec.metadata?.outboundMethodCount ?? "0", 10);
+        const internetNode: FlowNode<InternetNodeData> = {
+          id: nodeSpec.id,
+          type: "internet",
+          position: nodeSpec.position ?? { x: 0, y: 0 },
+          draggable: true,
+          data: {
+            label: nodeSpec.label,
+            outboundMethodCount: methodCount,
+            hasDeprecatedPath: nodeSpec.metadata?.hasDeprecatedPath === "true",
+          },
+        };
+        result.push(internetNode);
         continue;
       }
 
@@ -330,14 +373,14 @@ function LiveCanvasInner({
     }
 
     return result;
-  // expandedVmssIds is a ref — intentionally excluded from deps
+  // expandedVmssIds, expandedNatGwIds are refs — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, handleNsgSelect, stableVmssExpand]);
+  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, natGwBySubnet, handleNsgSelect, stableVmssExpand, handleNatGwSelect]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
   // ── VMSS expand handler (needs setNodes from above) ──
-  const handleVmssExpand = useCallback(async (vmssNodeId: string, azureResourceId: string) => {
+  const handleVmssExpand = useCallback(async (vmssNodeId: string, azureResourceId: string, aksClusterArmId?: string) => {
     const isExpanded = expandedVmssIds.current.has(vmssNodeId);
 
     // Toggle: if already expanded, collapse
@@ -368,7 +411,7 @@ function LiveCanvasInner({
     if (!vmssInstanceCache.current.has(vmssNodeId)) {
       try {
         const token = await getApiToken().catch(() => null);
-        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}`;
+        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}${aksClusterArmId ? `&aksClusterId=${encodeURIComponent(aksClusterArmId)}` : ""}`;
         const data = await fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(url, token);
         vmssInstanceCache.current.set(vmssNodeId, data.instances ?? []);
       } catch {
@@ -384,41 +427,38 @@ function LiveCanvasInner({
       const vmssNode = prev.find((n: FlowNode) => n.id === vmssNodeId);
       if (!vmssNode) return prev;
 
-      // Instance nodes are direct children of the VMSS node so they follow when dragged.
-      // Position is relative to the VMSS node's top-left corner.
-      const INST_W = 190;
-      const INST_H = 50;
-      const INST_GAP = 8;
-      const cols = Math.min(instances.length, 2);
+      // Single-column — instances stack vertically under parent VMSS node.
+      const INST_W = 200;
+      const INST_H = 54;
+      const INST_GAP = 6;
       const vmssW = vmssNode.width ?? NODE_WIDTH;
       const vmssH = vmssNode.height ?? NODE_HEIGHT;
+      const instX = Math.round((vmssW - INST_W) / 2);
 
-      const instanceNodes: (FlowNode<VmssInstanceNodeData> & { parentNode: string })[] = instances.map((inst, i) => {
-        const col = i % cols;
-        const row = Math.floor(i / cols);
-        const totalW = cols * INST_W + (cols - 1) * INST_GAP;
-        return {
-          id: `vmss-inst-${vmssNodeId}-${inst.instanceId}`,
-          type: "vmssInstance" as const,
-          parentNode: vmssNodeId,
-          position: {
-            // Centre the grid under the VMSS node
-            x: (vmssW - totalW) / 2 + col * (INST_W + INST_GAP),
-            y: vmssH + 20 + row * (INST_H + INST_GAP),
-          },
-          draggable: false,
-          selectable: true,
-          style: { width: INST_W, height: INST_H },
-          data: {
-            label: inst.computerName || `instance-${inst.instanceId}`,
-            computerName: inst.computerName || `instance-${inst.instanceId}`,
-            powerState: inst.powerState,
-            privateIp: inst.privateIp,
-            parentVmssId: vmssNodeId,
-            onSelect: onVmssInstanceSelectRef.current,
-          },
-        };
-      });
+      const instanceNodes: (FlowNode<VmssInstanceNodeData> & { parentNode: string })[] = instances.map((inst, i) => ({
+        id: `vmss-inst-${vmssNodeId}-${inst.instanceId}`,
+        type: "vmssInstance" as const,
+        parentNode: vmssNodeId,
+        position: {
+          x: instX,
+          y: vmssH + 20 + i * (INST_H + INST_GAP),
+        },
+        draggable: false,
+        selectable: true,
+        style: { width: INST_W, height: INST_H },
+        data: {
+          label: inst.computerName || `instance-${inst.instanceId}`,
+          computerName: inst.computerName || `instance-${inst.instanceId}`,
+          powerState: inst.powerState,
+          provisioningState: inst.provisioningState,
+          privateIp: inst.privateIp,
+          nodePoolName: inst.nodePoolName,
+          nodeImageVersion: inst.nodeImageVersion,
+          conditions: inst.conditions,
+          parentVmssId: vmssNodeId,
+          onSelect: onVmssInstanceSelectRef.current,
+        },
+      }));
 
       // Remove old instances for this VMSS (if any), then add new
       const filtered = prev.filter((n: FlowNode) => {
@@ -718,6 +758,7 @@ function LiveCanvasInner({
 
         if (nodeSpec.nodeType === "group") {
           const attachedNsgs = nsgByTarget.get(nodeSpec.id);
+          const attachedNatGw = natGwBySubnet.get(nodeSpec.id);
           const data: GroupNodeData = {
             label: nodeSpec.label,
             icon: nodeSpec.icon,
@@ -729,7 +770,9 @@ function LiveCanvasInner({
               icon: n.icon as GroupNodeData["icon"],
               azureResourceId: n.azureResourceId,
             })),
+            natGwBadge: attachedNatGw,
             onNsgSelect: handleNsgSelect,
+            onNatGwToggle: handleNatGwSelect,
           };
           // Position: compact plan > user-dragged existing > spec > existing > origin
           // compact plan always wins for multi-focus top-level VNets (no existing.position preserve)
@@ -771,6 +814,28 @@ function LiveCanvasInner({
             (gn as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
           }
           result.push(gn);
+          continue;
+        }
+
+        // Internet sentinel node (update path)
+        if (nodeSpec.resourceKind === "internet") {
+          const methodCount = parseInt(nodeSpec.metadata?.outboundMethodCount ?? "0", 10);
+          const idata: InternetNodeData = {
+            label: nodeSpec.label,
+            outboundMethodCount: methodCount,
+            hasDeprecatedPath: nodeSpec.metadata?.hasDeprecatedPath === "true",
+          };
+          if (existing) {
+            result.push({ ...existing, data: idata, position: nodeSpec.position ?? existing.position });
+            continue;
+          }
+          result.push({
+            id: nodeSpec.id,
+            type: "internet",
+            position: nodeSpec.position ?? { x: 0, y: 0 },
+            draggable: true,
+            data: idata,
+          } as FlowNode<InternetNodeData>);
           continue;
         }
 
@@ -845,6 +910,7 @@ function LiveCanvasInner({
               }
             : undefined,
           onNsgSelect: handleNsgSelect,
+          aksClusterArmId: nodeSpec.metadata?.aksClusterArmId,
           vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
           onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
         };
@@ -1089,14 +1155,17 @@ function LiveCanvasInner({
 
   const edges: FlowEdge<AnimatedEdgeData>[] = useMemo(() => {
     if (!showNetworkFlow) return [];
-    return spec.edges.map((edgeSpec) => {
+    const result: FlowEdge<AnimatedEdgeData>[] = [];
+    for (const edgeSpec of spec.edges) {
       const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
       const isHighlighted = hoveredNodeId ? connectedEdgeIds.has(edgeSpec.id) : false;
       const isDimmed = hoveredNodeId ? !connectedEdgeIds.has(edgeSpec.id) : false;
-      return {
+      result.push({
         id: edgeSpec.id,
         source: edgeSpec.source,
         target: edgeSpec.target,
+        // natgw-association: route from the orange dot handle on the subnet badge
+        sourceHandle: edgeSpec.edgeKind === "natgw-association" ? "natgw-source" : undefined,
         type: "animated",
         data: {
           status: live?.status ?? "idle",
@@ -1109,8 +1178,9 @@ function LiveCanvasInner({
           isDimmed,
           showParticles: particlesEnabled,
         },
-      };
-    });
+      });
+    }
+    return result;
   }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled, showNetworkFlow]);
 
   // Build node positions map with actual measured dimensions from ReactFlow

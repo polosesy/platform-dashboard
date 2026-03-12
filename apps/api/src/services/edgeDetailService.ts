@@ -21,6 +21,7 @@ import type {
 import { getDiagramSpec } from "./liveAggregator";
 import { getArmFetcherAuto } from "../infra/azureClientFactory";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
+import { fetchAksNodeInfoMap } from "./kubernetes";
 
 // ──────────────────────────────────────────────
 // Cache: 30 seconds per bearer+edge combination
@@ -588,6 +589,7 @@ export async function fetchVmssInstances(
   env: Env,
   bearerToken: string | undefined,
   vmssResourceId: string,
+  aksClusterArmId?: string,
 ): Promise<AksVmssInstance[]> {
   const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}vmss-inst:${vmssResourceId}`;
   const cached = vmssInstanceCache.get(cacheKey);
@@ -595,35 +597,60 @@ export async function fetchVmssInstances(
 
   try {
     const arm = await getArmFetcherAuto(env, bearerToken);
-    const data = await arm.fetchJson<Record<string, unknown>>(
-      `https://management.azure.com${vmssResourceId}/virtualMachines?api-version=2024-03-01&$expand=instanceView`,
-    );
+
+    // Fetch ARM VMs (power state), ARM NICs (fallback IP), and optionally K8s nodes (real IP + conditions) in parallel.
+    const [data, nicsData, k8sNodes] = await Promise.all([
+      arm.fetchJson<Record<string, unknown>>(
+        `https://management.azure.com${vmssResourceId}/virtualMachines?api-version=2024-03-01&$expand=instanceView`,
+      ),
+      arm.fetchJson<Record<string, unknown>>(
+        `https://management.azure.com${vmssResourceId}/networkInterfaces?api-version=2018-10-01`,
+      ).catch(() => null),
+      aksClusterArmId
+        ? fetchAksNodeInfoMap(env, bearerToken, aksClusterArmId).catch(() => null)
+        : Promise.resolve(null),
+    ]);
     const instances = ((data?.value ?? []) as Array<Record<string, unknown>>).slice(0, 50);
+
+    // Build instanceId → privateIp map from ARM NIC API (fallback when K8s unavailable)
+    const instanceIpMap = new Map<string, string>();
+    for (const nic of ((nicsData?.value ?? []) as Array<Record<string, unknown>>)) {
+      const nicProps = (nic.properties ?? {}) as Record<string, unknown>;
+      const vmRef = (nicProps.virtualMachine ?? {}) as Record<string, unknown>;
+      const instanceId = String(vmRef.id ?? "").split("/").pop() ?? "";
+      const ipConfigs = (nicProps.ipConfigurations ?? []) as Array<Record<string, unknown>>;
+      const ip = String(((ipConfigs[0]?.properties ?? {}) as Record<string, unknown>).privateIPAddress ?? "");
+      if (instanceId && ip) instanceIpMap.set(instanceId, ip);
+    }
+
+    // Parse pool name once (same for all instances)
+    const vmssShortName = String(vmssResourceId.split("/").pop() ?? "");
+    const poolNameMatch = vmssShortName.replace(/^aks-/, "").replace(/-[0-9a-f]+-vmss$/i, "");
+    const nodePoolName = poolNameMatch || undefined;
 
     const result: AksVmssInstance[] = instances.map((inst) => {
       const instProps = (inst.properties ?? {}) as Record<string, unknown>;
       const osProfile = (instProps.osProfile ?? {}) as Record<string, unknown>;
+      const instanceId = String(inst.instanceId ?? inst.name ?? "");
+      const computerName = String(osProfile.computerName ?? inst.name ?? "");
 
-      // Power state from instance view statuses
+      // Power state from ARM instance view statuses
       const statuses = ((instProps.instanceView as Record<string, unknown>)?.statuses ?? []) as Array<Record<string, unknown>>;
       const powerStatus = statuses.find((s) => String(s.code ?? "").startsWith("PowerState/"));
       const powerState = powerStatus ? String(powerStatus.code).replace("PowerState/", "") : "unknown";
 
-      // Private IP from network interfaces
-      const netProfile = (instProps.networkProfile ?? {}) as Record<string, unknown>;
-      const netInterfaces = (netProfile.networkInterfaces ?? []) as Array<Record<string, unknown>>;
-      const firstNic = netInterfaces[0];
-      const nicProps = (firstNic?.properties ?? {}) as Record<string, unknown>;
-      const ipConfigs = (nicProps.ipConfigurations ?? []) as Array<Record<string, unknown>>;
-      const firstIpProps = (ipConfigs[0]?.properties ?? {}) as Record<string, unknown>;
-      const privateIp = firstIpProps.privateIPAddress ? String(firstIpProps.privateIPAddress) : undefined;
+      // Prefer K8s node data (accurate IP, nodeImageVersion, real conditions) over ARM
+      const k8sNode = k8sNodes?.[computerName];
 
       return {
-        instanceId: String(inst.instanceId ?? inst.name ?? ""),
-        computerName: String(osProfile.computerName ?? inst.name ?? ""),
+        instanceId,
+        computerName,
         provisioningState: String(instProps.provisioningState ?? "Succeeded"),
         powerState,
-        privateIp,
+        privateIp: k8sNode?.privateIp || instanceIpMap.get(instanceId) || undefined,
+        nodePoolName,
+        nodeImageVersion: k8sNode?.nodeImageVersion,
+        conditions: k8sNode?.conditions,
       };
     });
 
@@ -716,6 +743,7 @@ export async function fetchAksPlaneDetail(
         osType: String(ap.osType ?? "Linux"),
         osSKU: ap.osSKU ? String(ap.osSKU) : undefined,
         orchestratorVersion: ap.orchestratorVersion ? String(ap.orchestratorVersion) : undefined,
+        nodeImageVersion: ap.nodeImageVersion ? String(ap.nodeImageVersion) : undefined,
         powerState: String((ap.powerState as Record<string, unknown>)?.code ?? "Running"),
         provisioningState: String(ap.provisioningState ?? "Succeeded"),
         availabilityZones: Array.isArray(ap.availabilityZones) ? ap.availabilityZones.map(String) : undefined,
@@ -738,29 +766,47 @@ export async function fetchAksPlaneDetail(
           });
 
           if (matchedVmss) {
-            pool.vmssResourceId = String(matchedVmss.id ?? pool.vmssResourceId);
-            // Fetch instances
+            const vmssId = String(matchedVmss.id ?? "");
+            pool.vmssResourceId = vmssId || pool.vmssResourceId;
+            // Fetch instances + NICs in parallel
             try {
-              const instancesData = await arm.fetchJson<Record<string, unknown>>(`https://management.azure.com${matchedVmss.id}/instances?api-version=2024-03-01`);
+              const [instancesData, nicsData] = await Promise.all([
+                arm.fetchJson<Record<string, unknown>>(
+                  `https://management.azure.com${vmssId}/virtualMachines?api-version=2024-03-01&$expand=instanceView`,
+                ),
+                arm.fetchJson<Record<string, unknown>>(
+                  `https://management.azure.com${vmssId}/networkInterfaces?api-version=2018-10-01`,
+                ).catch(() => null),
+              ]);
               const instances = (instancesData?.value ?? []) as Array<Record<string, unknown>>;
+
+              // Build instanceId → privateIp map
+              const instanceIpMap = new Map<string, string>();
+              for (const nic of ((nicsData?.value ?? []) as Array<Record<string, unknown>>)) {
+                const nicProps = (nic.properties ?? {}) as Record<string, unknown>;
+                const vmRef = (nicProps.virtualMachine ?? {}) as Record<string, unknown>;
+                const instanceId = String(vmRef.id ?? "").split("/").pop() ?? "";
+                const ipConfigs = (nicProps.ipConfigurations ?? []) as Array<Record<string, unknown>>;
+                const ip = String(((ipConfigs[0]?.properties ?? {}) as Record<string, unknown>).privateIPAddress ?? "");
+                if (instanceId && ip) instanceIpMap.set(instanceId, ip);
+              }
+
               pool.vmssInstances = instances.slice(0, 20).map((inst) => {
                 const instProps = (inst.properties ?? {}) as Record<string, unknown>;
                 const osProfile = (instProps.osProfile ?? {}) as Record<string, unknown>;
-                const netProfile = (instProps.networkProfile ?? {}) as Record<string, unknown>;
-                const netInterfaces = ((netProfile.networkInterfaces ?? []) as Array<Record<string, unknown>>);
-                const firstIpConfig = ((netInterfaces[0]?.properties as Record<string, unknown>)?.ipConfigurations as Array<Record<string, unknown>> | undefined)?.[0];
-                const privateIp = firstIpConfig ? String((firstIpConfig.properties as Record<string, unknown>)?.privateIPAddress ?? "") : undefined;
-
+                const instanceId = String(inst.instanceId ?? inst.name ?? "");
                 const statuses = ((instProps.instanceView as Record<string, unknown>)?.statuses ?? []) as Array<Record<string, unknown>>;
                 const powerStatus = statuses.find((s) => String(s.code ?? "").startsWith("PowerState/"));
                 const powerState = powerStatus ? String(powerStatus.code).replace("PowerState/", "") : "unknown";
 
                 return {
-                  instanceId: String(inst.instanceId ?? inst.name ?? ""),
+                  instanceId,
                   computerName: String(osProfile.computerName ?? inst.name ?? ""),
                   provisioningState: String(instProps.provisioningState ?? "Succeeded"),
                   powerState,
-                  privateIp: privateIp || undefined,
+                  privateIp: instanceIpMap.get(instanceId) || undefined,
+                  nodePoolName: pool.name,
+                  nodeImageVersion: pool.nodeImageVersion,
                 };
               });
             } catch {

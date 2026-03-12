@@ -32,6 +32,8 @@ const ICON_FILE: Record<DiagramIconKind, string> = {
   serviceBus: "service-bus",
   eventHub: "event-hub",
   publicIP: "public-ip",
+  natGateway: "nat-gateway",
+  internet: "custom",  // InternetNode uses inline SVG — no asset needed
   custom: "custom",
 };
 

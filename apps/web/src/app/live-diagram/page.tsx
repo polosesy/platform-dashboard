@@ -3,7 +3,7 @@
 import "reactflow/dist/style.css";
 
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail } from "@aud/types";
+import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
@@ -153,7 +153,7 @@ export default function LiveDiagramPage() {
   const [edgeDetailLoading, setEdgeDetailLoading] = useState(false);
 
   const [selectedVmssInstance, setSelectedVmssInstance] = useState<{
-    computerName: string; powerState: string; privateIp?: string; parentVmssId: string; label: string;
+    computerName: string; powerState: string; provisioningState?: string; privateIp?: string; nodePoolName?: string; nodeImageVersion?: string; conditions?: AksNodeCondition[]; parentVmssId: string; label: string;
   } | null>(null);
 
   const handleNodeSelect = useCallback((nodeId: string | null) => {
@@ -162,7 +162,7 @@ export default function LiveDiagramPage() {
     if (nodeId) setSelectedEdgeId(null);
   }, []);
 
-  const handleVmssInstanceSelect = useCallback((data: { computerName: string; powerState: string; privateIp?: string; parentVmssId: string; label: string }) => {
+  const handleVmssInstanceSelect = useCallback((data: { computerName: string; powerState: string; provisioningState?: string; privateIp?: string; nodePoolName?: string; nodeImageVersion?: string; conditions?: AksNodeCondition[]; parentVmssId: string; label: string }) => {
     setSelectedVmssInstance(data);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);

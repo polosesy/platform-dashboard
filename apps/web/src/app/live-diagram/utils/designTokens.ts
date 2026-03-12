@@ -135,8 +135,12 @@ const EDGE_KIND_STYLES: Record<DiagramEdgeKind, EdgeKindStyle> = {
   routes:        { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
   logging:       { stroke: "rgba(107,113,122,0.30)", particle: "rgba(107,113,122,0.50)", dashArray: "4 6",       showParticles: false },
   inferred:      { stroke: "rgba(107,113,122,0.25)", particle: "rgba(107,113,122,0.40)", dashArray: "2 4 6 4",   showParticles: false },
-  "attached-to": { stroke: "rgba(95,75,139,0.50)",   particle: "rgba(95,75,139,0.70)",   dashArray: "none",      showParticles: false },
-  "bound-to":    { stroke: "rgba(0,120,212,0.45)",   particle: "rgba(0,120,212,0.70)",   dashArray: "4 4",       showParticles: false },
+  "attached-to":        { stroke: "rgba(95,75,139,0.50)",   particle: "rgba(95,75,139,0.70)",   dashArray: "none",    showParticles: false },
+  "bound-to":           { stroke: "rgba(0,120,212,0.45)",   particle: "rgba(0,120,212,0.70)",   dashArray: "4 4",     showParticles: false },
+  // Outbound internet: orange-amber for explicit, dashed handled via animation override for deprecated
+  "outbound-internet":  { stroke: "rgba(251,146,60,0.75)",  particle: "rgba(251,146,60,0.95)",  dashArray: "none",    showParticles: false },
+  // NAT GW association: subnet → NAT GW card, same orange family, dashed
+  "natgw-association":  { stroke: "rgba(251,146,60,0.60)",  particle: "rgba(251,146,60,0.80)",  dashArray: "6 4",     showParticles: false },
 };
 
 export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle {
