@@ -1791,12 +1791,13 @@ export async function generateDiagramSpec(
       }
     }
 
+    // Group PaaS resources by VNet short ID (hoisted — also used by otherExternal placement)
+    const paasByVnet = new Map<string, Array<{ res: ArchitectureNode; sid: string }>>();
+
     // Place PE-connected PaaS BELOW their associated VNet (not in global grid)
     if (peConnectedPaaS.length > 0) {
       console.log(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned below their VNet`);
 
-      // Group PaaS resources by VNet short ID
-      const paasByVnet = new Map<string, Array<{ res: ArchitectureNode; sid: string }>>();
       const unassocPaaS: Array<{ res: ArchitectureNode; sid: string }> = [];
       for (const res of peConnectedPaaS) {
         const sid = idMap.get(res.id)!;
@@ -1866,7 +1867,7 @@ export async function generateDiagramSpec(
       if (unassocPaaS.length > 0) cursorY += NODE_H + EXTERNAL_GAP;
     }
 
-    // Place remaining external resources in a flat row
+    // Place remaining external resources — group by connected VNet when possible
     if (otherExternal.length > 0) {
       otherExternal.sort((a, b) => {
         const tierA = DATA_KINDS.has(a.kind) ? 0 : COMPUTE_KINDS.has(a.kind) ? 1 : 2;
@@ -1874,37 +1875,114 @@ export async function generateDiagramSpec(
         return tierA - tierB;
       });
 
-      const cols = Math.min(otherExternal.length, 5);
-      for (let i = 0; i < otherExternal.length; i++) {
-        const res = otherExternal[i]!;
-        const row = Math.floor(i / cols);
-        const col = i % cols;
-        const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
-        const extArchMeta = archMetaMap.get(res.id);
+      // Build specNodeToVnet: spec short ID → owning VNet spec short ID
+      const specNodeToVnet = new Map<string, string>();
+      for (const dn of diagramNodes) {
+        if (dn.nodeType === "group" && dn.icon === "vnet") specNodeToVnet.set(dn.id, dn.id);
+      }
+      for (const dn of diagramNodes) {
+        if (specNodeToVnet.has(dn.id)) continue;
+        let cur: typeof dn | undefined = dn;
+        while (cur?.parentId) {
+          if (specNodeToVnet.has(cur.parentId)) { specNodeToVnet.set(dn.id, specNodeToVnet.get(cur.parentId)!); break; }
+          cur = diagramNodes.find(n => n.id === cur!.parentId);
+        }
+      }
 
-        diagramNodes.push({
-          id: idMap.get(res.id)!,
-          label: res.name,
-          icon: KIND_TO_ICON[res.kind] ?? "custom",
-          azureResourceId: res.azureId,
-          endpoint: res.endpoint,
-          groupId: inferGroup(res),
-          resourceKind: res.kind,
-          location: res.location,
-          resourceGroup: res.resourceGroup,
-          tags: res.tags,
-          position: {
-            x: 40 + col * (NODE_W + NODE_GAP + 20),
-            y: cursorY + row * (NODE_H + NODE_GAP),
-          },
-          bindings: NODE_BINDINGS[res.kind] ?? {
-            health: { source: "composite", rules: [] },
-          },
-          subResources: collectSubResources(res.id),
-          metadata: {
-            ...(isDetachedNsg ? { detached: "true" } : {}),
-            ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
-          },
+      // Map each otherExternal to a VNet via graph edge traversal
+      const externalToVnet = new Map<string, string>(); // sid → vnetShortId
+      for (const res of otherExternal) {
+        const sid = idMap.get(res.id);
+        if (!sid) continue;
+        for (const edge of graph.edges) {
+          const peerOrigId = edge.source === res.id ? edge.target : edge.target === res.id ? edge.source : undefined;
+          if (!peerOrigId) continue;
+          const peerShortId = idMap.get(peerOrigId);
+          if (!peerShortId) continue;
+          const vnet = specNodeToVnet.get(peerShortId);
+          if (vnet) { externalToVnet.set(sid, vnet); break; }
+        }
+      }
+
+      // Group by VNet
+      const extByVnet = new Map<string, Array<{ res: ArchitectureNode; sid: string }>>();
+      const unconnectedExt: Array<{ res: ArchitectureNode; sid: string }> = [];
+      for (const res of otherExternal) {
+        const sid = idMap.get(res.id)!;
+        const vnetId = externalToVnet.get(sid);
+        if (vnetId) {
+          const arr = extByVnet.get(vnetId) ?? [];
+          arr.push({ res, sid });
+          extByVnet.set(vnetId, arr);
+        } else {
+          unconnectedExt.push({ res, sid });
+        }
+      }
+
+      // Place VNet-connected external resources below their VNet (below any already-placed PaaS rows)
+      for (const [vnetShortId, extGroup] of extByVnet) {
+        const vnetSpec = diagramNodes.find(n => n.id === vnetShortId);
+        if (!vnetSpec) continue;
+        const paasCount = paasByVnet.get(vnetShortId)?.length ?? 0;
+        const paasRows = Math.ceil(paasCount / 4);
+        const paasHeight = paasRows > 0 ? paasRows * (NODE_H + NODE_GAP) + NODE_GAP : 0;
+        const baseX = vnetSpec.position?.x ?? 40;
+        const baseY = (vnetSpec.position?.y ?? 0) + (vnetSpec.height ?? 300) + EXTERNAL_GAP + paasHeight;
+
+        extGroup.forEach(({ res, sid }, i) => {
+          const col = i % 4;
+          const row = Math.floor(i / 4);
+          const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
+          const extArchMeta = archMetaMap.get(res.id);
+          diagramNodes.push({
+            id: sid,
+            label: res.name,
+            icon: KIND_TO_ICON[res.kind] ?? "custom",
+            azureResourceId: res.azureId,
+            endpoint: res.endpoint,
+            groupId: inferGroup(res),
+            resourceKind: res.kind,
+            location: res.location,
+            resourceGroup: res.resourceGroup,
+            tags: res.tags,
+            position: { x: baseX + col * (NODE_W + NODE_GAP), y: baseY + row * (NODE_H + NODE_GAP) },
+            bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+            subResources: collectSubResources(res.id),
+            metadata: {
+              ...(isDetachedNsg ? { detached: "true" } : {}),
+              ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
+            },
+          });
+        });
+      }
+
+      // Unconnected external resources: flat grid at cursorY
+      if (unconnectedExt.length > 0) {
+        const cols = Math.min(unconnectedExt.length, 5);
+        unconnectedExt.forEach(({ res, sid }, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
+          const extArchMeta = archMetaMap.get(res.id);
+          diagramNodes.push({
+            id: sid,
+            label: res.name,
+            icon: KIND_TO_ICON[res.kind] ?? "custom",
+            azureResourceId: res.azureId,
+            endpoint: res.endpoint,
+            groupId: inferGroup(res),
+            resourceKind: res.kind,
+            location: res.location,
+            resourceGroup: res.resourceGroup,
+            tags: res.tags,
+            position: { x: 40 + col * (NODE_W + NODE_GAP + 20), y: cursorY + row * (NODE_H + NODE_GAP) },
+            bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+            subResources: collectSubResources(res.id),
+            metadata: {
+              ...(isDetachedNsg ? { detached: "true" } : {}),
+              ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
+            },
+          });
         });
       }
     }

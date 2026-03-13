@@ -27,7 +27,7 @@ type UpdateMode = "polling" | "sse";
 type MultiSelectDropdownProps = {
   label: string;
   allLabel: string;
-  options: { id: string; label: string }[];
+  options: { id: string; label: string; badge?: string }[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   disabled?: boolean;
@@ -77,11 +77,11 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
       >
-        {btnLabel}
+        <span className={styles.multiSelectBtnLabel}>{btnLabel}</span>
         {selected.size > 0 && (
           <span className={styles.multiSelectBtnCount}>{selected.size}</span>
         )}
-        <span style={{ opacity: 0.5, fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ opacity: 0.5, fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className={styles.multiSelectDropdown}>
@@ -103,7 +103,8 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
                 checked={selected.has(opt.id)}
                 onChange={() => toggle(opt.id)}
               />
-              {opt.label}
+              <span className={styles.multiSelectOptionLabel}>{opt.label}</span>
+              {opt.badge && <span className={styles.multiSelectOptionBadge}>{opt.badge}</span>}
             </label>
           ))}
         </div>
@@ -343,7 +344,8 @@ export default function LiveDiagramPage() {
       .filter((n) => n.nodeType === "group" && n.icon === "vnet")
       .map((n) => ({
         id: n.id,
-        label: n.location ? `${n.label} (${formatAzureRegion(n.location)})` : n.label,
+        label: n.label,
+        badge: n.location ? formatAzureRegion(n.location) : undefined,
       }));
   }, [spec]);
 
