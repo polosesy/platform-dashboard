@@ -739,6 +739,42 @@ function LiveCanvasInner({
       fitBoundsRef.current = null;
     }
 
+    // Single-focus: place external standalone nodes near the focused VNet.
+    // In single-focus mode there is no compact layout, so external nodes would render at
+    // their raw spec coordinates (which may be far below all VNets).
+    // Override: position them in a grid directly below the focused VNet.
+    if (mode === "single-focus" && topGroupsFromSpec.length === 1) {
+      const focusedVnet = topGroupsFromSpec[0]!;
+      const vnetX = focusedVnet.position?.x ?? 0;
+      const vnetY = focusedVnet.position?.y ?? 0;
+      const vnetH = focusedVnet.height ?? 300;
+      const vnetW = focusedVnet.width ?? 400;
+
+      const externalNodes = spec.nodes.filter((n) => !n.parentId && n.nodeType !== "group");
+      if (externalNodes.length > 0) {
+        externalDeltaPos = new Map();
+        const COLS = Math.min(externalNodes.length, 4);
+        externalNodes.forEach((n, i) => {
+          const col = i % COLS;
+          const row = Math.floor(i / COLS);
+          externalDeltaPos!.set(n.id, {
+            x: vnetX + col * (NODE_WIDTH + COMPACT_GAP),
+            y: vnetY + vnetH + COMPACT_GAP + row * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2)),
+          });
+        });
+        // Set fitBoundsRef to cover VNet + external nodes together
+        const rows = Math.ceil(externalNodes.length / COLS);
+        const extTotalW = COLS * (NODE_WIDTH + COMPACT_GAP);
+        const extTotalH = rows * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2));
+        fitBoundsRef.current = {
+          x: vnetX,
+          y: vnetY,
+          width: Math.max(vnetW, extTotalW),
+          height: vnetH + COMPACT_GAP + extTotalH,
+        };
+      }
+    }
+
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]));
 
@@ -825,14 +861,15 @@ function LiveCanvasInner({
             outboundMethodCount: methodCount,
             hasDeprecatedPath: nodeSpec.metadata?.hasDeprecatedPath === "true",
           };
+          const extPosInternet = externalDeltaPos?.get(nodeSpec.id);
           if (existing) {
-            result.push({ ...existing, data: idata, position: nodeSpec.position ?? existing.position });
+            result.push({ ...existing, data: idata, position: extPosInternet ?? nodeSpec.position ?? existing.position });
             continue;
           }
           result.push({
             id: nodeSpec.id,
             type: "internet",
-            position: nodeSpec.position ?? { x: 0, y: 0 },
+            position: extPosInternet ?? nodeSpec.position ?? { x: 0, y: 0 },
             draggable: true,
             data: idata,
           } as FlowNode<InternetNodeData>);
