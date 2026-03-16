@@ -656,15 +656,7 @@ function LiveCanvasInner({
         if (cursor && topGroupIdSet.has(cursor.id)) nodeToRootVnet.set(n.id, cursor.id);
       }
 
-      // Step 2: Compute positional delta for each selected VNet
-      const vnetDelta = new Map<string, { dx: number; dy: number }>();
-      for (const vnet of topGroupsFromSpec) {
-        const sp = vnet.position;
-        const cp = compactPlan.pos.get(vnet.id);
-        if (sp && cp) vnetDelta.set(vnet.id, { dx: cp.x - sp.x, dy: cp.y - sp.y });
-      }
-
-      // Step 3: Assign unassigned external nodes to VNets via edge traversal
+      // Step 2: Assign unassigned external nodes to VNets via edge traversal
       for (const edge of spec.edges) {
         const sv = nodeToRootVnet.get(edge.source);
         const tv = nodeToRootVnet.get(edge.target);
@@ -672,45 +664,34 @@ function LiveCanvasInner({
         else if (tv && !nodeToRootVnet.has(edge.source)) nodeToRootVnet.set(edge.source, tv);
       }
 
-      // Step 4: Compute delta-offset positions for external standalone nodes
-      externalDeltaPos = new Map();
+      // Step 3: Compute ABSOLUTE positions for external standalone nodes.
+      // Group by owner VNet and place in a grid directly below the VNet's compact position.
+      // This replaces the previous delta-offset approach which left nodes far from their VNet
+      // because it only applied the VNet's horizontal shift, not a proximity correction.
+      const externalByVnet = new Map<string, string[]>();
       for (const n of spec.nodes) {
         if (n.parentId || topGroupIdSet.has(n.id)) continue;
         const ownerVnet = nodeToRootVnet.get(n.id);
         if (!ownerVnet) continue;
-        const delta = vnetDelta.get(ownerVnet);
-        if (!delta || !n.position) continue;
-        externalDeltaPos.set(n.id, { x: n.position.x + delta.dx, y: n.position.y + delta.dy });
+        const arr = externalByVnet.get(ownerVnet) ?? [];
+        arr.push(n.id);
+        externalByVnet.set(ownerVnet, arr);
       }
 
-      if (process.env.NODE_ENV !== "production") {
-        const unmovedRelatedNodeIds = spec.nodes
-          .filter((n) => !n.parentId && !topGroupIdSet.has(n.id) && !externalDeltaPos!.has(n.id))
-          .map((n) => n.id);
-        const longEdges = spec.edges
-          .filter((e) => {
-            const si = nodeToRootVnet.has(e.source);
-            const ti = nodeToRootVnet.has(e.target);
-            return (si && !ti) || (ti && !si);
-          })
-          .map((e) => ({ source: e.source, target: e.target,
-            sourceInSubgraph: nodeToRootVnet.has(e.source),
-            targetInSubgraph: nodeToRootVnet.has(e.target) }));
-        console.log("[compact-layout] subgraph", {
-          selectedVnetIds: topGroupsFromSpec.map((n) => n.id),
-          movedNodeIds: [...compactPlan.pos.keys(), ...externalDeltaPos.keys()],
-          unmovedRelatedNodeIds,
-          longEdges,
-          externalDelta: [...externalDeltaPos.entries()].map(([id, pos]) => ({
-            id, ownerVnet: nodeToRootVnet.get(id), newPos: pos,
-            specPos: nodeById.get(id)?.position,
-          })),
-          vnetDescendants: topGroupsFromSpec.map((vnet) => ({
-            vnetId: vnet.id,
-            descendants: [...nodeToRootVnet.entries()]
-              .filter(([nid, vid]) => vid === vnet.id && nid !== vnet.id)
-              .map(([nid]) => nid),
-          })),
+      externalDeltaPos = new Map();
+      for (const [vnetId, extNodeIds] of externalByVnet) {
+        const compactVnetPos = compactPlan.pos.get(vnetId);
+        if (!compactVnetPos) continue;
+        const vnetSpec = nodeById.get(vnetId);
+        const vnetH = vnetSpec?.height ?? 300;
+        const COLS = Math.min(extNodeIds.length, 4);
+        extNodeIds.forEach((id, i) => {
+          const col = i % COLS;
+          const row = Math.floor(i / COLS);
+          externalDeltaPos!.set(id, {
+            x: compactVnetPos.x + col * (NODE_WIDTH + COMPACT_GAP),
+            y: compactVnetPos.y + vnetH + COMPACT_GAP + row * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2)),
+          });
         });
       }
     }
