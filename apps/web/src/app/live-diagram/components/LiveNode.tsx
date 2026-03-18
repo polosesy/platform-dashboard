@@ -37,6 +37,7 @@ export type LiveNodeData = {
   aksClusterArmId?: string;
   vmssExpanded?: boolean;
   onVmssExpand?: (nodeId: string, azureResourceId: string, aksClusterArmId?: string) => void;
+  isUnused?: boolean; // public IP not attached to any resource
 };
 
 const RING_R = defaultTokens.dimensions.healthRingRadius;
@@ -97,7 +98,7 @@ const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
 };
 
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
@@ -224,6 +225,11 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
           {!powerState && health !== "unknown" && (
             <span className={styles.healthStatusBadge} data-health={health}>
               {health === "ok" ? "OK" : health === "warning" ? "Warn" : "Crit"}
+            </span>
+          )}
+          {isUnused && (
+            <span className={styles.unusedBadge} title="리소스에 연결되지 않은 미사용 공용 IP">
+              미사용
             </span>
           )}
         </div>

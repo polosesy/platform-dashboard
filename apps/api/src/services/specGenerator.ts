@@ -965,6 +965,41 @@ export async function generateDiagramSpec(
     }]);
   }
 
+  // ── Build standalone NIC → Public IP absorption map ──
+  // Standalone NICs (not VM-bound) with a public IP are absorbed into a PIP card.
+  // The PIP becomes the main resource card; the NIC appears as its sub-resource.
+  const nicToPipAzureId = new Map<string, string>(); // nicOrigId → pipAzureId (lowercase)
+  for (const node of graph.nodes) {
+    if (node.kind !== "nic") continue;
+    if (nicToVmBound.has(node.id)) continue; // VM-bound NICs are handled separately
+    const pipAzureId = typeof node.metadata?.publicIPAzureId === "string" ? node.metadata.publicIPAzureId : undefined;
+    if (pipAzureId) nicToPipAzureId.set(node.id, pipAzureId);
+  }
+
+  // PIP azureId (lower) → PIP graph node (includes absorbed PIPs)
+  const pipByAzureId = new Map<string, ArchitectureNode>();
+  for (const node of graph.nodes) {
+    if (node.kind !== "publicIP") continue;
+    if (node.azureId) pipByAzureId.set(node.azureId.toLowerCase(), node);
+  }
+
+  // PIPs that must be shown in the diagram (their attached NIC is standalone, not VM-bound)
+  const standalonePipIds = new Set<string>(); // PIP origIds to un-exclude
+  const pipToStandaloneNics = new Map<string, ArchitectureNode[]>(); // pipOrigId → NIC nodes
+  const nicToPipOrigId = new Map<string, string>(); // nicOrigId → pipOrigId (for edge retargeting)
+  for (const [nicOrigId, pipAzureId] of nicToPipAzureId) {
+    const pipNode = pipByAzureId.get(pipAzureId);
+    if (!pipNode) continue;
+    standalonePipIds.add(pipNode.id);
+    nicToPipOrigId.set(nicOrigId, pipNode.id);
+    const nicNode = graph.nodes.find((n) => n.id === nicOrigId);
+    if (nicNode) {
+      const arr = pipToStandaloneNics.get(pipNode.id) ?? [];
+      arr.push(nicNode);
+      pipToStandaloneNics.set(pipNode.id, arr);
+    }
+  }
+
   // ── Build NSG placement map ──
   // NSGs are placed based on their associations:
   //  - If attached to a subnet → place inside that subnet
@@ -1106,6 +1141,7 @@ export async function generateDiagramSpec(
   if (vmBoundNics.size > 0) {
     console.log(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
   }
+  console.log(`[specGenerator] PIP absorption: ${nicToPipAzureId.size} standalone NICs → ${standalonePipIds.size} PIP cards`);
   if (appGwFrontendIPs.size > 0) {
     console.log(`[specGenerator] AppGW Frontend IPs: ${appGwFrontendIPs.size} AppGWs with frontend IPs`);
   }
@@ -1113,9 +1149,23 @@ export async function generateDiagramSpec(
     console.log(`[specGenerator] LB Frontend IPs: ${lbFrontendIPs.size} LBs with frontend IPs`);
   }
 
-  /** Collect sub-resources (NICs, Frontend IPs) for a given node by its original ID. */
+  /** Collect sub-resources (NICs, Frontend IPs, PIP-attached NICs) for a given node by its original ID. */
   function collectSubResources(nodeOrigId: string): SubResource[] | undefined {
     const subs: SubResource[] = [];
+
+    // Public IP card: include standalone NICs as sub-resource chips
+    const pipNics = pipToStandaloneNics.get(nodeOrigId);
+    if (pipNics) {
+      for (const nic of pipNics) {
+        subs.push({
+          id: idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id),
+          label: nic.name,
+          kind: "nic" as SubResourceKind,
+          endpoint: nic.endpoint,
+          azureResourceId: nic.azureId,
+        });
+      }
+    }
     const boundNics = vmBoundNics.get(nodeOrigId);
     if (boundNics) {
       for (const nic of boundNics) {
@@ -1163,7 +1213,8 @@ export async function generateDiagramSpec(
     (n) =>
       !EXCLUDED_KINDS.has(n.kind) &&
       !(n.kind === "nic" && nicToVmBound.has(n.id)) &&
-      !(n.kind === "publicIP" && n.metadata?.absorbed === true),
+      !(n.kind === "nic" && nicToPipAzureId.has(n.id)) && // standalone NICs absorbed into PIP card
+      !(n.kind === "publicIP" && n.metadata?.absorbed === true && !standalonePipIds.has(n.id)),
   );
 
   // Build node ID set for edge filtering
@@ -1933,6 +1984,7 @@ export async function generateDiagramSpec(
           const col = i % 4;
           const row = Math.floor(i / 4);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
+          const isUnusedPip = res.kind === "publicIP" && res.metadata?.unused === true;
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -1950,6 +2002,7 @@ export async function generateDiagramSpec(
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
+              ...(isUnusedPip ? { unused: "true" } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -1963,6 +2016,7 @@ export async function generateDiagramSpec(
           const col = i % cols;
           const row = Math.floor(i / cols);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
+          const isUnusedPip = res.kind === "publicIP" && res.metadata?.unused === true;
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -1980,6 +2034,7 @@ export async function generateDiagramSpec(
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
+              ...(isUnusedPip ? { unused: "true" } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -2114,8 +2169,14 @@ export async function generateDiagramSpec(
   // would be dropped because the NIC is no longer a separate node.
   // We redirect them to the parent VM so the flow is preserved.
   const retargetedEdges = graph.edges.map((e) => {
-    const newSource = nicToVmBound.get(e.source);
-    const newTarget = nicToVmBound.get(e.target);
+    // NIC→VM absorption: redirect edges that point to VM-bound NICs → parent VM
+    const newSourceVm = nicToVmBound.get(e.source);
+    const newTargetVm = nicToVmBound.get(e.target);
+    // NIC→PIP absorption: redirect edges that point to standalone NICs → parent PIP card
+    const newSourcePip = nicToPipOrigId.get(e.source);
+    const newTargetPip = nicToPipOrigId.get(e.target);
+    const newSource = newSourceVm ?? newSourcePip;
+    const newTarget = newTargetVm ?? newTargetPip;
     if (!newSource && !newTarget) return e;
     return { ...e, source: newSource ?? e.source, target: newTarget ?? e.target };
   }).filter((e) => e.source !== e.target); // drop self-loops

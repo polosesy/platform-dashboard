@@ -299,9 +299,13 @@ function extractEndpoint(type: string | undefined, name: string | undefined, pro
     return space?.addressPrefixes?.[0];
   }
 
-  // Subnet — addressPrefix
+  // Subnet — addressPrefix (single) or addressPrefixes[0] (array, newer subnets)
   if (t === "microsoft.network/virtualnetworks/subnets") {
-    return safeString(p.addressPrefix);
+    const single = safeString(p.addressPrefix);
+    if (single) return single;
+    const arr = p.addressPrefixes;
+    if (Array.isArray(arr) && arr.length > 0) return safeString(arr[0]);
+    return undefined;
   }
 
   return undefined;
@@ -715,7 +719,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   for (const r of resRows) {
     if (!r.id) continue;
     if ((r.type ?? "").toLowerCase() === "microsoft.network/publicipaddresses") {
-      publicIpById.set(r.id, (r.properties ?? {}) as Record<string, unknown>);
+      publicIpById.set(r.id.toLowerCase(), (r.properties ?? {}) as Record<string, unknown>);
     }
   }
 
@@ -743,11 +747,15 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const endpoint = extractEndpoint(r.type, r.name, r.properties);
     const nodeMetadata: Record<string, unknown> = {};
 
-    // Public IP — mark as absorbed if attached to another resource (has ipConfiguration)
+    // Public IP — mark as absorbed (attached) or unused (not attached)
     if (kind === "publicIP") {
       const props = (r.properties ?? {}) as Record<string, unknown>;
       const ipConfig = props.ipConfiguration as Record<string, unknown> | undefined;
-      if (ipConfig?.id) nodeMetadata.absorbed = true;
+      if (ipConfig?.id) {
+        nodeMetadata.absorbed = true;
+      } else {
+        nodeMetadata.unused = true; // allocated but not attached to any resource
+      }
     }
 
     // Subnet — store defaultOutboundAccess for outbound flow visualization
@@ -756,6 +764,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       if (props.defaultOutboundAccess != null) {
         nodeMetadata.defaultOutboundAccess = String(props.defaultOutboundAccess);
       }
+      // Debug: log what property keys we have for subnets so we can verify CIDR extraction
+      console.log(`[azure] Subnet "${r.name}" props keys=[${Object.keys(props).join(",")}] addressPrefix=${safeString(props.addressPrefix)} endpoint=${extractEndpoint(r.type, r.name, r.properties)}`);
     }
 
     // AKS — store rich metadata for 3-plane diagram (접속면/실행면/노출면)
@@ -868,17 +878,26 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   }
 
   // NICs with a public IP reference — store in metadata for specGenerator to use as sub-resource
+  // Resource Graph may return ipConfigurations in two formats:
+  //   ARM format:      ipConfigurations[].properties.publicIPAddress.id
+  //   RG flat format:  ipConfigurations[].publicIPAddress.id
   for (const node of nodes) {
     if (node.kind !== "nic") continue;
     const r = nicById.get(node.id);
     if (!r) continue;
-    const ipCfgs = ((r.properties as Record<string, unknown>)?.ipConfigurations ?? []) as Array<{
-      properties?: { publicIPAddress?: { id?: string } };
-    }>;
-    const pubRef = ipCfgs[0]?.properties?.publicIPAddress?.id?.toLowerCase();
+    const ipCfgs = ((r.properties as Record<string, unknown>)?.ipConfigurations ?? []) as Array<Record<string, unknown>>;
+    const firstCfg = ipCfgs[0];
+    if (!firstCfg) continue;
+    // Try ARM format first, then Resource Graph flattened format
+    const nested = (firstCfg.properties as { publicIPAddress?: { id?: string } } | undefined)?.publicIPAddress?.id;
+    const flat = (firstCfg.publicIPAddress as { id?: string } | undefined)?.id;
+    const pubRef = (nested ?? flat)?.toLowerCase();
     if (!pubRef) continue;
     const pubIp = safeString(publicIpById.get(pubRef)?.ipAddress);
-    if (pubIp) node.metadata = { ...node.metadata, publicIP: pubIp };
+    // Always record the ARM ID reference so specGenerator can absorb this NIC into the PIP card.
+    // pubIp may be absent for dynamic/unallocated PIPs — that's fine, we still need the link.
+    node.metadata = { ...node.metadata, publicIPAzureId: pubRef, ...(pubIp ? { publicIP: pubIp } : {}) };
+    console.log(`[azure] NIC "${node.name}" → PIP ref=${pubRef.split("/").pop()} ip=${pubIp || "(unallocated)"} format=${nested ? "arm" : "flat"}`);
   }
 
   // NAT Gateway: resolve actual public IP from publicIpById, then create subnet→natGateway edges
@@ -1385,6 +1404,8 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   console.log(`[subnet-discovery] Source (a) NIC properties: ${discoveredSubnetIds.size} subnet IDs`);
 
   // ── Source (b): VNet.properties.subnets[].id ──
+  // Also capture addressPrefix so discovered subnet nodes get their CIDR displayed.
+  const subnetAddressPrefix = new Map<string, string>(); // subnet ARM id (lower) → CIDR
   const preNicCount = discoveredSubnetIds.size;
   for (const r of resRows) {
     if (!r.id) continue;
@@ -1393,11 +1414,17 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const arr = safePropArray(r.properties, "subnets");
     for (const sub of arr) {
       if (!sub || typeof sub !== "object") continue;
-      const id = safeId((sub as Record<string, unknown>).id);
-      if (id) discoveredSubnetIds.add(id);
+      const obj = sub as Record<string, unknown>;
+      const id = safeId(obj.id);
+      if (!id) continue;
+      discoveredSubnetIds.add(id);
+      // addressPrefix may be nested under .properties (ARM) or flat (Resource Graph)
+      const props = obj.properties as Record<string, unknown> | undefined;
+      const prefix = safeString(props?.addressPrefix ?? obj.addressPrefix);
+      if (prefix) subnetAddressPrefix.set(id.toLowerCase(), prefix);
     }
   }
-  console.log(`[subnet-discovery] Source (b) VNet embedded: +${discoveredSubnetIds.size - preNicCount} (total ${discoveredSubnetIds.size})`);
+  console.log(`[subnet-discovery] Source (b) VNet embedded: +${discoveredSubnetIds.size - preNicCount} (total ${discoveredSubnetIds.size}, ${subnetAddressPrefix.size} with CIDR)`);
 
   // ── Source (c): Resource ID / edge ID parsing for /subnets/ pattern ──
   const preEdgeCount = discoveredSubnetIds.size;
@@ -1413,10 +1440,21 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   }
   console.log(`[subnet-discovery] Source (c) ID parsing: +${discoveredSubnetIds.size - preEdgeCount} (total ${discoveredSubnetIds.size})`);
 
+  // ── Patch existing subnet nodes that have no CIDR but have a discovered prefix ──
+  // Subnets from resRows may have been created without addressPrefix if RG returned empty properties.
+  for (const node of nodes) {
+    if (node.kind !== "subnet" || node.endpoint) continue;
+    const prefix = subnetAddressPrefix.get(node.id.toLowerCase());
+    if (prefix) {
+      node.endpoint = prefix;
+      console.log(`[subnet-discovery] Patched CIDR for existing subnet "${node.name}": ${prefix}`);
+    }
+  }
+
   // ── Create subnet nodes for ALL discovered IDs ──
   let createdSubnets = 0;
   for (const subnetId of discoveredSubnetIds) {
-    if (nodes.some(n => n.id === subnetId && n.kind === "subnet")) continue; // Already exists
+    if (nodes.some(n => n.id.toLowerCase() === subnetId.toLowerCase() && n.kind === "subnet")) continue; // Already exists
 
     const subName = subnetId.split("/").pop() ?? "unknown-subnet";
     const vnetIdx = subnetId.lastIndexOf("/subnets/");
@@ -1425,12 +1463,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     // Fall back to NIC's location/RG if VNet not found
     const anyNicForSubnet = [...nicById.values()].find(nic => getSubnetIdFromNicProps(nic.properties) === subnetId);
 
+    const discoveredPrefix = subnetAddressPrefix.get(subnetId.toLowerCase());
     const subRow: AzureResourceRow = {
       id: subnetId,
       name: subName,
       type: "Microsoft.Network/virtualNetworks/subnets",
       location: vnetRow?.location ?? anyNicForSubnet?.location,
       resourceGroup: vnetRow?.resourceGroup ?? anyNicForSubnet?.resourceGroup,
+      properties: discoveredPrefix ? { addressPrefix: discoveredPrefix } : undefined,
     };
     resourceById.set(subnetId, subRow);
     nodes.push({
@@ -1438,6 +1478,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       kind: "subnet",
       name: subName,
       azureId: subnetId,
+      endpoint: discoveredPrefix, // CIDR — shown as subtitle in GroupNode
       location: subRow.location,
       resourceGroup: subRow.resourceGroup,
       health: "unknown",

@@ -339,6 +339,7 @@ function LiveCanvasInner({
           onNsgSelect: handleNsgSelect,
           vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
           onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
+          isUnused: nodeSpec.metadata?.unused === "true",
         },
       };
       if (nodeSpec.parentId) {
@@ -931,6 +932,7 @@ function LiveCanvasInner({
           aksClusterArmId: nodeSpec.metadata?.aksClusterArmId,
           vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
           onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
+          isUnused: nodeSpec.metadata?.unused === "true",
         };
         if (existing) {
           const updated = { ...existing, data } as FlowNode<LiveNodeData> & { parentNode?: string; extent?: string };

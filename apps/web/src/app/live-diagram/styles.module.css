@@ -505,6 +505,18 @@
   line-height: 1.2;
 }
 
+.unusedBadge {
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: rgba(209, 132, 0, 0.90);
+  background: rgba(209, 132, 0, 0.10);
+  border: 1px solid rgba(209, 132, 0, 0.25);
+}
+
 .healthStatusBadge[data-health="ok"] {
   color: rgba(16, 137, 62, 0.85);
   background: rgba(16, 137, 62, 0.08);
