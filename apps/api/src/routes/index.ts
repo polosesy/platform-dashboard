@@ -9,6 +9,7 @@ import { registerCostRoutes } from "./cost";
 import { registerSecurityRoutes } from "./security";
 import { registerHealthRoutes } from "./health";
 import { registerLiveDiagramRoutes } from "./liveDiagram";
+import { registerObservabilityRoutes } from "./observability";
 
 export function registerAllRoutes(router: Router, env: Env) {
   // Health check
@@ -26,4 +27,5 @@ export function registerAllRoutes(router: Router, env: Env) {
   registerSecurityRoutes(router, env);
   registerHealthRoutes(router, env);
   registerLiveDiagramRoutes(router, env);
+  registerObservabilityRoutes(router, env);
 }

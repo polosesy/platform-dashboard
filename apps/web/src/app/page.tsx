@@ -44,6 +44,12 @@ const features = [
     desc: "AKS cluster overview with pods, deployments, services, and namespace-level object browser.",
     accent: "#326ce5",
   },
+  {
+    href: "/observability",
+    title: "Observability",
+    desc: "APM + Container Insights: workload health, JVM metrics, node resources, error rates, and p95 latency.",
+    accent: "#8764b8",
+  },
 ];
 
 export default function Home() {

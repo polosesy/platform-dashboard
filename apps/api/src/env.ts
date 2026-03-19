@@ -58,6 +58,12 @@ const EnvSchema = z.object({
   // Connection Monitor
   AZURE_CONNECTION_MONITOR_ENABLED: z.coerce.boolean().default(false),
   AZURE_CONNECTION_MONITOR_CACHE_TTL_MS: z.coerce.number().default(120_000),
+
+  // Observability / APM (Container Insights + Prometheus + App Insights)
+  AZURE_OBSERVABILITY_ENABLED: z.coerce.boolean().default(false),
+  AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID: z.string().optional(), // Log Analytics workspace for Container Insights (falls back to AZURE_LOG_ANALYTICS_WORKSPACE_ID)
+  AZURE_PROMETHEUS_ENDPOINT: z.string().optional(),             // Prometheus HTTP API base URL (Phase 2)
+  AZURE_OBSERVABILITY_CACHE_TTL_MS: z.coerce.number().default(60_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

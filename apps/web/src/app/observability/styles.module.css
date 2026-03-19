@@ -1,0 +1,385 @@
+/* ── Page Layout ── */
+.page {
+  padding: 24px 28px;
+  max-width: 1400px;
+  margin: 0 auto;
+  font-family: var(--font-sans);
+  color: var(--fg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+}
+
+.clusterSelect {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  min-width: 200px;
+}
+
+.refreshBtn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.refreshBtn:hover { background: var(--surface-2, #f0f0f0); }
+
+/* ── Data Source Status ── */
+.dsBadges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.dsBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dsBadgeOk {
+  background: rgba(16,137,62,0.10);
+  color: rgba(16,137,62,0.90);
+  border: 1px solid rgba(16,137,62,0.25);
+}
+.dsBadgeOff {
+  background: rgba(20,21,23,0.06);
+  color: rgba(20,21,23,0.40);
+  border: 1px solid rgba(20,21,23,0.12);
+}
+
+.noDataBanner {
+  padding: 32px;
+  text-align: center;
+  color: rgba(20,21,23,0.45);
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin: 20px 0;
+}
+.noDataBanner strong { display: block; margin-bottom: 6px; font-size: 14px; color: rgba(20,21,23,0.6); }
+
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.tab {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: rgba(20,21,23,0.5);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s;
+}
+.tab:hover { color: var(--fg); }
+.tabActive {
+  color: var(--accent, #0078d4);
+  border-bottom-color: var(--accent, #0078d4);
+}
+
+/* ── Summary Cards (Overview) ── */
+.summaryCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.summaryCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.summaryCardLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(20,21,23,0.45);
+  margin-bottom: 6px;
+}
+
+.summaryCardValue {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg);
+}
+
+.summaryCardSub {
+  font-size: 11px;
+  margin-top: 4px;
+  color: rgba(20,21,23,0.50);
+}
+
+/* ── Section Headers ── */
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(20,21,23,0.50);
+  margin: 0 0 12px;
+}
+
+/* ── Workload Table ── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(20,21,23,0.45);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(20,21,23,0.06);
+  vertical-align: middle;
+}
+
+.tableRow {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.tableRow:hover { background: rgba(0,120,212,0.04); }
+.tableRowSelected { background: rgba(0,120,212,0.06); }
+
+/* ── Pod Mini Bar ── */
+.podBar {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.podBarSegment {
+  height: 8px;
+  border-radius: 2px;
+  min-width: 6px;
+}
+.podRunning { background: rgba(16,137,62,0.65); }
+.podPending { background: rgba(209,132,0,0.65); }
+.podFailed  { background: rgba(196,43,28,0.75); }
+
+.podBarLabel {
+  font-size: 11px;
+  color: rgba(20,21,23,0.5);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* ── Resource Usage Gauge ── */
+.gauge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gaugeBar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(20,21,23,0.08);
+  width: 64px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.gaugeFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.gaugeOk      { background: rgba(16,137,62,0.65); }
+.gaugeWarn    { background: rgba(209,132,0,0.75); }
+.gaugeCrit    { background: rgba(196,43,28,0.80); }
+
+.gaugeLabel {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: rgba(20,21,23,0.6);
+}
+
+/* ── APM Badges ── */
+.apmBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.apmOk   { background: rgba(16,137,62,0.08);  color: rgba(16,137,62,0.85); }
+.apmWarn { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
+.apmCrit { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.90); }
+.apmNone { background: rgba(20,21,23,0.05);  color: rgba(20,21,23,0.35); }
+
+/* ── Workload Detail Panel ── */
+.detailPanel {
+  position: fixed;
+  top: 0; right: 0;
+  width: 420px;
+  height: 100vh;
+  background: var(--bg, #fff);
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 24px rgba(0,0,0,0.08);
+  overflow-y: auto;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailHeader {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detailTitle { font-size: 16px; font-weight: 700; margin: 0; flex: 1; }
+.detailNs    { font-size: 11px; color: rgba(20,21,23,0.45); margin-top: 2px; }
+.detailKind  {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(0,120,212,0.08);
+  color: rgba(0,120,212,0.80);
+}
+
+.detailClose {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; color: rgba(20,21,23,0.4);
+  padding: 0; line-height: 1;
+}
+.detailClose:hover { color: var(--fg); }
+
+.detailBody { padding: 20px; flex: 1; }
+
+.detailSection { margin-bottom: 20px; }
+.detailSectionTitle {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: rgba(20,21,23,0.45); margin: 0 0 10px;
+}
+
+.metricRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(20,21,23,0.05);
+  font-size: 13px;
+}
+.metricRowLabel { color: rgba(20,21,23,0.55); }
+.metricRowValue { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ── Node Table ── */
+.nodeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.nodeCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.nodeCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.nodeName { font-size: 13px; font-weight: 600; }
+
+.nodeStatusBadge {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  text-transform: uppercase;
+}
+.nodeReady    { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
+.nodeNotReady { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.85); }
+.nodeUnknown  { background: rgba(20,21,23,0.07); color: rgba(20,21,23,0.45); }
+
+.nodeMetrics { display: flex; flex-direction: column; gap: 8px; }
+.nodeMetricLabel { font-size: 11px; color: rgba(20,21,23,0.45); margin-bottom: 3px; }
+
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 2px solid rgba(0,120,212,0.2);
+  border-top-color: rgba(0,120,212,0.8);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px;
+  color: rgba(20,21,23,0.4);
+  font-size: 13px;
+}
+
+.errorMsg {
+  padding: 16px;
+  background: rgba(196,43,28,0.06);
+  border: 1px solid rgba(196,43,28,0.20);
+  border-radius: 8px;
+  color: rgba(196,43,28,0.85);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
