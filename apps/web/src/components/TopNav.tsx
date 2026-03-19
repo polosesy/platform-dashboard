@@ -15,6 +15,7 @@ const links = [
   { href: "/cost", label: "Cost" },
   { href: "/security", label: "Security" },
   { href: "/kubernetes", label: "Kubernetes" },
+  { href: "/observability", label: "Observability" },
 ];
 
 type TopNavProps = {
