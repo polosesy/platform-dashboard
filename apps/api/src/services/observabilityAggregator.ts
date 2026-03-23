@@ -31,8 +31,8 @@ export async function getObservabilityOverview(
   clusterName: string,
 ): Promise<ObservabilityOverview> {
   const [workloadResult, nodeResult] = await Promise.allSettled([
-    collectWorkloadHealth(env, bearerToken),
-    collectNodeHealth(env, bearerToken),
+    collectWorkloadHealth(env, bearerToken, clusterId),
+    collectNodeHealth(env, bearerToken, clusterId),
   ]);
 
   const { workloads, containerInsightsAvailable: ciWorkloads } =
@@ -47,6 +47,7 @@ export async function getObservabilityOverview(
 
   const containerInsightsAvailable = ciWorkloads || ciNodes;
   const appInsightsConfigured = !!env.AZURE_APP_INSIGHTS_APP_ID;
+  console.log(`[observability] overview: CI=${containerInsightsAvailable} workloads=${workloads.length} nodes=${nodes.length} cluster=${clusterId}`);
 
   // Enrich workloads with APM data if App Insights is configured
   const enrichedWorkloads = appInsightsConfigured
@@ -85,7 +86,7 @@ export async function getObservabilityOverview(
     generatedAt: new Date().toISOString(),
     dataSourceStatus: buildDataSourceStatus(
       containerInsightsAvailable,
-      false, // Prometheus: Phase 2
+      !!env.AZURE_PROMETHEUS_ENDPOINT, // Phase 2 — endpoint 설정 시 활성
       appInsightsConfigured,
     ),
     nodeSummary,
@@ -99,7 +100,7 @@ export async function getObservabilityWorkloads(
   bearerToken: string | undefined,
   clusterId: string,
 ): Promise<ObservabilityWorkloadsResponse> {
-  const { workloads, containerInsightsAvailable } = await collectWorkloadHealth(env, bearerToken).catch(
+  const { workloads, containerInsightsAvailable } = await collectWorkloadHealth(env, bearerToken, clusterId).catch(
     () => ({ workloads: [], containerInsightsAvailable: false }),
   );
 
@@ -121,7 +122,7 @@ export async function getObservabilityNodes(
   bearerToken: string | undefined,
   clusterId: string,
 ): Promise<ObservabilityNodesResponse> {
-  const { nodes, containerInsightsAvailable } = await collectNodeHealth(env, bearerToken).catch(
+  const { nodes, containerInsightsAvailable } = await collectNodeHealth(env, bearerToken, clusterId).catch(
     () => ({ nodes: [], containerInsightsAvailable: false }),
   );
 

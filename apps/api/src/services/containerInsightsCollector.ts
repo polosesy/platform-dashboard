@@ -6,7 +6,7 @@ import type {
   ResourceUsage,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getLogAnalyticsFetcherAuto } from "../infra/azureClientFactory";
+import { getLogAnalyticsFetcherAuto, getArmFetcherAuto } from "../infra/azureClientFactory";
 
 // ──────────────────────────────────────────────────────────────
 // Container Insights Collector
@@ -17,6 +17,7 @@ import { getLogAnalyticsFetcherAuto } from "../infra/azureClientFactory";
 //   - KubeNodeInventory — node status + conditions
 //   - InsightsMetrics   — CPU/memory usage (cpuUsageNanoCores, memoryWorkingSetBytes)
 //
+// Auto-discovers Log Analytics workspace from AKS cluster ARM ID.
 // Falls back gracefully when Container Insights is not enabled.
 // ──────────────────────────────────────────────────────────────
 
@@ -32,6 +33,103 @@ type LaQueryResponse = {
 
 const workloadsCache = new CacheManager<WorkloadHealth[]>(20, 60_000);
 const nodesCache = new CacheManager<NodeResourceSummary[]>(20, 60_000);
+const workspaceIdCache = new CacheManager<string>(10, 5 * 60_000);
+
+// ── Auto-discover Log Analytics workspace from AKS cluster ──
+//
+// AKS 모니터링 설정은 두 가지 경로로 workspace 참조를 저장합니다:
+//   (a) Legacy OMS agent: addonProfiles.omsagent.config.logAnalyticsWorkspaceResourceID
+//   (b) AMA (Azure Monitor Agent): azureMonitorProfile.containerInsights.logAnalyticsWorkspaceResourceId
+// 클러스터 ARM API에서 두 경로 모두 확인합니다.
+
+type AksClusterMonitoringProps = {
+  properties?: {
+    addonProfiles?: {
+      omsagent?: { enabled?: boolean; config?: { logAnalyticsWorkspaceResourceID?: string } };
+      omsAgent?: { enabled?: boolean; config?: { logAnalyticsWorkspaceResourceID?: string } };
+    };
+    azureMonitorProfile?: {
+      containerInsights?: {
+        enabled?: boolean;
+        logAnalyticsWorkspaceResourceId?: string;
+      };
+      metrics?: { enabled?: boolean };
+    };
+  };
+};
+
+async function resolveWorkspaceId(
+  env: Env,
+  bearerToken: string | undefined,
+  clusterId: string,
+): Promise<string | null> {
+  // 1) AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID가 명시적으로 설정된 경우 우선
+  //    (AZURE_LOG_ANALYTICS_WORKSPACE_ID는 Traffic Analytics용이므로 여기서 fallback 안 함)
+  if (env.AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID) {
+    return env.AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID;
+  }
+
+  // 2) 클러스터 ARM ID에서 자동 탐색
+  if (clusterId && clusterId.toLowerCase().startsWith("/subscriptions/")) {
+    const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+    const cacheKey = `${prefix}:ws-resolve:${clusterId.toLowerCase()}`;
+    const cached = workspaceIdCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const fetcher = await getArmFetcherAuto(env, bearerToken);
+      const clusterUrl = `https://management.azure.com${clusterId}?api-version=2024-09-01`;
+      const cluster = await fetcher.fetchJson<AksClusterMonitoringProps>(clusterUrl);
+
+      // (a) AMA 방식: azureMonitorProfile.containerInsights
+      const amaWsId =
+        cluster.properties?.azureMonitorProfile?.containerInsights?.logAnalyticsWorkspaceResourceId;
+
+      // (b) Legacy 방식: addonProfiles.omsagent
+      const omsWsId =
+        cluster.properties?.addonProfiles?.omsagent?.config?.logAnalyticsWorkspaceResourceID ??
+        cluster.properties?.addonProfiles?.omsAgent?.config?.logAnalyticsWorkspaceResourceID;
+
+      const wsResourceId = amaWsId ?? omsWsId;
+
+      console.log("[containerInsights] cluster addon discovery:", {
+        clusterId,
+        amaEnabled: cluster.properties?.azureMonitorProfile?.containerInsights?.enabled,
+        amaWsId: amaWsId ?? "(none)",
+        omsEnabled: cluster.properties?.addonProfiles?.omsagent?.enabled,
+        omsWsId: omsWsId ?? "(none)",
+        prometheusEnabled: cluster.properties?.azureMonitorProfile?.metrics?.enabled,
+      });
+
+      if (wsResourceId) {
+        // workspace ARM resource ID → customerId (GUID)
+        const wsUrl = `https://management.azure.com${wsResourceId}?api-version=2022-10-01`;
+        const ws = await fetcher.fetchJson<{
+          properties?: { customerId?: string };
+        }>(wsUrl);
+
+        const workspaceGuid = ws.properties?.customerId;
+        if (workspaceGuid) {
+          console.log("[containerInsights] Auto-discovered workspace GUID:", workspaceGuid);
+          workspaceIdCache.set(cacheKey, workspaceGuid);
+          return workspaceGuid;
+        }
+        console.warn("[containerInsights] Workspace has no customerId:", wsResourceId);
+      } else {
+        console.warn("[containerInsights] No Container Insights workspace in cluster config");
+      }
+    } catch (err) {
+      console.error("[containerInsights] workspace resolve error:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  // 3) 최후 fallback: 공유 Log Analytics workspace (Traffic Analytics와 동일)
+  const fallback = env.AZURE_LOG_ANALYTICS_WORKSPACE_ID;
+  if (fallback) {
+    console.log("[containerInsights] Falling back to AZURE_LOG_ANALYTICS_WORKSPACE_ID:", fallback);
+  }
+  return fallback ?? null;
+}
 
 function tableToObjects(table: LogAnalyticsTable): Record<string, unknown>[] {
   const cols = table.columns.map((c) => c.name);
@@ -52,33 +150,37 @@ function asString(v: unknown): string {
   return typeof v === "string" ? v : String(v ?? "");
 }
 
-function getWorkspaceId(env: Env): string | null {
-  return env.AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID ?? env.AZURE_LOG_ANALYTICS_WORKSPACE_ID ?? null;
-}
-
 // ── Workloads: KubePodInventory + InsightsMetrics ──
 
 export async function collectWorkloadHealth(
   env: Env,
   bearerToken: string | undefined,
+  clusterId: string,
 ): Promise<{ workloads: WorkloadHealth[]; containerInsightsAvailable: boolean }> {
-  const workspaceId = getWorkspaceId(env);
-  if (!workspaceId || !env.AZURE_OBSERVABILITY_ENABLED) {
+  const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
+  if (!workspaceId) {
+    console.warn("[containerInsights] No workspace ID resolved for cluster:", clusterId);
     return { workloads: [], containerInsightsAvailable: false };
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:obs:workloads:${workspaceId}`;
+  const cacheKey = `${prefix}:obs:workloads:${workspaceId}:${clusterId}`;
   const cached = workloadsCache.get(cacheKey);
   if (cached) return { workloads: cached, containerInsightsAvailable: true };
 
   try {
     const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
 
+    // ClusterId 필터: ARM resource ID 포함 여부로 클러스터 구분
+    const clusterFilter = clusterId.startsWith("/subscriptions/")
+      ? `| where ClusterId =~ "${clusterId}"`
+      : `| where ClusterId contains "${clusterId}"`;
+
     // Query 1: Pod inventory grouped by controller (workload)
     const podKql = `
 KubePodInventory
 | where TimeGenerated > ago(5m)
+${clusterFilter}
 | summarize arg_max(TimeGenerated, *) by PodUid
 | summarize
     TotalPods   = dcount(PodName),
@@ -92,6 +194,10 @@ KubePodInventory
 
     // Query 2: CPU/memory from InsightsMetrics (container level, grouped to controller)
     const metricsKql = `
+let clusterPods = KubePodInventory
+| where TimeGenerated > ago(5m)
+${clusterFilter}
+| distinct PodUid, Computer;
 InsightsMetrics
 | where TimeGenerated > ago(5m) and Namespace == "k8s"
 | where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes")
@@ -102,6 +208,7 @@ InsightsMetrics
     RsName   = tostring(Tags.k8sControllerName),
     CpuLimit = todouble(coalesce(Tags.k8sCpuLimitNanoCores, "0")),
     MemLimit = todouble(coalesce(Tags.k8sMemoryLimitBytes, "0"))
+| where isnotempty(RsName)
 | summarize AvgVal = avg(Val), AvgLimit = avg(CpuLimit + MemLimit) by Name, RsName, K8sNs
 | summarize
     AvgCpuNano   = avgif(AvgVal, Name == "cpuUsageNanoCores"),
@@ -109,6 +216,8 @@ InsightsMetrics
     CpuLimitNano = maxif(AvgLimit, Name == "cpuUsageNanoCores"),
     MemLimitBytes = maxif(AvgLimit, Name == "memoryWorkingSetBytes")
   by RsName, K8sNs`;
+
+    console.log("[containerInsights] querying workloads — workspace:", workspaceId, "cluster:", clusterId);
 
     const [podResult, metricsResult] = await Promise.allSettled([
       fetcher.query(workspaceId, podKql),
@@ -119,7 +228,11 @@ InsightsMetrics
     const podMap = new Map<string, WorkloadHealth>();
     if (podResult.status === "fulfilled") {
       const resp = podResult.value as LaQueryResponse;
+      if (resp.error) {
+        console.error("[containerInsights] KQL pod error:", resp.error.message);
+      }
       const table = resp.tables?.[0];
+      console.log("[containerInsights] pod query rows:", table?.rows?.length ?? 0);
       if (table) {
         for (const row of tableToObjects(table)) {
           const name = asString(row.ControllerName);
@@ -146,6 +259,10 @@ InsightsMetrics
           });
         }
       }
+    }
+
+    if (podResult.status === "rejected") {
+      console.error("[containerInsights] pod query rejected:", podResult.reason);
     }
 
     // Merge metrics into workload map
@@ -212,23 +329,30 @@ InsightsMetrics
 export async function collectNodeHealth(
   env: Env,
   bearerToken: string | undefined,
+  clusterId: string,
 ): Promise<{ nodes: NodeResourceSummary[]; containerInsightsAvailable: boolean }> {
-  const workspaceId = getWorkspaceId(env);
-  if (!workspaceId || !env.AZURE_OBSERVABILITY_ENABLED) {
+  const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
+  if (!workspaceId) {
+    console.warn("[containerInsights] No workspace ID resolved for nodes, cluster:", clusterId);
     return { nodes: [], containerInsightsAvailable: false };
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:obs:nodes:${workspaceId}`;
+  const cacheKey = `${prefix}:obs:nodes:${workspaceId}:${clusterId}`;
   const cached = nodesCache.get(cacheKey);
   if (cached) return { nodes: cached, containerInsightsAvailable: true };
 
   try {
     const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
 
+    const clusterFilter = clusterId.startsWith("/subscriptions/")
+      ? `| where ClusterId =~ "${clusterId}"`
+      : `| where ClusterId contains "${clusterId}"`;
+
     const nodeKql = `
 KubeNodeInventory
 | where TimeGenerated > ago(5m)
+${clusterFilter}
 | summarize arg_max(TimeGenerated, *) by Computer
 | project
     NodeName = Computer,
@@ -236,20 +360,29 @@ KubeNodeInventory
     Labels,
     Capacity = todynamic(Capacity)`;
 
+    // Node-level metrics: join with cluster's nodes via KubeNodeInventory
     const nodeMetricsKql = `
+let clusterNodes = KubeNodeInventory
+| where TimeGenerated > ago(5m)
+${clusterFilter}
+| distinct Computer;
 InsightsMetrics
 | where TimeGenerated > ago(5m) and Namespace == "k8s"
 | where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes", "cpuCapacityNanoCores", "memoryCapacityBytes")
 | where isempty(todynamic(Tags).k8sPodName)
 | extend Tags = todynamic(Tags)
 | extend NodeName = tostring(Tags.k8sNode)
+| where NodeName in (clusterNodes)
 | summarize AvgVal = avg(Val) by Name, NodeName`;
 
     const podCountKql = `
 KubePodInventory
 | where TimeGenerated > ago(5m)
+${clusterFilter}
 | summarize arg_max(TimeGenerated, *) by PodUid
 | summarize PodCount = dcount(PodName) by Computer`;
+
+    console.log("[containerInsights] querying nodes — workspace:", workspaceId, "cluster:", clusterId);
 
     const [nodeResult, metricsResult, podCountResult] = await Promise.allSettled([
       fetcher.query(workspaceId, nodeKql),
@@ -262,7 +395,9 @@ KubePodInventory
 
     if (nodeResult.status === "fulfilled") {
       const resp = nodeResult.value as LaQueryResponse;
+      if (resp.error) console.error("[containerInsights] KQL node error:", resp.error.message);
       const table = resp.tables?.[0];
+      console.log("[containerInsights] node query rows:", table?.rows?.length ?? 0);
       if (table) {
         for (const row of tableToObjects(table)) {
           const name = asString(row.NodeName);
