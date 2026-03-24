@@ -184,7 +184,7 @@ KubePodInventory
 | where TimeGenerated > ago(5m)
 ${clusterFilter}
 | extend _PodLabel = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
-| extend _Restarts = toint(coalesce(column_ifexists("PodRestartCount", ""), column_ifexists("Restarts", ""), "0"))
+| extend _Restarts = toint(coalesce(tostring(column_ifexists("PodRestartCount", "")), tostring(column_ifexists("Restarts", "")), "0"))
 | summarize arg_max(TimeGenerated, *) by PodUid
 | summarize
     TotalPods   = dcount(_PodLabel),
