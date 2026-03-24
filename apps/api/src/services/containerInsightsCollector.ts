@@ -177,45 +177,45 @@ export async function collectWorkloadHealth(
       : `| where ClusterId contains "${clusterId}"`;
 
     // Query 1: Pod inventory grouped by controller (workload)
+    // ContainerLogV2 스키마에서는 PodName 대신 Name, Restarts 대신 PodRestartCount 사용 가능
+    // column_ifexists()로 양쪽 스키마 호환
     const podKql = `
 KubePodInventory
 | where TimeGenerated > ago(5m)
 ${clusterFilter}
+| extend _PodLabel = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
+| extend _Restarts = toint(coalesce(column_ifexists("PodRestartCount", ""), column_ifexists("Restarts", ""), "0"))
 | summarize arg_max(TimeGenerated, *) by PodUid
 | summarize
-    TotalPods   = dcount(PodName),
+    TotalPods   = dcount(_PodLabel),
     RunningPods = countif(PodStatus == "Running"),
     PendingPods = countif(PodStatus == "Pending"),
     FailedPods  = countif(PodStatus in ("Failed","CrashLoopBackOff","Error","OOMKilled")),
-    TotalRestarts = sum(toint(coalesce(Restarts, 0)))
+    TotalRestarts = sum(_Restarts)
   by ControllerName, ControllerKind, Namespace
 | where isnotempty(ControllerName) and ControllerKind in ("ReplicaSet","StatefulSet","DaemonSet","Deployment")
 | top 100 by TotalPods desc`;
 
     // Query 2: CPU/memory from InsightsMetrics (container level, grouped to controller)
+    // Namespace: "container.azm.ms/k8s" (AMA) 또는 "k8s" (legacy OMS)
     const metricsKql = `
-let clusterPods = KubePodInventory
-| where TimeGenerated > ago(5m)
-${clusterFilter}
-| distinct PodUid, Computer;
 InsightsMetrics
-| where TimeGenerated > ago(5m) and Namespace == "k8s"
+| where TimeGenerated > ago(5m) and Namespace in ("container.azm.ms/k8s", "k8s")
 | where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes")
 | extend Tags = todynamic(Tags)
 | extend
-    PodName  = tostring(Tags.k8sPodName),
-    K8sNs    = tostring(Tags.k8sNamespace),
-    RsName   = tostring(Tags.k8sControllerName),
-    CpuLimit = todouble(coalesce(Tags.k8sCpuLimitNanoCores, "0")),
-    MemLimit = todouble(coalesce(Tags.k8sMemoryLimitBytes, "0"))
-| where isnotempty(RsName)
-| summarize AvgVal = avg(Val), AvgLimit = avg(CpuLimit + MemLimit) by Name, RsName, K8sNs
+    _ControllerName = coalesce(tostring(Tags.controllerName), tostring(Tags.k8sControllerName), ""),
+    _K8sNs          = coalesce(tostring(Tags["k8sNamespace"]), tostring(Tags.Namespace), ""),
+    _CpuLimit       = todouble(coalesce(Tags.cpuLimitNanoCores, Tags.k8sCpuLimitNanoCores, "0")),
+    _MemLimit       = todouble(coalesce(Tags.memoryLimitBytes, Tags.k8sMemoryLimitBytes, "0"))
+| where isnotempty(_ControllerName) and isnotempty(_K8sNs)
+| summarize AvgVal = avg(Val), AvgLimit = avg(_CpuLimit + _MemLimit) by Name, _ControllerName, _K8sNs
 | summarize
     AvgCpuNano   = avgif(AvgVal, Name == "cpuUsageNanoCores"),
     AvgMemBytes  = avgif(AvgVal, Name == "memoryWorkingSetBytes"),
     CpuLimitNano = maxif(AvgLimit, Name == "cpuUsageNanoCores"),
     MemLimitBytes = maxif(AvgLimit, Name == "memoryWorkingSetBytes")
-  by RsName, K8sNs`;
+  by _ControllerName, _K8sNs`;
 
     console.log("[containerInsights] querying workloads — workspace:", workspaceId, "cluster:", clusterId);
 
@@ -232,7 +232,7 @@ InsightsMetrics
         console.error("[containerInsights] KQL pod error:", resp.error.message);
       }
       const table = resp.tables?.[0];
-      console.log("[containerInsights] pod query rows:", table?.rows?.length ?? 0);
+      console.log("[containerInsights] pod query — rows:", table?.rows?.length ?? 0, "columns:", table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)");
       if (table) {
         for (const row of tableToObjects(table)) {
           const name = asString(row.ControllerName);
@@ -271,8 +271,8 @@ InsightsMetrics
       const table = resp.tables?.[0];
       if (table) {
         for (const row of tableToObjects(table)) {
-          const rsName = asString(row.RsName);
-          const ns = asString(row.K8sNs);
+          const rsName = asString(row._ControllerName ?? row.RsName);
+          const ns = asString(row._K8sNs ?? row.K8sNs);
 
           // Try direct key match, then strip RS hash suffix (rs-name-xxxxx → name)
           let wl = podMap.get(`${ns}/${rsName}`);
@@ -367,11 +367,11 @@ let clusterNodes = KubeNodeInventory
 ${clusterFilter}
 | distinct Computer;
 InsightsMetrics
-| where TimeGenerated > ago(5m) and Namespace == "k8s"
+| where TimeGenerated > ago(5m) and Namespace in ("container.azm.ms/k8s", "k8s")
 | where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes", "cpuCapacityNanoCores", "memoryCapacityBytes")
 | where isempty(todynamic(Tags).k8sPodName)
 | extend Tags = todynamic(Tags)
-| extend NodeName = tostring(Tags.k8sNode)
+| extend NodeName = coalesce(tostring(Tags.hostName), tostring(Tags.k8sNode), Computer)
 | where NodeName in (clusterNodes)
 | summarize AvgVal = avg(Val) by Name, NodeName`;
 
@@ -379,8 +379,9 @@ InsightsMetrics
 KubePodInventory
 | where TimeGenerated > ago(5m)
 ${clusterFilter}
+| extend _PodLabel = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
 | summarize arg_max(TimeGenerated, *) by PodUid
-| summarize PodCount = dcount(PodName) by Computer`;
+| summarize PodCount = dcount(_PodLabel) by Computer`;
 
     console.log("[containerInsights] querying nodes — workspace:", workspaceId, "cluster:", clusterId);
 
