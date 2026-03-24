@@ -3,6 +3,12 @@
 import type { NodeResourceSummary } from "@aud/types";
 import styles from "../styles.module.css";
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 function GaugeBar({ pct }: { pct: number | null }) {
   if (pct === null) return <span style={{ fontSize: 11, color: "rgba(20,21,23,0.35)" }}>N/A</span>;
   const clamped = Math.min(100, Math.round(pct));
@@ -88,11 +94,37 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
               </div>
             </div>
 
+            {/* Disk */}
+            {node.diskUsagePct !== null && (
+              <div>
+                <div className={styles.nodeMetricLabel}>디스크</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <GaugeBar pct={node.diskUsagePct} />
+                  {node.diskCapacityGB !== null && (
+                    <span style={{ fontSize: 11, color: "rgba(20,21,23,0.45)" }}>{node.diskCapacityGB}GB</span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 11, color: "rgba(20,21,23,0.45)" }}>
               <span>파드 {node.podCount}개</span>
-              {node.cpuCapacityMillicores && <span>CPU {node.cpuCapacityMillicores}m</span>}
-              {node.memoryCapacityMiB && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}
+              {node.cpuCapacityMillicores != null && <span>CPU {node.cpuCapacityMillicores}m</span>}
+              {node.memoryCapacityMiB != null && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}
             </div>
+
+            {/* Network throughput */}
+            {(node.networkRxBytesPerSec !== null || node.networkTxBytesPerSec !== null) && (
+              <div className={styles.nodeNetRow}>
+                <span className={styles.nodeNetLabel}>NET</span>
+                {node.networkRxBytesPerSec !== null && (
+                  <span className={styles.nodeNetValue}>↓ {formatBytes(node.networkRxBytesPerSec)}/s</span>
+                )}
+                {node.networkTxBytesPerSec !== null && (
+                  <span className={styles.nodeNetValue}>↑ {formatBytes(node.networkTxBytesPerSec)}/s</span>
+                )}
+              </div>
+            )}
 
             <PressureIndicators conditions={node.conditions} />
           </div>

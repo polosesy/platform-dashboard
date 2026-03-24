@@ -12,15 +12,17 @@ import { DataSourceBadges } from "./components/DataSourceBadges";
 import { OverviewTab } from "./components/OverviewTab";
 import { WorkloadsTab } from "./components/WorkloadsTab";
 import { InfraTab } from "./components/InfraTab";
+import { LogsTab } from "./components/LogsTab";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 
-type Tab = "overview" | "workloads" | "infra";
+type Tab = "overview" | "workloads" | "infra" | "logs";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "workloads", label: "Workloads" },
   { id: "infra", label: "Infrastructure" },
+  { id: "logs", label: "Logs" },
 ];
 
 export default function ObservabilityPage() {
@@ -219,6 +221,13 @@ export default function ObservabilityPage() {
 
           {tab === "infra" && nodesResp && (
             <InfraTab nodes={nodesResp.nodes} />
+          )}
+
+          {tab === "logs" && (
+            <LogsTab
+              clusterId={clusterId}
+              workloads={workloadsResp?.workloads ?? []}
+            />
           )}
         </>
       )}

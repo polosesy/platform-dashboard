@@ -4,6 +4,7 @@ import type {
   NodeResourceSummary,
   NodeConditionSummary,
   ResourceUsage,
+  PodLogEntry,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { getLogAnalyticsFetcherAuto, getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -368,7 +369,7 @@ ${clusterFilter}
 | distinct Computer;
 InsightsMetrics
 | where TimeGenerated > ago(5m) and Namespace in ("container.azm.ms/k8s", "k8s")
-| where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes", "cpuCapacityNanoCores", "memoryCapacityBytes")
+| where Name in ("cpuUsageNanoCores", "memoryWorkingSetBytes", "cpuCapacityNanoCores", "memoryCapacityBytes", "diskUsedPercentage", "diskCapacity", "networkRxBytesPerSec", "networkTxBytesPerSec")
 | where isempty(todynamic(Tags).k8sPodName)
 | extend Tags = todynamic(Tags)
 | extend NodeName = coalesce(tostring(Tags.hostName), tostring(Tags.k8sNode), Computer)
@@ -418,6 +419,10 @@ ${clusterFilter}
             memoryUsagePct: null,
             cpuCapacityMillicores: cpuCores ? Math.round(cpuCores * 1000) : null,
             memoryCapacityMiB: memMiB,
+            diskUsagePct: null,
+            diskCapacityGB: null,
+            networkRxBytesPerSec: null,
+            networkTxBytesPerSec: null,
             podCount: 0,
             conditions: [],
           });
@@ -452,6 +457,16 @@ ${clusterFilter}
           if (memUsage !== undefined && memCap > 0) {
             node.memoryUsagePct = Math.min(100, Math.round((memUsage / memCap) * 100));
           }
+          // Disk
+          const diskPct = metrics["diskUsedPercentage"];
+          if (diskPct !== undefined) node.diskUsagePct = Math.min(100, Math.round(diskPct));
+          const diskCap = metrics["diskCapacity"];
+          if (diskCap !== undefined) node.diskCapacityGB = Math.round(diskCap / (1024 * 1024 * 1024));
+          // Network
+          const rxB = metrics["networkRxBytesPerSec"];
+          if (rxB !== undefined) node.networkRxBytesPerSec = Math.round(rxB);
+          const txB = metrics["networkTxBytesPerSec"];
+          if (txB !== undefined) node.networkTxBytesPerSec = Math.round(txB);
         }
       }
     }
@@ -498,7 +513,110 @@ function parseMemToMiB(s: string): number | null {
   }
 }
 
+// ── Pod Live Logs: ContainerLogV2 / ContainerLog ──
+
+const logsCache = new CacheManager<PodLogEntry[]>(30, 15_000); // 15s TTL — 로그는 자주 갱신
+
+export async function collectPodLogs(
+  env: Env,
+  bearerToken: string | undefined,
+  clusterId: string,
+  namespace: string,
+  podName: string,
+  limit: number = 200,
+  sinceMinutes: number = 30,
+): Promise<{ logs: PodLogEntry[]; containerInsightsAvailable: boolean }> {
+  const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
+  if (!workspaceId) {
+    return { logs: [], containerInsightsAvailable: false };
+  }
+
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const cacheKey = `${prefix}:obs:logs:${workspaceId}:${namespace}:${podName}:${limit}`;
+  const cached = logsCache.get(cacheKey);
+  if (cached) return { logs: cached, containerInsightsAvailable: true };
+
+  try {
+    const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
+
+    // ContainerLogV2 (newer schema) 우선 시도, 실패 시 ContainerLog (legacy) fallback
+    const logV2Kql = `
+ContainerLogV2
+| where TimeGenerated > ago(${sinceMinutes}m)
+| where PodName =~ "${podName}" and PodNamespace =~ "${namespace}"
+| project TimeGenerated, PodName, ContainerName, LogMessage, LogSource
+| order by TimeGenerated desc
+| take ${limit}`;
+
+    const logV1Kql = `
+ContainerLog
+| where TimeGenerated > ago(${sinceMinutes}m)
+| where LogEntry has "${podName}"
+| extend _Pod = extract("([^/]+)$", 1, ContainerID)
+| project TimeGenerated, PodName = _Pod, ContainerName = Name, LogMessage = LogEntry, LogSource = LogEntrySource
+| order by TimeGenerated desc
+| take ${limit}`;
+
+    let entries: PodLogEntry[] = [];
+
+    // Try V2 first
+    try {
+      const resp = await fetcher.query(workspaceId, logV2Kql) as LaQueryResponse;
+      const table = resp.tables?.[0];
+      if (table && table.rows.length > 0) {
+        entries = tableToObjects(table).map((row) => ({
+          timestamp: asString(row.TimeGenerated),
+          podName: asString(row.PodName),
+          containerName: asString(row.ContainerName),
+          logMessage: asString(row.LogMessage),
+          stream: parseLogStream(asString(row.LogSource)),
+        }));
+        console.log(`[containerInsights] logs V2: ${entries.length} entries for ${namespace}/${podName}`);
+      }
+    } catch {
+      // ContainerLogV2 테이블이 없을 수 있음 — fallback
+    }
+
+    // Fallback to V1
+    if (entries.length === 0) {
+      try {
+        const resp = await fetcher.query(workspaceId, logV1Kql) as LaQueryResponse;
+        const table = resp.tables?.[0];
+        if (table && table.rows.length > 0) {
+          entries = tableToObjects(table).map((row) => ({
+            timestamp: asString(row.TimeGenerated),
+            podName: asString(row.PodName),
+            containerName: asString(row.ContainerName),
+            logMessage: asString(row.LogMessage),
+            stream: parseLogStream(asString(row.LogSource)),
+          }));
+          console.log(`[containerInsights] logs V1: ${entries.length} entries for ${namespace}/${podName}`);
+        }
+      } catch (err) {
+        console.error("[containerInsights] log query error:", err instanceof Error ? err.message : err);
+      }
+    }
+
+    // 시간순 정렬 (오래된 → 최신)
+    entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    logsCache.set(cacheKey, entries);
+    return { logs: entries, containerInsightsAvailable: true };
+  } catch (err) {
+    console.error("[containerInsights] logs error:", err instanceof Error ? err.message : err);
+    return { logs: [], containerInsightsAvailable: false };
+  }
+}
+
+function parseLogStream(source: string): PodLogEntry["stream"] {
+  const s = source.toLowerCase();
+  if (s.includes("stdout")) return "stdout";
+  if (s.includes("stderr")) return "stderr";
+  return "unknown";
+}
+
 export function clearObservabilityCache(): void {
   workloadsCache.clear();
   nodesCache.clear();
+  logsCache.clear();
 }

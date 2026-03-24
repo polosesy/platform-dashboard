@@ -18,6 +18,10 @@ export type NodeResourceSummary = {
   memoryUsagePct: number | null;   // 0-100
   cpuCapacityMillicores: number | null;
   memoryCapacityMiB: number | null;
+  diskUsagePct: number | null;     // 0-100
+  diskCapacityGB: number | null;
+  networkRxBytesPerSec: number | null;
+  networkTxBytesPerSec: number | null;
   podCount: number;
   conditions: NodeConditionSummary[];
 };
@@ -149,6 +153,25 @@ export type ObservabilityRumResponse = {
   generatedAt: string;
   dataSourceStatus: ObservabilityDataSourceStatus;
   rum: RumMetrics;
+};
+
+// ── Pod Live Logs ──
+
+export type PodLogEntry = {
+  timestamp: string;       // ISO 8601
+  podName: string;
+  containerName: string;
+  logMessage: string;
+  stream: "stdout" | "stderr" | "unknown";
+};
+
+export type ObservabilityLogsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  logs: PodLogEntry[];
+  podName: string;
+  namespace: string;
+  hasMore: boolean;         // 추가 로그 존재 여부
 };
 
 export type ObservabilityStatusResponse = {

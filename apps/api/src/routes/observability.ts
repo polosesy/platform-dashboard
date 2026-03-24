@@ -5,7 +5,8 @@ import {
   getObservabilityWorkloads,
   getObservabilityNodes,
 } from "../services/observabilityAggregator";
-import type { ObservabilityStatusResponse } from "@aud/types";
+import { collectPodLogs } from "../services/containerInsightsCollector";
+import type { ObservabilityStatusResponse, ObservabilityLogsResponse } from "@aud/types";
 
 export function registerObservabilityRoutes(router: Router, env: Env) {
   // Status — data source connectivity check
@@ -62,6 +63,38 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     } catch (e: unknown) {
       console.error("[observability] nodes error:", e instanceof Error ? e.message : e);
       res.status(500).json({ error: "nodes_failed", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // Logs — pod live logs via ContainerLogV2/ContainerLog
+  router.get("/api/observability/logs", async (req: Request, res: Response) => {
+    const clusterId = typeof req.query.clusterId === "string" ? req.query.clusterId : "";
+    const namespace = typeof req.query.namespace === "string" ? req.query.namespace : "";
+    const podName = typeof req.query.podName === "string" ? req.query.podName : "";
+    const limit = Math.min(500, Math.max(10, parseInt(String(req.query.limit ?? "200"), 10) || 200));
+    const sinceMinutes = Math.min(1440, Math.max(1, parseInt(String(req.query.sinceMinutes ?? "30"), 10) || 30));
+
+    if (!clusterId || !namespace || !podName) {
+      res.status(400).json({ error: "missing_params", message: "clusterId, namespace, podName are required" });
+      return;
+    }
+
+    try {
+      const { logs, containerInsightsAvailable } = await collectPodLogs(
+        env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes,
+      );
+      const data: ObservabilityLogsResponse = {
+        clusterId,
+        generatedAt: new Date().toISOString(),
+        logs,
+        podName,
+        namespace,
+        hasMore: logs.length >= limit,
+      };
+      res.json(data);
+    } catch (e: unknown) {
+      console.error("[observability] logs error:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "logs_failed", message: e instanceof Error ? e.message : String(e) });
     }
   });
 }
