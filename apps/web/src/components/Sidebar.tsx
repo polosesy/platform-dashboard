@@ -52,6 +52,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         { href: "/security", label: t("common.security"), icon: "shield" },
         { href: "/kubernetes", label: t("common.kubernetes"), icon: "grid" },
         { href: "/observability", label: "Observability", icon: "pulse" },
+        { href: "/hubble", label: "Hubble Network", icon: "network" },
       ],
     },
   ];

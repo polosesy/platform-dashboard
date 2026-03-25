@@ -5,9 +5,11 @@ import type {
   ObservabilityNodesResponse,
   ObservabilityDataSourceStatus,
   WorkloadHealth,
+  NodeResourceSummary,
 } from "@aud/types";
 import { collectWorkloadHealth, collectNodeHealth } from "./containerInsightsCollector";
 import { collectAppInsightsApm } from "./appInsightsApmCollector";
+import { collectPrometheusWorkloadMetrics, collectPrometheusNodeMetrics, resolvePrometheusEndpoint } from "./prometheusCollector";
 
 // ──────────────────────────────────────────────────────────────
 // Observability Aggregator
@@ -30,9 +32,11 @@ export async function getObservabilityOverview(
   clusterId: string,
   clusterName: string,
 ): Promise<ObservabilityOverview> {
-  const [workloadResult, nodeResult] = await Promise.allSettled([
+  const [workloadResult, nodeResult, promWlResult, promNodeResult] = await Promise.allSettled([
     collectWorkloadHealth(env, bearerToken, clusterId),
     collectNodeHealth(env, bearerToken, clusterId),
+    collectPrometheusWorkloadMetrics(env, bearerToken, clusterId),
+    collectPrometheusNodeMetrics(env, bearerToken, clusterId),
   ]);
 
   const { workloads, containerInsightsAvailable: ciWorkloads } =
@@ -40,14 +44,28 @@ export async function getObservabilityOverview(
       ? workloadResult.value
       : { workloads: [], containerInsightsAvailable: false };
 
-  const { nodes, containerInsightsAvailable: ciNodes } =
+  let { nodes, containerInsightsAvailable: ciNodes } =
     nodeResult.status === "fulfilled"
       ? nodeResult.value
-      : { nodes: [], containerInsightsAvailable: false };
+      : { nodes: [] as NodeResourceSummary[], containerInsightsAvailable: false };
 
   const containerInsightsAvailable = ciWorkloads || ciNodes;
+  const prometheusAvailable =
+    (promWlResult.status === "fulfilled" && promWlResult.value.available) ||
+    (promNodeResult.status === "fulfilled" && promNodeResult.value.available);
   const appInsightsConfigured = !!env.AZURE_APP_INSIGHTS_APP_ID;
-  console.log(`[observability] overview: CI=${containerInsightsAvailable} workloads=${workloads.length} nodes=${nodes.length} cluster=${clusterId}`);
+
+  // Prometheus 메트릭으로 workload CPU/Mem 보강 (CI 데이터가 없을 때)
+  if (promWlResult.status === "fulfilled" && promWlResult.value.metrics.size > 0) {
+    enrichWorkloadsWithPrometheus(workloads, promWlResult.value.metrics);
+  }
+
+  // Prometheus 메트릭으로 node 보강
+  if (promNodeResult.status === "fulfilled" && promNodeResult.value.metrics.size > 0) {
+    nodes = enrichNodesWithPrometheus(nodes, promNodeResult.value.metrics);
+  }
+
+  console.log(`[observability] overview: CI=${containerInsightsAvailable} Prom=${prometheusAvailable} workloads=${workloads.length} nodes=${nodes.length} cluster=${clusterId}`);
 
   // Enrich workloads with APM data if App Insights is configured
   const enrichedWorkloads = appInsightsConfigured
@@ -86,7 +104,7 @@ export async function getObservabilityOverview(
     generatedAt: new Date().toISOString(),
     dataSourceStatus: buildDataSourceStatus(
       containerInsightsAvailable,
-      !!env.AZURE_PROMETHEUS_ENDPOINT, // Phase 2 — endpoint 설정 시 활성
+      prometheusAvailable,
       appInsightsConfigured,
     ),
     nodeSummary,
@@ -100,9 +118,20 @@ export async function getObservabilityWorkloads(
   bearerToken: string | undefined,
   clusterId: string,
 ): Promise<ObservabilityWorkloadsResponse> {
-  const { workloads, containerInsightsAvailable } = await collectWorkloadHealth(env, bearerToken, clusterId).catch(
-    () => ({ workloads: [], containerInsightsAvailable: false }),
-  );
+  const [ciResult, promResult] = await Promise.allSettled([
+    collectWorkloadHealth(env, bearerToken, clusterId),
+    collectPrometheusWorkloadMetrics(env, bearerToken, clusterId),
+  ]);
+
+  const { workloads, containerInsightsAvailable } =
+    ciResult.status === "fulfilled"
+      ? ciResult.value
+      : { workloads: [] as WorkloadHealth[], containerInsightsAvailable: false };
+
+  const prometheusAvailable = promResult.status === "fulfilled" && promResult.value.available;
+  if (promResult.status === "fulfilled" && promResult.value.metrics.size > 0) {
+    enrichWorkloadsWithPrometheus(workloads, promResult.value.metrics);
+  }
 
   const appInsightsConfigured = !!env.AZURE_APP_INSIGHTS_APP_ID;
   const enriched = appInsightsConfigured
@@ -112,7 +141,7 @@ export async function getObservabilityWorkloads(
   return {
     clusterId,
     generatedAt: new Date().toISOString(),
-    dataSourceStatus: buildDataSourceStatus(containerInsightsAvailable, false, appInsightsConfigured),
+    dataSourceStatus: buildDataSourceStatus(containerInsightsAvailable, prometheusAvailable, appInsightsConfigured),
     workloads: enriched,
   };
 }
@@ -122,14 +151,25 @@ export async function getObservabilityNodes(
   bearerToken: string | undefined,
   clusterId: string,
 ): Promise<ObservabilityNodesResponse> {
-  const { nodes, containerInsightsAvailable } = await collectNodeHealth(env, bearerToken, clusterId).catch(
-    () => ({ nodes: [], containerInsightsAvailable: false }),
-  );
+  const [ciResult, promResult] = await Promise.allSettled([
+    collectNodeHealth(env, bearerToken, clusterId),
+    collectPrometheusNodeMetrics(env, bearerToken, clusterId),
+  ]);
+
+  const { nodes: ciNodes, containerInsightsAvailable } =
+    ciResult.status === "fulfilled"
+      ? ciResult.value
+      : { nodes: [] as NodeResourceSummary[], containerInsightsAvailable: false };
+
+  const prometheusAvailable = promResult.status === "fulfilled" && promResult.value.available;
+  const nodes = (promResult.status === "fulfilled" && promResult.value.metrics.size > 0)
+    ? enrichNodesWithPrometheus(ciNodes, promResult.value.metrics)
+    : ciNodes;
 
   return {
     clusterId,
     generatedAt: new Date().toISOString(),
-    dataSourceStatus: buildDataSourceStatus(containerInsightsAvailable, false, !!env.AZURE_APP_INSIGHTS_APP_ID),
+    dataSourceStatus: buildDataSourceStatus(containerInsightsAvailable, prometheusAvailable, !!env.AZURE_APP_INSIGHTS_APP_ID),
     nodes,
   };
 }
@@ -151,4 +191,39 @@ async function enrichWithApm(
   } catch {
     return workloads;
   }
+}
+
+// ── Enrich workloads with Prometheus CPU/Memory ──
+
+function enrichWorkloadsWithPrometheus(
+  workloads: WorkloadHealth[],
+  promMetrics: Map<string, Partial<WorkloadHealth>>,
+): void {
+  for (const wl of workloads) {
+    const key = `${wl.namespace}/${wl.name}`;
+    const prom = promMetrics.get(key);
+    if (!prom) continue;
+    // CI 데이터가 없을 때만 Prometheus로 채움
+    if (!wl.cpu && prom.cpu) wl.cpu = prom.cpu as WorkloadHealth["cpu"];
+    if (!wl.memory && prom.memory) wl.memory = prom.memory as WorkloadHealth["memory"];
+  }
+}
+
+// ── Enrich nodes with Prometheus metrics ──
+
+function enrichNodesWithPrometheus(
+  nodes: NodeResourceSummary[],
+  promMetrics: Map<string, Partial<NodeResourceSummary>>,
+): NodeResourceSummary[] {
+  // Prometheus는 node 이름 or IP로 키를 가질 수 있음
+  for (const node of nodes) {
+    const prom = promMetrics.get(node.name);
+    if (!prom) continue;
+    if (node.cpuUsagePct === null && prom.cpuUsagePct != null) node.cpuUsagePct = prom.cpuUsagePct;
+    if (node.memoryUsagePct === null && prom.memoryUsagePct != null) node.memoryUsagePct = prom.memoryUsagePct;
+    if (node.diskUsagePct === null && prom.diskUsagePct != null) node.diskUsagePct = prom.diskUsagePct;
+    if (node.networkRxBytesPerSec === null && prom.networkRxBytesPerSec != null) node.networkRxBytesPerSec = prom.networkRxBytesPerSec;
+    if (node.networkTxBytesPerSec === null && prom.networkTxBytesPerSec != null) node.networkTxBytesPerSec = prom.networkTxBytesPerSec;
+  }
+  return nodes;
 }

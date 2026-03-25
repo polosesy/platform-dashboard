@@ -64,6 +64,13 @@ const EnvSchema = z.object({
   AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID: z.string().optional(), // Log Analytics workspace for Container Insights (falls back to AZURE_LOG_ANALYTICS_WORKSPACE_ID)
   AZURE_PROMETHEUS_ENDPOINT: z.string().optional(),             // Prometheus HTTP API base URL (Phase 2)
   AZURE_OBSERVABILITY_CACHE_TTL_MS: z.coerce.number().default(60_000),
+
+  // Cilium Hubble
+  HUBBLE_ENABLED: z.coerce.boolean().default(true),
+  HUBBLE_RELAY_NAMESPACE: z.string().default("kube-system"),
+  HUBBLE_RELAY_PORT: z.coerce.number().default(80),
+  HUBBLE_FLOW_LIMIT: z.coerce.number().default(10_000),
+  HUBBLE_CACHE_TTL_MS: z.coerce.number().default(30_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -31,12 +31,12 @@ export type NodeConditionSummary = {
   status: "True" | "False" | "Unknown";
 };
 
-// ── Workload (Deployment / StatefulSet / DaemonSet) ──
+// ── Workload (Deployment / StatefulSet / DaemonSet / standalone Pod) ──
 
 export type WorkloadHealth = {
   name: string;
   namespace: string;
-  kind: "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet";
+  kind: "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet" | "Pod";
   pods: {
     total: number;
     running: number;
@@ -174,10 +174,84 @@ export type ObservabilityLogsResponse = {
   hasMore: boolean;         // 추가 로그 존재 여부
 };
 
+// ── Namespace / Pod Discovery (for Logs tab dropdown) ──
+
+export type NamespacePodItem = {
+  namespace: string;
+  podName: string;
+  /** Controller-managed 워크로드명 (standalone Pod이면 podName과 동일) */
+  workloadName: string;
+  status: string;           // Running, Pending, Failed, Completed …
+  /** Pod 내 컨테이너 이름 목록 (multi-container pod 지원) */
+  containers?: string[];
+};
+
+export type ObservabilityNamespacesResponse = {
+  clusterId: string;
+  generatedAt: string;
+  /** namespace → pod list 매핑용 flat 배열 */
+  items: NamespacePodItem[];
+};
+
 export type ObservabilityStatusResponse = {
   generatedAt: string;
   dataSourceStatus: ObservabilityDataSourceStatus;
   workspaceId: string | null;
   prometheusEndpoint: string | null;
   appInsightsConfigured: boolean;
+};
+
+// ── Workload Detail (per-pod breakdown, services, containers) ──
+
+export type WorkloadContainerDetail = {
+  name: string;
+  image: string;
+  ports: { containerPort: number; protocol: string }[];
+  resourceRequests: { cpu?: string; memory?: string } | null;
+  resourceLimits: { cpu?: string; memory?: string } | null;
+  ready: boolean;
+  restartCount: number;
+  state: "running" | "waiting" | "terminated" | "unknown";
+  stateReason?: string;
+};
+
+export type WorkloadPodDetail = {
+  name: string;
+  namespace: string;
+  status: string;            // Running, Pending, Failed, …
+  podIP: string;
+  nodeName: string;
+  startTime: string;         // ISO 8601
+  containers: WorkloadContainerDetail[];
+};
+
+export type WorkloadServiceInfo = {
+  name: string;
+  namespace: string;
+  type: string;              // ClusterIP, LoadBalancer, NodePort, ExternalName
+  clusterIP: string;
+  externalIP: string | null;
+  ports: { port: number; targetPort: string | number; protocol: string; nodePort?: number }[];
+  /** Service selector 라벨 */
+  selector: Record<string, string>;
+};
+
+export type WorkloadEndpointInfo = {
+  serviceName: string;
+  addresses: { ip: string; nodeName?: string; podName?: string }[];
+  ports: { port: number; protocol: string; name?: string }[];
+};
+
+export type WorkloadDetailResponse = {
+  clusterId: string;
+  generatedAt: string;
+  workloadName: string;
+  namespace: string;
+  kind: string;
+  /** 개별 파드 상세 */
+  pods: WorkloadPodDetail[];
+  /** 워크로드에 연결된 서비스 */
+  services: WorkloadServiceInfo[];
+  /** 서비스 엔드포인트 */
+  endpoints: WorkloadEndpointInfo[];
 };

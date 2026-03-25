@@ -5,6 +5,7 @@ import type {
   NodeConditionSummary,
   ResourceUsage,
   PodLogEntry,
+  NamespacePodItem,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 import { getLogAnalyticsFetcherAuto, getArmFetcherAuto } from "../infra/azureClientFactory";
@@ -180,21 +181,35 @@ export async function collectWorkloadHealth(
     // Query 1: Pod inventory grouped by controller (workload)
     // ContainerLogV2 스키마에서는 PodName 대신 Name, Restarts 대신 PodRestartCount 사용 가능
     // column_ifexists()로 양쪽 스키마 호환
+    // Controller-managed workloads + standalone Pods (no controller) 를 union
     const podKql = `
-KubePodInventory
+let _base = KubePodInventory
 | where TimeGenerated > ago(5m)
 ${clusterFilter}
 | extend _PodLabel = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
 | extend _Restarts = toint(coalesce(tostring(column_ifexists("PodRestartCount", "")), tostring(column_ifexists("Restarts", "")), "0"))
-| summarize arg_max(TimeGenerated, *) by PodUid
+| summarize arg_max(TimeGenerated, *) by PodUid;
+let _controlled = _base
+| where isnotempty(ControllerName) and ControllerKind in ("ReplicaSet","StatefulSet","DaemonSet","Deployment")
 | summarize
     TotalPods   = dcount(_PodLabel),
     RunningPods = countif(PodStatus == "Running"),
     PendingPods = countif(PodStatus == "Pending"),
     FailedPods  = countif(PodStatus in ("Failed","CrashLoopBackOff","Error","OOMKilled")),
     TotalRestarts = sum(_Restarts)
-  by ControllerName, ControllerKind, Namespace
-| where isnotempty(ControllerName) and ControllerKind in ("ReplicaSet","StatefulSet","DaemonSet","Deployment")
+  by ControllerName, ControllerKind, Namespace;
+let _standalone = _base
+| where isempty(ControllerName) or ControllerKind !in ("ReplicaSet","StatefulSet","DaemonSet","Deployment")
+| summarize
+    TotalPods   = dcount(_PodLabel),
+    RunningPods = countif(PodStatus == "Running"),
+    PendingPods = countif(PodStatus == "Pending"),
+    FailedPods  = countif(PodStatus in ("Failed","CrashLoopBackOff","Error","OOMKilled")),
+    TotalRestarts = sum(_Restarts)
+  by Namespace, _PodLabel
+| extend ControllerName = _PodLabel, ControllerKind = "Pod"
+| project-away _PodLabel;
+union _controlled, _standalone
 | top 100 by TotalPods desc`;
 
     // Query 2: CPU/memory from InsightsMetrics (container level, grouped to controller)
@@ -532,7 +547,7 @@ export async function collectPodLogs(
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:obs:logs:${workspaceId}:${namespace}:${podName}:${limit}`;
+  const cacheKey = `${prefix}:obs:logs:${workspaceId}:${namespace}:${podName}:${limit}:${sinceMinutes}`;
   const cached = logsCache.get(cacheKey);
   if (cached) return { logs: cached, containerInsightsAvailable: true };
 
@@ -540,19 +555,26 @@ export async function collectPodLogs(
     const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
 
     // ContainerLogV2 (newer schema) 우선 시도, 실패 시 ContainerLog (legacy) fallback
+    // column_ifexists()로 AMA / OMS / Basic 티어 스키마 차이 흡수
     const logV2Kql = `
 ContainerLogV2
 | where TimeGenerated > ago(${sinceMinutes}m)
-| where PodName =~ "${podName}" and PodNamespace =~ "${namespace}"
-| project TimeGenerated, PodName, ContainerName, LogMessage, LogSource
+| extend _PodNs = coalesce(column_ifexists("PodNamespace", ""), column_ifexists("Namespace", ""))
+| extend _PodName = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""))
+| extend _Container = coalesce(column_ifexists("ContainerName", ""), column_ifexists("Container", ""), "")
+| extend _Msg = coalesce(column_ifexists("LogMessage", ""), column_ifexists("Message", ""), column_ifexists("LogEntry", ""), "")
+| extend _Src = coalesce(column_ifexists("LogSource", ""), column_ifexists("Stream", ""), "unknown")
+| where _PodNs =~ "${namespace}"
+| where _PodName =~ "${podName}"
+| project TimeGenerated, PodName = _PodName, ContainerName = _Container, LogMessage = _Msg, LogSource = _Src
 | order by TimeGenerated desc
 | take ${limit}`;
 
     const logV1Kql = `
 ContainerLog
 | where TimeGenerated > ago(${sinceMinutes}m)
-| where LogEntry has "${podName}"
 | extend _Pod = extract("([^/]+)$", 1, ContainerID)
+| where _Pod =~ "${podName}"
 | project TimeGenerated, PodName = _Pod, ContainerName = Name, LogMessage = LogEntry, LogSource = LogEntrySource
 | order by TimeGenerated desc
 | take ${limit}`;
@@ -562,7 +584,11 @@ ContainerLog
     // Try V2 first
     try {
       const resp = await fetcher.query(workspaceId, logV2Kql) as LaQueryResponse;
+      if (resp.error) {
+        console.warn(`[containerInsights] logs V2 API error for ${namespace}/${podName}:`, resp.error.message);
+      }
       const table = resp.tables?.[0];
+      console.log(`[containerInsights] logs V2 query — rows: ${table?.rows?.length ?? 0}, cols: ${table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)"} for ${namespace}/${podName}`);
       if (table && table.rows.length > 0) {
         entries = tableToObjects(table).map((row) => ({
           timestamp: asString(row.TimeGenerated),
@@ -573,15 +599,20 @@ ContainerLog
         }));
         console.log(`[containerInsights] logs V2: ${entries.length} entries for ${namespace}/${podName}`);
       }
-    } catch {
+    } catch (err) {
       // ContainerLogV2 테이블이 없을 수 있음 — fallback
+      console.warn(`[containerInsights] logs V2 exception for ${namespace}/${podName}:`, err instanceof Error ? err.message : err);
     }
 
     // Fallback to V1
     if (entries.length === 0) {
       try {
         const resp = await fetcher.query(workspaceId, logV1Kql) as LaQueryResponse;
+        if (resp.error) {
+          console.warn(`[containerInsights] logs V1 API error for ${namespace}/${podName}:`, resp.error.message);
+        }
         const table = resp.tables?.[0];
+        console.log(`[containerInsights] logs V1 query — rows: ${table?.rows?.length ?? 0} for ${namespace}/${podName}`);
         if (table && table.rows.length > 0) {
           entries = tableToObjects(table).map((row) => ({
             timestamp: asString(row.TimeGenerated),
@@ -593,7 +624,7 @@ ContainerLog
           console.log(`[containerInsights] logs V1: ${entries.length} entries for ${namespace}/${podName}`);
         }
       } catch (err) {
-        console.error("[containerInsights] log query error:", err instanceof Error ? err.message : err);
+        console.error("[containerInsights] logs V1 exception:", err instanceof Error ? err.message : err);
       }
     }
 
@@ -615,8 +646,78 @@ function parseLogStream(source: string): PodLogEntry["stream"] {
   return "unknown";
 }
 
+// ── Namespace / Pod Discovery (for Logs tab) ──
+// KubePodInventory에서 모든 namespace + pod를 직접 쿼리하여
+// 새 namespace/pod 생성 시 자동으로 감지
+
+const nsPodCache = new CacheManager<NamespacePodItem[]>(20, 30_000); // 30s TTL
+
+export async function collectNamespacePods(
+  env: Env,
+  bearerToken: string | undefined,
+  clusterId: string,
+): Promise<{ items: NamespacePodItem[]; containerInsightsAvailable: boolean }> {
+  const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
+  if (!workspaceId) {
+    return { items: [], containerInsightsAvailable: false };
+  }
+
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const cacheKey = `${prefix}:obs:nspods:${workspaceId}:${clusterId}`;
+  const cached = nsPodCache.get(cacheKey);
+  if (cached) return { items: cached, containerInsightsAvailable: true };
+
+  try {
+    const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
+
+    const clusterFilter = clusterId.startsWith("/subscriptions/")
+      ? `| where ClusterId =~ "${clusterId}"`
+      : `| where ClusterId contains "${clusterId}"`;
+
+    // Controller 유무에 관계없이 모든 Pod를 가져옴
+    const kql = `
+KubePodInventory
+| where TimeGenerated > ago(10m)
+${clusterFilter}
+| extend _PodName = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
+| summarize arg_max(TimeGenerated, *) by PodUid
+| extend _WorkloadName = iff(isnotempty(ControllerName), ControllerName, _PodName)
+| project Namespace, PodName = _PodName, WorkloadName = _WorkloadName, PodStatus
+| order by Namespace asc, PodName asc`;
+
+    console.log("[containerInsights] querying namespace/pods — workspace:", workspaceId);
+
+    const resp = await fetcher.query(workspaceId, kql) as LaQueryResponse;
+    if (resp.error) {
+      console.error("[containerInsights] namespace/pods KQL error:", resp.error.message);
+    }
+
+    const table = resp.tables?.[0];
+    console.log("[containerInsights] namespace/pods query — rows:", table?.rows?.length ?? 0);
+
+    const items: NamespacePodItem[] = [];
+    if (table) {
+      for (const row of tableToObjects(table)) {
+        items.push({
+          namespace: asString(row.Namespace),
+          podName: asString(row.PodName),
+          workloadName: asString(row.WorkloadName),
+          status: asString(row.PodStatus),
+        });
+      }
+    }
+
+    nsPodCache.set(cacheKey, items);
+    return { items, containerInsightsAvailable: true };
+  } catch (err) {
+    console.error("[containerInsights] namespace/pods error:", err instanceof Error ? err.message : err);
+    return { items: [], containerInsightsAvailable: false };
+  }
+}
+
 export function clearObservabilityCache(): void {
   workloadsCache.clear();
   nodesCache.clear();
   logsCache.clear();
+  nsPodCache.clear();
 }

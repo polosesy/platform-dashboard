@@ -61,6 +61,10 @@ export async function getLogAnalyticsToken(env: Env, bearerToken: string): Promi
   return getToken(env, bearerToken, "https://api.loganalytics.io/.default");
 }
 
+export async function getPrometheusToken(env: Env, bearerToken: string): Promise<string> {
+  return getToken(env, bearerToken, "https://prometheus.monitor.azure.com/.default");
+}
+
 export function getOBOCredential(env: Env, bearerToken: string): OnBehalfOfCredential {
   return getOrCreateCredential(env, bearerToken);
 }

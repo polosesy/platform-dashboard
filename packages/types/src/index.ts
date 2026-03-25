@@ -10,3 +10,4 @@ export * from "./alerts";
 export * from "./kubernetes";
 export * from "./liveDiagram";
 export * from "./observability";
+export * from "./hubble";

@@ -467,6 +467,144 @@
   color: rgba(0,120,212,0.90);
 }
 
+/* ── Workload Detail — Pod/Service/Container sections ── */
+.podDetailItem {
+  border: 1px solid rgba(20,21,23,0.08);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.podDetailHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s;
+}
+.podDetailHeader:hover { background: rgba(0,120,212,0.03); }
+
+.podDetailChevron {
+  font-size: 10px;
+  color: rgba(20,21,23,0.35);
+  flex-shrink: 0;
+  width: 12px;
+}
+
+.podDetailName {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.podDetailMeta {
+  font-size: 11px;
+  color: rgba(20,21,23,0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.podDetailRestarts {
+  font-size: 10px;
+  color: rgba(196,43,28,0.75);
+  font-weight: 600;
+}
+
+.podStatusBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.podStatusRunning    { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
+.podStatusWaiting    { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
+.podStatusTerminated { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.85); }
+.podStatusUnknown    { background: rgba(20,21,23,0.06); color: rgba(20,21,23,0.40); }
+
+.podDetailBody {
+  padding: 4px 10px 10px 28px;
+  border-top: 1px solid rgba(20,21,23,0.06);
+}
+
+.podDetailMiniRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding: 3px 0;
+  color: rgba(20,21,23,0.6);
+  gap: 8px;
+}
+
+.podDetailMono {
+  font-family: var(--font-mono, 'Cascadia Code', 'Consolas', monospace);
+  font-size: 10.5px;
+  color: rgba(0,120,212,0.70);
+  text-align: right;
+  word-break: break-all;
+}
+
+.containerDetail {
+  margin-top: 8px;
+  border: 1px solid rgba(20,21,23,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.containerDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: rgba(20,21,23,0.02);
+  border-bottom: 1px solid rgba(20,21,23,0.05);
+}
+
+.containerDetailName {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(20,21,23,0.7);
+}
+
+.containerDetailBody {
+  padding: 4px 8px 6px;
+}
+
+/* ── Service card ── */
+.svcCard {
+  border: 1px solid rgba(20,21,23,0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.svcCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.svcCardName {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.svcTypeBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0,120,212,0.08);
+  color: rgba(0,120,212,0.80);
+}
+
 /* ── Node Network/Disk helpers ── */
 .nodeNetRow {
   display: flex;

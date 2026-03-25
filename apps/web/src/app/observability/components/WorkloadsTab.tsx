@@ -83,10 +83,12 @@ export function WorkloadsTab({
   workloads,
   onWorkloadSelect,
   selectedKey,
+  clusterId,
 }: {
   workloads: WorkloadHealth[];
   onWorkloadSelect: (name: string, ns: string) => void;
   selectedKey: string | null;
+  clusterId: string;
 }) {
   const [search, setSearch] = useState("");
   const [nsFilter, setNsFilter] = useState("all");
@@ -178,6 +180,7 @@ export function WorkloadsTab({
       {selectedWl && (
         <WorkloadDetailPanel
           wl={selectedWl}
+          clusterId={clusterId}
           onClose={() => onWorkloadSelect("", "")}
         />
       )}

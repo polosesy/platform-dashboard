@@ -216,6 +216,7 @@ export default function ObservabilityPage() {
               workloads={workloadsResp.workloads}
               onWorkloadSelect={handleWorkloadSelect}
               selectedKey={selectedWorkload}
+              clusterId={clusterId}
             />
           )}
 
@@ -226,7 +227,6 @@ export default function ObservabilityPage() {
           {tab === "logs" && (
             <LogsTab
               clusterId={clusterId}
-              workloads={workloadsResp?.workloads ?? []}
             />
           )}
         </>

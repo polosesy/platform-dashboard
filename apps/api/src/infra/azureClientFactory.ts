@@ -1,7 +1,7 @@
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import { ClientSecretCredential } from "@azure/identity";
 import type { Env } from "../env";
-import { getOBOCredential, getArmToken, getLogAnalyticsToken } from "./oboTokenPool";
+import { getOBOCredential, getArmToken, getLogAnalyticsToken, getPrometheusToken } from "./oboTokenPool";
 
 export function getResourceGraphClient(env: Env, bearerToken: string): ResourceGraphClient {
   const credential = getOBOCredential(env, bearerToken);
@@ -92,6 +92,37 @@ export async function getLogAnalyticsFetcherAuto(env: Env, bearerToken: string |
   return getLogAnalyticsFetcherSP(env);
 }
 
+// ────────────────────────────────────────────
+// Prometheus (Azure Managed Prometheus)
+// ────────────────────────────────────────────
+
+export type PrometheusFetcher = {
+  token: string;
+  query: (endpoint: string, promql: string, time?: string) => Promise<unknown>;
+  queryRange: (endpoint: string, promql: string, start: string, end: string, step: string) => Promise<unknown>;
+};
+
+export async function getPrometheusFetcher(env: Env, bearerToken: string): Promise<PrometheusFetcher> {
+  const token = await withTokenTimeout(getPrometheusToken(env, bearerToken), "OBO Prometheus");
+  return buildPrometheusFetcher(token);
+}
+
+export async function getPrometheusFetcherSP(env: Env): Promise<PrometheusFetcher> {
+  const token = await getSPToken(env, "https://prometheus.monitor.azure.com/.default");
+  return buildPrometheusFetcher(token);
+}
+
+export async function getPrometheusFetcherAuto(env: Env, bearerToken: string | undefined): Promise<PrometheusFetcher> {
+  if (bearerToken) {
+    try {
+      return await getPrometheusFetcher(env, bearerToken);
+    } catch {
+      // OBO failed, fall through to SP
+    }
+  }
+  return getPrometheusFetcherSP(env);
+}
+
 /** Get a ClientSecretCredential instance (for SDK clients like Storage). */
 export function getSPCredential(env: Env): ClientSecretCredential {
   const { tenantId, clientId, clientSecret } = ensureSPConfig(env);
@@ -138,6 +169,36 @@ function buildFetcher(armToken: string): ArmFetcher {
       } finally {
         clearTimeout(timer);
       }
+    },
+  };
+}
+
+function buildPrometheusFetcher(token: string): PrometheusFetcher {
+  async function promFetch(url: string): Promise<unknown> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ARM_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`Prometheus ${res.status}: ${await res.text()}`);
+      return res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return {
+    token,
+    async query(endpoint: string, promql: string, time?: string): Promise<unknown> {
+      const params = new URLSearchParams({ query: promql });
+      if (time) params.set("time", time);
+      return promFetch(`${endpoint}/api/v1/query?${params}`);
+    },
+    async queryRange(endpoint: string, promql: string, start: string, end: string, step: string): Promise<unknown> {
+      const params = new URLSearchParams({ query: promql, start, end, step });
+      return promFetch(`${endpoint}/api/v1/query_range?${params}`);
     },
   };
 }
