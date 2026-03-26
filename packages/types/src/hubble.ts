@@ -54,6 +54,24 @@ export type HubbleFlow = {
 /** Cilium reserved identity 또는 워크로드 유형 */
 export type HubbleServiceType = "workload" | "world" | "host" | "dns" | "init" | "unmanaged" | "kube-apiserver" | "remote-node";
 
+/** K8s Service에 연결된 Pod 엔드포인트 */
+export type HubbleEndpointPod = {
+  podName: string;
+  podIP: string;
+  ready: boolean;
+  nodeName: string;
+};
+
+/** K8s Service 메타데이터 */
+export type HubbleK8sService = {
+  serviceName: string;
+  clusterIP: string;
+  type: "ClusterIP" | "NodePort" | "LoadBalancer" | "ExternalName";
+  ports: { port: number; targetPort: number | string; protocol: string; name?: string }[];
+  selector: Record<string, string>;
+  endpoints: HubbleEndpointPod[];
+};
+
 export type HubbleServiceNode = {
   id: string;                     // `${namespace}/${workloadName}`
   namespace: string;
@@ -67,6 +85,8 @@ export type HubbleServiceNode = {
   labels: Record<string, string>;
   /** 이 노드에 연결된 노드 ID 목록 */
   connectedTo: string[];
+  /** 이 워크로드에 매핑된 K8s Service 목록 */
+  k8sServices?: HubbleK8sService[];
   metrics: {
     totalFlows: number;
     forwardedFlows: number;

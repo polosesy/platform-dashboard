@@ -617,6 +617,114 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Service Badge (on node) ── */
+.svcNodeSvcBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 6px;
+  margin-top: -1px;
+}
+.svcNodeSvcBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0,120,212,0.10);
+  color: rgba(0,120,212,0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  cursor: default;
+}
+.svcNodeEpCount {
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(16,137,62,0.8);
+  margin-left: 2px;
+}
+
+/* ── Detail Panel: K8s Service ── */
+.detailSvcBlock {
+  background: rgba(0,120,212,0.03);
+  border: 1px solid rgba(0,120,212,0.10);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.detailSvcHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.detailSvcName {
+  font-weight: 700;
+  font-size: 12px;
+  color: rgba(0,120,212,0.85);
+}
+.detailSvcType {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(20,21,23,0.06);
+  color: rgba(20,21,23,0.5);
+}
+
+/* ── Detail Panel: Endpoint Table ── */
+.detailEpTable {
+  margin-top: 6px;
+  font-size: 10px;
+  border-top: 1px solid rgba(20,21,23,0.08);
+  padding-top: 4px;
+}
+.detailEpHeader {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr 0.6fr;
+  gap: 4px;
+  font-weight: 700;
+  color: rgba(20,21,23,0.4);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  padding: 2px 0 4px;
+  border-bottom: 1px solid rgba(20,21,23,0.06);
+}
+.detailEpRow {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr 0.6fr;
+  gap: 4px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(20,21,23,0.03);
+}
+.detailEpRow:last-child { border-bottom: none; }
+.detailEpPod {
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detailEpIp {
+  font-family: var(--font-mono, monospace);
+  color: rgba(20,21,23,0.6);
+}
+.detailEpNode {
+  color: rgba(20,21,23,0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detailEpStatus {
+  font-weight: 600;
+  font-size: 9px;
+}
+
 /* ── Handle (ReactFlow) ── */
 .handleHidden {
   width: 6px !important;
@@ -725,4 +833,138 @@
   text-transform: uppercase;
   color: rgba(20,21,23,0.45);
   margin-top: 4px;
+}
+
+/* ── Namespace Group Node ── */
+.nsGroupNode {
+  width: 100%;
+  height: 100%;
+  border: 1.5px dashed rgba(20,21,23,0.18);
+  border-radius: 10px;
+  background: rgba(20,21,23,0.02);
+  pointer-events: none;
+  position: relative;
+}
+.nsGroupLabel {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(20,21,23,0.35);
+  letter-spacing: 0.03em;
+}
+
+/* ── View Toggle ── */
+.viewToggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.viewToggleBtn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: var(--surface);
+  color: rgba(20,21,23,0.5);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.viewToggleBtn:hover { background: var(--surface-2, #f0f0f0); color: var(--fg); }
+.viewToggleActive {
+  background: var(--accent, #0078d4) !important;
+  color: #fff !important;
+}
+
+/* ── Receiving dot ── */
+.receivingDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(20,21,23,0.15);
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.receivingActive {
+  background: rgba(16,137,62,0.7);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Visual view: flow section below map ── */
+.visualFlowSection {
+  margin-top: 12px;
+}
+.visualFlowHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* ── Flow Table + Detail split layout ── */
+.visualFlowLayout {
+  display: flex;
+  gap: 0;
+  position: relative;
+}
+.flowTableWithDetail {
+  flex: 1 1 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* ── Flow Table enhancements ── */
+.flowNs {
+  font-size: 10px;
+  color: rgba(20,21,23,0.35);
+  font-style: italic;
+}
+.flowRowSelected {
+  background: rgba(0,120,212,0.08) !important;
+  border-left: 2px solid rgba(0,120,212,0.6);
+}
+.flowRow { cursor: pointer; }
+
+/* ── Flow Detail Panel ── */
+.flowDetailPanel {
+  width: 320px;
+  min-width: 280px;
+  max-height: calc(50vh - 120px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--surface, #fff);
+  font-size: 12px;
+}
+.flowDetailBody {
+  padding: 12px 16px;
+}
+.flowDetailRow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 0;
+}
+.flowDetailLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(20,21,23,0.55);
+}
+.flowDetailValue {
+  font-size: 12px;
+  color: var(--fg);
+  word-break: break-all;
+}
+.flowDetailDivider {
+  height: 1px;
+  background: rgba(20,21,23,0.08);
+  margin: 6px 0;
 }

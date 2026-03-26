@@ -1,3 +1,4 @@
+import * as k8s from "@kubernetes/client-node";
 import type { Env } from "../env";
 import type {
   HubbleFlow,
@@ -5,10 +6,14 @@ import type {
   HubbleServiceNode,
   HubbleServiceEdge,
   HubbleServiceType,
+  HubbleK8sService,
+  HubbleEndpointPod,
   HubbleNetworkSummary,
   HubbleSecuritySummary,
 } from "@aud/types";
 import { getHubbleFlows } from "./hubbleClient";
+import { getKubeconfig } from "./kubernetes";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
 
 // ──────────────────────────────────────────────────────────────
 // Hubble Collector
@@ -334,6 +339,29 @@ export async function collectServiceMap(
     };
   });
 
+  // ── K8s Service enrichment ──
+  try {
+    const svcMap = await fetchK8sServiceMap(env, bearerToken, clusterId, Array.from(allNamespaces));
+    for (const node of nodes) {
+      if (!node.namespace || node.serviceType !== "workload") continue;
+      const services = svcMap.get(node.namespace);
+      if (!services) continue;
+      // selector 라벨 매칭: Service.spec.selector의 모든 키/값이 노드 라벨에 포함
+      const matched = services.filter((svc) =>
+        Object.entries(svc.selector).every(([k, v]) => {
+          // k8s: prefix 제거하여 비교 (Hubble 라벨은 k8s:app 형태)
+          const nodeVal = node.labels[`k8s:${k}`] ?? node.labels[k];
+          return nodeVal === v;
+        }),
+      );
+      if (matched.length > 0) {
+        node.k8sServices = matched;
+      }
+    }
+  } catch (e) {
+    console.warn("[hubble] K8s Service enrichment failed:", (e as Error).message);
+  }
+
   return {
     clusterId,
     generatedAt: new Date().toISOString(),
@@ -517,4 +545,87 @@ export async function collectSecuritySummary(
     topDenied,
     identityFlows,
   };
+}
+
+// ── K8s Service + Endpoint 조회 ──
+
+const k8sSvcCache = new CacheManager<Map<string, HubbleK8sService[]>>(10, 60_000);
+
+async function fetchK8sServiceMap(
+  env: Env,
+  bearerToken: string | undefined,
+  clusterId: string,
+  namespaces: string[],
+): Promise<Map<string, HubbleK8sService[]>> {
+  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const cacheKey = `${prefix}:hubble-k8s-svc:${clusterId}`;
+  const cached = k8sSvcCache.get(cacheKey);
+  if (cached) return cached;
+
+  const kubeconfigYaml = await getKubeconfig(env, bearerToken, clusterId);
+  const kc = new k8s.KubeConfig();
+  kc.loadFromString(kubeconfigYaml);
+  const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
+
+  const result = new Map<string, HubbleK8sService[]>();
+
+  for (const ns of namespaces) {
+    try {
+      const [svcList, epList] = await Promise.all([
+        coreV1.listNamespacedService({ namespace: ns }),
+        coreV1.listNamespacedEndpoints({ namespace: ns }),
+      ]);
+
+      // EndpointSlice → pod 엔드포인트 맵 (serviceName → pods)
+      const endpointMap = new Map<string, HubbleEndpointPod[]>();
+      for (const ep of epList.items) {
+        const svcName = ep.metadata?.name ?? "";
+        const pods: HubbleEndpointPod[] = [];
+        for (const subset of ep.subsets ?? []) {
+          for (const addr of [...(subset.addresses ?? []), ...(subset.notReadyAddresses ?? [])]) {
+            pods.push({
+              podName: addr.targetRef?.name ?? addr.ip ?? "",
+              podIP: addr.ip ?? "",
+              ready: (subset.addresses ?? []).includes(addr),
+              nodeName: addr.nodeName ?? "",
+            });
+          }
+        }
+        endpointMap.set(svcName, pods);
+      }
+
+      const services: HubbleK8sService[] = [];
+      for (const svc of svcList.items) {
+        const name = svc.metadata?.name ?? "";
+        const selector = svc.spec?.selector ?? {};
+        // selector가 없는 Service (ExternalName 등) 제외
+        if (Object.keys(selector).length === 0) continue;
+
+        const ports = (svc.spec?.ports ?? []).map((p) => ({
+          port: p.port ?? 0,
+          targetPort: (p.targetPort ?? p.port ?? 0) as number | string,
+          protocol: p.protocol ?? "TCP",
+          name: p.name,
+        }));
+
+        services.push({
+          serviceName: name,
+          clusterIP: svc.spec?.clusterIP ?? "",
+          type: (svc.spec?.type ?? "ClusterIP") as HubbleK8sService["type"],
+          ports,
+          selector,
+          endpoints: endpointMap.get(name) ?? [],
+        });
+      }
+
+      if (services.length > 0) {
+        result.set(ns, services);
+      }
+    } catch (e) {
+      console.warn(`[hubble] K8s service fetch failed for ns=${ns}:`, (e as Error).message);
+    }
+  }
+
+  k8sSvcCache.set(cacheKey, result);
+  return result;
 }

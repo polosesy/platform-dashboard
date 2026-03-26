@@ -15,14 +15,16 @@ import { InfraTab } from "./components/InfraTab";
 import { LogsTab } from "./components/LogsTab";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
+import { HubbleTab } from "./components/HubbleTab";
 
-type Tab = "overview" | "workloads" | "infra" | "logs";
+type Tab = "overview" | "workloads" | "infra" | "logs" | "hubble";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "workloads", label: "Workloads" },
   { id: "infra", label: "Infrastructure" },
   { id: "logs", label: "Logs" },
+  { id: "hubble", label: "Hubble Network" },
 ];
 
 export default function ObservabilityPage() {
@@ -193,7 +195,7 @@ export default function ObservabilityPage() {
       )}
 
       {/* Tabs */}
-      {(overview || workloadsResp || nodesResp) && (
+      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble") && (
         <>
           <div className={styles.tabs}>
             {TABS.map((t) => (
@@ -228,6 +230,10 @@ export default function ObservabilityPage() {
             <LogsTab
               clusterId={clusterId}
             />
+          )}
+
+          {tab === "hubble" && (
+            <HubbleTab clusterId={clusterId} />
           )}
         </>
       )}
