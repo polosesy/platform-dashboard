@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import styles from "./styles.module.css";
-import type {
-  KubernetesClustersResponse,
-  KubernetesClusterOverview,
-  KubernetesClusterInfo,
-  KubernetesObjectKind,
-} from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
-import { useApiToken } from "@/lib/useApiToken";
+import type { KubernetesClusterOverview, KubernetesObjectKind } from "@aud/types";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiQuery } from "@/lib/useApiQuery";
+import { useAksClusters } from "@/lib/useAksClusters";
+import { ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
+
+/** base64url of the cluster's ARM resource ID (path segment for the overview API). */
+function encodeClusterId(id: string): string {
+  return btoa(id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 const ALL_KINDS: KubernetesObjectKind[] = [
   "Node", "Namespace", "Pod", "Deployment", "ReplicaSet",
@@ -20,7 +23,7 @@ const ALL_KINDS: KubernetesObjectKind[] = [
 function relativeAge(iso: string): string {
   if (!iso) return "-";
   const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 0) return "just now";
+  if (ms < 0) return "0s";
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -32,76 +35,25 @@ function relativeAge(iso: string): string {
 }
 
 export default function KubernetesPage() {
-  const [clusters, setClusters] = useState<KubernetesClusterInfo[]>([]);
-  const [clustersNote, setClustersNote] = useState<string | undefined>();
-  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
-  const [overview, setOverview] = useState<KubernetesClusterOverview | null>(null);
+  const { t } = useI18n();
+  const {
+    clusters,
+    clusterId: selectedClusterId,
+    setClusterId: setSelectedClusterId,
+    note: clustersNote,
+    loading,
+    error: clustersError,
+  } = useAksClusters();
   const [kindFilter, setKindFilter] = useState<KubernetesObjectKind | "All">("All");
   const [namespaceFilter, setNamespaceFilter] = useState<string>("All");
-  const [loading, setLoading] = useState(true);
-  const [overviewLoading, setOverviewLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const getApiToken = useApiToken();
 
-  // Load clusters
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    getApiToken()
-      .then((token) =>
-        fetchJsonWithBearer<KubernetesClustersResponse>(
-          `${apiBaseUrl()}/api/kubernetes/clusters`,
-          token,
-        ),
-      )
-      .then((data) => {
-        if (cancelled) return;
-        setClusters(data.clusters);
-        setClustersNote(data.note);
-        if (data.clusters.length > 0 && !selectedClusterId) {
-          setSelectedClusterId(data.clusters[0]!.id);
-        }
-        setLoading(false);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Failed to load clusters");
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [getApiToken]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load cluster overview when selection changes
-  const loadOverview = useCallback(
-    async (clusterId: string) => {
-      if (!clusterId) return;
-      setOverviewLoading(true);
-      setOverview(null);
-      try {
-        const token = await getApiToken();
-        const encoded = btoa(clusterId)
-          .replace(/\+/g, "-")
-          .replace(/\//g, "_")
-          .replace(/=+$/, "");
-        const data = await fetchJsonWithBearer<KubernetesClusterOverview>(
-          `${apiBaseUrl()}/api/kubernetes/cluster/${encoded}/overview`,
-          token,
-        );
-        setOverview(data);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Failed to load cluster overview");
-      } finally {
-        setOverviewLoading(false);
-      }
-    },
-    [getApiToken],
+  const overviewQuery = useApiQuery(selectedClusterId ? `k8s-overview:${selectedClusterId}` : null, (token) =>
+    fetchJsonWithBearer<KubernetesClusterOverview>(apiUrl(`/api/kubernetes/cluster/${encodeClusterId(selectedClusterId)}/overview`), token),
   );
-
-  useEffect(() => {
-    if (selectedClusterId) {
-      loadOverview(selectedClusterId);
-    }
-  }, [selectedClusterId, loadOverview]);
+  // Never show the previous cluster's objects while the new selection loads
+  const overview = overviewQuery.loading ? null : (overviewQuery.data ?? null);
+  const overviewLoading = overviewQuery.loading;
+  const error = clustersError ?? overviewQuery.error;
 
   // Derive unique namespaces from overview
   const namespaces = useMemo(() => {
@@ -135,95 +87,48 @@ export default function KubernetesPage() {
 
   return (
     <div className={styles.page}>
-      {/* Header */}
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <div className={styles.title}>Kubernetes</div>
-          <div className={styles.subTitle}>
-            {selectedCluster
-              ? `${selectedCluster.name} — ${selectedCluster.location} — v${selectedCluster.kubernetesVersion}`
-              : "Select a cluster"}
-          </div>
-        </div>
-        <div className={styles.controls}>
-          <select
-            className={styles.select}
-            value={selectedClusterId}
-            onChange={(e) => {
-              setSelectedClusterId(e.target.value);
-              setKindFilter("All");
-              setNamespaceFilter("All");
-            }}
-          >
-            {clusters.length === 0 && <option value="">No clusters</option>}
-            {clusters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.location})
-              </option>
-            ))}
-          </select>
-          {namespaces.length > 0 && (
-            <select
-              className={styles.select}
-              value={namespaceFilter}
-              onChange={(e) => setNamespaceFilter(e.target.value)}
-            >
-              <option value="All">All Namespaces</option>
-              {namespaces.map((ns) => (
-                <option key={ns} value={ns}>
-                  {ns}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        meta={selectedCluster ? <span>{selectedCluster.name} · {selectedCluster.location} · Kubernetes v{selectedCluster.kubernetesVersion}</span> : null}
+        actions={
+          <>
+            <Select
+              label={t("common.cluster")}
+              value={selectedClusterId}
+              onChange={(v) => {
+                setSelectedClusterId(v);
+                setKindFilter("All");
+                setNamespaceFilter("All");
+              }}
+              placeholder={loading ? t("common.loading") : t("pol.noCluster")}
+              options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.location})` }))}
+            />
+            {namespaces.length > 0 ? (
+              <Select
+                label={t("k8s.namespace")}
+                value={namespaceFilter}
+                onChange={setNamespaceFilter}
+                options={[{ value: "All", label: t("k8s.allNamespaces") }, ...namespaces.map((ns) => ({ value: ns, label: ns }))]}
+              />
+            ) : null}
+          </>
+        }
+      />
 
-      {/* Notes */}
-      {clustersNote && <div className={styles.note}>{clustersNote}</div>}
-      {overview?.note && <div className={styles.note}>{overview.note}</div>}
-
-      {error && <div className={styles.error}>{error}</div>}
-
-      {loading && <div className={styles.loading}>Loading clusters...</div>}
+      {clustersNote ? <Notice tone="info">{clustersNote}</Notice> : null}
+      {overview?.note ? <Notice tone="info">{overview.note}</Notice> : null}
+      <ErrorNotice error={error} />
+      {loading ? <LoadingState /> : null}
 
       {/* Summary cards */}
       {overview && (
         <div className={styles.summaryStrip}>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Nodes</div>
-            <div className={styles.summaryValue}>{overview.summary.nodeCount}</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Pods</div>
-            <div className={styles.summaryValue}>{overview.summary.podTotal}</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Running</div>
-            <div className={styles.summaryValue} data-accent="running">
-              {overview.summary.podRunning}
-            </div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Pending</div>
-            <div className={styles.summaryValue} data-accent="pending">
-              {overview.summary.podPending}
-            </div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Failed</div>
-            <div className={styles.summaryValue} data-accent="failed">
-              {overview.summary.podFailed}
-            </div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Deployments</div>
-            <div className={styles.summaryValue}>{overview.summary.deploymentCount}</div>
-          </div>
-          <div className={styles.summaryCard}>
-            <div className={styles.summaryLabel}>Services</div>
-            <div className={styles.summaryValue}>{overview.summary.serviceCount}</div>
-          </div>
+          <Stat label={t("k8s.nodes")} value={overview.summary.nodeCount} />
+          <Stat label={t("k8s.pods")} value={overview.summary.podTotal} />
+          <Stat label={t("k8s.running")} value={overview.summary.podRunning} tone="success" />
+          <Stat label={t("k8s.pending")} value={overview.summary.podPending} tone={overview.summary.podPending ? "medium" : undefined} />
+          <Stat label={t("k8s.failed")} value={overview.summary.podFailed} tone={overview.summary.podFailed ? "high" : undefined} />
+          <Stat label="Deployment" value={overview.summary.deploymentCount} />
+          <Stat label="Service" value={overview.summary.serviceCount} />
         </div>
       )}
 
@@ -235,7 +140,7 @@ export default function KubernetesPage() {
             className={`${styles.kindBtn} ${kindFilter === "All" ? styles.kindBtnActive : ""}`}
             onClick={() => setKindFilter("All")}
           >
-            All ({overview.objects.length})
+            {t("common.all")} ({overview.objects.length})
           </button>
           {visibleKinds.map((kind) => {
             const count = overview.objects.filter((o) => o.kind === kind).length;
@@ -254,19 +159,19 @@ export default function KubernetesPage() {
       )}
 
       {/* Objects table */}
-      {overviewLoading && <div className={styles.loading}>Loading cluster objects...</div>}
+      {overviewLoading ? <LoadingState /> : null}
       {overview && !overviewLoading && (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Namespace</th>
-                <th>Kind</th>
-                <th>Status</th>
-                <th>Ready</th>
-                <th>Restarts</th>
-                <th>Age</th>
+                <th>{t("k8s.col.name")}</th>
+                <th>{t("k8s.namespace")}</th>
+                <th>{t("k8s.col.kind")}</th>
+                <th>{t("k8s.col.status")}</th>
+                <th>{t("k8s.col.ready")}</th>
+                <th>{t("k8s.col.restarts")}</th>
+                <th>{t("k8s.col.age")}</th>
               </tr>
             </thead>
             <tbody>
@@ -294,7 +199,7 @@ export default function KubernetesPage() {
               {filteredObjects.length === 0 && (
                 <tr>
                   <td colSpan={7}>
-                    <div className={styles.tableHint}>No objects match the current filters</div>
+                    <div className={styles.tableHint}>{t("k8s.noMatch")}</div>
                   </td>
                 </tr>
               )}

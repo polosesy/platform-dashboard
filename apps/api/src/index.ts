@@ -18,13 +18,18 @@ dotenvConfig(); // Also try local apps/api/.env if present
 
 import cors from "cors";
 import express from "express";
-import { loadEnv } from "./env";
-import { bearerTokenMiddleware } from "./auth";
-import { registerAllRoutes } from "./routes/index";
+import { loadEnv } from "./env.js";
+import { bearerTokenMiddleware } from "./auth.js";
+import { registerAllRoutes } from "./routes/index.js";
+import { requestIdMiddleware } from "./middleware/requestId.js";
+import { setDebugLogging } from "./infra/logger.js";
 
 const env = loadEnv(process.env);
+setDebugLogging(env.AUD_DEBUG);
 
 const app = express();
+app.disable("x-powered-by");
+app.use(requestIdMiddleware);
 app.use(express.json({ limit: "1mb" }));
 const allowedOrigins = env.CORS_ORIGIN.split(",").map((s) => s.trim());
 app.use(
@@ -44,8 +49,9 @@ function killPortHolder(port: number): boolean {
     const output = execSync("netstat -ano", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
     const pids = new Set<string>();
     for (const line of output.split("\n")) {
-      if (!line.includes(`:${port}`) || !line.includes("LISTENING")) continue;
+      // Columns: Proto  LocalAddress  ForeignAddress  State  PID — match the local port exactly (":4000", not ":40001")
       const parts = line.trim().split(/\s+/);
+      if (parts[3] !== "LISTENING" || !parts[1]?.endsWith(`:${port}`)) continue;
       const pid = parts[parts.length - 1];
       if (pid && pid !== "0" && /^\d+$/.test(pid) && pid !== String(process.pid)) {
         pids.add(pid);

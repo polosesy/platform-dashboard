@@ -1,192 +1,134 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import styles from "./styles.module.css";
-import type { SecureScoreSummary, SecurityAlertsResponse } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
-import { useApiToken } from "@/lib/useApiToken";
+import Link from "next/link";
+import type { PostureDomain } from "@aud/types";
+import { LoadingState, Panel, Stat } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
+import { useSecurity } from "./SecurityContext";
+import { DOMAINS, PostureNotices, SecurityHeader, SeverityBadge, useGap, useLabel } from "./components";
+import s from "./security.module.css";
 
-const SEV_COLORS: Record<string, string> = {
-  High: "rgba(216, 59, 1, 0.90)",
-  Medium: "rgba(209, 132, 0, 0.90)",
-  Low: "rgba(0, 120, 212, 0.80)",
-  Informational: "rgba(20, 21, 23, 0.40)",
-};
+/** 보안 개요 — Wiz-style posture overview: score, open findings by severity, areas, threats, coverage. */
+export default function SecurityOverviewPage() {
+  const { t } = useI18n();
+  const label = useLabel();
+  const { posture } = useSecurity();
+  const recGap = useGap("recommendations");
+  const complianceGap = useGap("compliance");
+  const plansGap = useGap("plans");
+  const alertsGap = useGap("alerts");
 
-function gaugeColor(pct: number): string {
-  if (pct >= 70) return "rgba(16, 137, 62, 0.80)";
-  if (pct >= 40) return "rgba(209, 132, 0, 0.80)";
-  return "rgba(216, 59, 1, 0.80)";
-}
+  const recs = posture?.recommendations ?? [];
+  const affected = (sev: string) => recs.filter((r) => r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
+  const kinds = (sev: string) => recs.filter((r) => r.severity === sev).length;
+  const failedControls = (posture?.compliance ?? []).reduce((n, c) => n + c.failed, 0);
+  const paidPlans = (posture?.plans ?? []).filter((p) => p.tier === "Standard").length;
+  const notCollected = t("sec.collectFailed");
 
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
+  const byDomain = DOMAINS.map((d) => {
+    const rs = recs.filter((r) => r.domain === d);
+    const sum = (sev?: string) => rs.filter((r) => !sev || r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
+    return { d, kinds: rs.length, total: sum(), high: sum("High"), medium: sum("Medium"), low: sum("Low") };
+  }).filter((x) => x.kinds > 0);
+  const href = (d: PostureDomain) => (d === "identity" ? "/security/identity" : `/security/findings?domain=${d}`);
 
-export default function SecurityPage() {
-  const getApiToken = useApiToken();
-  const [score, setScore] = useState<SecureScoreSummary | null>(null);
-  const [alerts, setAlerts] = useState<SecurityAlertsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    getApiToken()
-      .then(async (token) => {
-        const base = apiBaseUrl();
-        const [s, a] = await Promise.all([
-          fetchJsonWithBearer<SecureScoreSummary>(`${base}/api/security/score`, token),
-          fetchJsonWithBearer<SecurityAlertsResponse>(`${base}/api/security/alerts`, token),
-        ]);
-        if (cancelled) return;
-        setScore(s);
-        setAlerts(a);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Unknown error");
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [getApiToken]);
-
-  // SVG gauge calculation
-  const R = 58;
-  const C = 2 * Math.PI * R;
-  const pct = score?.percentage ?? 0;
-  const offset = C - (pct / 100) * C;
+  const top = recs.slice(0, 6);
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.title}>Security</div>
-          <div className={styles.subTitle}>
-            {score ? `Generated: ${new Date(score.generatedAt).toLocaleString()}` : loading ? "Loading..." : "No data"}
-          </div>
-        </div>
-      </div>
+    <div className={s.page}>
+      <SecurityHeader />
+      <PostureNotices />
 
-      {error ? <div className={styles.error}>Failed to load: {error}</div> : null}
-      {score?.note ? <div className={styles.note}>{score.note}</div> : null}
-
-      <div className={styles.grid}>
-        {/* Secure Score Gauge */}
-        <div className={styles.gaugeCard}>
-          <div className={styles.gaugeRing}>
-            <svg className={styles.gaugeSvg} width="140" height="140" viewBox="0 0 140 140">
-              <circle className={styles.gaugeTrack} cx="70" cy="70" r={R} strokeWidth="12" />
-              <circle
-                className={styles.gaugeFill}
-                cx="70" cy="70" r={R}
-                strokeWidth="12"
-                stroke={gaugeColor(pct)}
-                strokeDasharray={C}
-                strokeDashoffset={offset}
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className={styles.gaugeLabel}>
-              <div className={styles.gaugeScore}>{score?.currentScore ?? "-"}</div>
-              <div className={styles.gaugeMax}>/ {score?.maxScore ?? 100}</div>
-            </div>
+      {!posture ? (
+        <LoadingState />
+      ) : (
+        <>
+          <div className={s.stats}>
+            <Stat
+              label={t("sec.score")}
+              value={posture.score ? `${posture.score.percentage}%` : "—"}
+              hint={posture.score ? `${posture.score.current} / ${posture.score.max}` : t("sec.scoreUnavailable")}
+              tone={posture.score ? (posture.score.percentage < 40 ? "high" : posture.score.percentage < 70 ? "medium" : "success") : undefined}
+            />
+            <Link href="/security/findings" className={s.statLink}>
+              <Stat label={t("sec.affectedHigh")} value={recGap ? notCollected : affected("High").toLocaleString()} hint={t("sec.recTypes", { n: kinds("High") })} tone="high" />
+            </Link>
+            <Link href="/security/findings" className={s.statLink}>
+              <Stat label={t("sec.affectedMedium")} value={recGap ? notCollected : affected("Medium").toLocaleString()} hint={t("sec.recTypes", { n: kinds("Medium") })} tone="medium" />
+            </Link>
+            <Link href="/security/findings" className={s.statLink}>
+              <Stat label={t("sec.affectedLow")} value={recGap ? notCollected : affected("Low").toLocaleString()} hint={t("sec.recTypes", { n: kinds("Low") })} />
+            </Link>
+            <Link href="/security/threats" className={s.statLink}>
+              <Stat label={t("sec.activeThreats")} value={alertsGap ? notCollected : posture.alerts.length} />
+            </Link>
+            <Link href="/security/compliance" className={s.statLink}>
+              <Stat label={t("sec.failedControls")} value={complianceGap ? notCollected : failedControls} hint={t("sec.standards", { n: posture.compliance.length })} />
+            </Link>
+            <Link href="/security/compliance" className={s.statLink}>
+              <Stat label={t("sec.coverage")} value={plansGap ? notCollected : `${paidPlans} / ${posture.plans.length}`} hint={t("sec.coverageHint", { n: posture.plans.length })} />
+            </Link>
           </div>
-          <div className={styles.gaugeTitle}>Secure Score</div>
-          <div className={styles.gaugePct}>{pct.toFixed(1)}%</div>
-        </div>
 
-        {/* Severity Summary */}
-        <div className={styles.severityCard}>
-          <div className={styles.severityHeader}>
-            <div className={styles.severityTitle}>Active Alerts</div>
-            {alerts && <span className={`${styles.severityBadge} ${styles.sevHigh}`}>{alerts.totalActive} active</span>}
-          </div>
-          <div className={styles.severityStrip}>
-            <div className={styles.sevItem}>
-              <div className={styles.sevCount} style={{ color: SEV_COLORS.High }}>{alerts?.bySeverity.high ?? 0}</div>
-              <div className={styles.sevLabel}>High</div>
-            </div>
-            <div className={styles.sevItem}>
-              <div className={styles.sevCount} style={{ color: SEV_COLORS.Medium }}>{alerts?.bySeverity.medium ?? 0}</div>
-              <div className={styles.sevLabel}>Medium</div>
-            </div>
-            <div className={styles.sevItem}>
-              <div className={styles.sevCount} style={{ color: SEV_COLORS.Low }}>{alerts?.bySeverity.low ?? 0}</div>
-              <div className={styles.sevLabel}>Low</div>
-            </div>
-            <div className={styles.sevItem}>
-              <div className={styles.sevCount} style={{ color: SEV_COLORS.Informational }}>{alerts?.bySeverity.informational ?? 0}</div>
-              <div className={styles.sevLabel}>Info</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Control Scores */}
-        <div className={styles.card}>
-          <div className={styles.cardTitle}>Security Controls</div>
-          <div className={styles.cardBody}>
-            {score && score.controlScores.length > 0 ? (
-              score.controlScores.map((c) => {
-                const controlPct = c.maxScore > 0 ? (c.currentScore / c.maxScore) * 100 : 0;
-                return (
-                  <div key={c.controlName} className={styles.controlRow}>
-                    <div>
-                      <div className={styles.controlName}>{c.controlName}</div>
-                      <div className={styles.controlBar}>
-                        <div className={styles.controlFill} style={{ width: `${controlPct}%` }} />
-                      </div>
-                    </div>
-                    <div className={styles.controlScore}>{c.currentScore}/{c.maxScore}</div>
-                    <div className={styles.controlResources}>{c.unhealthyResourceCount} issue{c.unhealthyResourceCount !== 1 ? "s" : ""}</div>
-                  </div>
-                );
-              })
+          <Panel title={t("sec.byDomain")} sub={t("sec.byDomainHint")}>
+            {recGap ? (
+              <div className={s.dim}>{notCollected}</div>
             ) : (
-              <div className={styles.empty}>{loading ? "Loading controls..." : "No control data."}</div>
+              <div className={s.domains}>
+                {byDomain.map((x) => (
+                  <Link key={x.d} href={href(x.d)} className={s.domainCard}>
+                    <span className={s.domainName}>{label("sec.domain", x.d)}</span>
+                    <span className={s.domainNums}>
+                      <span className={s.domainBig}>{x.total.toLocaleString()}</span>
+                      <span className={s.domainSub}>{t("sec.recTypes", { n: x.kinds })}</span>
+                    </span>
+                    <span className={s.domainBar} aria-hidden="true">
+                      <span className={s.barHigh} style={{ width: `${(x.high / Math.max(1, x.total)) * 100}%` }} />
+                      <span className={s.barMedium} style={{ width: `${(x.medium / Math.max(1, x.total)) * 100}%` }} />
+                      <span className={s.barLow} style={{ width: `${(x.low / Math.max(1, x.total)) * 100}%` }} />
+                    </span>
+                    <span className={s.domainSub}>
+                      {t("sec.sev.High")} {x.high} · {t("sec.sev.Medium")} {x.medium} · {t("sec.sev.Low")} {x.low}
+                    </span>
+                  </Link>
+                ))}
+              </div>
             )}
-          </div>
-        </div>
+          </Panel>
 
-        {/* Alert List */}
-        <div className={styles.card}>
-          <div className={styles.cardTitle}>Recent Alerts</div>
-          <div className={styles.cardBody}>
-            {alerts && alerts.alerts.length > 0 ? (
-              alerts.alerts.map((a) => (
-                <div key={a.id} className={styles.alertRow}>
-                  <div className={styles.alertTop}>
-                    <div className={styles.alertDot} style={{ background: SEV_COLORS[a.severity] ?? SEV_COLORS.Low }} />
-                    <div className={styles.alertName}>{a.alertName}</div>
-                    <div className={styles.alertTime}>{timeAgo(a.detectedAt)}</div>
-                  </div>
-                  <div className={styles.alertDesc}>{a.description}</div>
-                  <div className={styles.alertMeta}>
-                    <span className={styles.alertEntity}>{a.compromisedEntity}</span>
-                    {a.tactics.map((t) => (
-                      <span key={t} className={styles.tacticPill}>{t}</span>
-                    ))}
-                  </div>
+          <div className={s.split}>
+            <Panel title={t("sec.topActions")} actions={<Link href="/security/findings" className={s.linkMore}>{t("sec.viewAll")}</Link>}>
+              <ul className={s.list}>
+                {top.map((r) => (
+                  <li key={r.key} className={s.listItem}>
+                    <SeverityBadge severity={r.severity} />
+                    <span className={s.listTitle} title={r.title}>{r.title}</span>
+                    <span className={s.num}>{t("sec.unhealthyOf", { u: r.unhealthy, t: r.unhealthy + r.healthy })}</span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+            <Panel title={t("sec.controls")} sub={t("sec.controlsHint")}>
+              {posture.controls.filter((c) => c.maxScore > 0).map((c) => (
+                <div key={c.controlName} className={s.control}>
+                  <span>{c.controlName}</span>
+                  <span className={s.num}>{c.currentScore} / {c.maxScore} · {t("sec.issues", { n: c.unhealthyResourceCount })}</span>
+                  <span className={s.track} aria-hidden="true">
+                    <span className={s.fill} style={{ display: "block", width: `${(c.currentScore / c.maxScore) * 100}%` }} />
+                  </span>
                 </div>
-              ))
-            ) : (
-              <div className={styles.empty}>{loading ? "Loading alerts..." : "No security alerts."}</div>
-            )}
+              ))}
+            </Panel>
           </div>
-        </div>
-      </div>
+
+          <Panel title={t("sec.clusterCardTitle")}>
+            <div className={s.cluster}>
+              <span>{t("sec.clusterCardBody")}</span>
+              <Link href="/policies" className={s.linkMore}>{t("sec.goCluster")} →</Link>
+            </div>
+          </Panel>
+        </>
+      )}
     </div>
   );
 }

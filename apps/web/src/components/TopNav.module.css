@@ -1,7 +1,8 @@
 .header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  /* Above page canvases (ReactFlow, maps) so dropdown panels are never covered; below the drawer (40+) */
+  z-index: 30;
   backdrop-filter: blur(14px);
   background: rgba(246, 244, 239, 0.66);
   border-bottom: 1px solid rgba(20, 21, 23, 0.10);
@@ -38,6 +39,13 @@
   cursor: pointer;
   flex: none;
   transition: background 120ms ease, color 120ms ease;
+}
+
+.menuBtn:focus-visible,
+.link:focus-visible,
+.panelLink:focus-visible {
+  outline: 2px solid rgba(0, 120, 212, 0.9);
+  outline-offset: 2px;
 }
 
 .menuBtn:hover {
@@ -77,17 +85,129 @@
 
 /* ── Navigation Links ── */
 
+/* No overflow clipping here: dropdown panels are absolutely positioned below the triggers */
 .nav {
   display: flex;
   align-items: center;
   gap: 4px;
   justify-content: flex-start;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
-.nav::-webkit-scrollbar {
+.group {
+  position: relative;
+  flex: none;
+}
+
+.trigger {
+  gap: 6px;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.chevron {
+  transition: transform 140ms ease;
+  opacity: 0.7;
+}
+
+.trigger[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(20, 21, 23, 0.12);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 270px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid rgba(20, 21, 23, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(20, 21, 23, 0.14);
+  z-index: 1;
+}
+
+.panel[hidden] {
   display: none;
+}
+
+/* Sub-heading inside a dropdown (e.g. "Azure 보안" / "클러스터 보안") */
+.panelSection {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+li:not(:first-child) > .panelSection {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.panelLink {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.panelLink:hover {
+  background: rgba(20, 21, 23, 0.05);
+}
+
+.panelLink[data-active] {
+  background: rgba(0, 120, 212, 0.08);
+}
+
+.panelLink[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: rgba(0, 120, 212, 0.9);
+}
+
+.panelIcon {
+  display: inline-flex;
+  margin-top: 1px;
+  color: rgba(20, 21, 23, 0.62);
+}
+
+.panelLink[data-active] .panelIcon,
+.panelLink[data-active] .panelLabel {
+  color: rgba(0, 120, 212, 0.95);
+}
+
+.panelLabel {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  color: rgba(20, 21, 23, 0.88);
+  white-space: nowrap;
+}
+
+.panelDesc {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .link {
@@ -177,12 +297,39 @@
   color: rgba(20, 21, 23, 0.82);
 }
 
+.btnPrimary:disabled,
+.btnSecondary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
+.authError {
+  max-width: 320px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b42318;
+  line-height: 1.35;
+}
+
 .btnPrimary:hover,
 .btnSecondary:hover {
   transform: translateY(-1px);
 }
 
 /* ── Responsive ── */
+
+@media (max-width: 1439px) {
+  .userName {
+    max-width: 160px;
+  }
+}
+
+@media (max-width: 1359px) {
+  .brandMeta {
+    display: none;
+  }
+}
 
 @media (max-width: 980px) {
   .bar {

@@ -1,9 +1,26 @@
 import { z } from "zod";
 
+/**
+ * Boolean env flag. `z.coerce.boolean()` treats any non-empty string as true
+ * (so "false" → true), which silently inverted every *_ENABLED flag.
+ */
+const envBool = (defaultValue: boolean) =>
+  z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((v) => {
+      if (typeof v === "boolean") return v;
+      if (v === undefined || v.trim() === "") return defaultValue;
+      return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+    });
+
 const EnvSchema = z.object({
   PORT: z.coerce.number().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000,http://localhost:3001"),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
+
+  // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)
+  AUD_DEBUG: envBool(false),
 
   // Azure Log Analytics (Traffic Analytics)
   AZURE_LOG_ANALYTICS_WORKSPACE_ID: z.string().optional(),
@@ -23,16 +40,19 @@ const EnvSchema = z.object({
   AZURE_RESOURCE_GRAPH_PAGE_SIZE: z.coerce.number().default(1000),
   AZURE_RESOURCE_GRAPH_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
-  // Azure Cost Management
-  AZURE_COST_MANAGEMENT_ENABLED: z.coerce.boolean().default(false),
+  // Azure Cost Management (set false to serve mock data only)
+  AZURE_COST_MANAGEMENT_ENABLED: envBool(true),
   AZURE_COST_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
 
-  // Azure Security (Defender for Cloud)
-  AZURE_SECURITY_ENABLED: z.coerce.boolean().default(false),
+  // Azure Security — Defender for Cloud (set false to serve mock data only)
+  AZURE_SECURITY_ENABLED: envBool(true),
   AZURE_SECURITY_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
+  // Security posture (/api/security/posture) uses the signed-in user (OBO) only. Set true to let
+  // anonymous requests read live Defender data with the service principal (local verification only).
+  AZURE_SECURITY_SP_FALLBACK: envBool(false),
 
-  // Azure Resource Health
-  AZURE_HEALTH_ENABLED: z.coerce.boolean().default(false),
+  // Azure Resource Health (set false to serve mock data only)
+  AZURE_HEALTH_ENABLED: envBool(true),
   AZURE_HEALTH_CACHE_TTL_MS: z.coerce.number().default(2 * 60_000),
 
   // Azure Translator (optional — for Service Events translation feature)
@@ -40,7 +60,7 @@ const EnvSchema = z.object({
   AZURE_TRANSLATOR_REGION: z.string().optional(),
 
   // Live Diagram — Azure Monitor real integration
-  AZURE_LIVE_DIAGRAM_ENABLED: z.coerce.boolean().default(false),
+  AZURE_LIVE_DIAGRAM_ENABLED: envBool(false),
   AZURE_LIVE_METRICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
   AZURE_MONITOR_ALERTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
   AZURE_APP_INSIGHTS_APP_ID: z.string().optional(),
@@ -52,21 +72,20 @@ const EnvSchema = z.object({
   AZURE_NSG_FLOW_LOG_CACHE_TTL_MS: z.coerce.number().default(120_000),
 
   // Traffic Analytics (live diagram edge traffic)
-  AZURE_TRAFFIC_ANALYTICS_ENABLED: z.coerce.boolean().default(false),
+  AZURE_TRAFFIC_ANALYTICS_ENABLED: envBool(false),
   AZURE_TRAFFIC_ANALYTICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
   // Connection Monitor
-  AZURE_CONNECTION_MONITOR_ENABLED: z.coerce.boolean().default(false),
+  AZURE_CONNECTION_MONITOR_ENABLED: envBool(false),
   AZURE_CONNECTION_MONITOR_CACHE_TTL_MS: z.coerce.number().default(120_000),
 
   // Observability / APM (Container Insights + Prometheus + App Insights)
-  AZURE_OBSERVABILITY_ENABLED: z.coerce.boolean().default(false),
-  AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID: z.string().optional(), // Log Analytics workspace for Container Insights (falls back to AZURE_LOG_ANALYTICS_WORKSPACE_ID)
-  AZURE_PROMETHEUS_ENDPOINT: z.string().optional(),             // Prometheus HTTP API base URL (Phase 2)
+  AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID: z.string().optional(), // Log Analytics workspace for Container Insights (auto-discovered from the cluster when unset)
+  AZURE_PROMETHEUS_ENDPOINT: z.string().optional(),             // Prometheus HTTP API base URL (auto-discovered when unset)
   AZURE_OBSERVABILITY_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
   // Cilium Hubble
-  HUBBLE_ENABLED: z.coerce.boolean().default(true),
+  HUBBLE_ENABLED: envBool(true),
   HUBBLE_RELAY_NAMESPACE: z.string().default("kube-system"),
   HUBBLE_RELAY_PORT: z.coerce.number().default(80),
   HUBBLE_FLOW_LIMIT: z.coerce.number().default(10_000),

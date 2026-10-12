@@ -1,6 +1,7 @@
 import type { LiveAlert, AlertSeverity } from "@aud/types";
 import { defaultTokens } from "../utils/designTokens";
 import styles from "../styles.module.css";
+import { useI18n } from "@/lib/i18n";
 
 type AlertSidebarProps = {
   alerts: LiveAlert[];
@@ -25,17 +26,18 @@ function timeAgo(iso: string): string {
 }
 
 export function AlertSidebar({ alerts, onAlertClick }: AlertSidebarProps) {
+  const { t } = useI18n();
   const sorted = [...alerts].sort((a, b) => severityOrder(a.severity) - severityOrder(b.severity));
 
   return (
     <aside className={styles.alertSidebar}>
       <div className={styles.alertTitle}>
-        Alerts
+        {t("live.alerts")}
         {alerts.length > 0 && <span className={styles.alertBadge}>{alerts.length}</span>}
       </div>
 
       {sorted.length === 0 ? (
-        <div className={styles.alertEmpty}>No active alerts.</div>
+        <div className={styles.alertEmpty}>{t("live.noAlerts")}</div>
       ) : (
         <div className={styles.alertList}>
           {sorted.map((alert) => (

@@ -1,13 +1,13 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager";
-import { getLogAnalyticsFetcherAuto } from "../infra/azureClientFactory";
+import { CacheManager } from "../infra/cacheManager.js";
+import { getLogAnalyticsFetcherAuto, tableToObjects, type LogAnalyticsResponse } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Traffic Analytics Collector (for Live Diagram)
 //
 // Queries NTANetAnalytics Log Analytics table
-// for subnet/IP pair traffic, then maps the flows
+// for subnet pair traffic, then maps the flows
 // to diagram edges with throughput data.
 // ────────────────────────────────────────────
 
@@ -21,26 +21,11 @@ export type EdgeTrafficData = {
 
 const trafficCache = new CacheManager<EdgeTrafficData[]>(20, 60_000);
 
-type LogAnalyticsTable = {
-  name: string;
-  columns: Array<{ name: string; type: string }>;
-  rows: unknown[][];
-};
-
-type LogAnalyticsQueryResponse = {
-  tables?: LogAnalyticsTable[];
-  error?: { message?: string };
-};
-
 /**
  * Collect traffic analytics data and map to diagram edges.
  *
- * Queries NTANetAnalytics for:
- * 1. Subnet pair traffic (SrcSubnet → DestSubnet)
- * 2. IP pair traffic (SrcIp → DestIp)
- *
- * Maps results to diagram edges using subnet/IP overlap with
- * node azureResourceId patterns.
+ * Queries NTANetAnalytics for subnet pair traffic (SrcSubnet → DestSubnet)
+ * and maps it to diagram edges via the nodes' subnet resource IDs.
  */
 export async function collectTrafficAnalytics(
   env: Env,
@@ -84,7 +69,7 @@ export async function collectTrafficAnalytics(
     edgeLookup.set(`${edge.target}→${edge.source}`, edge.id); // bidirectional
   }
 
-  // Query 1: Subnet pair traffic
+  // Subnet pair traffic (IP-pair resolution is not implemented, so only subnet pairs are queried)
   const subnetKql = `${table}
 | where SubType == "FlowLog" and TimeGenerated > ago(5m)
 | where isnotempty(SrcSubnet) and isnotempty(DestSubnet)
@@ -96,30 +81,14 @@ export async function collectTrafficAnalytics(
   by SrcSubnet, DestSubnet
 | top 50 by TotalBytes desc`;
 
-  // Query 2: IP pair traffic (for more granular mapping)
-  const ipKql = `${table}
-| where SubType == "FlowLog" and TimeGenerated > ago(5m)
-| where isnotempty(SrcIp) and isnotempty(DestIp)
-| extend TotalBytes = tolong(coalesce(BytesSrcToDest, 0)) + tolong(coalesce(BytesDestToSrc, 0))
-| summarize
-    TotalBytes=sum(TotalBytes),
-    AllowedFlows=sum(tolong(coalesce(AllowedInFlows, 0)) + tolong(coalesce(AllowedOutFlows, 0))),
-    DeniedFlows=sum(tolong(coalesce(DeniedInFlows, 0)) + tolong(coalesce(DeniedOutFlows, 0)))
-  by SrcIp, DestIp
-| top 100 by TotalBytes desc`;
-
-  // Execute queries in parallel
-  const [subnetResult, ipResult] = await Promise.allSettled([
-    fetcher.query(workspaceId, subnetKql),
-    fetcher.query(workspaceId, ipKql),
-  ]);
+  const [subnetResult] = await Promise.allSettled([fetcher.query(workspaceId, subnetKql)]);
 
   // Aggregate traffic data per edge
   const edgeTraffic = new Map<string, { totalBytes: number; allowedFlows: number; deniedFlows: number }>();
 
   // Process subnet pairs
   if (subnetResult.status === "fulfilled") {
-    const resp = subnetResult.value as LogAnalyticsQueryResponse;
+    const resp = subnetResult.value as LogAnalyticsResponse;
     const tableData = resp.tables?.[0];
     if (tableData) {
       const rows = tableToObjects(tableData);
@@ -141,21 +110,6 @@ export async function collectTrafficAnalytics(
             edgeTraffic.set(edgeId, existing);
           }
         }
-      }
-    }
-  }
-
-  // Process IP pairs (supplement subnet data with direct IP resolution)
-  if (ipResult.status === "fulfilled") {
-    const resp = ipResult.value as LogAnalyticsQueryResponse;
-    const tableData = resp.tables?.[0];
-    if (tableData) {
-      const rows = tableToObjects(tableData);
-      for (const row of rows) {
-        // IP-based matching would use ipResourceMap if available
-        // For now, contribute to edges that haven't been resolved via subnet
-        // This will be enhanced once IP→Resource map is integrated
-        void row; // Placeholder for future IP-based resolution
       }
     }
   }
@@ -195,15 +149,6 @@ function resolveSubnetToNode(
   if (byName) return byName;
 
   return null;
-}
-
-function tableToObjects(table: LogAnalyticsTable): Record<string, unknown>[] {
-  const cols = table.columns.map((c) => c.name);
-  return table.rows.map((row) => {
-    const obj: Record<string, unknown> = {};
-    for (let i = 0; i < cols.length; i++) obj[cols[i]!] = row[i];
-    return obj;
-  });
 }
 
 function asNumber(v: unknown): number {

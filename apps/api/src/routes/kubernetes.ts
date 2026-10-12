@@ -1,74 +1,82 @@
 import type { Request, Response, Router } from "express";
-import type { Env } from "../env";
-import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes";
+import type { Env } from "../env.js";
+import type { KubernetesClusterInfo } from "@aud/types";
+import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes.js";
+import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
+import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
+import { assertArmResourceId, queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
+
+/** Minimal cluster info derived from an ARM ID, used when the cluster is not in the listing. */
+function clusterInfoFromId(azureResourceId: string): KubernetesClusterInfo {
+  const segment = (key: string) => azureResourceId.match(new RegExp(`/${key}/([^/]+)`, "i"))?.[1] ?? "";
+  return {
+    id: azureResourceId.toLowerCase(),
+    name: azureResourceId.split("/").pop() ?? "unknown",
+    resourceGroup: segment("resourceGroups"),
+    subscriptionId: segment("subscriptions"),
+    location: "",
+    kubernetesVersion: "",
+    nodeCount: 0,
+    powerState: "unknown",
+    fqdn: "",
+  };
+}
 
 export function registerKubernetesRoutes(router: Router, env: Env) {
   // List AKS clusters
-  router.get("/api/kubernetes/clusters", async (req: Request, res: Response) => {
-    const subscriptionId =
-      typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
-    try {
-      const data = await listAksClusters(env, req.auth?.bearerToken, { subscriptionId });
-      res.json(data);
-    } catch (e: unknown) {
-      console.error("[kubernetes] clusters error:", e instanceof Error ? e.message : e);
-      res.json({ ...mockClusters, note: e instanceof Error ? e.message : "clusters error" });
-    }
-  });
+  router.get("/api/kubernetes/clusters", (req: Request, res: Response) =>
+    respondWithFallback(
+      res,
+      () => listAksClusters(env, req.auth?.bearerToken, { subscriptionId: querySubscriptionId(req, env) }),
+      mockClusters,
+      "kubernetes",
+    ),
+  );
 
-  // Get cluster overview (K8s objects)
+  // Get cluster overview (K8s objects). clusterId is the base64url-encoded Azure resource ID.
   router.get("/api/kubernetes/cluster/:clusterId/overview", async (req: Request, res: Response) => {
-    const clusterId = req.params.clusterId;
-    // clusterId is base64url-encoded Azure resource ID
     let azureResourceId: string;
+    let subscriptionId: string | undefined;
     try {
-      azureResourceId = Buffer.from(clusterId, "base64url").toString("utf-8");
-    } catch {
-      res.status(400).json({ error: "invalid_cluster_id" });
-      return;
+      azureResourceId = assertArmResourceId(env, Buffer.from(req.params.clusterId ?? "", "base64url").toString("utf-8"), "clusterId");
+      subscriptionId = querySubscriptionId(req, env);
+    } catch (e: unknown) {
+      return sendError(res, e, "invalid_cluster_id");
     }
 
     try {
-      // First, get cluster info from the clusters list
-      const subscriptionId =
-        typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
       const clustersData = await listAksClusters(env, req.auth?.bearerToken, { subscriptionId });
-      const clusterInfo = clustersData.clusters.find(
-        (c) => c.id === azureResourceId.toLowerCase(),
-      );
-
-      if (!clusterInfo) {
-        // Fallback: create minimal cluster info from the resource ID
-        const parts = azureResourceId.split("/");
-        const name = parts[parts.length - 1] ?? "unknown";
-        const rg = parts[parts.indexOf("resourcegroups") + 1] ?? parts[parts.indexOf("resourceGroups") + 1] ?? "";
-        const subId = parts[parts.indexOf("subscriptions") + 1] ?? "";
-
-        const overview = await getClusterOverview(env, req.auth?.bearerToken, azureResourceId, {
-          id: azureResourceId.toLowerCase(),
-          name,
-          resourceGroup: rg,
-          subscriptionId: subId,
-          location: "",
-          kubernetesVersion: "",
-          nodeCount: 0,
-          powerState: "unknown",
-          fqdn: "",
-        });
-        res.json(overview);
-        return;
-      }
-
-      const overview = await getClusterOverview(env, req.auth?.bearerToken, azureResourceId, clusterInfo);
-      res.json(overview);
+      const clusterInfo =
+        clustersData.clusters.find((c) => c.id === azureResourceId.toLowerCase()) ?? clusterInfoFromId(azureResourceId);
+      res.json(await getClusterOverview(env, req.auth?.bearerToken, azureResourceId, clusterInfo));
     } catch (e: unknown) {
       console.error("[kubernetes] overview error:", e instanceof Error ? e.message : e);
       // Fall back to mock overview
-      const fallbackCluster = mockClusters.clusters[0]!;
       res.json({
-        ...mockClusterOverview(fallbackCluster),
+        ...mockClusterOverview(mockClusters.clusters[0]!),
         note: e instanceof Error ? e.message : "overview error",
       });
+    }
+  });
+
+  // Policy insights: risk combinations, attack paths, RBAC matrix, workload network map, KBOM
+  // (registered before /policies so the more specific path is matched first)
+  router.get("/api/kubernetes/policies/insights", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await collectPolicyInsights(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "policy_insights_failed", "kubernetes");
+    }
+  });
+
+  // Cluster policy posture: PSA, NetworkPolicy, RBAC, VPA/HPA/PDB, resource governance
+  router.get("/api/kubernetes/policies", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await collectClusterPolicies(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "policies_failed", "kubernetes");
     }
   });
 }

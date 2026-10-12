@@ -110,7 +110,7 @@ export function LogsTab({ clusterId }: Props) {
     } else {
       setContainerName("");
     }
-  }, [containerOptions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [containerOptions]);  
 
   const fetchLogs = useCallback(async () => {
     if (!clusterId || !namespace || !podName) return;
@@ -165,9 +165,12 @@ export function LogsTab({ clusterId }: Props) {
     }
   }, [logs, autoScroll]);
 
+  // kubelet 로그 API는 stdout/stderr를 구분하지 않음 — Container Insights 경로일 때만 필터 노출
+  const hasStreamInfo = useMemo(() => logs.some((l) => l.stream !== "unknown"), [logs]);
+
   const filteredLogs = useMemo(() => {
     let result = logs;
-    if (streamFilter !== "all") {
+    if (hasStreamInfo && streamFilter !== "all") {
       result = result.filter((l) => l.stream === streamFilter);
     }
     if (search) {
@@ -175,15 +178,12 @@ export function LogsTab({ clusterId }: Props) {
       result = result.filter((l) => l.logMessage.toLowerCase().includes(q));
     }
     return result;
-  }, [logs, streamFilter, search]);
+  }, [logs, hasStreamInfo, streamFilter, search]);
 
   function formatTime(ts: string) {
-    try {
-      const d = new Date(ts);
-      return d.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    } catch {
-      return ts.slice(11, 19);
-    }
+    const d = new Date(ts);
+    if (!ts || Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   if (nsPodItems.length === 0 && !loading) {
@@ -232,11 +232,13 @@ export function LogsTab({ clusterId }: Props) {
           <option value={1440}>최근 24시간</option>
         </select>
 
-        <select value={streamFilter} onChange={(e) => setStreamFilter(e.target.value as "all" | "stdout" | "stderr")}>
-          <option value="all">전체 스트림</option>
-          <option value="stdout">stdout</option>
-          <option value="stderr">stderr</option>
-        </select>
+        {hasStreamInfo && (
+          <select value={streamFilter} onChange={(e) => setStreamFilter(e.target.value as "all" | "stdout" | "stderr")}>
+            <option value="all">전체 스트림</option>
+            <option value="stdout">stdout</option>
+            <option value="stderr">stderr</option>
+          </select>
+        )}
 
         <input
           type="text"
@@ -277,9 +279,11 @@ export function LogsTab({ clusterId }: Props) {
             <span className={styles.logPod} title={log.containerName}>
               {log.containerName || log.podName}
             </span>
-            <span className={`${styles.logStream} ${log.stream === "stderr" ? styles.logStderr : styles.logStdout}`}>
-              {log.stream}
-            </span>
+            {log.stream !== "unknown" && (
+              <span className={`${styles.logStream} ${log.stream === "stderr" ? styles.logStderr : styles.logStdout}`}>
+                {log.stream}
+              </span>
+            )}
             <span className={styles.logMsg}>{log.logMessage}</span>
           </div>
         ))}

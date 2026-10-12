@@ -1,24 +1,30 @@
 import * as k8s from "@kubernetes/client-node";
 import { Writable } from "stream";
-import type { Env } from "../env";
-import type { HubbleFlow, HubbleEndpoint } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getKubeconfig } from "./kubernetes";
+import type { Env } from "../env.js";
+import type { HubbleFlow, HubbleEndpoint, HubbleFlowSet } from "@aud/types";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { HttpError } from "../infra/requestParams.js";
+import { debug } from "../infra/logger.js";
+import { loadKubeConfig } from "./kubernetes.js";
+import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCoverage, type AgentBatch } from "./hubbleMerge.js";
 
 // ──────────────────────────────────────────────────────────────
 // Hubble Client
 //
 // Cilium Hubble에서 네트워크 플로우를 수집하는 클라이언트.
-// 여러 전략을 순차적으로 시도하여 안정적으로 동작합니다:
+// 각 cilium-agent는 자기 노드의 플로우만 보관하므로(링 버퍼),
+// 모든 agent에서 읽어 병합해야 클러스터 전체가 보입니다.
 //
-// Strategy 1: hubble-relay pod에서 직접 exec (로컬 연결)
+// Strategy 1: 모든 cilium-agent pod에서 `hubble observe` (로컬 소켓) → 병합
 // Strategy 2: cilium-agent pod에서 --server 플래그로 relay 연결
+//             (AKS ACNS relay는 mTLS라 hubble CLI로는 실패 — 비 AKS용 폴백)
 // Strategy 3: K8s API proxy를 통한 hubble-relay HTTP 접근
 // ──────────────────────────────────────────────────────────────
 
-const flowsCache = new CacheManager<HubbleFlow[]>(10, 30_000);
+const flowsCache = new CacheManager<HubbleFlowSet>(10, 30_000);
 const statusCache = new CacheManager<HubbleStatusInfo>(10, 30_000);
-const podDiscoveryCache = new CacheManager<DiscoveredPod>(10, 120_000);
+const agentDiscoveryCache = new CacheManager<AgentDiscovery>(10, 120_000);
+const bufferStatusCache = new CacheManager<BufferStatus>(100, 60_000);
 
 type HubbleStatusInfo = {
   available: boolean;
@@ -27,110 +33,104 @@ type HubbleStatusInfo = {
   maxFlows: number;
   uptimeNs: number;
   nodeCount: number;
+  nodesTotal: number;
   message: string;
 };
 
-type DiscoveredPod = {
+type AgentPod = {
   podName: string;
   namespace: string;
   container: string;
-  strategy: "relay" | "agent";
+  nodeName: string;
 };
 
-// ── Pod Discovery — 여러 전략으로 Hubble 접근 가능한 pod 탐색 ──
+type AgentDiscovery = {
+  /** Running agents — one per node */
+  agents: AgentPod[];
+  /** All agent pods found, including ones not Running */
+  total: number;
+};
 
-const RELAY_LABEL_SELECTORS = [
-  "k8s-app=hubble-relay",
-  "app.kubernetes.io/name=hubble-relay",
-  "app=hubble-relay",
-];
+type BufferStatus = {
+  version: string;
+  numFlows: number;
+  maxFlows: number;
+  uptimeNs: number;
+};
 
 const AGENT_LABEL_SELECTORS = [
   "k8s-app=cilium",
   "app.kubernetes.io/name=cilium-agent",
 ];
-
-const RELAY_CONTAINER_NAMES = ["hubble-relay", "relay"];
 const AGENT_CONTAINER_NAMES = ["cilium-agent", "cilium"];
 
-async function discoverHubblePod(
+/** Concurrent `kubectl exec` sessions per request — large clusters have hundreds of nodes. */
+const AGENT_EXEC_CONCURRENCY = 8;
+
+/** Ring buffer size Cilium uses when `hubble status` is unavailable (hubble-event-buffer-capacity default). */
+const DEFAULT_BUFFER_CAPACITY = 4095;
+
+// ── Agent discovery — every cilium-agent pod (one per node) ──
+
+async function discoverAgents(
   env: Env,
+  kc: k8s.KubeConfig,
   bearerToken: string | undefined,
   azureResourceId: string,
-): Promise<DiscoveredPod> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:hubble-discovery:${azureResourceId}`;
-  const cached = podDiscoveryCache.get(cacheKey);
+): Promise<AgentDiscovery> {
+  const cacheKey = `${cachePrefix(bearerToken)}:hubble-agents:${azureResourceId}`;
+  const cached = agentDiscoveryCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
+  const namespaces = [...new Set(["kube-system", env.HUBBLE_RELAY_NAMESPACE, "cilium", "cilium-system"])];
 
-  const relayNs = env.HUBBLE_RELAY_NAMESPACE;
-  const searchNamespaces = [relayNs, "cilium", "cilium-system"];
-  const uniqueNs = [...new Set(searchNamespaces)];
-
-  // Strategy 1: hubble-relay pod 탐색
-  for (const ns of uniqueNs) {
-    for (const labelSelector of RELAY_LABEL_SELECTORS) {
+  for (const namespace of namespaces) {
+    for (const labelSelector of AGENT_LABEL_SELECTORS) {
       try {
-        const podList = await coreV1.listNamespacedPod({ namespace: ns, labelSelector });
-        const runningPod = podList.items.find((p) => p.status?.phase === "Running");
-        if (runningPod?.metadata?.name) {
-          const containers = runningPod.spec?.containers?.map((c) => c.name) ?? [];
-          const container = RELAY_CONTAINER_NAMES.find((c) => containers.includes(c))
-            ?? containers[0] ?? "hubble-relay";
-          const result: DiscoveredPod = {
-            podName: runningPod.metadata.name,
-            namespace: ns,
-            container,
-            strategy: "relay",
-          };
-          console.log(`[hubble] discovered relay pod: ${ns}/${result.podName} (container: ${container})`);
-          podDiscoveryCache.set(cacheKey, result);
-          return result;
-        }
+        const items = (await coreV1.listNamespacedPod({ namespace, labelSelector })).items;
+        if (items.length === 0) continue;
+        const agents = items
+          .filter((p) => p.status?.phase === "Running" && p.metadata?.name)
+          .map((p) => {
+            const containers = p.spec?.containers?.map((c) => c.name) ?? [];
+            return {
+              podName: p.metadata!.name!,
+              namespace,
+              container: AGENT_CONTAINER_NAMES.find((c) => containers.includes(c)) ?? containers[0] ?? "cilium-agent",
+              nodeName: p.spec?.nodeName ?? "",
+            };
+          })
+          .sort((a, b) => a.nodeName.localeCompare(b.nodeName));
+        const result = { agents, total: items.length };
+        debug(`[hubble] discovered ${agents.length}/${items.length} running cilium agents in ${namespace} (${labelSelector})`);
+        agentDiscoveryCache.set(cacheKey, result);
+        return result;
       } catch {
         // 이 namespace/selector 조합은 실패 — 다음 시도
       }
     }
   }
 
-  // Strategy 2: cilium-agent pod 탐색
-  for (const ns of uniqueNs) {
-    for (const labelSelector of AGENT_LABEL_SELECTORS) {
-      try {
-        const podList = await coreV1.listNamespacedPod({ namespace: ns, labelSelector });
-        const runningPod = podList.items.find((p) => p.status?.phase === "Running");
-        if (runningPod?.metadata?.name) {
-          const containers = runningPod.spec?.containers?.map((c) => c.name) ?? [];
-          const container = AGENT_CONTAINER_NAMES.find((c) => containers.includes(c))
-            ?? containers[0] ?? "cilium-agent";
-          const result: DiscoveredPod = {
-            podName: runningPod.metadata.name,
-            namespace: ns,
-            container,
-            strategy: "agent",
-          };
-          console.log(`[hubble] discovered agent pod: ${ns}/${result.podName} (container: ${container})`);
-          podDiscoveryCache.set(cacheKey, result);
-          return result;
-        }
-      } catch {
-        // continue
-      }
-    }
-  }
-
   throw new Error(
-    `Hubble pod를 찾을 수 없습니다. ` +
-    `검색 namespace: [${uniqueNs.join(", ")}], ` +
-    `relay labels: [${RELAY_LABEL_SELECTORS.join(", ")}], ` +
-    `agent labels: [${AGENT_LABEL_SELECTORS.join(", ")}]. ` +
+    `cilium-agent pod를 찾을 수 없습니다. ` +
+    `검색 namespace: [${namespaces.join(", ")}], labels: [${AGENT_LABEL_SELECTORS.join(", ")}]. ` +
     `Cilium이 설치되어 있고 Hubble이 활성화되어 있는지 확인하세요.`,
   );
+}
+
+/** Run `fn` over `items` with at most `limit` in flight, preserving order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // ── Hubble Relay 서비스명 자동 탐색 ──
@@ -155,7 +155,7 @@ async function discoverRelayService(
       if (serviceNames.includes(name) || name.includes("hubble-relay")) {
         const port = svc.spec?.ports?.[0]?.port ?? 80;
         const fqdn = `${name}.${namespace}.svc.cluster.local:${port}`;
-        console.log(`[hubble] discovered relay service: ${fqdn}`);
+        debug(`[hubble] discovered relay service: ${fqdn}`);
         relayServiceCache.set(cacheKey, fqdn);
         return fqdn;
       }
@@ -168,6 +168,26 @@ async function discoverRelayService(
 }
 
 // ── Execute command in pod and collect output ──
+
+/** Hard cap on captured stdout (10k JSON flows is roughly 15 MB). */
+const MAX_EXEC_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+// Values passed as `hubble observe` arguments — must not look like flags.
+const K8S_NAME_RE = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
+const VERDICTS = new Set(["FORWARDED", "DROPPED", "AUDIT", "ERROR", "REDIRECTED", "TRACED", "TRANSLATED"]);
+const FLOW_TYPES = new Set(["l7", "trace", "drop", "capture", "policy-verdict", "debug", "sock", "trace-sock"]);
+
+function validateObserveFilters(opts: { namespace?: string; verdict?: string; type?: string } | undefined) {
+  if (opts?.namespace && !K8S_NAME_RE.test(opts.namespace)) {
+    throw new HttpError(400, "invalid_namespace", "namespace must be a valid Kubernetes name");
+  }
+  if (opts?.verdict && !VERDICTS.has(opts.verdict.toUpperCase())) {
+    throw new HttpError(400, "invalid_verdict", `verdict must be one of ${[...VERDICTS].join(", ")}`);
+  }
+  if (opts?.type && !FLOW_TYPES.has(opts.type.toLowerCase())) {
+    throw new HttpError(400, "invalid_type", `type must be one of ${[...FLOW_TYPES].join(", ")}`);
+  }
+}
 
 async function execInPod(
   kc: k8s.KubeConfig,
@@ -182,32 +202,46 @@ async function execInPod(
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    let socket: { close: () => void } | undefined;
+
+    const finish = (exitCode: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Close the exec websocket so the remote process does not keep streaming
+      try { socket?.close(); } catch { /* already closed */ }
+      resolve({ stdout, stderr, exitCode });
+    };
 
     const outStream = new Writable({
       write(chunk, _enc, cb) {
-        stdout += chunk.toString();
+        if (stdout.length < MAX_EXEC_OUTPUT_BYTES) stdout += chunk.toString();
         cb();
       },
     });
 
     const errStream = new Writable({
       write(chunk, _enc, cb) {
-        stderr += chunk.toString();
+        if (stderr.length < 64 * 1024) stderr += chunk.toString();
         cb();
       },
     });
 
-    const timer = setTimeout(() => {
-      resolve({ stdout, stderr, exitCode: stdout ? 0 : 124 }); // timeout
-    }, timeoutMs);
+    // On timeout keep partial output (hubble may still be streaming) — 124 like coreutils `timeout`
+    const timer = setTimeout(() => finish(stdout ? 0 : 124), timeoutMs);
 
     exec
       .exec(namespace, podName, container, command, outStream, errStream, null, false, (status) => {
-        clearTimeout(timer);
-        const exitCode = status?.status === "Success" ? 0 : 1;
-        resolve({ stdout, stderr, exitCode });
+        finish(status?.status === "Success" ? 0 : 1);
+      })
+      .then((ws) => {
+        socket = ws;
+        if (settled) ws.close();
       })
       .catch((err) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(err);
       });
@@ -216,6 +250,21 @@ async function execInPod(
 
 // ── Hubble observe: get flows ──
 
+type ObserveFilters = { ns: string; verdict: string; type?: string };
+
+function observeArgs(outputFmt: "jsonpb" | "json", limit: number, f: ObserveFilters, server?: string): string[] {
+  const args = ["hubble", "observe", "--output", outputFmt, "--last", String(limit)];
+  if (server) args.push("--server", server);
+  if (f.ns) args.push("--namespace", f.ns);
+  if (f.verdict) args.push("--verdict", f.verdict);
+  if (f.type) args.push("--type", f.type);
+  return args;
+}
+
+/**
+ * Flows from every node, merged newest first and de-duplicated, with a
+ * description of which nodes and time span they cover.
+ */
 export async function getHubbleFlows(
   env: Env,
   bearerToken: string | undefined,
@@ -226,187 +275,173 @@ export async function getHubbleFlows(
     verdict?: string;
     type?: string;
   },
-): Promise<HubbleFlow[]> {
-  if (!env.HUBBLE_ENABLED) return [];
+): Promise<HubbleFlowSet> {
+  if (!env.HUBBLE_ENABLED) return { flows: [], coverage: emptyCoverage() };
+  validateObserveFilters(opts);
 
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const ns = opts?.namespace ?? "";
-  const verdict = opts?.verdict ?? "";
-  const cacheKey = `${prefix}:hubble-flows:${azureResourceId}:${ns}:${verdict}`;
+  const prefix = cachePrefix(bearerToken);
+  const filters: ObserveFilters = {
+    ns: opts?.namespace ?? "",
+    verdict: opts?.verdict?.toUpperCase() ?? "",
+    type: opts?.type?.toLowerCase(),
+  };
+  const limit = opts?.last ?? Math.min(env.HUBBLE_FLOW_LIMIT, 10_000);
+  // Every filter that changes the hubble query must be part of the key
+  const cacheKey = `${prefix}:hubble-flows:${azureResourceId}:${filters.ns}:${filters.verdict}:${filters.type ?? ""}:${limit}`;
   const cached = flowsCache.get(cacheKey);
   if (cached) return cached;
 
-  const discovered = await discoverHubblePod(env, bearerToken, azureResourceId);
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
+  const discovery = await discoverAgents(env, kc, bearerToken, azureResourceId);
+  const result = await tryGetFlows(kc, env, discovery, azureResourceId, prefix, limit, filters);
 
-  const limit = opts?.last ?? Math.min(env.HUBBLE_FLOW_LIMIT, 10_000);
-
-  // 플로우 수집 시도 (여러 전략)
-  const result = await tryGetFlows(kc, env, discovered, azureResourceId, prefix, limit, ns, verdict, opts?.type);
-
-  if (result.flows.length > 0) {
-    flowsCache.set(cacheKey, result.flows);
-  } else if (result.error) {
-    console.warn(`[hubble] flows collection warning: ${result.error}`);
+  if (result.set) {
+    flowsCache.set(cacheKey, result.set, env.HUBBLE_CACHE_TTL_MS);
+    return result.set;
   }
-
-  return result.flows;
+  console.warn(`[hubble] flows collection warning: ${result.error}`);
+  return { flows: [], coverage: emptyCoverage(discovery.total) };
 }
 
 async function tryGetFlows(
   kc: k8s.KubeConfig,
   env: Env,
-  discovered: DiscoveredPod,
+  discovery: AgentDiscovery,
   azureResourceId: string,
   prefix: string,
   limit: number,
-  ns: string,
-  verdict: string,
-  type?: string,
-): Promise<{ flows: HubbleFlow[]; error?: string }> {
+  filters: ObserveFilters,
+): Promise<{ set?: HubbleFlowSet; error?: string }> {
   const errors: string[] = [];
+  const { agents } = discovery;
 
-  // cilium pod 찾기 (relay와 별도)
-  const ciliumPod = await findCiliumPod(kc, discovered);
-
-  // ── Strategy 1: cilium pod에서 `hubble observe` (로컬 소켓) ──
+  // ── Strategy 1: 모든 cilium agent에서 `hubble observe` (로컬 소켓) → 병합 ──
   // Cilium 1.17+: hubble 바이너리가 별도 존재, 로컬 소켓(/var/run/cilium/hubble.sock)으로 접근
-  if (ciliumPod) {
-    for (const outputFmt of ["jsonpb", "json"] as const) {
-      const args = ["hubble", "observe", "--output", outputFmt, "--last", String(limit)];
-      if (ns) args.push("--namespace", ns);
-      if (verdict) args.push("--verdict", verdict);
-      if (type) args.push("--type", type);
-
-      console.log(`[hubble] Strategy 1 (hubble observe --output ${outputFmt}): ${ciliumPod.namespace}/${ciliumPod.podName}`);
-      try {
-        const result = await execInPod(
-          kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-          args, 30_000,
-        );
-
-        if (result.stdout.trim()) {
-          const flows = parseHubbleJsonOutput(result.stdout);
-          if (flows.length > 0) {
-            console.log(`[hubble] Strategy 1 success (${outputFmt}): parsed ${flows.length} flows`);
-            return { flows };
-          }
-        }
-        const errMsg = result.stderr.slice(0, 200);
-        console.log(`[hubble] Strategy 1 (${outputFmt}) failed: exitCode=${result.exitCode}, stderr=${errMsg}`);
-        errors.push(`hubble-local-${outputFmt}: exitCode=${result.exitCode}, stderr=${errMsg}`);
-
-        // "not found" = hubble 바이너리 없음 → 다음 output format 시도 불필요
-        if (errMsg.includes("not found") || errMsg.includes("no such file")) break;
-      } catch (e) {
-        errors.push(`hubble-local-${outputFmt}: ${(e as Error).message}`);
-      }
+  if (agents.length > 0) {
+    debug(`[hubble] Strategy 1: hubble observe on ${agents.length} agents`);
+    const batches = await mapWithConcurrency(agents, AGENT_EXEC_CONCURRENCY, (a) => readAgentFlows(kc, a, limit, filters));
+    const answered = batches.filter((b) => !b.error);
+    // Success once any node answered — an empty but successful read is a real "no traffic"
+    if (answered.length > 0) {
+      const set = mergeAgentBatches(batches, discovery.total, limit);
+      debug(
+        `[hubble] Strategy 1: ${answered.length}/${discovery.total} nodes, ` +
+        `${set.coverage.rawEvents} events → ${set.flows.length} after de-dup, ` +
+        `common window ${set.coverage.commonWindowMinutes}min`,
+      );
+      return { set };
     }
+    errors.push(...batches.map((b) => `hubble-local@${b.nodeName}: ${b.error}`));
   }
 
   // ── Strategy 2: cilium pod에서 `hubble observe --server relay` ──
-  if (ciliumPod) {
-    const relaySvcKey = `${prefix}:relay-svc:${azureResourceId}`;
-    const relayFqdn = await discoverRelayService(kc, discovered.namespace, relaySvcKey)
+  const agent = agents[0];
+  if (agent) {
+    const relayFqdn = await discoverRelayService(kc, env.HUBBLE_RELAY_NAMESPACE, `${prefix}:relay-svc:${azureResourceId}`)
       ?? `hubble-relay.${env.HUBBLE_RELAY_NAMESPACE}.svc.cluster.local:${env.HUBBLE_RELAY_PORT}`;
-
-    const args = ["hubble", "observe", "--output", "json",
-      "--last", String(limit), "--server", relayFqdn];
-    if (ns) args.push("--namespace", ns);
-    if (verdict) args.push("--verdict", verdict);
-    if (type) args.push("--type", type);
-
-    console.log(`[hubble] Strategy 2 (hubble observe --server): ${ciliumPod.namespace}/${ciliumPod.podName} → ${relayFqdn}`);
+    debug(`[hubble] Strategy 2 (hubble observe --server): ${agent.namespace}/${agent.podName} → ${relayFqdn}`);
     try {
       const result = await execInPod(
-        kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-        args, 30_000,
+        kc, agent.namespace, agent.podName, agent.container,
+        observeArgs("json", limit, filters, relayFqdn), 30_000,
       );
-
-      if (result.stdout.trim()) {
-        const flows = parseHubbleJsonOutput(result.stdout);
-        if (flows.length > 0) {
-          console.log(`[hubble] Strategy 2 success: parsed ${flows.length} flows`);
-          return { flows };
-        }
+      const flows = dedupeObservations(parseHubbleJsonOutput(result.stdout));
+      if (flows.length > 0) {
+        debug(`[hubble] Strategy 2 success: ${flows.length} flows`);
+        return { set: { flows: flows.slice(0, limit), coverage: singleSourceCoverage("relay", flows) } };
       }
-      console.log(`[hubble] Strategy 2 failed: exitCode=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
       errors.push(`hubble-relay: exitCode=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`);
     } catch (e) {
       errors.push(`hubble-relay: ${(e as Error).message}`);
     }
   }
 
-  // ── Strategy 3: cilium-dbg hubble-local ──
-  // AKS Cilium 1.17: `cilium-dbg` 로 래핑, hubble-related 명령 확인
-  if (ciliumPod) {
-    const args = ["cilium-dbg", "bpf", "recorder", "list"];  // probe if cilium-dbg works
-    console.log(`[hubble] Strategy 3 (cilium-dbg probe): ${ciliumPod.namespace}/${ciliumPod.podName}`);
-    try {
-      const probe = await execInPod(
-        kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-        ["cilium-dbg", "status", "--brief"], 10_000,
-      );
-      console.log(`[hubble] cilium-dbg probe: exitCode=${probe.exitCode}, stdout=${probe.stdout.slice(0, 100)}`);
-    } catch {
-      // just diagnostic
+  // ── Strategy 3: K8s API proxy → hubble-relay gRPC-web / HTTP ──
+  debug(`[hubble] Strategy 3 (K8s API proxy): attempting...`);
+  try {
+    const flows = dedupeObservations(await getFlowsViaApiProxy(kc, env.HUBBLE_RELAY_NAMESPACE, env, limit, filters.ns));
+    if (flows.length > 0) {
+      debug(`[hubble] Strategy 3 success: ${flows.length} flows`);
+      return { set: { flows: flows.slice(0, limit), coverage: singleSourceCoverage("api-proxy", flows) } };
     }
+  } catch (e) {
+    errors.push(`api-proxy: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // ── Strategy 4: K8s API proxy → hubble-relay gRPC-web / HTTP ──
-  {
-    console.log(`[hubble] Strategy 4 (K8s API proxy): attempting...`);
-    try {
-      const flows = await getFlowsViaApiProxy(kc, discovered.namespace, env, limit, ns);
-      if (flows.length > 0) {
-        console.log(`[hubble] Strategy 4 success: ${flows.length} flows`);
-        return { flows };
-      }
-    } catch (e) {
-      errors.push(`api-proxy: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  return {
-    flows: [],
-    error: `모든 Hubble 연결 전략이 실패했습니다. 시도된 전략:\n${errors.join("\n")}`,
-  };
+  return { error: `모든 Hubble 연결 전략이 실패했습니다. 시도된 전략:\n${errors.join("\n")}` };
 }
 
-/** cilium pod 탐색 (relay pod과 별도) */
-async function findCiliumPod(
+/** `hubble observe` on one agent's local socket. Never throws — failures are reported in the batch. */
+async function readAgentFlows(
   kc: k8s.KubeConfig,
-  discovered: DiscoveredPod,
-): Promise<DiscoveredPod | null> {
-  if (discovered.strategy === "agent") return discovered;
+  agent: AgentPod,
+  limit: number,
+  filters: ObserveFilters,
+): Promise<AgentBatch> {
+  const base = { nodeName: agent.nodeName, podName: agent.podName };
+  const bufferPromise = getBufferStatus(kc, agent);
+  let lastError = "no output";
 
-  const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
-  const searchNs = [discovered.namespace, "kube-system", "cilium", "cilium-system"];
-  const uniqueNs = [...new Set(searchNs)];
-
-  for (const nsName of uniqueNs) {
-    for (const labelSelector of AGENT_LABEL_SELECTORS) {
-      try {
-        const podList = await coreV1.listNamespacedPod({ namespace: nsName, labelSelector });
-        const running = podList.items.find((p) => p.status?.phase === "Running");
-        if (running?.metadata?.name) {
-          const containers = running.spec?.containers?.map((c) => c.name) ?? [];
-          return {
-            podName: running.metadata.name,
-            namespace: nsName,
-            container: AGENT_CONTAINER_NAMES.find((c) => containers.includes(c)) ?? containers[0] ?? "cilium-agent",
-            strategy: "agent",
-          };
-        }
-      } catch { /* continue */ }
+  for (const outputFmt of ["jsonpb", "json"] as const) {
+    try {
+      const result = await execInPod(
+        kc, agent.namespace, agent.podName, agent.container,
+        observeArgs(outputFmt, limit, filters), 30_000,
+      );
+      const flows = parseHubbleJsonOutput(result.stdout);
+      if (flows.length > 0 || (result.exitCode === 0 && !result.stderr.trim())) {
+        const buffer = await bufferPromise;
+        // Older history is gone when we hit our own --last or the ring buffer has wrapped
+        const wrapped = buffer
+          ? buffer.maxFlows > 0 && buffer.numFlows >= buffer.maxFlows
+          : flows.length >= DEFAULT_BUFFER_CAPACITY;
+        return { ...base, flows, truncated: flows.length >= limit || wrapped };
+      }
+      lastError = `exitCode=${result.exitCode}, stderr=${result.stderr.slice(0, 200)}`;
+      debug(`[hubble] observe (${outputFmt}) failed on ${agent.podName}: ${lastError}`);
+      // "not found" = hubble 바이너리 없음 → 다음 output format 시도 불필요
+      if (/not found|no such file/i.test(result.stderr)) break;
+    } catch (e) {
+      lastError = (e as Error).message;
     }
   }
+  return { ...base, flows: [], truncated: false, error: lastError };
+}
+
+/** `hubble status` on one agent — tells whether its ring buffer has wrapped. Never throws. */
+async function getBufferStatus(kc: k8s.KubeConfig, agent: AgentPod): Promise<BufferStatus | null> {
+  const cacheKey = `${agent.namespace}/${agent.podName}`;
+  const cached = bufferStatusCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const result = await execInPod(
+      kc, agent.namespace, agent.podName, agent.container,
+      ["hubble", "status", "--output", "json"], 10_000,
+    );
+    const parsed = safeJsonParse<Record<string, unknown>>(result.stdout);
+    if (parsed) {
+      const status = parseBufferStatus(parsed);
+      bufferStatusCache.set(cacheKey, status);
+      return status;
+    }
+  } catch { /* fall through */ }
+
+  try {
+    // "Hubble: Ok   Current/Max Flows: 4095/4095 (100.00%), Flows/s: 43.63"
+    const result = await execInPod(
+      kc, agent.namespace, agent.podName, agent.container,
+      ["cilium-dbg", "status", "--brief"], 10_000,
+    );
+    const match = result.stdout.match(/Hubble:\s*Ok\s+Current\/Max Flows:\s*(\d+)\/(\d+)/);
+    if (match) {
+      const status = { version: "cilium-dbg", numFlows: Number(match[1]), maxFlows: Number(match[2]), uptimeNs: 0 };
+      bufferStatusCache.set(cacheKey, status);
+      return status;
+    }
+  } catch { /* unknown */ }
   return null;
 }
-
-// buildObserveArgs는 더 이상 사용하지 않음 — tryGetFlows에서 직접 args 구성
 
 // ── K8s API proxy를 통한 hubble-relay 접근 ──
 
@@ -456,126 +491,60 @@ async function getFlowsViaApiProxy(
 
 // ── Hubble status ──
 
+/** Ring-buffer status summed over every node's agent. */
 export async function getHubbleStatus(
   env: Env,
   bearerToken: string | undefined,
   azureResourceId: string,
 ): Promise<HubbleStatusInfo> {
-  if (!env.HUBBLE_ENABLED) {
-    return { available: false, version: "", numFlows: 0, maxFlows: 0, uptimeNs: 0, nodeCount: 0, message: "HUBBLE_ENABLED=false" };
-  }
+  const off = { version: "", numFlows: 0, maxFlows: 0, uptimeNs: 0, nodeCount: 0, nodesTotal: 0 };
+  if (!env.HUBBLE_ENABLED) return { available: false, ...off, message: "HUBBLE_ENABLED=false" };
 
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:hubble-status:${azureResourceId}`;
   const cached = statusCache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const discovered = await discoverHubblePod(env, bearerToken, azureResourceId);
-    const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-    const kc = new k8s.KubeConfig();
-    kc.loadFromString(kubeconfigYaml);
+    const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
+    const { agents, total } = await discoverAgents(env, kc, bearerToken, azureResourceId);
+    const statuses = (await mapWithConcurrency(agents, AGENT_EXEC_CONCURRENCY, (a) => getBufferStatus(kc, a)))
+      .filter((s): s is BufferStatus => s !== null);
 
-    // cilium pod 찾기 (hubble 바이너리가 여기에 있음)
-    const ciliumPod = await findCiliumPod(kc, discovered);
-    const statusErrors: string[] = [];
-
-    // Strategy 1: cilium pod에서 `hubble status` (로컬 소켓)
-    if (ciliumPod) {
-      const result = await execInPod(
-        kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-        ["hubble", "status", "--output", "json"],
-        10_000,
-      );
-      if (result.stdout.trim()) {
-        const parsed = safeJsonParse<Record<string, unknown>>(result.stdout);
-        if (parsed) {
-          const info = buildStatusInfo(parsed);
-          statusCache.set(cacheKey, info);
-          return info;
-        }
-      }
-      statusErrors.push(result.stderr.slice(0, 200));
+    if (statuses.length === 0) {
+      return {
+        available: false,
+        ...off,
+        nodesTotal: total,
+        message: `cilium agent ${agents.length}개 발견, hubble status 조회 실패 (hubble 바이너리/소켓 확인 필요)`,
+      };
     }
 
-    // Strategy 2: cilium pod에서 `hubble status --server relay`
-    if (ciliumPod) {
-      const relayFqdn = await discoverRelayService(kc, discovered.namespace, `${prefix}:relay-svc:${azureResourceId}`)
-        ?? `hubble-relay.${env.HUBBLE_RELAY_NAMESPACE}.svc.cluster.local:${env.HUBBLE_RELAY_PORT}`;
-
-      const result = await execInPod(
-        kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-        ["hubble", "status", "--server", relayFqdn, "--output", "json"],
-        10_000,
-      );
-      if (result.stdout.trim()) {
-        const parsed = safeJsonParse<Record<string, unknown>>(result.stdout);
-        if (parsed) {
-          const info = buildStatusInfo(parsed);
-          statusCache.set(cacheKey, info);
-          return info;
-        }
-      }
-      statusErrors.push(result.stderr.slice(0, 200));
-    }
-
-    // Strategy 3: cilium-dbg status → hubble 상태 파싱
-    if (ciliumPod) {
-      const result = await execInPod(
-        kc, ciliumPod.namespace, ciliumPod.podName, ciliumPod.container,
-        ["cilium-dbg", "status", "--brief"],
-        10_000,
-      );
-      if (result.stdout.includes("Hubble")) {
-        // "Hubble: Ok   Current/Max Flows: 4095/4095 (100.00%), Flows/s: 43.63"
-        const match = result.stdout.match(
-          /Hubble:\s*(Ok|Disabled)\s+Current\/Max Flows:\s*(\d+)\/(\d+)/,
-        );
-        if (match) {
-          const info: HubbleStatusInfo = {
-            available: match[1] === "Ok",
-            version: "cilium-dbg",
-            numFlows: Number(match[2]),
-            maxFlows: Number(match[3]),
-            uptimeNs: 0,
-            nodeCount: 0,
-            message: match[1] === "Ok" ? "connected (via cilium-dbg)" : "disabled",
-          };
-          statusCache.set(cacheKey, info);
-          return info;
-        }
-      }
-      statusErrors.push(result.stderr.slice(0, 200));
-    }
-
-    // 모든 시도 실패 시 pod 발견 자체는 성공한 것이므로 부분 정보 반환
-    const msg = statusErrors.filter(Boolean).join("; ").slice(0, 300);
-    return {
+    const info: HubbleStatusInfo = {
       available: true,
-      version: "unknown",
-      numFlows: 0,
-      maxFlows: 0,
-      uptimeNs: 0,
-      nodeCount: 0,
-      message: `Hubble pod 발견됨 (${discovered.podName}), 상세 상태 조회 실패: ${msg || "unknown error"}`,
+      version: statuses.find((s) => s.version && s.version !== "cilium-dbg")?.version ?? statuses[0]!.version,
+      numFlows: statuses.reduce((sum, s) => sum + s.numFlows, 0),
+      maxFlows: statuses.reduce((sum, s) => sum + s.maxFlows, 0),
+      uptimeNs: Math.min(...statuses.map((s) => s.uptimeNs)),
+      nodeCount: statuses.length,
+      nodesTotal: total,
+      message: statuses.length < total ? `${total - statuses.length}개 노드 응답 없음` : "connected",
     };
-
+    statusCache.set(cacheKey, info, env.HUBBLE_CACHE_TTL_MS);
+    return info;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn("[hubble] status check failed:", msg);
-    return { available: false, version: "", numFlows: 0, maxFlows: 0, uptimeNs: 0, nodeCount: 0, message: msg };
+    return { available: false, ...off, message: msg };
   }
 }
 
-function buildStatusInfo(parsed: Record<string, unknown>): HubbleStatusInfo {
+function parseBufferStatus(parsed: Record<string, unknown>): BufferStatus {
   return {
-    available: true,
     version: String(parsed.version ?? ""),
     numFlows: Number(parsed.num_flows ?? parsed.numFlows ?? parsed.current_flows ?? 0),
     maxFlows: Number(parsed.max_flows ?? parsed.maxFlows ?? 0),
     uptimeNs: Number(parsed.uptime_ns ?? parsed.uptimeNs ?? 0),
-    nodeCount: Number(parsed.num_connected_nodes ?? parsed.nodeCount ?? parsed.nodes?.toString() ?? 0),
-    message: "connected",
   };
 }
 
@@ -598,16 +567,13 @@ function safeJsonParse<T>(raw: string): T | null {
  * - flat:    {"time":"...","verdict":"FORWARDED","source":{...},...}
  *   (cilium hubble observe가 이 포맷을 사용할 수 있음)
  */
-function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
+export function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
   if (!raw || !raw.trim()) return [];
 
   const lines = raw.split("\n").filter((l) => l.trim());
   const flows: HubbleFlow[] = [];
 
-  // 디버그: 첫 줄 로깅 (파싱 이슈 진단용)
-  if (lines.length > 0) {
-    console.log(`[hubble] parseHubbleJsonOutput: ${lines.length} lines, first=${lines[0]!.slice(0, 200)}`);
-  }
+  debug(`[hubble] parseHubbleJsonOutput: ${lines.length} lines`);
 
   for (const line of lines) {
     try {
@@ -621,6 +587,7 @@ function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
       const source = parseEndpoint(flow.source as Record<string, unknown> | undefined);
       const destination = parseEndpoint(flow.destination as Record<string, unknown> | undefined);
 
+      const ip = flow.IP as Record<string, unknown> | undefined;
       const l4 = flow.l4 as Record<string, unknown> | undefined;
       const tcp = l4?.TCP as Record<string, unknown> | undefined;
       const udp = l4?.UDP as Record<string, unknown> | undefined;
@@ -685,6 +652,9 @@ function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
         isReply: Boolean(flow.is_reply ?? flow.IsReply ?? flow.isReply),
         nodeName: String(flow.node_name ?? obj.node_name ?? flow.nodeName ?? ""),
         summary: String(flow.Summary ?? flow.summary ?? ""),
+        sourceIp: ip?.source ? String(ip.source) : undefined,
+        destinationIp: ip?.destination ? String(ip.destination) : undefined,
+        tcpFlags: tcp?.flags ? Object.keys(tcp.flags as Record<string, unknown>).sort().join(",") : undefined,
       });
     } catch (e) {
       // 파싱 실패 줄은 스킵 (최초 1건만 로깅)
@@ -720,7 +690,8 @@ function parseEndpoint(raw: Record<string, unknown> | undefined): HubbleEndpoint
     if (k) labelMap[k] = vParts.join("=");
   }
 
-  const namespace = String(raw.namespace ?? "");
+  // Post-SNAT copies drop namespace/pod_name but keep the identity's labels
+  const namespace = String(raw.namespace || labelMap["k8s:io.kubernetes.pod.namespace"] || "");
   const podName = String(raw.pod_name ?? "");
   const identity = Number(raw.identity ?? 0);
 

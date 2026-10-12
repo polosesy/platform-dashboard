@@ -12,6 +12,7 @@
 3. [Azure 인증 / OBO](#3-azure-인증--obo)
 4. [Kubernetes API](#4-kubernetes-api)
 5. [프론트엔드 (Next.js / React)](#5-프론트엔드)
+6. [보안 (Defender for Cloud)](#6-보안-defender-for-cloud)
 
 ---
 
@@ -82,6 +83,16 @@
 - **원인**: 네트워크 불안정 또는 Azure 서비스 일시적 장애
 - **해결**: OBO token pool에 retry 로직 포함, 요청 타임아웃 설정
 
+### AUTH-004: 로그인 버튼이 동작하지 않음 — AADSTS900144 (client_id 누락)
+- **증상**: 로그인 팝업이 `AADSTS900144: The request body must contain the following parameter: 'client_id'`로 끝나거나 `/common` 권한으로 열림
+- **원인**: Next.js는 앱 디렉터리(`apps/web`)의 `.env`만 읽는데 환경 파일은 저장소 루트에만 있어, 브라우저 번들의 `NEXT_PUBLIC_AZURE_AD_*`가 빈 값
+- **해결**: `apps/web/next.config.ts`가 루트 `.env*`를 `processEnv`로 반영하고 `NEXT_PUBLIC_*`를 `env`로 넘겨 인라인. 변경 후 dev 서버 재시작 필요. 확인: 번들에 `"TURBOPACK compile-time value"`로 clientId가 들어 있는지
+
+### AUTH-005: 로그인 팝업에서 계정 선택 후 60초 뒤 `timed_out`
+- **에러**: `BrowserAuthError: timed_out` (`redirect_bridge_timeout`), 팝업이 닫히지 않음
+- **원인**: MSAL v5는 팝업 응답을 BroadcastChannel(redirect bridge)로만 받음. 리디렉트 URI 페이지가 `broadcastResponseToMainFrame()`을 호출하지 않으면 원래 창이 응답을 받지 못함 (v2/v3의 팝업 URL 감시 방식은 제거됨)
+- **해결**: `apps/web/src/app/providers.tsx`가 모듈 로드 시 URL에 인증 응답(`state` + `code|error`)이 있으면 `@azure/msal-browser/redirect-bridge`의 `broadcastResponseToMainFrame()`을 호출하고 앱을 렌더링하지 않음. 리디렉트 URI(`NEXT_PUBLIC_AZURE_AD_REDIRECT_URI`)는 Entra 앱 등록의 **SPA** 플랫폼에 등록되어 있어야 함
+
 ---
 
 ## 4. Kubernetes API
@@ -105,10 +116,42 @@
 - **원인**: `useApiToken` hook의 토큰 갱신 타이밍 이슈
 - **해결**: `getApiToken()` → Bearer token 패턴으로 통일
 
-### FE-002: Sidebar 메뉴 미등록
-- **증상**: 새 페이지가 네비게이션에 표시되지 않음
-- **원인**: `Sidebar.tsx`의 `sections` 배열에 항목 미추가
-- **해결**: `Sidebar.tsx` sections 배열에 해당 href/label/icon 추가
+### FE-002: 새 페이지가 메뉴에 표시되지 않음
+- **증상**: 새 페이지가 상단 바·드로어에 없음, 또는 `navConfig.test.ts`가 실패
+- **원인**: 메뉴는 `apps/web/src/lib/navConfig.ts` 하나에서 상단 바와 드로어가 함께 만들어짐 — 항목 미추가
+- **해결**: `NAV_GROUPS`의 알맞은 그룹에 `item(href, key, icon)` 추가 → `i18nMessages.ts`에 `nav.item.<key>`·`nav.desc.<key>` ko/en 추가 → `npm test --workspace apps/api` (페이지 라우트와 메뉴 1:1, 아이콘 중복, 번역 누락 검사)
+
+### FE-003: dev 서버에서 페이지가 무한 새로고침 (Turbopack 패닉)
+- **에러**: `FATAL: An unexpected Turbopack error occurred` / HMR `reloadPage`: `Failed to write app endpoint /<page> — Next.js package not found`
+- **원인**: 저장소 폴더를 이동한 뒤 `apps/web/.next/dev`(Turbopack 영속 캐시)에 옛 절대 경로(`<old>/node_modules/next`)가 남아 HMR 계산이 매번 실패 → 서버가 `reloadPage` 전송
+- **해결**: `npm run dev`의 predev가 `apps/web/.next/.project-root`로 이동을 감지해 캐시를 자동 삭제. 수동: dev 서버 중지 후 `apps/web/.next/dev` 삭제. 워크스페이스 링크 경고가 나오면 `npm install`
+
+### FE-004: 카드·선택 상자 배경이 투명하게 보임
+- **증상**: 일부 페이지의 카드가 배경 없이 글자만 보임 (예전 Hubble·AKS 모니터링)
+- **원인**: CSS에서 정의되지 않은 변수(`var(--surface)` 등)를 사용 — 브라우저는 오류 없이 투명으로 처리
+- **해결**: 토큰은 `apps/web/src/app/globals.css`에만 정의(`--surface`·`--fg`·`--line`은 별칭). `uiConsistency.test.ts`가 정의되지 않은 변수·없는 CSS 모듈 클래스를 잡음. 폰트 변수(`--font-geist-*`)는 `body`에 붙으므로 별칭도 `body`에 선언
+
+### FE-005: 인프라 구성도에 선이 하나도 그려지지 않음 / 박스가 클릭을 가로챔
+- **증상**: 노드는 보이는데 선이 없음(콘솔 `error008`), 또는 빈 곳을 눌러도 선택이 해제되지 않음
+- **원인**: React Flow 11은 커스텀 노드에 `Handle`이 없으면 선을 만들지 않음. 노드 래퍼(`.react-flow__node`)는 `pointer-events: all`이라 큰 경계 박스가 캔버스를 덮음
+- **해결**: `architecture/components/ArchNodes.tsx`의 숨김 `Handle` 유지, 박스 노드는 `style.pointerEvents = "none"`(헤더만 클릭), `elevateNodesOnSelect={false}`. 개발 모드의 경고 `error#002`(nodeTypes)는 React 19 StrictMode가 useMemo를 두 번 실행해 생기는 오탐 — 프로덕션 빌드에서는 0건
+
+### FE-006: 탭이 URL과 어긋남 / 빌드 시 `useSearchParams() should be wrapped in a suspense boundary`
+- **증상**: 메뉴에서 같은 화면을 눌러도 탭이 그대로이거나, `next build`가 위 오류로 실패
+- **원인**: 탭 상태를 URL에 둘 때 컴포넌트 state로 복사하면 같은 라우트 이동(쿼리 제거)을 놓침. `useSearchParams`는 정적 빌드에서 Suspense 경계가 필요
+- **해결**: `useQueryParam(name, allowed, fallback)`(`lib/useQueryParam.ts`) 사용 — 값은 URL에서 매 렌더 읽고, 쓰기는 `history.replaceState`(Next가 감지). 해당 페이지는 `<Suspense>`로 감쌈 (`/policies`, `/security/findings`)
+
+---
+
+## 6. 보안 (Defender for Cloud)
+
+### SEC-001: 보안 화면이 '예시 데이터'로만 나옴
+- **원인**: `/api/security/posture`는 로그인 사용자 권한(OBO)으로만 실데이터를 읽음. 비로그인이면 mock(`source:"mock"`)
+- **해결**: 로그인. 사용자에게 구독의 **Security Reader**(또는 Reader) 권한이 있어야 함. 로컬 검증에서만 `AZURE_SECURITY_SP_FALLBACK=true`로 서비스 주체 사용 가능(기본 false — 운영에서 켜지 말 것)
+
+### SEC-002: 보안 화면에 '일부 데이터를 가져오지 못했습니다'
+- **원인**: Resource Graph 6개 쿼리 중 일부 실패(권한·스로틀링 429) — 실패 섹션은 `gaps`로 오고 화면에 '수집 실패'로 표시(0건으로 표시하지 않음)
+- **해결**: API 로그(`[posture]`, `AUD_DEBUG=true`)와 응답 `gaps[].message` 확인(구독 ID는 `[scope]`로 마스킹됨). 5분 캐시(`AZURE_SECURITY_CACHE_TTL_MS`) 후 재시도
 
 ---
 
@@ -127,4 +170,4 @@
 
 ---
 
-*최종 업데이트: 2026-03-26*
+*최종 업데이트: 2026-10-08*

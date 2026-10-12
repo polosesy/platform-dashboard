@@ -1,38 +1,23 @@
-import { createHash } from "crypto";
-import { OnBehalfOfCredential } from "@azure/identity";
-import type { Env } from "../env";
-import type { NetworkFlowPair, NetworkPortSummary, NetworkSummary, NetworkTotals } from "../types";
-
-type LogAnalyticsTable = {
-  name: string;
-  columns: Array<{ name: string; type: string }>;
-  rows: unknown[][];
-};
-
-type LogAnalyticsResponse = {
-  tables?: LogAnalyticsTable[];
-  error?: { message?: string; code?: string };
-};
+import type { Env } from "../env.js";
+import type { NetworkFlowPair, NetworkPortSummary, NetworkSummary, NetworkTotals } from "@aud/types";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import {
+  getLogAnalyticsFetcher,
+  tableToObjects,
+  type LogAnalyticsFetcher,
+  type LogAnalyticsResponse,
+  type LogAnalyticsTable,
+} from "../infra/azureClientFactory.js";
 
 type NetworkQueryParams = {
   lookbackMinutes: number;
   top: number;
 };
 
-let cache:
-  | {
-      key: string;
-      expiresAt: number;
-      summary: NetworkSummary;
-    }
-  | undefined;
-
-function bearerKey(bearerToken: string): string {
-  return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
-}
+const summaryCache = new CacheManager<NetworkSummary>(50);
 
 function clampInt(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.trunc(v)));
+  return Math.max(min, Math.min(max, Math.trunc(Number.isFinite(v) ? v : min)));
 }
 
 function asNumber(v: unknown): number {
@@ -45,53 +30,11 @@ function asString(v: unknown): string {
   return typeof v === "string" ? v : String(v ?? "");
 }
 
-function tableToObjects(table: LogAnalyticsTable): Record<string, unknown>[] {
-  const cols = table.columns.map((c) => c.name);
-  return table.rows.map((row) => {
-    const obj: Record<string, unknown> = {};
-    for (let i = 0; i < cols.length; i++) obj[cols[i]!] = row[i];
-    return obj;
-  });
-}
-
-async function queryLogAnalytics(env: Env, bearerToken: string, query: string): Promise<LogAnalyticsTable> {
-  const tenantId = env.AZURE_AD_TENANT_ID;
-  const clientId = env.AZURE_AD_CLIENT_ID;
-  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
-  const workspaceId = env.AZURE_LOG_ANALYTICS_WORKSPACE_ID;
-
-  if (!tenantId || !clientId || !clientSecret || !workspaceId) {
-    throw new Error("Azure Log Analytics not configured (AZURE_AD_* and AZURE_LOG_ANALYTICS_WORKSPACE_ID required)");
-  }
-
-  const credential = new OnBehalfOfCredential({
-    tenantId,
-    clientId,
-    clientSecret,
-    userAssertionToken: bearerToken,
-  });
-  const token = await credential.getToken("https://api.loganalytics.io/.default");
-  if (!token?.token) throw new Error("Failed to acquire Log Analytics token");
-
-  const url = `https://api.loganalytics.io/v1/workspaces/${workspaceId}/query`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token.token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ query }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Log Analytics query failed: HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
-  }
-
-  const json = (await res.json()) as LogAnalyticsResponse;
+async function queryTable(fetcher: LogAnalyticsFetcher, workspaceId: string, query: string): Promise<LogAnalyticsTable> {
+  const json = (await fetcher.query(workspaceId, query)) as LogAnalyticsResponse;
   const table = json.tables?.[0];
   if (!table) {
-    const msg = json.error?.message || "No tables returned";
-    throw new Error(`Log Analytics query returned no data: ${msg}`);
+    throw new Error(`Log Analytics query returned no data: ${json.error?.message || "No tables returned"}`);
   }
   return table;
 }
@@ -185,46 +128,37 @@ export function mockNetworkSummary(lookbackMinutes: number, table: string, note?
 export async function tryGetNetworkSummaryFromLogAnalytics(
   env: Env,
   bearerToken: string | undefined,
-  params: NetworkQueryParams
+  params: NetworkQueryParams,
 ): Promise<NetworkSummary | null> {
-  if (!bearerToken) return null;
-  if (!env.AZURE_LOG_ANALYTICS_WORKSPACE_ID) return null;
+  const workspaceId = env.AZURE_LOG_ANALYTICS_WORKSPACE_ID;
+  if (!bearerToken || !workspaceId) return null;
 
   const lookbackMinutes = clampInt(params.lookbackMinutes, 5, 60 * 24 * 14);
   const top = clampInt(params.top, 5, 50);
   const table = env.AZURE_LOG_ANALYTICS_TABLE;
 
-  const key = `${bearerKey(bearerToken)}:${env.AZURE_LOG_ANALYTICS_WORKSPACE_ID}:${table}:${lookbackMinutes}:${top}`;
-  const now = Date.now();
-  if (cache && cache.key === key && cache.expiresAt > now) return cache.summary;
+  const key = `${bearerKeyPrefix(bearerToken)}:${workspaceId}:${table}:${lookbackMinutes}:${top}`;
+  const cached = summaryCache.get(key);
+  if (cached) return cached;
 
+  const fetcher = await getLogAnalyticsFetcher(env, bearerToken);
   const [totalsTable, subnetsTable, ipsTable, portsTable] = await Promise.all([
-    queryLogAnalytics(env, bearerToken, totalsQuery(table, lookbackMinutes)),
-    queryLogAnalytics(env, bearerToken, topSubnetPairsQuery(table, lookbackMinutes, top)),
-    queryLogAnalytics(env, bearerToken, topIpPairsQuery(table, lookbackMinutes, top)),
-    queryLogAnalytics(env, bearerToken, topPortsQuery(table, lookbackMinutes, top)),
+    queryTable(fetcher, workspaceId, totalsQuery(table, lookbackMinutes)),
+    queryTable(fetcher, workspaceId, topSubnetPairsQuery(table, lookbackMinutes, top)),
+    queryTable(fetcher, workspaceId, topIpPairsQuery(table, lookbackMinutes, top)),
+    queryTable(fetcher, workspaceId, topPortsQuery(table, lookbackMinutes, top)),
   ]);
-
-  const totals = mapTotals(tableToObjects(totalsTable)[0]);
-  const topSubnetPairs = mapPairs(tableToObjects(subnetsTable), "SrcSubnet", "DestSubnet");
-  const topIpPairs = mapPairs(tableToObjects(ipsTable), "SrcIp", "DestIp");
-  const topPorts = mapPorts(tableToObjects(portsTable));
 
   const summary: NetworkSummary = {
     generatedAt: new Date().toISOString(),
     lookbackMinutes,
     table,
-    totals,
-    topSubnetPairs,
-    topIpPairs,
-    topPorts,
+    totals: mapTotals(tableToObjects(totalsTable)[0]),
+    topSubnetPairs: mapPairs(tableToObjects(subnetsTable), "SrcSubnet", "DestSubnet"),
+    topIpPairs: mapPairs(tableToObjects(ipsTable), "SrcIp", "DestIp"),
+    topPorts: mapPorts(tableToObjects(portsTable)),
   };
 
-  cache = {
-    key,
-    expiresAt: now + env.AZURE_LOG_ANALYTICS_CACHE_TTL_MS,
-    summary,
-  };
-
+  summaryCache.set(key, summary, env.AZURE_LOG_ANALYTICS_CACHE_TTL_MS);
   return summary;
 }

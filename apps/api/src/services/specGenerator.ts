@@ -4,7 +4,7 @@ import type {
   ArchitectureEdge,
   GraphNodeKind,
   EdgeKind,
-} from "../types";
+} from "@aud/types";
 import type {
   DiagramSpec,
   DiagramNodeSpec,
@@ -18,8 +18,9 @@ import type {
   SubResource,
   SubResourceKind,
 } from "@aud/types";
-import { inferImplicitEdges } from "./dependencyInference";
+import { inferImplicitEdges } from "./dependencyInference.js";
 import ELK from "elkjs";
+import { debug } from "../infra/logger.js";
 
 // ── Kinds to exclude (infra-only, not useful for live monitoring) ──
 
@@ -506,14 +507,14 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     const vnets = graph.nodes.filter(n => n.kind === "vnet");
     const subnets = graph.nodes.filter(n => n.kind === "subnet");
     const containsEdges = graph.edges.filter(e => e.kind === "contains");
-    console.log(`[containment] Pass 1: 0 subnet→vnet. VNets=${vnets.length}, Subnets=${subnets.length}, Contains edges=${containsEdges.length}`);
+    debug(`[containment] Pass 1: 0 subnet→vnet. VNets=${vnets.length}, Subnets=${subnets.length}, Contains edges=${containsEdges.length}`);
     for (const e of containsEdges.slice(0, 5)) {
-      console.log(`[containment]   ${e.source.slice(0, 60)}.. (${nodeKindMap.get(e.source) ?? "?"}) → ${e.target.slice(0, 60)}.. (${nodeKindMap.get(e.target) ?? "?"})`);
+      debug(`[containment]   ${e.source.slice(0, 60)}.. (${nodeKindMap.get(e.source) ?? "?"}) → ${e.target.slice(0, 60)}.. (${nodeKindMap.get(e.target) ?? "?"})`);
     }
-    if (vnets.length > 0) console.log(`[containment] Sample VNet ID: ${vnets[0]!.id.slice(0, 120)}`);
-    if (subnets.length > 0) console.log(`[containment] Sample Subnet ID: ${subnets[0]!.id.slice(0, 120)}`);
+    if (vnets.length > 0) debug(`[containment] Sample VNet ID: ${vnets[0]!.id.slice(0, 120)}`);
+    if (subnets.length > 0) debug(`[containment] Sample Subnet ID: ${subnets[0]!.id.slice(0, 120)}`);
   } else {
-    console.log(`[containment] Pass 1: ${pass1Count} subnet→vnet from contains edges`);
+    debug(`[containment] Pass 1: ${pass1Count} subnet→vnet from contains edges`);
   }
 
   // ── Pass 1b: Fallback — infer VNet→Subnet from Azure resource ID hierarchy ──
@@ -529,11 +530,11 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
       subnetParent.set(node.id, parentVnetId);
       pass1bCount++;
     } else {
-      console.log(`[containment] Pass 1b: parent "${parentVnetId.slice(0, 80)}" kind=${parentKind ?? "NOT_FOUND"}`);
+      debug(`[containment] Pass 1b: parent "${parentVnetId.slice(0, 80)}" kind=${parentKind ?? "NOT_FOUND"}`);
     }
   }
   if (pass1bCount > 0) {
-    console.log(`[containment] Pass 1b: ID-fallback resolved ${pass1bCount} subnet→vnet`);
+    debug(`[containment] Pass 1b: ID-fallback resolved ${pass1bCount} subnet→vnet`);
   }
 
   // ── Pass 2: Subnet → Resource (network/connects/attached-to/bound-to edges) ──
@@ -563,7 +564,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
       }
     }
   }
-  console.log(`[containment] Pass 2: ${pass2Nic} subnet→nic, ${pass2Other} subnet→other`);
+  debug(`[containment] Pass 2: ${pass2Nic} subnet→nic, ${pass2Other} subnet→other`);
 
   // ── Pass 3: NIC → Resource: resolve through NIC to subnet ──
   let pass3Count = 0;
@@ -580,7 +581,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
       );
     }
   }
-  console.log(`[containment] Pass 3: ${pass3Count} resources resolved via NIC chain`);
+  debug(`[containment] Pass 3: ${pass3Count} resources resolved via NIC chain`);
 
   // ── Pass 4: Resource Group proximity fallback ──
   const subnetRgMap = new Map<string, string[]>();
@@ -627,7 +628,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     }
   }
   if (pass4Count > 0) {
-    console.log(`[containment] Pass 4: RG-proximity assigned ${pass4Count} resources to subnets`);
+    debug(`[containment] Pass 4: RG-proximity assigned ${pass4Count} resources to subnets`);
   }
 
   // ── Pass 5: Nuclear failsafe — if containment is still empty, force-assign ──
@@ -637,7 +638,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
   if (subnetParent.size === 0) {
     const vnetNodes = graph.nodes.filter(n => n.kind === "vnet");
     const subnetNodesLocal = graph.nodes.filter(n => n.kind === "subnet");
-    console.log(`[containment] Pass 5: FAILSAFE — subnetParent is empty! VNets=${vnetNodes.length}, Subnets=${subnetNodesLocal.length}`);
+    debug(`[containment] Pass 5: FAILSAFE — subnetParent is empty! VNets=${vnetNodes.length}, Subnets=${subnetNodesLocal.length}`);
 
     if (vnetNodes.length > 0 && subnetNodesLocal.length > 0) {
       // Force VNet→Subnet containment from node IDs
@@ -658,11 +659,11 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
               pass5Count++;
               sampleChains.push(`[Pass5-CI] subnet "${sub.name}" → vnet "${match.name}" (case-insensitive)`);
             } else {
-              console.log(`[containment] Pass 5: subnet "${sub.name}" parent VNet "${parentVnetId.split("/").pop()}" NOT FOUND in ${vnetNodes.length} VNets`);
+              debug(`[containment] Pass 5: subnet "${sub.name}" parent VNet "${parentVnetId.split("/").pop()}" NOT FOUND in ${vnetNodes.length} VNets`);
               // Dump first VNet ID for comparison
               if (vnetNodes.length > 0) {
-                console.log(`[containment] Pass 5: expected="${parentVnetId}"`);
-                console.log(`[containment] Pass 5: actual  ="${vnetNodes[0]!.id}"`);
+                debug(`[containment] Pass 5: expected="${parentVnetId}"`);
+                debug(`[containment] Pass 5: actual  ="${vnetNodes[0]!.id}"`);
               }
             }
           }
@@ -681,7 +682,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
 
       // Force resource→subnet containment if still empty
       if (resourceSubnet.size === 0 && subnetParent.size > 0) {
-        console.log(`[containment] Pass 5: Also forcing resource→subnet by RG proximity`);
+        debug(`[containment] Pass 5: Also forcing resource→subnet by RG proximity`);
         // Rebuild subnet RG map with freshly resolved subnets
         const subRgMap5 = new Map<string, string[]>();
         for (const sub of subnetNodesLocal) {
@@ -715,7 +716,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     }
   }
   if (pass5Count > 0) {
-    console.log(`[containment] Pass 5: FAILSAFE resolved ${pass5Count} containment entries`);
+    debug(`[containment] Pass 5: FAILSAFE resolved ${pass5Count} containment entries`);
   }
 
   // Graph-level node counts
@@ -726,11 +727,11 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     total: graph.nodes.length,
   };
 
-  console.log(`[containment] Final: ${subnetParent.size} subnet→vnet, ${resourceSubnet.size} resource→subnet`);
+  debug(`[containment] Final: ${subnetParent.size} subnet→vnet, ${resourceSubnet.size} resource→subnet`);
 
   // Log all sample chains for server-side debugging
   for (const chain of sampleChains) {
-    console.log(`[containment]   ${chain}`);
+    debug(`[containment]   ${chain}`);
   }
 
   return {
@@ -755,7 +756,8 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
 
 // ── ELK Layout Engine ──
 
-const elk = new ELK();
+// elkjs is CommonJS: under NodeNext the default import is module.exports, whose `.default` is the constructor
+const elk = new ELK.default();
 
 async function applyElkLayout(
   nodes: DiagramNodeSpec[],
@@ -1135,18 +1137,18 @@ export async function generateDiagramSpec(
   }
 
   if (nsgToSubnet.size > 0) {
-    console.log(`[specGenerator] NSG placement: ${nsgToSubnet.size} subnet, ${nsgToVm.size} VM-attached, ${nsgToStandaloneNic.size} NIC-attached, ${standaloneNsgIds.size} standalone`);
+    debug(`[specGenerator] NSG placement: ${nsgToSubnet.size} subnet, ${nsgToVm.size} VM-attached, ${nsgToStandaloneNic.size} NIC-attached, ${standaloneNsgIds.size} standalone`);
   }
 
   if (vmBoundNics.size > 0) {
-    console.log(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
+    debug(`[specGenerator] NIC absorption: ${nicToVmBound.size} NICs → ${vmBoundNics.size} VMs`);
   }
-  console.log(`[specGenerator] PIP absorption: ${nicToPipAzureId.size} standalone NICs → ${standalonePipIds.size} PIP cards`);
+  debug(`[specGenerator] PIP absorption: ${nicToPipAzureId.size} standalone NICs → ${standalonePipIds.size} PIP cards`);
   if (appGwFrontendIPs.size > 0) {
-    console.log(`[specGenerator] AppGW Frontend IPs: ${appGwFrontendIPs.size} AppGWs with frontend IPs`);
+    debug(`[specGenerator] AppGW Frontend IPs: ${appGwFrontendIPs.size} AppGWs with frontend IPs`);
   }
   if (lbFrontendIPs.size > 0) {
-    console.log(`[specGenerator] LB Frontend IPs: ${lbFrontendIPs.size} LBs with frontend IPs`);
+    debug(`[specGenerator] LB Frontend IPs: ${lbFrontendIPs.size} LBs with frontend IPs`);
   }
 
   /** Collect sub-resources (NICs, Frontend IPs, PIP-attached NICs) for a given node by its original ID. */
@@ -1232,9 +1234,9 @@ export async function generateDiagramSpec(
   const resourceNodes = filteredNodes.filter((n) => !NETWORK_CONTAINER_KINDS.has(n.kind));
 
   // ── Diagnostic: containment resolution ──
-  console.log(`[specGenerator] Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
-  console.log(`[specGenerator] Filtered: ${vnetNodes.length} VNets, ${subnetNodes.length} Subnets, ${resourceNodes.length} resources`);
-  console.log(`[specGenerator] Containment: ${containment.subnetParent.size} subnet→vnet, ${containment.resourceSubnet.size} resource→subnet`);
+  debug(`[specGenerator] Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+  debug(`[specGenerator] Filtered: ${vnetNodes.length} VNets, ${subnetNodes.length} Subnets, ${resourceNodes.length} resources`);
+  debug(`[specGenerator] Containment: ${containment.subnetParent.size} subnet→vnet, ${containment.resourceSubnet.size} resource→subnet`);
   if (containment.subnetParent.size === 0 && subnetNodes.length > 0) {
     console.warn(`[specGenerator] WARNING: ${subnetNodes.length} subnets found but none mapped to VNets!`);
     // Log sample subnet IDs and contains edges for debugging
@@ -1296,7 +1298,7 @@ export async function generateDiagramSpec(
   // ── Diagnostic: final containment ──
   for (const [vShortId, subs] of vnetSubnets) {
     const childCounts = subs.map(s => `${s.shortId}(${subnetChildren.get(s.shortId)?.length ?? 0} children)`);
-    console.log(`[specGenerator] VNet "${vShortId}" → ${subs.length} subnets: [${childCounts.join(", ")}]`);
+    debug(`[specGenerator] VNet "${vShortId}" → ${subs.length} subnets: [${childCounts.join(", ")}]`);
   }
 
   // Height of sub-resource chip row (NIC/Frontend IP embedded in parent)
@@ -1699,7 +1701,7 @@ export async function generateDiagramSpec(
 
   // ── ResourceGroup fallback: When no VNet/Subnet exists, group by RG ──
   if (vnetNodes.length === 0 && subnetNodes.length === 0 && externalResources.length > 0) {
-    console.log(`[specGenerator] No VNet/Subnet found — using ResourceGroup-based grouping for ${externalResources.length} resources`);
+    debug(`[specGenerator] No VNet/Subnet found — using ResourceGroup-based grouping for ${externalResources.length} resources`);
     const rgGroups = new Map<string, ArchitectureNode[]>();
     for (const res of externalResources) {
       const rg = res.resourceGroup ?? "ungrouped";
@@ -1847,7 +1849,7 @@ export async function generateDiagramSpec(
 
     // Place PE-connected PaaS BELOW their associated VNet (not in global grid)
     if (peConnectedPaaS.length > 0) {
-      console.log(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned below their VNet`);
+      debug(`[specGenerator] PE-connected PaaS: ${peConnectedPaaS.length} resources positioned below their VNet`);
 
       const unassocPaaS: Array<{ res: ArchitectureNode; sid: string }> = [];
       for (const res of peConnectedPaaS) {
@@ -2075,7 +2077,7 @@ export async function generateDiagramSpec(
       n.parentId = parentSpec.id;
       if (!parentSpec.nodeType) parentSpec.nodeType = "group";
       forceSubnetParent++;
-      console.log(`[force-parentId] Subnet "${n.id}" → VNet "${parentSpec.id}"`);
+      debug(`[force-parentId] Subnet "${n.id}" → VNet "${parentSpec.id}"`);
     }
   }
 
@@ -2122,7 +2124,7 @@ export async function generateDiagramSpec(
   }
 
   if (forceSubnetParent > 0 || forceResourceParent > 0) {
-    console.log(`[force-parentId] Forced ${forceSubnetParent} subnet→VNet + ${forceResourceParent} resource→subnet parentIds`);
+    debug(`[force-parentId] Forced ${forceSubnetParent} subnet→VNet + ${forceResourceParent} resource→subnet parentIds`);
   }
 
   // ── AKS API Endpoint: synthetic external node above VNet (접속면) ──
@@ -2502,16 +2504,16 @@ export async function generateDiagramSpec(
     }
   }
 
-  console.log(`[CP1] parentId validation: ${validParentCount} valid, ${brokenParentCount} broken (fixed)`);
-  console.log(`[CP1] Group nodes: ${groupNodesWithSize.join(", ")}`);
+  debug(`[CP1] parentId validation: ${validParentCount} valid, ${brokenParentCount} broken (fixed)`);
+  debug(`[CP1] Group nodes: ${groupNodesWithSize.join(", ")}`);
 
   // Sample parentId chain for debugging
   const sampleChildren = diagramNodes.filter((n) => n.parentId).slice(0, 8);
   if (sampleChildren.length > 0) {
-    console.log(`[CP1] Sample parentId chains:`);
+    debug(`[CP1] Sample parentId chains:`);
     for (const c of sampleChildren) {
       const parent = diagramNodes.find((n) => n.id === c.parentId);
-      console.log(`  "${c.id}" (${c.nodeType ?? "leaf"}) → "${c.parentId}" (${parent?.nodeType ?? "??"})`);
+      debug(`  "${c.id}" (${c.nodeType ?? "leaf"}) → "${c.parentId}" (${parent?.nodeType ?? "??"})`);
     }
   }
 

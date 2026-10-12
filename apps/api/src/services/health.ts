@@ -1,4 +1,4 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   HealthSummary,
   ResourceHealthStatus,
@@ -11,18 +11,16 @@ import type {
   RegionHealthStatus,
   RegionalStatusResponse,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcherAuto } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { parseSubscriptionIds } from "../infra/requestParams.js";
+import { debug } from "../infra/logger.js";
 
 // ────────────────────────────────────────────
 // Azure Resource Health — Availability Status
 // ────────────────────────────────────────────
 
 const healthCache = new CacheManager<HealthSummary>(50);
-
-function parseSubscriptionIds(raw: string): string[] {
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
-}
 
 type ArmAvailabilityStatus = {
   id?: string;
@@ -56,7 +54,7 @@ const HEALTH_SUMMARY_TIMEOUT_MS = 90_000;
 const HEALTH_PAGE_TIMEOUT_MS = 60_000;
 
 async function fetchAllAvailabilityStatuses(
-  fetcher: { armToken: string },
+  fetcher: ArmFetcher,
   subId: string,
 ): Promise<ArmAvailabilityStatus[]> {
   const all: ArmAvailabilityStatus[] = [];
@@ -69,21 +67,9 @@ async function fetchAllAvailabilityStatuses(
       console.warn(`[health] subscription ${subId}: hit max pagination limit (${MAX_PAGINATION_PAGES} pages, ${all.length} items)`);
       break;
     }
-    const currentUrl: string = url;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HEALTH_PAGE_TIMEOUT_MS);
-    try {
-      const res = await fetch(currentUrl, {
-        headers: { Authorization: `Bearer ${fetcher.armToken}`, "Content-Type": "application/json" },
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`ARM ${res.status}: ${await res.text()}`);
-      const page = (await res.json()) as ArmAvailabilityStatusPage;
-      all.push(...(page.value ?? []));
-      url = page.nextLink;
-    } finally {
-      clearTimeout(timer);
-    }
+    const page: ArmAvailabilityStatusPage = await fetcher.fetchJson<ArmAvailabilityStatusPage>(url, { timeoutMs: HEALTH_PAGE_TIMEOUT_MS });
+    all.push(...(page.value ?? []));
+    url = page.nextLink;
   }
   return all;
 }
@@ -127,12 +113,7 @@ export async function tryGetHealthSummary(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<HealthSummary | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
-
-  const allSubIds = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
-  const subIds = opts?.subscriptionId
-    ? [opts.subscriptionId]
-    : allSubIds;
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
   if (subIds.length === 0) return null;
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
@@ -240,11 +221,11 @@ function extractTag(xml: string, tag: string): string {
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&") // last — "&amp;lt;" must stay "&lt;"
     .trim();
 }
 
@@ -261,6 +242,8 @@ const KNOWN_REGIONS = [
   "UAE North", "South Africa North",
 ];
 
+const REGIONS_LONGEST_FIRST = [...KNOWN_REGIONS].sort((a, b) => b.length - a.length);
+
 function parseIncidentMeta(title: string, description: string): {
   regions: string[];
   services: string[];
@@ -269,8 +252,15 @@ function parseIncidentMeta(title: string, description: string): {
   const text = `${title} ${description}`;
   const regions: string[] = [];
 
-  for (const r of KNOWN_REGIONS) {
-    if (text.toLowerCase().includes(r.toLowerCase())) regions.push(r);
+  // Longest names first, consuming each match, so "East US 2" does not also
+  // count as "East US" and "North Central US" not as "Central US".
+  let remaining = text.toLowerCase();
+  for (const r of REGIONS_LONGEST_FIRST) {
+    const needle = r.toLowerCase();
+    if (remaining.includes(needle)) {
+      regions.push(r);
+      remaining = remaining.split(needle).join(" | ");
+    }
   }
 
   // Extract bracketed service names from Azure RSS titles like "[Service Name] - Description"
@@ -417,8 +407,7 @@ export async function tryGetServiceHealthEvents(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<ServiceHealthEventsResponse | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS)[0];
+  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
   if (!subId) return null;
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
@@ -444,7 +433,7 @@ export async function tryGetServiceHealthEvents(
     }
 
     return {
-      id: item.name ?? String(Math.random()),
+      id: item.name ?? `${p.eventType ?? "event"}:${p.title ?? ""}:${p.impactStartTime ?? ""}`,
       eventType: mapEventType(p.eventType),
       title: p.title ?? "Unknown event",
       summary: stripHtml(p.summary ?? "").slice(0, 1000),
@@ -641,14 +630,8 @@ const REGION_DISPLAY: Record<string, string> = {
   mexicocentral: "Mexico Central", newzealandnorth: "New Zealand North",
 };
 
-/**
- * Query Azure Resource Graph for distinct resource locations across subscriptions.
- * Uses POST to the Resource Graph REST API with the existing ARM token.
- */
-/** Timeout for Resource Graph location query (ms) — matches ARM_FETCH_TIMEOUT_MS. */
-const RG_FETCH_TIMEOUT_MS = 30_000;
-
-async function fetchResourceLocations(armToken: string, subIds: string[]): Promise<string[]> {
+/** Query Azure Resource Graph for distinct resource locations across subscriptions. */
+async function fetchResourceLocations(fetcher: ArmFetcher, subIds: string[]): Promise<string[]> {
   // Resource Graph returns objectArray by default (2022-10-01):
   //   { data: [{ location: "koreacentral" }, ...] }
   // OR table format if requested:
@@ -656,44 +639,20 @@ async function fetchResourceLocations(armToken: string, subIds: string[]): Promi
   type RGResp = {
     data?: Array<{ location: string }> | { rows?: unknown[][] };
   };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RG_FETCH_TIMEOUT_MS);
-  try {
-    const resp = await fetch(
-      "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${armToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subscriptions: subIds,
-          query: "Resources | summarize by location",
-        }),
-        signal: controller.signal,
-      },
-    );
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      throw new Error(`ResourceGraph ${resp.status}: ${body}`);
-    }
-    const json = await resp.json() as RGResp;
+  const json = await fetcher.postJson<RGResp>(
+    "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
+    { subscriptions: subIds, query: "Resources | summarize by location" },
+  );
 
-    // Parse both objectArray and table formats
-    let locations: string[];
-    if (Array.isArray(json.data)) {
-      // objectArray format (default): [{ location: "koreacentral" }, ...]
-      locations = json.data.map((r) => r.location).filter(Boolean);
-    } else if (json.data && "rows" in json.data) {
-      // table format: { rows: [["koreacentral"], ...] }
-      locations = (json.data.rows ?? []).map((r) => String(r[0])).filter(Boolean);
-    } else {
-      locations = [];
-    }
-
-    console.log(`[health] ResourceGraph returned ${locations.length} distinct locations for ${subIds.length} subscription(s):`, locations.join(", "));
-    return locations;
-  } finally {
-    clearTimeout(timer);
+  let locations: string[] = [];
+  if (Array.isArray(json.data)) {
+    locations = json.data.map((r) => r.location).filter(Boolean);
+  } else if (json.data && "rows" in json.data) {
+    locations = (json.data.rows ?? []).map((r) => String(r[0])).filter(Boolean);
   }
+
+  debug(`[health] ResourceGraph returned ${locations.length} distinct locations for ${subIds.length} subscription(s):`, locations.join(", "));
+  return locations;
 }
 
 /**
@@ -712,10 +671,7 @@ export async function tryGetRegionalStatus(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<RegionalStatusResponse | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
-
-  const allSubIds = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
-  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : allSubIds;
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
   if (subIds.length === 0) return null;
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
@@ -731,7 +687,7 @@ export async function tryGetRegionalStatus(
 
   try {
     return await Promise.race([
-      _fetchRegionalStatusCore(env, bearerToken, subIds, key, opts),
+      _fetchRegionalStatusCore(env, bearerToken, subIds, key),
       timeoutPromise,
     ]);
   } finally {
@@ -744,29 +700,31 @@ async function _fetchRegionalStatusCore(
   bearerToken: string | undefined,
   subIds: string[],
   cacheKey: string,
-  opts?: { subscriptionId?: string },
 ): Promise<RegionalStatusResponse> {
   const fetcher = await getArmFetcherAuto(env, bearerToken);
 
-  // Fetch user's resource locations and service health events in parallel
-  const [locResult, eventsResult] = await Promise.allSettled([
-    fetchResourceLocations(fetcher.armToken, subIds),
-    tryGetServiceHealthEvents(env, bearerToken, opts),
+  // Resource locations span every subscription, so service health events must too
+  const [locResult, ...eventsResults] = await Promise.allSettled([
+    fetchResourceLocations(fetcher, subIds),
+    ...subIds.map((subscriptionId) => tryGetServiceHealthEvents(env, bearerToken, { subscriptionId })),
   ]);
 
-  const locations = locResult.status === "fulfilled" ? locResult.value : [];
-  const eventsResp = eventsResult.status === "fulfilled" ? eventsResult.value : null;
+  const locations = locResult.status === "fulfilled" ? (locResult.value as string[]) : [];
 
   let locError: string | undefined;
   if (locResult.status === "rejected") {
     const reason = locResult.reason;
     locError = reason instanceof Error ? reason.message : String(reason);
     console.error("[health] fetchResourceLocations failed:", locError);
-  } else {
-    console.log(`[health] regional-status: ${locations.length} locations, ${subIds.length} subscription(s)`);
   }
 
-  const allEvents = eventsResp?.events ?? [];
+  // Events can repeat across subscriptions (same tracking id) — de-duplicate
+  const eventsById = new Map<string, ServiceHealthEvent>();
+  for (const r of eventsResults) {
+    if (r.status !== "fulfilled" || !r.value) continue;
+    for (const e of (r.value as ServiceHealthEventsResponse).events) eventsById.set(e.id, e);
+  }
+  const allEvents = [...eventsById.values()];
 
   // Filter out non-regional locations (e.g. "global")
   const physicalLocations = locations.filter((loc) => loc.toLowerCase() !== "global");

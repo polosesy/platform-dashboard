@@ -1,8 +1,29 @@
+import fs from "node:fs";
+import path from "node:path";
+import { processEnv, type LoadedEnvFiles } from "@next/env";
 import type { NextConfig } from "next";
+
+// Next.js reads .env files only from the app directory (apps/web), and its env loader
+// caches the first result, so `loadEnvConfig(root)` from here is a no-op. The monorepo
+// keeps one .env at the repository root: apply its files directly (existing values —
+// shell or apps/web/.env* — win), then hand every NEXT_PUBLIC_* value to `env` so it is
+// inlined into the browser bundle (MSAL client ID, tenant, API scope) by Turbopack and webpack.
+const rootDir = path.resolve(process.cwd(), "../..");
+const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+const rootEnvFiles: LoadedEnvFiles = [`.env.${mode}.local`, ".env.local", `.env.${mode}`, ".env"].flatMap((name) => {
+  const file = path.join(rootDir, name);
+  return fs.existsSync(file) ? [{ path: name, contents: fs.readFileSync(file, "utf8"), env: {} }] : [];
+});
+processEnv(rootEnvFiles, rootDir, { info: () => {}, error: console.error });
+
+const publicEnv = Object.fromEntries(
+  Object.entries(process.env).filter((e): e is [string, string] => e[0].startsWith("NEXT_PUBLIC_") && typeof e[1] === "string"),
+);
 
 const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 const nextConfig: NextConfig = {
+  env: publicEnv,
   async rewrites() {
     return [
       {

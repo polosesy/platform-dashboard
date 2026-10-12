@@ -1,4 +1,4 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   EdgeNetworkDetail,
   NicEndpointInfo,
@@ -18,10 +18,10 @@ import type {
   AksExposureResource,
   AksVmssInstance,
 } from "@aud/types";
-import { getDiagramSpec } from "./liveAggregator";
-import { getArmFetcherAuto } from "../infra/azureClientFactory";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { fetchAksNodeInfoMap } from "./kubernetes";
+import { getDiagramSpec } from "./liveAggregator.js";
+import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { fetchAksNodeInfoMap } from "./kubernetes.js";
 
 // ──────────────────────────────────────────────
 // Cache: 30 seconds per bearer+edge combination

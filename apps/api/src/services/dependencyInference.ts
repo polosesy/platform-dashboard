@@ -19,7 +19,7 @@ import type {
   ArchitectureNode,
   ArchitectureEdge,
   EdgeKind,
-} from "../types";
+} from "@aud/types";
 
 // ── Resource role classification ──
 

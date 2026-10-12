@@ -1,7 +1,7 @@
-import type { ArchitectureGraph } from "./types";
+import type { ArchitectureGraph } from "@aud/types";
 import type {
   CostSummary, CostTrendResponse, BudgetsResponse,
-  SecureScoreSummary, SecurityAlertsResponse,
+  SecureScoreSummary, SecurityAlertsResponse, SecurityPostureResponse,
   HealthSummary,
   GlobalStatusResponse,
   ServiceHealthEventsResponse,
@@ -212,6 +212,56 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
       tactics: ["CredentialAccess"],
     },
   ],
+  note: "mock data",
+};
+
+export const mockSecurityPosture: SecurityPostureResponse = {
+  generatedAt: new Date().toISOString(),
+  source: "mock",
+  score: { current: 26.4, max: 43, percentage: 61.4 },
+  controls: mockSecureScore.controlScores,
+  recommendations: [
+    {
+      key: "mock-priv-roles", title: "Privileged roles should not have permanent access at the subscription and resource group level",
+      severity: "High", domain: "identity", threats: ["AccountBreach", "ElevationOfPrivilege"], unhealthy: 6, healthy: 2,
+      samples: [{ name: "sub-prod-01", type: "subscription", resourceGroup: "" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
+      remediation: "Use Entra PIM to make privileged role assignments eligible instead of permanent.",
+    },
+    {
+      key: "mock-mgmt-ports", title: "Management ports should be closed on your virtual machines",
+      severity: "Medium", domain: "network", threats: ["ThreatResistance"], unhealthy: 4, healthy: 12,
+      samples: [{ name: "vm-jump-01", type: "virtualMachines", resourceGroup: "rg-core" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
+    },
+    {
+      key: "mock-storage-public", title: "Storage accounts should restrict network access",
+      severity: "Medium", domain: "data", threats: ["DataExfiltration", "DataSpillage"], unhealthy: 3, healthy: 5,
+      samples: [{ name: "stlogs01", type: "storageAccounts", resourceGroup: "rg-data" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
+    },
+    {
+      key: "mock-host-encryption", title: "Virtual machines and virtual machine scale sets should have encryption at host enabled",
+      severity: "Medium", domain: "compute", threats: ["DataSpillage"], unhealthy: 8, healthy: 0,
+      samples: [{ name: "vm-app-01", type: "virtualMachines", resourceGroup: "rg-app" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
+    },
+    {
+      key: "mock-aks-rbac", title: "Azure Kubernetes Service clusters should have Defender profile enabled",
+      severity: "High", domain: "container", threats: ["MissingCoverage"], unhealthy: 1, healthy: 0,
+      samples: [{ name: "aks-platform", type: "managedClusters", resourceGroup: "rg-aks" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
+    },
+  ],
+  compliance: [
+    { name: "Microsoft-cloud-security-benchmark", state: "Failed", passed: 38, failed: 24, skipped: 0 },
+    { name: "SOC-2", state: "Failed", passed: 33, failed: 14, skipped: 0 },
+  ],
+  plans: [
+    { name: "CloudPosture", tier: "Standard" },
+    { name: "Containers", tier: "Free" },
+    { name: "VirtualMachines", tier: "Free" },
+  ],
+  alerts: mockSecurityAlerts.alerts.map((a) => ({
+    id: a.id, title: a.alertName, severity: a.severity, status: a.status, intent: a.tactics[0], detectedAt: a.detectedAt,
+    description: a.description, resources: [{ name: a.compromisedEntity, type: "resource", resourceGroup: "" }],
+  })),
+  gaps: [],
   note: "mock data",
 };
 

@@ -1,96 +1,52 @@
+"use client";
+
 import Link from "next/link";
+import { NavIcon } from "@/components/navIcons";
+import { PageHeader } from "@/components/ui";
+import { NAV_GROUPS } from "@/lib/navConfig";
+import { useI18n } from "@/lib/i18n";
 import styles from "./home.module.css";
 
-const features = [
-  {
-    href: "/architecture",
-    title: "Architecture Map",
-    desc: "VNET/subnet/AKS/App Gateway topology with node-level health and dependency visualization.",
-    accent: "var(--accent)",
-  },
-  {
-    href: "/live-diagram",
-    title: "Live Diagram",
-    desc: "Real-time topology with 2D/3D modes, D3 particle animation, fault ripple, and traffic heatmap.",
-    accent: "var(--accent-2)",
-  },
-  {
-    href: "/health",
-    title: "Resource Health",
-    desc: "Resource availability states with donut chart, state filters, and detailed status table.",
-    accent: "#10893e",
-  },
-  {
-    href: "/network",
-    title: "Network Flow",
-    desc: "Top talkers, denied flows, subnet/IP pairs and service-to-service traffic analysis.",
-    accent: "var(--accent)",
-  },
-  {
-    href: "/cost",
-    title: "Cost Management",
-    desc: "Monthly spend, forecasts, budget tracking with trend charts and cost breakdown.",
-    accent: "var(--warning)",
-  },
-  {
-    href: "/security",
-    title: "Security",
-    desc: "Defender Secure Score, active alerts by severity, control scores, and MITRE tactics.",
-    accent: "var(--danger)",
-  },
-  {
-    href: "/kubernetes",
-    title: "Kubernetes",
-    desc: "AKS cluster overview with pods, deployments, services, and namespace-level object browser.",
-    accent: "#326ce5",
-  },
-  {
-    href: "/observability",
-    title: "Observability",
-    desc: "APM + Container Insights: workload health, JVM metrics, node resources, error rates, and p95 latency.",
-    accent: "#8764b8",
-  },
-];
-
+/** 개요 — every screen of the dashboard, grouped exactly like the menu (cards are generated from navConfig). */
 export default function Home() {
+  const { t } = useI18n();
+  const groups = NAV_GROUPS.filter((g) => g.key !== "overview");
+
   return (
     <div className={styles.page}>
-      <section className={styles.hero}>
-        <div className={styles.kicker}>Unified visibility</div>
-        <h1 className={styles.title}>
-          Azure architecture, network flows, and delivery status.
-        </h1>
-        <p className={styles.subtitle}>
-          Resource Graph + Monitor + Log Analytics + Defender + Kubernetes in
-          one place. Explore real-time topology, health, cost, security, and
-          workloads across your entire Azure estate.
-        </p>
+      <PageHeader
+        actions={
+          <div className={styles.actions}>
+            <Link className={styles.primary} href="/architecture">{t("nav.item.architecture")}</Link>
+            <Link className={styles.secondary} href="/security">{t("nav.item.securityOverview")}</Link>
+            <Link className={styles.secondary} href="/health">{t("nav.item.health")}</Link>
+          </div>
+        }
+      />
+      <p className={styles.intro}>{t("home.intro")}</p>
 
-        <div className={styles.actions}>
-          <Link className={styles.primary} href="/live-diagram">
-            Open Live Diagram
-          </Link>
-          <Link className={styles.secondary} href="/architecture">
-            Architecture Map
-          </Link>
-          <Link className={styles.secondary} href="/health">
-            Resource Health
-          </Link>
-        </div>
-      </section>
-
-      <section className={styles.cards}>
-        {features.map((f) => (
-          <Link key={f.href} className={styles.card} href={f.href}>
-            <div
-              className={styles.cardAccent}
-              style={{ background: f.accent }}
-            />
-            <div className={styles.cardTitle}>{f.title}</div>
-            <div className={styles.cardBody}>{f.desc}</div>
-          </Link>
-        ))}
-      </section>
+      {groups.map((g) => (
+        <section key={g.key} className={styles.group} aria-labelledby={`home-${g.key}`}>
+          <h2 id={`home-${g.key}`} className={styles.groupTitle}>
+            <NavIcon name={g.icon} size={16} />
+            {t(g.labelKey)}
+          </h2>
+          <div className={styles.cards}>
+            {g.items.map((it) => (
+              <Link key={it.href} className={styles.card} href={it.href}>
+                <span className={styles.cardIcon}><NavIcon name={it.icon} size={20} /></span>
+                <span className={styles.cardText}>
+                  <span className={styles.cardTitle}>
+                    {t(it.labelKey)}
+                    {it.section && g.items.some((x) => x.section !== it.section) ? <span className={styles.cardSection}>{t(it.section)}</span> : null}
+                  </span>
+                  <span className={styles.cardBody}>{t(it.descKey)}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

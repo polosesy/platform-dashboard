@@ -1,9 +1,9 @@
 import { BlobServiceClient } from "@azure/storage-blob";
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager";
-import { getSPCredential } from "../infra/azureClientFactory";
-import { buildIpResourceMap, resolveIpsToNodes, type IpResourceMap } from "./ipResourceMapper";
+import { CacheManager } from "../infra/cacheManager.js";
+import { getSPCredential } from "../infra/azureClientFactory.js";
+import { buildIpResourceMap, resolveIpsToNodes, type IpResourceMap } from "./ipResourceMapper.js";
 
 // ────────────────────────────────────────────
 // NSG Flow Log Collector

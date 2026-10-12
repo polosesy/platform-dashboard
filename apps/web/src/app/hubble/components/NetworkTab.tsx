@@ -5,6 +5,7 @@ import type { HubbleNetworkSummary } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { CoverageNote } from "./CoverageNote";
 
 type Props = { clusterId: string };
 
@@ -55,6 +56,8 @@ export function NetworkTab({ clusterId }: Props) {
 
   return (
     <div>
+      <CoverageNote coverage={data.coverage} requestedMinutes={data.timeWindowMinutes} />
+
       {/* Summary Cards */}
       <div className={styles.summaryCards}>
         <div className={styles.summaryCard}>

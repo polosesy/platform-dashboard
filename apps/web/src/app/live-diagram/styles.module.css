@@ -1,41 +1,11 @@
 .page {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
 }
 
 /* ── Header ── */
-
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 2px;
-}
-
-.headerLeft {
-  display: grid;
-  gap: 2px;
-}
-
-.title {
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  font-size: 18px;
-}
-
-.subTitle {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.headerRight {
-  display: inline-flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 
 .statusDot {
   width: 8px;
@@ -1367,10 +1337,12 @@
 
 .selectorBar {
   position: relative;
-  z-index: 50;
+  /* Above the diagram canvas, below the app header (30) and its dropdown menus */
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: 14px;

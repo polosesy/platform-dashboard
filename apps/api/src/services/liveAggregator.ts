@@ -1,4 +1,4 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   DiagramSpec,
   LiveDiagramSnapshot,
@@ -12,20 +12,20 @@ import type {
   HeatmapCell,
   TrafficHeatmapData,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector";
-import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector";
-import { collectDiagramAlerts } from "./alertsCollector";
-import { collectAlertRules } from "./alertRulesCollector";
-import { collectTrafficAnalytics, type EdgeTrafficData } from "./trafficAnalyticsCollector";
-import { collectNsgFlowLogs, type NsgFlowEdgeData } from "./nsgFlowLogCollector";
-import { collectAppInsightsDependencies, type DependencyEdgeData } from "./appInsightsDependencyCollector";
-import { collectConnectionMonitorData, type ConnectionMonitorEdgeData } from "./connectionMonitorCollector";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector.js";
+import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector.js";
+import { collectDiagramAlerts } from "./alertsCollector.js";
+import { collectAlertRules } from "./alertRulesCollector.js";
+import { collectTrafficAnalytics, type EdgeTrafficData } from "./trafficAnalyticsCollector.js";
+import { collectNsgFlowLogs, type NsgFlowEdgeData } from "./nsgFlowLogCollector.js";
+import { collectAppInsightsDependencies, type DependencyEdgeData } from "./appInsightsDependencyCollector.js";
+import { collectConnectionMonitorData, type ConnectionMonitorEdgeData } from "./connectionMonitorCollector.js";
 import {
   resolveNodeHealth,
   resolveEdgeStatus,
   resolveTrafficLevel,
-} from "./healthCalculator";
+} from "./healthCalculator.js";
 
 // ────────────────────────────────────────────
 // Live Diagram Aggregator
@@ -52,8 +52,22 @@ const diagramStore = new Map<string, DiagramSpec>();
 const SPARKLINE_MAX_LEN = 20;
 const sparklineBuffers = new Map<string, { values: number[]; timestamps: string[] }>();
 
+/** Upper bound on stored specs — POST /api/live/diagrams accepts arbitrary IDs. */
+const MAX_DIAGRAMS = 50;
+
 export function saveDiagramSpec(spec: DiagramSpec): void {
+  diagramStore.delete(spec.id);
   diagramStore.set(spec.id, spec);
+  // Evict least-recently-saved diagrams, keeping the first (seed) entry
+  const seedId = diagramStore.keys().next().value;
+  for (const id of diagramStore.keys()) {
+    if (diagramStore.size <= MAX_DIAGRAMS) break;
+    if (id === seedId || id === spec.id) continue;
+    diagramStore.delete(id);
+    sparklineBuffers.forEach((_v, key) => {
+      if (key.startsWith(`${id}:`)) sparklineBuffers.delete(key);
+    });
+  }
 }
 
 export function getDiagramSpec(id: string): DiagramSpec | undefined {

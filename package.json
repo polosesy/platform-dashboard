@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "predev": "node scripts/predev.js",
-    "dev": "node scripts/predev.js && concurrently --kill-others-on-fail -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
+    "dev": "concurrently --kill-others-on-fail -n api,web -c blue,green \"npm:dev --workspace apps/api\" \"npm:dev --workspace apps/web\"",
     "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
     "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web",
     "gp": "bash scripts/gp.sh",
@@ -16,8 +16,5 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.0"
-  },
-  "dependencies": {
-    "elkjs": "^0.11.0"
   }
 }

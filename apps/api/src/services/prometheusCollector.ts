@@ -1,7 +1,8 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { WorkloadHealth, ResourceUsage, NodeResourceSummary } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcherAuto, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcherAuto, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory.js";
+import { debug } from "../infra/logger.js";
 
 // ──────────────────────────────────────────────────────────────
 // Azure Managed Prometheus Collector
@@ -79,13 +80,13 @@ export async function resolvePrometheusEndpoint(
     }>(accountsUrl);
 
     const accounts = accountsResp.value ?? [];
-    console.log(`[prometheus] Found ${accounts.length} Azure Monitor account(s) in subscription ${subscriptionId}`);
+    debug(`[prometheus] Found ${accounts.length} Azure Monitor account(s) in subscription ${subscriptionId}`);
 
     if (accounts.length > 0) {
       // 첫 번째 account의 query endpoint 사용 (대부분 구독당 1개)
       const endpoint = accounts[0]!.properties?.metrics?.prometheusQueryEndpoint;
       if (endpoint) {
-        console.log(`[prometheus] Auto-discovered endpoint: ${endpoint}`);
+        debug(`[prometheus] Auto-discovered endpoint: ${endpoint}`);
         endpointCache.set(cacheKey, endpoint);
         return endpoint;
       }
@@ -125,7 +126,7 @@ export async function resolvePrometheusEndpoint(
               }>(wsUrl);
               const ep = ws.properties?.metrics?.prometheusQueryEndpoint;
               if (ep) {
-                console.log(`[prometheus] Discovered endpoint via DCR ${dcr.name}: ${ep}`);
+                debug(`[prometheus] Discovered endpoint via DCR ${dcr.name}: ${ep}`);
                 endpointCache.set(cacheKey, ep);
                 return ep;
               }
@@ -226,7 +227,7 @@ sum by (namespace, pod) (
       }
     }
 
-    console.log(`[prometheus] workload metrics: ${result.size} workloads from ${endpoint}`);
+    debug(`[prometheus] workload metrics: ${result.size} workloads from ${endpoint}`);
     promWorkloadCache.set(cacheKey, result);
     return { metrics: result, available: true };
   } catch (err) {
@@ -256,10 +257,11 @@ export async function collectPrometheusNodeMetrics(
     const fetcher = await getPrometheusFetcherAuto(env, bearerToken);
     const result = new Map<string, Partial<NodeResourceSummary>>();
 
+    // node-exporter series carry `instance` (IP:port), not `node` — the aggregator maps IPs to node names
     // Node CPU usage %
-    const cpuQuery = `100 - (avg by (node) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
+    const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
     // Node Memory usage %
-    const memQuery = `100 * (1 - node_memory_AvailableBytes / node_memory_MemTotal_bytes)`;
+    const memQuery = `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`;
     // Node Disk usage %
     const diskQuery = `100 - ((node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"}) * 100)`;
     // Node Network I/O
@@ -297,7 +299,7 @@ export async function collectPrometheusNodeMetrics(
     processResults(netRxResp, "netRx", (n, v) => { n.networkRxBytesPerSec = Math.round(v); });
     processResults(netTxResp, "netTx", (n, v) => { n.networkTxBytesPerSec = Math.round(v); });
 
-    console.log(`[prometheus] node metrics: ${result.size} nodes from ${endpoint}`);
+    debug(`[prometheus] node metrics: ${result.size} nodes from ${endpoint}`);
     promNodeCache.set(cacheKey, result);
     return { metrics: result, available: true };
   } catch (err) {
@@ -312,10 +314,14 @@ export async function collectPrometheusNodeMetrics(
 function podToWorkloadName(podName: string): string {
   // deployment-name-<rs-hash>-<pod-hash> → deployment-name
   // statefulset-name-0 → statefulset-name
+  // daemonset-name-<pod-hash> → daemonset-name
   const match = podName.match(/^(.+)-[a-z0-9]{8,10}-[a-z0-9]{5}$/);
   if (match) return match[1]!;
   // StatefulSet: name-0, name-1
   const ssMatch = podName.match(/^(.+)-\d+$/);
   if (ssMatch) return ssMatch[1]!;
+  // DaemonSet / Job: name-<5-char suffix> (k8s random suffix alphabet has no vowels)
+  const dsMatch = podName.match(/^(.+)-[bcdfghjklmnpqrstvwxz2456789]{5}$/);
+  if (dsMatch) return dsMatch[1]!;
   return podName;
 }

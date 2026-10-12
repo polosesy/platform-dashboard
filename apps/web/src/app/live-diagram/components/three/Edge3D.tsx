@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EdgeStatus, EdgeTrafficLevel } from "@aud/types";
@@ -48,14 +48,17 @@ export function Edge3D({
   const particleCount = TRAFFIC_PARTICLE_COUNT[trafficLevel];
   const speed = TRAFFIC_SPEED[trafficLevel];
 
-  // Build curve between source and target
+  // Build curve between source and target. Depend on the coordinates, not the
+  // array identity — callers pass fresh arrays each render.
+  const [sx, sy, sz] = sourcePos;
+  const [tx, ty, tz] = targetPos;
   const curve = useMemo(() => {
-    const src = new THREE.Vector3(...sourcePos);
-    const tgt = new THREE.Vector3(...targetPos);
+    const src = new THREE.Vector3(sx, sy, sz);
+    const tgt = new THREE.Vector3(tx, ty, tz);
     const mid = new THREE.Vector3().lerpVectors(src, tgt, 0.5);
     mid.z += 0.8; // Arc upward
     return new THREE.QuadraticBezierCurve3(src, mid, tgt);
-  }, [sourcePos, targetPos]);
+  }, [sx, sy, sz, tx, ty, tz]);
 
   // Tube geometry for the edge line
   const tubeGeo = useMemo(() => {
@@ -66,24 +69,27 @@ export function Edge3D({
   // Particle positions buffer
   const particleGeo = useMemo(() => {
     if (particleCount === 0) return null;
-
-    const offsets = new Float32Array(particleCount);
-    for (let i = 0; i < particleCount; i++) {
-      offsets[i] = i / particleCount;
-    }
-    particleOffsetsRef.current = offsets;
-
-    const positions = new Float32Array(particleCount * 3);
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(particleCount * 3), 3));
     return geo;
   }, [particleCount]);
 
+  // Per-particle curve offsets, evenly spaced; advanced every frame in useFrame
+  useEffect(() => {
+    particleOffsetsRef.current = particleCount > 0
+      ? Float32Array.from({ length: particleCount }, (_, i) => i / particleCount)
+      : null;
+  }, [particleCount]);
+
+  // Free GPU buffers when geometries are replaced or the edge unmounts
+  useEffect(() => () => tubeGeo.dispose(), [tubeGeo]);
+  useEffect(() => () => particleGeo?.dispose(), [particleGeo]);
+
   // Animate particles along curve
   useFrame((_, delta) => {
-    if (!pointsRef.current || !particleOffsetsRef.current || !particleGeo) return;
-
     const offsets = particleOffsetsRef.current;
+    if (!pointsRef.current || !offsets || !particleGeo) return;
+
     const posAttr = particleGeo.getAttribute("position");
     if (!posAttr) return;
 

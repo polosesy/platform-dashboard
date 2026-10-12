@@ -1,16 +1,16 @@
 import type { Request, Response, Router } from "express";
-import type { Env } from "../env";
-import { registerArchitectureRoutes } from "./architecture";
-import { registerNetworkRoutes } from "./network";
-import { registerAzureRoutes } from "./azure";
-import { registerReservationRoutes } from "./reservations";
-import { registerKubernetesRoutes } from "./kubernetes";
-import { registerCostRoutes } from "./cost";
-import { registerSecurityRoutes } from "./security";
-import { registerHealthRoutes } from "./health";
-import { registerLiveDiagramRoutes } from "./liveDiagram";
-import { registerObservabilityRoutes } from "./observability";
-import { registerHubbleRoutes } from "./hubble";
+import type { Env } from "../env.js";
+import { registerArchitectureRoutes } from "./architecture.js";
+import { registerNetworkRoutes } from "./network.js";
+import { registerAzureRoutes } from "./azure.js";
+import { registerReservationRoutes } from "./reservations.js";
+import { registerKubernetesRoutes } from "./kubernetes.js";
+import { registerCostRoutes } from "./cost.js";
+import { registerSecurityRoutes } from "./security.js";
+import { registerHealthRoutes } from "./health.js";
+import { registerLiveDiagramRoutes } from "./liveDiagram.js";
+import { registerObservabilityRoutes } from "./observability.js";
+import { registerHubbleRoutes } from "./hubble.js";
 
 export function registerAllRoutes(router: Router, env: Env) {
   // Health check

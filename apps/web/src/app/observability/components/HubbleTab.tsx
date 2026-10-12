@@ -1,50 +1,32 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import type { HubbleStatusResponse } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
-import { useApiToken } from "@/lib/useApiToken";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiQuery } from "@/lib/useApiQuery";
 import { ServiceMapTab } from "../../hubble/components/ServiceMapTab";
 import { FlowsTab } from "../../hubble/components/FlowsTab";
 import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
+import { Button, Segmented } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
 
 type Props = { clusterId: string };
 
 type SubTab = "service-map" | "flows" | "network" | "security";
 
-const SUB_TABS: { id: SubTab; label: string }[] = [
-  { id: "service-map", label: "Service Map" },
-  { id: "flows", label: "Flows" },
-  { id: "network", label: "Network" },
-  { id: "security", label: "Security" },
-];
+const SUB_TABS: SubTab[] = ["service-map", "flows", "network", "security"];
 
+/** Hubble status badges + Service Map / Flows / Network / Security sub-tabs for one cluster. */
 export function HubbleTab({ clusterId }: Props) {
-  const getApiToken = useApiToken();
+  const { t } = useI18n();
   const [subTab, setSubTab] = useState<SubTab>("service-map");
-  const [hubbleStatus, setHubbleStatus] = useState<HubbleStatusResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const checkStatus = useCallback(async () => {
-    if (!clusterId) return;
-    try {
-      const token = await getApiToken();
-      const data = await fetchJsonWithBearer<HubbleStatusResponse>(
-        `${apiBaseUrl()}/api/hubble/status?clusterId=${encodeURIComponent(clusterId)}`,
-        token,
-      );
-      setHubbleStatus(data);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [clusterId, getApiToken]);
-
-  useEffect(() => {
-    if (clusterId) checkStatus();
-  }, [clusterId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const status = useApiQuery(clusterId ? `hubble-status:${clusterId}` : null, (token) =>
+    fetchJsonWithBearer<HubbleStatusResponse>(apiUrl("/api/hubble/status", { clusterId }), token),
+  );
+  // Ignore a previous cluster's status while the new one loads
+  const hubbleStatus = status.data?.clusterId === clusterId ? status.data : null;
 
   return (
     <div>
@@ -53,48 +35,43 @@ export function HubbleTab({ clusterId }: Props) {
         {hubbleStatus ? (
           <>
             <span className={`${styles.statusBadge} ${hubbleStatus.available ? styles.statusOk : styles.statusOff}`}>
-              Hubble Relay: {hubbleStatus.available ? "연결됨" : "연결 안 됨"}
+              Hubble: {hubbleStatus.available ? "연결됨" : "연결 안 됨"}
             </span>
             {hubbleStatus.available && (
               <>
-                <span className={`${styles.statusBadge} ${styles.statusOk}`}>
-                  노드: {hubbleStatus.nodeCount}
+                <span
+                  className={`${styles.statusBadge} ${hubbleStatus.nodeCount < hubbleStatus.nodesTotal ? styles.statusOff : styles.statusOk}`}
+                  title="cilium agent가 응답한 노드 / 전체 노드"
+                >
+                  노드: {hubbleStatus.nodeCount}/{hubbleStatus.nodesTotal}
                 </span>
-                <span className={`${styles.statusBadge} ${styles.statusOk}`}>
-                  플로우: {hubbleStatus.numFlows.toLocaleString()} / {hubbleStatus.maxFlows.toLocaleString()}
+                <span className={`${styles.statusBadge} ${styles.statusOk}`} title="모든 노드 링 버퍼 합계 (보관 중 / 최대)">
+                  버퍼: {hubbleStatus.numFlows.toLocaleString()} / {hubbleStatus.maxFlows.toLocaleString()}
                 </span>
               </>
             )}
           </>
         ) : (
           <span className={`${styles.statusBadge} ${styles.statusOff}`}>
-            Hubble 상태 확인 중...
+            {status.loading ? "Hubble 상태 확인 중..." : "Hubble 상태 없음"}
           </span>
         )}
-        <button className={styles.refreshBtn} onClick={checkStatus} style={{ marginLeft: 8 }}>
-          상태 확인
-        </button>
+        <Button size="sm" onClick={status.reload} disabled={!clusterId}>
+          {t("hub.checkStatus")}
+        </Button>
       </div>
 
-      {error && <div className={styles.errorMsg}>Hubble 오류: {error}</div>}
+      {status.error && <div className={styles.errorMsg}>Hubble 오류: {status.error}</div>}
 
-      {hubbleStatus?.message && !hubbleStatus.available && (
+      {hubbleStatus?.message && hubbleStatus.message !== "connected" && (
         <div className={styles.errorMsg} style={{ marginBottom: 16 }}>
           {hubbleStatus.message}
         </div>
       )}
 
       {/* Sub-tabs */}
-      <div className={styles.tabs} style={{ marginBottom: 16 }}>
-        {SUB_TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`${styles.tab} ${subTab === t.id ? styles.tabActive : ""}`}
-            onClick={() => setSubTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className={styles.subTabs}>
+        <Segmented label={t("hub.views")} value={subTab} onChange={setSubTab} items={SUB_TABS.map((id) => ({ id, label: t(`hub.view.${id}`) }))} />
       </div>
 
       {subTab === "service-map" && <ServiceMapTab clusterId={clusterId} />}

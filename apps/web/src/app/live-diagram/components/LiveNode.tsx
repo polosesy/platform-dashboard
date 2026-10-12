@@ -98,7 +98,7 @@ const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
 };
 
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, onSubResourceSelect, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused } = data;
+  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 

@@ -5,6 +5,7 @@ import type { HubbleSecuritySummary } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { CoverageNote } from "./CoverageNote";
 
 type Props = { clusterId: string };
 
@@ -55,6 +56,8 @@ export function SecurityTab({ clusterId }: Props) {
 
   return (
     <div>
+      <CoverageNote coverage={data.coverage} requestedMinutes={data.timeWindowMinutes} />
+
       {/* Policy Verdict Summary */}
       <div className={styles.verdictSummary}>
         <div className={styles.verdictBox}>

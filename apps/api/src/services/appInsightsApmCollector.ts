@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { ApmMetrics } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcherAuto } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
 
 // ──────────────────────────────────────────────────────────────
 // App Insights APM Collector (workload-level)

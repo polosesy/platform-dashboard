@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager";
-import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager } from "../infra/cacheManager.js";
+import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Connection Monitor Collector
@@ -233,17 +233,7 @@ async function queryConnectionMonitor(
     `/query?api-version=2023-11-01`;
 
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${fetcher.armToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    });
-
-    if (!res.ok) return null;
-    return await res.json() as ConnectionMonitorQueryResult;
+    return await fetcher.postJson<ConnectionMonitorQueryResult>(url, {});
   } catch {
     return null;
   }

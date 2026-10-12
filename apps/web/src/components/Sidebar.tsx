@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { NAV_GROUPS, isItemActive, sectionBefore } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
+import { NavIcon } from "./navIcons";
 import styles from "./Sidebar.module.css";
 
 export type SidebarProps = {
@@ -10,127 +13,87 @@ export type SidebarProps = {
   onClose: () => void;
 };
 
-const iconMap: Record<string, string> = {
-  grid: "\u25A6",
-  sitemap: "\u2B13",
-  pulse: "\u2248",
-  heart: "\u2665",
-  network: "\u2B82",
-  dollar: "\u0024",
-  shield: "\u26E8",
-  git: "\u2B60",
-  globe: "\u2B24",
-};
-
+/** Drawer navigation — the same NAV_GROUPS as the top bar, every section expanded. */
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { t, locale, setLocale } = useI18n();
+  const closeRef = useRef<HTMLButtonElement>(null);
 
-  const sections = [
-    {
-      label: t("nav.dashboard"),
-      items: [{ href: "/", label: t("common.overview"), icon: "grid" }],
-    },
-    {
-      label: t("nav.visualization"),
-      items: [
-        { href: "/architecture", label: t("common.architecture"), icon: "sitemap" },
-        { href: "/live-diagram", label: t("common.liveDiagram"), icon: "pulse" },
-      ],
-    },
-    {
-      label: t("nav.monitoring"),
-      items: [
-        { href: "/health", label: t("nav.resourceHealth"), icon: "heart" },
-        { href: "/network", label: t("nav.networkFlow"), icon: "network" },
-      ],
-    },
-    {
-      label: t("nav.operations"),
-      items: [
-        { href: "/cost", label: t("nav.costManagement"), icon: "dollar" },
-        { href: "/security", label: t("common.security"), icon: "shield" },
-        { href: "/kubernetes", label: t("common.kubernetes"), icon: "grid" },
-        { href: "/observability", label: "Observability", icon: "pulse" },
-      ],
-    },
-  ];
+  // Move focus into the drawer when it opens (DOM only — no state change)
+  useEffect(() => {
+    if (open) closeRef.current?.focus();
+  }, [open]);
 
   return (
     <>
-      {/* Backdrop overlay */}
-      <div
-        className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`}
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`} onClick={onClose} aria-hidden="true" />
 
-      {/* Sidebar panel */}
       <aside
+        id="nav-drawer"
         className={`${styles.sidebar} ${open ? styles.sidebarOpen : ""}`}
-        aria-label="Main navigation"
+        inert={!open}
+        aria-hidden={!open}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
       >
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarBrand}>
             <div className={styles.sidebarMark} aria-hidden="true" />
-            <span className={styles.sidebarTitle}>Azure Dashboard</span>
+            <span className={styles.sidebarTitle}>Azure Unified Dashboard</span>
           </div>
-          <button
-            className={styles.closeBtn}
-            onClick={onClose}
-            type="button"
-            aria-label="Close menu"
-          >
+          <button ref={closeRef} className={styles.closeBtn} onClick={onClose} type="button" aria-label={t("nav.closeMenu")}>
             &times;
           </button>
         </div>
 
-        <nav className={styles.sidebarNav}>
-          {sections.map((section) => (
-            <div key={section.label} className={styles.section}>
-              <div className={styles.sectionLabel}>{section.label}</div>
-              {section.items.map((item) => {
-                const active =
-                  item.href === "/"
-                    ? pathname === "/"
-                    : pathname === item.href ||
-                      pathname.startsWith(item.href + "/");
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
-                    onClick={onClose}
-                  >
-                    <span className={styles.navIcon} aria-hidden="true">
-                      {iconMap[item.icon] ?? "\u25CF"}
-                    </span>
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
+        <nav className={styles.sidebarNav} aria-label={t("nav.main")}>
+          {NAV_GROUPS.map((g) => {
+            const headed = g.key !== "overview";
+            const list = (
+              <ul className={styles.list} aria-labelledby={headed ? `nav-sec-${g.key}` : undefined} aria-label={headed ? undefined : t(g.labelKey)}>
+                {g.items.map((it, i) => {
+                  const active = isItemActive(pathname, it.href);
+                  const section = sectionBefore(g.items, i);
+                  return (
+                    <li key={it.href}>
+                      {section ? <div className={styles.subLabel} aria-hidden="true">{t(section)}</div> : null}
+                      <Link
+                        href={it.href}
+                        className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
+                        aria-current={active ? "page" : undefined}
+                        title={t(it.descKey)}
+                        onClick={onClose}
+                      >
+                        <span className={styles.navIcon}><NavIcon name={it.icon} /></span>
+                        {t(it.labelKey)}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+            return (
+              <div key={g.key} className={styles.section}>
+                {headed && <h2 id={`nav-sec-${g.key}`} className={styles.sectionLabel}>{t(g.labelKey)}</h2>}
+                {list}
+              </div>
+            );
+          })}
 
-          {/* Settings section with language selector */}
           <div className={styles.section}>
-            <div className={styles.sectionLabel}>{t("nav.settings")}</div>
+            <h2 id="nav-sec-settings" className={styles.sectionLabel}>{t("nav.settings")}</h2>
             <div className={styles.settingRow}>
-              <span className={styles.navIcon} aria-hidden="true">{iconMap.globe}</span>
+              <span className={styles.navIcon}><NavIcon name="globe" /></span>
               <span className={styles.settingLabel}>{t("settings.language")}</span>
-              <div className={styles.langSwitch}>
-                <button
-                  type="button"
-                  className={`${styles.langBtn} ${locale === "ko" ? styles.langBtnActive : ""}`}
-                  onClick={() => setLocale("ko")}
-                >
+              <div className={styles.langSwitch} role="group" aria-label={t("settings.language")}>
+                <button type="button" className={`${styles.langBtn} ${locale === "ko" ? styles.langBtnActive : ""}`} aria-pressed={locale === "ko"} onClick={() => setLocale("ko")}>
                   {t("settings.korean")}
                 </button>
-                <button
-                  type="button"
-                  className={`${styles.langBtn} ${locale === "en" ? styles.langBtnActive : ""}`}
-                  onClick={() => setLocale("en")}
-                >
+                <button type="button" className={`${styles.langBtn} ${locale === "en" ? styles.langBtnActive : ""}`} aria-pressed={locale === "en"} onClick={() => setLocale("en")}>
                   {t("settings.english")}
                 </button>
               </div>
@@ -140,7 +103,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         <div className={styles.sidebarFooter}>
           <div className={styles.footerLabel}>Azure Unified Dashboard</div>
-          <div className={styles.footerMeta}>SaaS Visualization Platform</div>
+          <div className={styles.footerMeta}>{t("nav.brandMeta")}</div>
         </div>
       </aside>
     </>

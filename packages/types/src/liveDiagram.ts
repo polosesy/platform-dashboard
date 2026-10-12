@@ -342,32 +342,6 @@ export type TrafficHeatmapData = {
 };
 
 // ────────────────────────────────────────────
-// 8. Extended Design Tokens (Fault / Heatmap / Particle)
-// ────────────────────────────────────────────
-
-export type FaultDesignTokens = {
-  rippleColor: Record<AlertSeverity, string>;
-  cascadeDelayMs: number;
-  impactHighlight: string;
-  rippleDurationMs: number;
-  maxRippleRadius: number;
-};
-
-export type HeatmapDesignTokens = {
-  colorScaleStart: string;
-  colorScaleEnd: string;
-  minOpacity: number;
-  maxOpacity: number;
-};
-
-export type CanvasParticleTokens = {
-  sizeRange: [number, number];
-  glowRadius: number;
-  trailLength: number;
-  trailOpacity: number;
-};
-
-// ────────────────────────────────────────────
 // 9. Edge Network Detail (엣지 클릭 시 on-demand fetch)
 // ────────────────────────────────────────────
 

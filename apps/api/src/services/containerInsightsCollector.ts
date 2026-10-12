@@ -1,14 +1,20 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   WorkloadHealth,
   NodeResourceSummary,
   NodeConditionSummary,
   ResourceUsage,
   PodLogEntry,
-  NamespacePodItem,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getLogAnalyticsFetcherAuto, getArmFetcherAuto } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import {
+  getLogAnalyticsFetcherAuto,
+  getArmFetcherAuto,
+  tableToObjects,
+  type LogAnalyticsResponse as LaQueryResponse,
+} from "../infra/azureClientFactory.js";
+import { kqlString } from "../infra/requestParams.js";
+import { debug } from "../infra/logger.js";
 
 // ──────────────────────────────────────────────────────────────
 // Container Insights Collector
@@ -22,16 +28,6 @@ import { getLogAnalyticsFetcherAuto, getArmFetcherAuto } from "../infra/azureCli
 // Auto-discovers Log Analytics workspace from AKS cluster ARM ID.
 // Falls back gracefully when Container Insights is not enabled.
 // ──────────────────────────────────────────────────────────────
-
-type LogAnalyticsTable = {
-  name: string;
-  columns: Array<{ name: string; type: string }>;
-  rows: unknown[][];
-};
-type LaQueryResponse = {
-  tables?: LogAnalyticsTable[];
-  error?: { message?: string };
-};
 
 const workloadsCache = new CacheManager<WorkloadHealth[]>(20, 60_000);
 const nodesCache = new CacheManager<NodeResourceSummary[]>(20, 60_000);
@@ -94,7 +90,7 @@ async function resolveWorkspaceId(
 
       const wsResourceId = amaWsId ?? omsWsId;
 
-      console.log("[containerInsights] cluster addon discovery:", {
+      debug("[containerInsights] cluster addon discovery:", {
         clusterId,
         amaEnabled: cluster.properties?.azureMonitorProfile?.containerInsights?.enabled,
         amaWsId: amaWsId ?? "(none)",
@@ -112,7 +108,7 @@ async function resolveWorkspaceId(
 
         const workspaceGuid = ws.properties?.customerId;
         if (workspaceGuid) {
-          console.log("[containerInsights] Auto-discovered workspace GUID:", workspaceGuid);
+          debug("[containerInsights] Auto-discovered workspace GUID:", workspaceGuid);
           workspaceIdCache.set(cacheKey, workspaceGuid);
           return workspaceGuid;
         }
@@ -128,18 +124,19 @@ async function resolveWorkspaceId(
   // 3) 최후 fallback: 공유 Log Analytics workspace (Traffic Analytics와 동일)
   const fallback = env.AZURE_LOG_ANALYTICS_WORKSPACE_ID;
   if (fallback) {
-    console.log("[containerInsights] Falling back to AZURE_LOG_ANALYTICS_WORKSPACE_ID:", fallback);
+    debug("[containerInsights] Falling back to AZURE_LOG_ANALYTICS_WORKSPACE_ID:", fallback);
   }
   return fallback ?? null;
 }
 
-function tableToObjects(table: LogAnalyticsTable): Record<string, unknown>[] {
-  const cols = table.columns.map((c) => c.name);
-  return table.rows.map((row) => {
-    const obj: Record<string, unknown> = {};
-    for (let i = 0; i < cols.length; i++) obj[cols[i]!] = row[i];
-    return obj;
-  });
+/**
+ * KQL filter selecting one cluster's rows. clusterId comes from the request,
+ * so it is always emitted as an escaped string literal.
+ */
+function clusterFilterKql(clusterId: string): string {
+  return clusterId.startsWith("/subscriptions/")
+    ? `| where ClusterId =~ ${kqlString(clusterId)}`
+    : `| where ClusterId contains ${kqlString(clusterId)}`;
 }
 
 function asNumber(v: unknown, fallback: number | null = null): number | null {
@@ -174,9 +171,7 @@ export async function collectWorkloadHealth(
     const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
 
     // ClusterId 필터: ARM resource ID 포함 여부로 클러스터 구분
-    const clusterFilter = clusterId.startsWith("/subscriptions/")
-      ? `| where ClusterId =~ "${clusterId}"`
-      : `| where ClusterId contains "${clusterId}"`;
+    const clusterFilter = clusterFilterKql(clusterId);
 
     // Query 1: Pod inventory grouped by controller (workload)
     // ContainerLogV2 스키마에서는 PodName 대신 Name, Restarts 대신 PodRestartCount 사용 가능
@@ -191,6 +186,9 @@ ${clusterFilter}
 | summarize arg_max(TimeGenerated, *) by PodUid;
 let _controlled = _base
 | where isnotempty(ControllerName) and ControllerKind in ("ReplicaSet","StatefulSet","DaemonSet","Deployment")
+// ReplicaSet "<deployment>-<pod-template-hash>" → Deployment "<deployment>" (merges rollout revisions)
+| extend ControllerName = iff(ControllerKind == "ReplicaSet", replace_regex(ControllerName, @"-[a-z0-9]{5,10}$", ""), ControllerName)
+| extend ControllerKind = iff(ControllerKind == "ReplicaSet", "Deployment", ControllerKind)
 | summarize
     TotalPods   = dcount(_PodLabel),
     RunningPods = countif(PodStatus == "Running"),
@@ -233,7 +231,7 @@ InsightsMetrics
     MemLimitBytes = maxif(AvgLimit, Name == "memoryWorkingSetBytes")
   by _ControllerName, _K8sNs`;
 
-    console.log("[containerInsights] querying workloads — workspace:", workspaceId, "cluster:", clusterId);
+    debug("[containerInsights] querying workloads — workspace:", workspaceId, "cluster:", clusterId);
 
     const [podResult, metricsResult] = await Promise.allSettled([
       fetcher.query(workspaceId, podKql),
@@ -248,13 +246,13 @@ InsightsMetrics
         console.error("[containerInsights] KQL pod error:", resp.error.message);
       }
       const table = resp.tables?.[0];
-      console.log("[containerInsights] pod query — rows:", table?.rows?.length ?? 0, "columns:", table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)");
+      debug("[containerInsights] pod query — rows:", table?.rows?.length ?? 0, "columns:", table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)");
       if (table) {
         for (const row of tableToObjects(table)) {
           const name = asString(row.ControllerName);
           const ns = asString(row.Namespace);
           const rawKind = asString(row.ControllerKind);
-          // Normalize ReplicaSet → Deployment (strip RS suffix pattern)
+          // ReplicaSet → Deployment (RS hash already stripped in KQL; kept for older cached rows)
           const kind = (rawKind === "ReplicaSet" ? "Deployment" : rawKind) as WorkloadHealth["kind"];
           const key = `${ns}/${name}`;
           podMap.set(key, {
@@ -332,7 +330,7 @@ InsightsMetrics
     }
 
     const workloads = [...podMap.values()];
-    workloadsCache.set(cacheKey, workloads);
+    workloadsCache.set(cacheKey, workloads, env.AZURE_OBSERVABILITY_CACHE_TTL_MS);
     return { workloads, containerInsightsAvailable: true };
   } catch (err) {
     console.error("[containerInsights] workloads error:", err instanceof Error ? err.message : err);
@@ -361,9 +359,7 @@ export async function collectNodeHealth(
   try {
     const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
 
-    const clusterFilter = clusterId.startsWith("/subscriptions/")
-      ? `| where ClusterId =~ "${clusterId}"`
-      : `| where ClusterId contains "${clusterId}"`;
+    const clusterFilter = clusterFilterKql(clusterId);
 
     const nodeKql = `
 KubeNodeInventory
@@ -399,7 +395,7 @@ ${clusterFilter}
 | summarize arg_max(TimeGenerated, *) by PodUid
 | summarize PodCount = dcount(_PodLabel) by Computer`;
 
-    console.log("[containerInsights] querying nodes — workspace:", workspaceId, "cluster:", clusterId);
+    debug("[containerInsights] querying nodes — workspace:", workspaceId, "cluster:", clusterId);
 
     const [nodeResult, metricsResult, podCountResult] = await Promise.allSettled([
       fetcher.query(workspaceId, nodeKql),
@@ -414,7 +410,7 @@ ${clusterFilter}
       const resp = nodeResult.value as LaQueryResponse;
       if (resp.error) console.error("[containerInsights] KQL node error:", resp.error.message);
       const table = resp.tables?.[0];
-      console.log("[containerInsights] node query rows:", table?.rows?.length ?? 0);
+      debug("[containerInsights] node query rows:", table?.rows?.length ?? 0);
       if (table) {
         for (const row of tableToObjects(table)) {
           const name = asString(row.NodeName);
@@ -499,7 +495,7 @@ ${clusterFilter}
     }
 
     const nodes = [...nodeMap.values()];
-    nodesCache.set(cacheKey, nodes);
+    nodesCache.set(cacheKey, nodes, env.AZURE_OBSERVABILITY_CACHE_TTL_MS);
     return { nodes, containerInsightsAvailable: true };
   } catch (err) {
     console.error("[containerInsights] nodes error:", err instanceof Error ? err.message : err);
@@ -564,18 +560,25 @@ ContainerLogV2
 | extend _Container = coalesce(column_ifexists("ContainerName", ""), column_ifexists("Container", ""), "")
 | extend _Msg = coalesce(column_ifexists("LogMessage", ""), column_ifexists("Message", ""), column_ifexists("LogEntry", ""), "")
 | extend _Src = coalesce(column_ifexists("LogSource", ""), column_ifexists("Stream", ""), "unknown")
-| where _PodNs =~ "${namespace}"
-| where _PodName =~ "${podName}"
+| where _PodNs =~ ${kqlString(namespace)}
+| where _PodName =~ ${kqlString(podName)}
 | project TimeGenerated, PodName = _PodName, ContainerName = _Container, LogMessage = _Msg, LogSource = _Src
 | order by TimeGenerated desc
 | take ${limit}`;
 
+    // ContainerLog has no pod/namespace columns — resolve the pod's container IDs via KubePodInventory
     const logV1Kql = `
+let _containers = KubePodInventory
+| where TimeGenerated > ago(${sinceMinutes + 60}m)
+${clusterFilterKql(clusterId)}
+| where Namespace =~ ${kqlString(namespace)}
+| where coalesce(column_ifexists("PodName", ""), column_ifexists("Name", "")) =~ ${kqlString(podName)}
+| where isnotempty(ContainerID)
+| distinct ContainerID, ContainerName;
 ContainerLog
 | where TimeGenerated > ago(${sinceMinutes}m)
-| extend _Pod = extract("([^/]+)$", 1, ContainerID)
-| where _Pod =~ "${podName}"
-| project TimeGenerated, PodName = _Pod, ContainerName = Name, LogMessage = LogEntry, LogSource = LogEntrySource
+| join kind=inner (_containers) on ContainerID
+| project TimeGenerated, PodName = ${kqlString(podName)}, ContainerName = tostring(split(ContainerName, "/")[-1]), LogMessage = LogEntry, LogSource = LogEntrySource
 | order by TimeGenerated desc
 | take ${limit}`;
 
@@ -588,7 +591,7 @@ ContainerLog
         console.warn(`[containerInsights] logs V2 API error for ${namespace}/${podName}:`, resp.error.message);
       }
       const table = resp.tables?.[0];
-      console.log(`[containerInsights] logs V2 query — rows: ${table?.rows?.length ?? 0}, cols: ${table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)"} for ${namespace}/${podName}`);
+      debug(`[containerInsights] logs V2 query — rows: ${table?.rows?.length ?? 0}, cols: ${table?.columns?.map((c: { name: string }) => c.name).join(", ") ?? "(none)"} for ${namespace}/${podName}`);
       if (table && table.rows.length > 0) {
         entries = tableToObjects(table).map((row) => ({
           timestamp: asString(row.TimeGenerated),
@@ -597,7 +600,7 @@ ContainerLog
           logMessage: asString(row.LogMessage),
           stream: parseLogStream(asString(row.LogSource)),
         }));
-        console.log(`[containerInsights] logs V2: ${entries.length} entries for ${namespace}/${podName}`);
+        debug(`[containerInsights] logs V2: ${entries.length} entries for ${namespace}/${podName}`);
       }
     } catch (err) {
       // ContainerLogV2 테이블이 없을 수 있음 — fallback
@@ -612,7 +615,7 @@ ContainerLog
           console.warn(`[containerInsights] logs V1 API error for ${namespace}/${podName}:`, resp.error.message);
         }
         const table = resp.tables?.[0];
-        console.log(`[containerInsights] logs V1 query — rows: ${table?.rows?.length ?? 0} for ${namespace}/${podName}`);
+        debug(`[containerInsights] logs V1 query — rows: ${table?.rows?.length ?? 0} for ${namespace}/${podName}`);
         if (table && table.rows.length > 0) {
           entries = tableToObjects(table).map((row) => ({
             timestamp: asString(row.TimeGenerated),
@@ -621,7 +624,7 @@ ContainerLog
             logMessage: asString(row.LogMessage),
             stream: parseLogStream(asString(row.LogSource)),
           }));
-          console.log(`[containerInsights] logs V1: ${entries.length} entries for ${namespace}/${podName}`);
+          debug(`[containerInsights] logs V1: ${entries.length} entries for ${namespace}/${podName}`);
         }
       } catch (err) {
         console.error("[containerInsights] logs V1 exception:", err instanceof Error ? err.message : err);
@@ -644,80 +647,4 @@ function parseLogStream(source: string): PodLogEntry["stream"] {
   if (s.includes("stdout")) return "stdout";
   if (s.includes("stderr")) return "stderr";
   return "unknown";
-}
-
-// ── Namespace / Pod Discovery (for Logs tab) ──
-// KubePodInventory에서 모든 namespace + pod를 직접 쿼리하여
-// 새 namespace/pod 생성 시 자동으로 감지
-
-const nsPodCache = new CacheManager<NamespacePodItem[]>(20, 30_000); // 30s TTL
-
-export async function collectNamespacePods(
-  env: Env,
-  bearerToken: string | undefined,
-  clusterId: string,
-): Promise<{ items: NamespacePodItem[]; containerInsightsAvailable: boolean }> {
-  const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
-  if (!workspaceId) {
-    return { items: [], containerInsightsAvailable: false };
-  }
-
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:obs:nspods:${workspaceId}:${clusterId}`;
-  const cached = nsPodCache.get(cacheKey);
-  if (cached) return { items: cached, containerInsightsAvailable: true };
-
-  try {
-    const fetcher = await getLogAnalyticsFetcherAuto(env, bearerToken);
-
-    const clusterFilter = clusterId.startsWith("/subscriptions/")
-      ? `| where ClusterId =~ "${clusterId}"`
-      : `| where ClusterId contains "${clusterId}"`;
-
-    // Controller 유무에 관계없이 모든 Pod를 가져옴
-    const kql = `
-KubePodInventory
-| where TimeGenerated > ago(10m)
-${clusterFilter}
-| extend _PodName = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""), tostring(PodUid))
-| summarize arg_max(TimeGenerated, *) by PodUid
-| extend _WorkloadName = iff(isnotempty(ControllerName), ControllerName, _PodName)
-| project Namespace, PodName = _PodName, WorkloadName = _WorkloadName, PodStatus
-| order by Namespace asc, PodName asc`;
-
-    console.log("[containerInsights] querying namespace/pods — workspace:", workspaceId);
-
-    const resp = await fetcher.query(workspaceId, kql) as LaQueryResponse;
-    if (resp.error) {
-      console.error("[containerInsights] namespace/pods KQL error:", resp.error.message);
-    }
-
-    const table = resp.tables?.[0];
-    console.log("[containerInsights] namespace/pods query — rows:", table?.rows?.length ?? 0);
-
-    const items: NamespacePodItem[] = [];
-    if (table) {
-      for (const row of tableToObjects(table)) {
-        items.push({
-          namespace: asString(row.Namespace),
-          podName: asString(row.PodName),
-          workloadName: asString(row.WorkloadName),
-          status: asString(row.PodStatus),
-        });
-      }
-    }
-
-    nsPodCache.set(cacheKey, items);
-    return { items, containerInsightsAvailable: true };
-  } catch (err) {
-    console.error("[containerInsights] namespace/pods error:", err instanceof Error ? err.message : err);
-    return { items: [], containerInsightsAvailable: false };
-  }
-}
-
-export function clearObservabilityCache(): void {
-  workloadsCache.clear();
-  nodesCache.clear();
-  logsCache.clear();
-  nsPodCache.clear();
 }

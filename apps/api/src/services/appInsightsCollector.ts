@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { MetricBinding, MetricAggregation } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Application Insights Metrics Collector

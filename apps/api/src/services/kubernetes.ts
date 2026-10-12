@@ -1,5 +1,5 @@
 import * as k8s from "@kubernetes/client-node";
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   KubernetesClusterInfo,
   KubernetesClustersResponse,
@@ -7,8 +7,10 @@ import type {
   KubernetesClusterOverview,
   AksNodeCondition,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcherAuto } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
+import { parseSubscriptionIds } from "../infra/requestParams.js";
+import { debug } from "../infra/logger.js";
 
 // ────────────────────────────────────────────
 // Cache
@@ -30,10 +32,6 @@ const k8sNodeInfoCache = new CacheManager<Record<string, K8sNodeInfo>>(10, 60_00
 // 1. List AKS Clusters via Resource Graph
 // ────────────────────────────────────────────
 
-function parseSubscriptionIds(raw: string): string[] {
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
 export async function listAksClusters(
   env: Env,
   bearerToken: string | undefined,
@@ -44,14 +42,12 @@ export async function listAksClusters(
   const cached = clustersCache.get(cacheKey);
   if (cached) return cached;
 
-  const fetcher = await getArmFetcherAuto(env, bearerToken);
-  const subIds = opts?.subscriptionId
-    ? [opts.subscriptionId]
-    : parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS ?? "");
-
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
   if (subIds.length === 0) {
     return { generatedAt: new Date().toISOString(), clusters: [], note: "no subscriptions configured" };
   }
+
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
 
   // Resource Graph query for AKS clusters
   const query = `resources | where type == "microsoft.containerservice/managedclusters" | project id, name, resourceGroup, subscriptionId, location, properties`;
@@ -61,28 +57,10 @@ export async function listAksClusters(
     options: { resultFormat: "objectArray" as const },
   };
 
-  const result = await fetcher.fetchJson<{ data?: Array<Record<string, unknown>> }>(
-    `https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01`,
-  ).catch(() => null);
-
-  // Use POST for Resource Graph
-  const rgResult = await fetch(
+  const rgData = await fetcher.postJson<{ data?: Array<Record<string, unknown>> }>(
     "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${fetcher.armToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    },
+    body,
   );
-
-  if (!rgResult.ok) {
-    throw new Error(`Resource Graph HTTP ${rgResult.status}: ${await rgResult.text()}`);
-  }
-
-  const rgData = (await rgResult.json()) as { data?: Array<Record<string, unknown>> };
   const rows = rgData.data ?? [];
 
   const clusters: KubernetesClusterInfo[] = rows.map((r) => {
@@ -129,23 +107,10 @@ export async function getKubeconfig(
 
   const fetcher = await getArmFetcherAuto(env, bearerToken);
 
-  const url = `https://management.azure.com${azureResourceId}/listClusterUserCredential?api-version=2024-09-01`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${fetcher.armToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({}),
-  });
-
-  if (!res.ok) {
-    throw new Error(`listClusterUserCredential HTTP ${res.status}: ${await res.text()}`);
-  }
-
-  const data = (await res.json()) as {
-    kubeconfigs?: Array<{ name?: string; value?: string }>;
-  };
+  const data = await fetcher.postJson<{ kubeconfigs?: Array<{ name?: string; value?: string }> }>(
+    `https://management.azure.com${azureResourceId}/listClusterUserCredential?api-version=2024-09-01`,
+    {},
+  );
 
   const b64 = data.kubeconfigs?.[0]?.value;
   if (!b64) throw new Error("No kubeconfig returned from ARM");
@@ -153,6 +118,17 @@ export async function getKubeconfig(
   const kubeconfig = Buffer.from(b64, "base64").toString("utf-8");
   kubeconfigCache.set(cacheKey, kubeconfig);
   return kubeconfig;
+}
+
+/** KubeConfig for an AKS cluster (kubeconfig itself is cached for 5 min). */
+export async function loadKubeConfig(
+  env: Env,
+  bearerToken: string | undefined,
+  azureResourceId: string,
+): Promise<k8s.KubeConfig> {
+  const kc = new k8s.KubeConfig();
+  kc.loadFromString(await getKubeconfig(env, bearerToken, azureResourceId));
+  return kc;
 }
 
 // ────────────────────────────────────────────
@@ -171,9 +147,7 @@ export async function fetchAksNodeInfoMap(
   const cached = k8sNodeInfoCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, aksClusterArmId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, aksClusterArmId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
   const nodeList = await coreV1.listNode();
@@ -217,10 +191,7 @@ export async function getClusterOverview(
   const cached = overviewCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
 
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
   const appsV1 = kc.makeApiClient(k8s.AppsV1Api);
@@ -430,6 +401,7 @@ export type K8sPodInfo = {
   podName: string;
   status: string;
   containers: string[];
+  nodeName: string;
 };
 
 const nsPodK8sCache = new CacheManager<{ pods: K8sPodInfo[]; namespaces: K8sNamespaceInfo[] }>(20, 15_000);
@@ -449,9 +421,7 @@ export async function listAllNamespacePods(
   const cached = nsPodK8sCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
   // Pod 목록 + 네임스페이스 목록 병렬 조회
@@ -470,6 +440,7 @@ export async function listAllNamespacePods(
       podName: p.metadata?.name ?? "",
       status: String(p.status?.phase ?? "Unknown"),
       containers: (p.spec?.containers ?? []).map((c) => c.name),
+      nodeName: p.spec?.nodeName ?? "",
     }));
 
   const namespaces: K8sNamespaceInfo[] = nsList.items.map((ns) => ({
@@ -477,7 +448,7 @@ export async function listAllNamespacePods(
     status: String(ns.status?.phase ?? "Active"),
   }));
 
-  console.log(`[k8s] listAllNamespacePods: ${podList.items.length} total → ${pods.length} active pods, ${namespaces.length} namespaces`);
+  debug(`[k8s] listAllNamespacePods: ${podList.items.length} total → ${pods.length} active pods, ${namespaces.length} namespaces`);
 
   const result = { pods, namespaces };
   nsPodK8sCache.set(cacheKey, result);
@@ -502,9 +473,7 @@ export async function readPodLogs(
     previous?: boolean;
   },
 ): Promise<string> {
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
   try {
@@ -537,7 +506,7 @@ export async function readPodLogs(
       if (containerMatch) {
         const containers = containerMatch[1]!.split(/\s+/);
         const firstContainer = containers[0]!;
-        console.log(`[k8s] readPodLogs: multi-container pod ${namespace}/${podName}, retrying with container=${firstContainer}`);
+        debug(`[k8s] readPodLogs: multi-container pod ${namespace}/${podName}, retrying with container=${firstContainer}`);
         try {
           const retryResp = await coreV1.readNamespacedPodLog({
             name: podName,
@@ -583,13 +552,11 @@ export async function getWorkloadDetail(
   kind: string,
 ): Promise<WorkloadDetailResponse> {
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:wl-detail:${azureResourceId}:${namespace}/${workloadName}`;
+  const cacheKey = `${prefix}:wl-detail:${azureResourceId}:${kind}:${namespace}/${workloadName}`;
   const cached = workloadDetailCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, azureResourceId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
   // ── 1) 해당 네임스페이스의 Pods, Services, Endpoints 병렬 조회 ──
@@ -725,7 +692,7 @@ export async function getWorkloadDetail(
     endpoints,
   };
 
-  console.log(`[k8s] workloadDetail: ${namespace}/${workloadName} (${kind}) → ${pods.length} pods, ${services.length} svcs, ${endpoints.length} eps`);
+  debug(`[k8s] workloadDetail: ${namespace}/${workloadName} (${kind}) → ${pods.length} pods, ${services.length} svcs, ${endpoints.length} eps`);
   workloadDetailCache.set(cacheKey, result);
   return result;
 }

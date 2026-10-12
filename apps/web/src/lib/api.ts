@@ -5,6 +5,28 @@ export function apiBaseUrl() {
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 }
 
+/**
+ * Human-readable API target for display. Deterministic on server and client
+ * (unlike apiBaseUrl(), which is "" in the browser) so it cannot cause a hydration mismatch.
+ */
+export function apiTargetLabel(): string {
+  return `/api → ${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000"}`;
+}
+
+/**
+ * Build an API URL with query params (empty / undefined values are skipped).
+ * Use this instead of `new URL(...)`: in the browser the base is "" and
+ * `new URL("/api/...")` throws "Invalid URL".
+ */
+export function apiUrl(path: string, params?: Record<string, string | number | undefined | null>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params ?? {})) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  const query = qs.toString();
+  return `${apiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
+
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,

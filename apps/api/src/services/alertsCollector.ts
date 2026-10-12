@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { LiveAlert, AlertSeverity, DiagramNodeSpec } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Azure Monitor Alerts Collector

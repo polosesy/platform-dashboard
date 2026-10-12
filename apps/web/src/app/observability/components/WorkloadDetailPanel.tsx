@@ -6,7 +6,6 @@ import type {
   WorkloadDetailResponse,
   WorkloadPodDetail,
   WorkloadServiceInfo,
-  WorkloadContainerDetail,
   JvmMetrics,
 } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";

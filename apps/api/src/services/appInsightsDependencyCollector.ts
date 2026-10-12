@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager";
-import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager } from "../infra/cacheManager.js";
+import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Application Insights Dependency Mapper
@@ -158,17 +158,7 @@ async function queryAppInsights(
       `https://management.azure.com${resourceId}` +
       `/api/query?api-version=2018-04-20`;
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${fetcher.armToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query: kql }),
-    });
-
-    if (!res.ok) return null;
-    const json = await res.json() as AppInsightsQueryResponse;
+    const json = await fetcher.postJson<AppInsightsQueryResponse>(url, { query: kql });
 
     const table = json.tables?.[0];
     if (!table) return null;

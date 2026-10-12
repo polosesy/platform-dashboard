@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import styles from "./styles.module.css";
 import type {
   HealthSummary,
@@ -11,14 +11,16 @@ import type {
   ServiceHealthEventsResponse,
   ServiceHealthEvent,
   ServiceHealthEventType,
-  AzureSubscriptionOption,
-  AzureSubscriptionsResponse,
   RegionalStatusResponse,
   RegionHealthStatus,
 } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiQuery } from "@/lib/useApiQuery";
+import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
+import { PageHeader, Tabs } from "@/components/ui";
+import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 
 // ── Constants ──
 
@@ -353,16 +355,10 @@ function InstanceHealthPanel({
   data,
   loading,
   error,
-  subscriptions,
-  subscriptionId,
-  onSubscriptionChange,
 }: {
   data: HealthSummary | null;
   loading: boolean;
   error: string | null;
-  subscriptions: AzureSubscriptionOption[];
-  subscriptionId: string;
-  onSubscriptionChange: (id: string) => void;
 }) {
   const { t } = useI18n();
   const [filter, setFilter] = useState<FilterState>("all");
@@ -417,25 +413,6 @@ function InstanceHealthPanel({
 
   return (
     <div className={styles.grid}>
-      {/* Subscription selector */}
-      {subscriptions.length > 0 && (
-        <div className={styles.instanceHeader}>
-          <span className={styles.instanceHeaderLabel}>{t("live.subscription")}</span>
-          <select
-            className={styles.subSelect}
-            value={subscriptionId}
-            onChange={(e) => onSubscriptionChange(e.target.value)}
-          >
-            <option value="">{t("health.allSubscriptions")}</option>
-            {subscriptions.map((s) => (
-              <option key={s.subscriptionId} value={s.subscriptionId}>
-                {s.name || s.subscriptionId}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {/* Fallback notice — shown when API returned mock/timeout data */}
       {hasFallbackNote && (
         <div className={styles.fallbackNotice}>
@@ -891,146 +868,49 @@ function ServiceStatusPanel({
 
 export default function HealthPage() {
   const { t } = useI18n();
-  const getApiToken = useApiToken();
   const [activeTab, setActiveTab] = useState<HealthTab>("global");
+  // Tabs load lazily on first visit
+  const [visited, setVisited] = useState<ReadonlySet<HealthTab>>(() => new Set<HealthTab>(["global"]));
+  const selectTab = (tab: HealthTab) => {
+    setActiveTab(tab);
+    setVisited((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  };
 
-  // Subscriptions list (shared across tabs)
-  const [subscriptions, setSubscriptions] = useState<AzureSubscriptionOption[]>([]);
-  const [subscriptionId, setSubscriptionId] = useState("");
+  // Subscriptions list (shared across tabs) — every subscription-scoped query is keyed by it
+  const { subscriptions, subscriptionId, setSubscriptionId, loaded: subsLoaded } = useSubscriptions();
+  const sub = subscriptionId || undefined;
 
-  // Tab 1 — Global Status
-  const [globalData, setGlobalData] = useState<GlobalStatusResponse | null>(null);
-  const [globalLoading, setGlobalLoading] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [globalLoaded, setGlobalLoaded] = useState(false);
-
-  // Tab 1 supplement — Regional Status
-  const [regionalData, setRegionalData] = useState<RegionalStatusResponse | null>(null);
-  const [regionalLoading, setRegionalLoading] = useState(false);
-  const [regionalLoaded, setRegionalLoaded] = useState(false);
+  // Tab 1 — Global Status (public RSS feed) + regional status for the user's deployed regions
+  const global = useApiQuery(
+    "health-global",
+    (token) => fetchJsonWithBearer<GlobalStatusResponse>(apiUrl("/api/health/global-status"), token),
+    { tokenOptional: true },
+  );
+  const regional = useApiQuery(
+    subsLoaded ? `health-regional:${subscriptionId}` : null,
+    (token) => fetchJsonWithBearer<RegionalStatusResponse>(apiUrl("/api/health/regional-status", { subscriptionId: sub }), token),
+    { tokenOptional: true },
+  );
 
   // Tab 2 — Instance Health
-  const [instanceData, setInstanceData] = useState<HealthSummary | null>(null);
-  const [instanceLoading, setInstanceLoading] = useState(false);
-  const [instanceError, setInstanceError] = useState<string | null>(null);
+  const instance = useApiQuery(
+    subsLoaded && visited.has("instance") ? `health-instance:${subscriptionId}` : null,
+    (token) => fetchJsonWithBearer<HealthSummary>(apiUrl("/api/health/summary", { subscriptionId: sub }), token),
+    { tokenOptional: true },
+  );
 
   // Tab 3 — Service Events
-  const [eventsData, setEventsData] = useState<ServiceHealthEventsResponse | null>(null);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [eventsError, setEventsError] = useState<string | null>(null);
-  const [eventsLoaded, setEventsLoaded] = useState(false);
+  const events = useApiQuery(
+    subsLoaded && visited.has("service") ? `health-events:${subscriptionId}` : null,
+    (token) => fetchJsonWithBearer<ServiceHealthEventsResponse>(apiUrl("/api/health/events", { subscriptionId: sub }), token),
+    { tokenOptional: true },
+  );
 
-  // Fetch subscriptions on mount
-  useEffect(() => {
-    let cancelled = false;
-    getApiToken()
-      .catch(() => null)
-      .then((token) =>
-        fetchJsonWithBearer<AzureSubscriptionsResponse>(`${apiBaseUrl()}/api/azure/subscriptions`, token),
-      )
-      .then((resp) => {
-        if (cancelled) return;
-        const subs = resp.subscriptions ?? [];
-        setSubscriptions(subs);
-        setSubscriptionId((prev) => prev || subs[0]?.subscriptionId || "");
-      })
-      .catch(() => { /* ignore — subscriptions are optional */ });
-    return () => { cancelled = true; };
-  }, [getApiToken]);
-
-  const loadGlobal = useCallback(() => {
-    if (globalLoaded || globalLoading) return;
-    let cancelled = false;
-    setGlobalLoading(true);
-    setGlobalError(null);
-    fetch(`${apiBaseUrl()}/api/health/global-status`)
-      .then((r) => r.json() as Promise<GlobalStatusResponse>)
-      .then((d) => { if (!cancelled) { setGlobalData(d); setGlobalLoaded(true); } })
-      .catch((e: unknown) => { if (!cancelled) setGlobalError(e instanceof Error ? e.message : "error"); })
-      .finally(() => { if (!cancelled) setGlobalLoading(false); });
-    return () => { cancelled = true; };
-  }, [globalLoaded, globalLoading]);
-
-  const loadRegional = useCallback((subId?: string) => {
-    if (regionalLoaded || regionalLoading) return;
-    let cancelled = false;
-    setRegionalLoading(true);
-    const url = subId
-      ? `${apiBaseUrl()}/api/health/regional-status?subscriptionId=${encodeURIComponent(subId)}`
-      : `${apiBaseUrl()}/api/health/regional-status`;
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const d = await fetchJsonWithBearer<RegionalStatusResponse>(url, token);
-        if (!cancelled) {
-          setRegionalData(d);
-          // Only mark loaded when we actually got regions — allows retry on transient failures
-          if (d.regions && d.regions.length > 0) {
-            setRegionalLoaded(true);
-          }
-        }
-      })
-      .catch(() => {
-        if (!cancelled && !regionalData) {
-          setRegionalData(null);
-        }
-      })
-      .finally(() => { if (!cancelled) setRegionalLoading(false); });
-    return () => { cancelled = true; };
-  }, [regionalLoaded, regionalLoading, getApiToken, regionalData]);
-
-  const loadInstance = useCallback((subId?: string) => {
-    let cancelled = false;
-    setInstanceLoading(true);
-    setInstanceError(null);
-    setInstanceData(null);
-    const url = subId
-      ? `${apiBaseUrl()}/api/health/summary?subscriptionId=${encodeURIComponent(subId)}`
-      : `${apiBaseUrl()}/api/health/summary`;
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const d = await fetchJsonWithBearer<HealthSummary>(url, token);
-        if (!cancelled) setInstanceData(d);
-      })
-      .catch((e: unknown) => { if (!cancelled) setInstanceError(e instanceof Error ? e.message : "error"); })
-      .finally(() => { if (!cancelled) setInstanceLoading(false); });
-    return () => { cancelled = true; };
-  }, [getApiToken]);
-
-  const loadEvents = useCallback(() => {
-    if (eventsLoaded || eventsLoading) return;
-    let cancelled = false;
-    setEventsLoading(true);
-    setEventsError(null);
-    const url = subscriptionId
-      ? `${apiBaseUrl()}/api/health/events?subscriptionId=${encodeURIComponent(subscriptionId)}`
-      : `${apiBaseUrl()}/api/health/events`;
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const d = await fetchJsonWithBearer<ServiceHealthEventsResponse>(url, token);
-        if (!cancelled) { setEventsData(d); setEventsLoaded(true); }
-      })
-      .catch((e: unknown) => { if (!cancelled) setEventsError(e instanceof Error ? e.message : "error"); })
-      .finally(() => { if (!cancelled) setEventsLoading(false); });
-    return () => { cancelled = true; };
-  }, [eventsLoaded, eventsLoading, subscriptionId, getApiToken]);
-
-  // Load on tab switch
-  useEffect(() => {
-    if (activeTab === "global") loadGlobal();
-    else if (activeTab === "instance") loadInstance(subscriptionId);
-    else if (activeTab === "service") loadEvents();
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Re-fetch instance data when subscription changes
-  useEffect(() => {
-    if (activeTab === "instance") loadInstance(subscriptionId);
-  }, [subscriptionId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Preload global tab on mount (RSS is public, regional needs auth)
-  useEffect(() => { loadGlobal(); loadRegional(subscriptionId || undefined); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Hide the previous subscription's results while the new ones load
+  const globalData = global.data ?? null;
+  const regionalData = regional.loading ? null : (regional.data ?? null);
+  const instanceData = instance.loading ? null : (instance.data ?? null);
+  const eventsData = events.loading ? null : (events.data ?? null);
 
   const activeGeneratedAt =
     activeTab === "global" ? globalData?.generatedAt
@@ -1039,64 +919,42 @@ export default function HealthPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.title}>{t("health.title")}</div>
-          <div className={styles.subTitle}>
-            {activeGeneratedAt
-              ? `${t("health.generatedAt")}: ${new Date(activeGeneratedAt).toLocaleString()}`
-              : t("health.loading")}
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        meta={<span>{activeGeneratedAt ? `${t("health.generatedAt")}: ${new Date(activeGeneratedAt).toLocaleString()}` : t("health.loading")}</span>}
+        actions={<SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />}
+      />
 
-      {/* Tab Bar */}
-      <div className={styles.tabBar}>
-        <button
-          type="button"
-          className={`${styles.tabBtn} ${activeTab === "global" ? styles.tabActive : ""}`}
-          onClick={() => setActiveTab("global")}
-        >
-          {t("health.tabGlobal")}
-        </button>
-        <button
-          type="button"
-          className={`${styles.tabBtn} ${activeTab === "instance" ? styles.tabActive : ""}`}
-          onClick={() => setActiveTab("instance")}
-        >
-          {t("health.tabInstance")}
-        </button>
-        <button
-          type="button"
-          className={`${styles.tabBtn} ${activeTab === "service" ? styles.tabActive : ""}`}
-          onClick={() => setActiveTab("service")}
-        >
-          {t("health.tabService")}
-        </button>
-      </div>
+      <Tabs
+        label={t("nav.item.health")}
+        idPrefix="health-tab"
+        value={activeTab}
+        onChange={selectTab}
+        items={[
+          { id: "global", label: t("health.tabGlobal") },
+          { id: "instance", label: t("health.tabInstance") },
+          { id: "service", label: t("health.tabService") },
+        ]}
+      />
 
       {/* Tab Content */}
       {activeTab === "global" && (
         <GlobalStatusPanel
           data={globalData}
-          loading={globalLoading}
-          error={globalError}
+          loading={global.loading}
+          error={global.error}
           regionalData={regionalData}
-          regionalLoading={regionalLoading}
+          regionalLoading={regional.loading}
         />
       )}
       {activeTab === "instance" && (
         <InstanceHealthPanel
           data={instanceData}
-          loading={instanceLoading}
-          error={instanceError}
-          subscriptions={subscriptions}
-          subscriptionId={subscriptionId}
-          onSubscriptionChange={(id) => setSubscriptionId(id)}
+          loading={instance.loading}
+          error={instance.error}
         />
       )}
       {activeTab === "service" && (
-        <ServiceStatusPanel data={eventsData} loading={eventsLoading} error={eventsError} />
+        <ServiceStatusPanel data={eventsData} loading={events.loading} error={events.error} />
       )}
     </div>
   );

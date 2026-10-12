@@ -13,11 +13,11 @@
     "@aud/types": "*",
     "@azure/msal-browser": "^5.0.2",
     "@azure/msal-react": "^5.0.2",
+    "@next/env": "16.1.6",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "reactflow": "^11.11.4",
-    "d3-color": "^3.1.0",
     "d3-ease": "^3.0.1",
     "d3-force": "^3.0.0",
     "d3-interpolate": "^3.0.1",
@@ -31,7 +31,6 @@
     "@react-three/drei": "^10.0.0"
   },
   "devDependencies": {
-    "@types/d3-color": "^3",
     "@types/d3-ease": "^3",
     "@types/d3-force": "^3",
     "@types/d3-interpolate": "^3",

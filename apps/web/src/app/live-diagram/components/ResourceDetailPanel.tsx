@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import type {
   DiagramNodeSpec,
   DiagramEdgeSpec,
@@ -11,7 +11,6 @@ import type {
   SparklineData,
   SubResource,
   NsgInfo,
-  NsgRuleEntry,
   BackendPoolInfo,
   AksPlaneDetail,
   AksNodePoolInfo,
@@ -24,8 +23,8 @@ import { getAzureIconUrl } from "../utils/azureIcons";
 import { fmtMetric } from "./LiveNode";
 import { D3Sparkline } from "./D3Sparkline";
 import { useI18n } from "@/lib/i18n";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
-import { useApiToken } from "@/lib/useApiToken";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useApiQuery } from "@/lib/useApiQuery";
 import styles from "../styles.module.css";
 
 type ConnectedEdge = {
@@ -191,28 +190,14 @@ const SEVERITY_COLORS: Record<number, string> = {
 const BACKEND_POOL_KINDS = new Set(["lb", "appGateway"]);
 
 function useBackendPool(azureResourceId: string | undefined, resourceKind: string | undefined) {
-  const [pools, setPools] = useState<BackendPoolInfo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const getApiToken = useApiToken();
-
-  useEffect(() => {
-    if (!resourceKind || !BACKEND_POOL_KINDS.has(resourceKind) || !azureResourceId) {
-      setPools([]);
-      return;
-    }
-    setLoading(true);
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const url = `${apiBaseUrl()}/api/live/backend-pool?resourceId=${encodeURIComponent(azureResourceId)}&resourceKind=${encodeURIComponent(resourceKind)}`;
-        const data = await fetchJsonWithBearer<{ pools: BackendPoolInfo[] }>(url, token);
-        setPools(data.pools ?? []);
-      })
-      .catch(() => setPools([]))
-      .finally(() => setLoading(false));
-  }, [azureResourceId, resourceKind, getApiToken]);
-
-  return { pools, loading };
+  const enabled = !!azureResourceId && !!resourceKind && BACKEND_POOL_KINDS.has(resourceKind);
+  const { data, error, loading } = useApiQuery(
+    enabled ? `backend-pool:${resourceKind}:${azureResourceId}` : null,
+    (token) =>
+      fetchJsonWithBearer<{ pools: BackendPoolInfo[] }>(apiUrl("/api/live/backend-pool", { resourceId: azureResourceId, resourceKind }), token),
+    { tokenOptional: true },
+  );
+  return { pools: enabled && !loading && !error ? (data?.pools ?? []) : [], loading };
 }
 
 const MEMBER_STATE_COLOR: Record<string, string> = {
@@ -304,28 +289,13 @@ function BackendPoolSection({ pools, loading }: { pools: BackendPoolInfo[]; load
 // ── NSG Rules Detail Section ──
 
 function useNsgDetail(azureResourceId: string | undefined, resourceKind: string | undefined) {
-  const [nsg, setNsg] = useState<NsgInfo | null>(null);
-  const [loading, setLoading] = useState(false);
-  const getApiToken = useApiToken();
-
-  useEffect(() => {
-    if (resourceKind !== "nsg" || !azureResourceId) {
-      setNsg(null);
-      return;
-    }
-    setLoading(true);
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const url = `${apiBaseUrl()}/api/live/nsg-detail?resourceId=${encodeURIComponent(azureResourceId)}`;
-        const data = await fetchJsonWithBearer<NsgInfo>(url, token);
-        setNsg(data);
-      })
-      .catch(() => setNsg(null))
-      .finally(() => setLoading(false));
-  }, [azureResourceId, resourceKind, getApiToken]);
-
-  return { nsg, loading };
+  const enabled = resourceKind === "nsg" && !!azureResourceId;
+  const { data, error, loading } = useApiQuery(
+    enabled ? `nsg-detail:${azureResourceId}` : null,
+    (token) => fetchJsonWithBearer<NsgInfo>(apiUrl("/api/live/nsg-detail", { resourceId: azureResourceId }), token),
+    { tokenOptional: true },
+  );
+  return { nsg: enabled && !loading && !error ? (data ?? null) : null, loading };
 }
 
 function NsgRulesSection({ nsg, loading }: { nsg: NsgInfo | null; loading: boolean }) {
@@ -425,56 +395,27 @@ function NsgRulesSection({ nsg, loading }: { nsg: NsgInfo | null; loading: boole
 // ── AKS Plane Detail (접속면 / 실행면 / 노출면) ──
 
 function useAksPlaneDetail(azureResourceId: string | undefined, resourceKind: string | undefined, archRole: string | undefined) {
-  const [detail, setDetail] = useState<AksPlaneDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const getApiToken = useApiToken();
-
-  useEffect(() => {
-    // Only fetch for real AKS cluster nodes, not synthetic API Endpoint nodes
-    if (resourceKind !== "aks" || !azureResourceId || archRole === "aks-control-plane") {
-      setDetail(null);
-      return;
-    }
-    setLoading(true);
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const url = `${apiBaseUrl()}/api/live/aks-plane?resourceId=${encodeURIComponent(azureResourceId)}`;
-        const data = await fetchJsonWithBearer<AksPlaneDetail>(url, token);
-        setDetail(data);
-      })
-      .catch(() => setDetail(null))
-      .finally(() => setLoading(false));
-  }, [azureResourceId, resourceKind, archRole, getApiToken]);
-
-  return { detail, loading };
+  // Only fetch for real AKS cluster nodes, not synthetic API Endpoint nodes
+  const enabled = resourceKind === "aks" && !!azureResourceId && archRole !== "aks-control-plane";
+  const { data, error, loading } = useApiQuery(
+    enabled ? `aks-plane:${azureResourceId}` : null,
+    (token) => fetchJsonWithBearer<AksPlaneDetail>(apiUrl("/api/live/aks-plane", { resourceId: azureResourceId }), token),
+    { tokenOptional: true },
+  );
+  return { detail: enabled && !loading && !error ? (data ?? null) : null, loading };
 }
 
 // ── VMSS Instance list (for AKS nodepool VMSS) ──
 
 function useVmssInstances(azureResourceId: string | undefined, archRole: string | undefined) {
-  const [instances, setInstances] = useState<AksVmssInstance[]>([]);
-  const [loading, setLoading] = useState(false);
-  const getApiToken = useApiToken();
-
-  useEffect(() => {
-    if (archRole !== "aks-vmss" || !azureResourceId) {
-      setInstances([]);
-      return;
-    }
-    setLoading(true);
-    getApiToken()
-      .catch(() => null)
-      .then(async (token) => {
-        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}`;
-        const data = await fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(url, token);
-        setInstances(data.instances ?? []);
-      })
-      .catch(() => setInstances([]))
-      .finally(() => setLoading(false));
-  }, [azureResourceId, archRole, getApiToken]);
-
-  return { instances, loading };
+  const enabled = archRole === "aks-vmss" && !!azureResourceId;
+  const { data, error, loading } = useApiQuery(
+    enabled ? `vmss-instances:${azureResourceId}` : null,
+    (token) =>
+      fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(apiUrl("/api/live/vmss-instances", { resourceId: azureResourceId }), token),
+    { tokenOptional: true },
+  );
+  return { instances: enabled && !loading && !error ? (data?.instances ?? []) : [], loading };
 }
 
 const EXPOSURE_ROLE_ICON: Record<string, string> = {

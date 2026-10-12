@@ -1,8 +1,11 @@
-import { createHash } from "crypto";
-import { OnBehalfOfCredential, ClientSecretCredential } from "@azure/identity";
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
-import type { Env } from "../env";
-import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "../types";
+import type { Env } from "../env.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { getSPCredential } from "../infra/azureClientFactory.js";
+import { getOBOCredential } from "../infra/oboTokenPool.js";
+import { parseSubscriptionIds } from "../infra/requestParams.js";
+import { debug } from "../infra/logger.js";
+import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "@aud/types";
 
 type AzureResourceRow = {
   id: string;
@@ -29,82 +32,23 @@ type AzureSubscriptionRow = {
   name?: string;
 };
 
-let cache:
-  | {
-      key: string;
-      expiresAt: number;
-      graph: ArchitectureGraph;
-    }
-  | undefined;
-
-let subsCache:
-  | {
-      key: string;
-      expiresAt: number;
-      subscriptions: AzureSubscriptionOption[];
-    }
-  | undefined;
+const graphCache = new CacheManager<ArchitectureGraph>(20);
+const subsCache = new CacheManager<AzureSubscriptionOption[]>(20);
 
 /** Clear the in-memory Azure Resource Graph cache. Call before generate to ensure fresh data. */
 export function clearGraphCache(): void {
-  cache = undefined;
-}
-
-function parseSubscriptionIds(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function bearerKey(bearerToken: string): string {
-  return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
+  graphCache.clear();
 }
 
 type RGClientBundle = { client: ResourceGraphClient; subscriptions: string[]; pageSize: number };
 
-function createOBOClient(env: Env, bearerToken: string): RGClientBundle {
-  const tenantId = env.AZURE_AD_TENANT_ID;
-  const clientId = env.AZURE_AD_CLIENT_ID;
-  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
-  const subRaw = env.AZURE_SUBSCRIPTION_IDS;
-
-  if (!tenantId || !clientId || !clientSecret || !subRaw) {
-    throw new Error("Azure OBO not configured (AZURE_AD_* and AZURE_SUBSCRIPTION_IDS required)");
-  }
-
-  const subscriptions = parseSubscriptionIds(subRaw);
+/** Resource Graph client — pooled OBO credential when a user token is present, shared SP credential otherwise. */
+function createResourceGraphClient(env: Env, bearerToken: string | undefined): RGClientBundle {
+  const subscriptions = parseSubscriptionIds(env);
   if (subscriptions.length === 0) {
     throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
   }
-
-  const credential = new OnBehalfOfCredential({
-    tenantId,
-    clientId,
-    clientSecret,
-    userAssertionToken: bearerToken,
-  });
-
-  return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
-}
-
-/** Fallback: use service principal credentials directly (no user token needed). */
-function createServicePrincipalClient(env: Env): RGClientBundle {
-  const tenantId = env.AZURE_AD_TENANT_ID;
-  const clientId = env.AZURE_AD_CLIENT_ID;
-  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
-  const subRaw = env.AZURE_SUBSCRIPTION_IDS;
-
-  if (!tenantId || !clientId || !clientSecret || !subRaw) {
-    throw new Error("Azure SP not configured (AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET, AZURE_SUBSCRIPTION_IDS required)");
-  }
-
-  const subscriptions = parseSubscriptionIds(subRaw);
-  if (subscriptions.length === 0) {
-    throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
-  }
-
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+  const credential = bearerToken ? getOBOCredential(env, bearerToken) : getSPCredential(env);
   return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
 }
 
@@ -155,6 +99,18 @@ function safeString(v: unknown): string | undefined {
 /** Like safeString, but also lowercases — for Azure resource IDs which are case-insensitive. */
 function safeId(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim().toLowerCase() : undefined;
+}
+
+/**
+ * Top-level resource that owns a child ID, lowercased:
+ * ".../networkInterfaces/nic1/ipConfigurations/ipc" → ".../networkinterfaces/nic1"
+ * (a VMSS instance NIC resolves to the scale set).
+ */
+export function ownerResourceId(childId: string): string | undefined {
+  const parts = childId.trim().toLowerCase().split("/");
+  // ["", "subscriptions", s, "resourcegroups", rg, "providers", ns, type, name, ...]
+  if (parts.length < 9 || parts[1] !== "subscriptions" || parts[3] !== "resourcegroups" || parts[5] !== "providers") return undefined;
+  return parts.slice(0, 9).join("/");
 }
 
 /** Extract the full subnet resource ID from any Azure resource ID containing /subnets/ */
@@ -601,17 +557,6 @@ async function resourceGraphQueryAll<T>(
   return all;
 }
 
-function createResourceGraphClient(env: Env, bearerToken: string | undefined): RGClientBundle {
-  if (bearerToken) {
-    try {
-      return createOBOClient(env, bearerToken);
-    } catch {
-      // OBO failed — fall through to SP
-    }
-  }
-  return createServicePrincipalClient(env);
-}
-
 async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | undefined): Promise<ArchitectureGraph> {
   const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
 
@@ -747,12 +692,18 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const endpoint = extractEndpoint(r.type, r.name, r.properties);
     const nodeMetadata: Record<string, unknown> = {};
 
-    // Public IP — mark as absorbed (attached) or unused (not attached)
+    // Public IP — mark as absorbed (attached) or unused (not attached), and record the owner
+    // (NIC / LB / App Gateway via its ip configuration, or a NAT Gateway)
     if (kind === "publicIP") {
       const props = (r.properties ?? {}) as Record<string, unknown>;
       const ipConfig = props.ipConfiguration as Record<string, unknown> | undefined;
+      const natGatewayId = safeId((props.natGateway as Record<string, unknown> | undefined)?.id);
       if (ipConfig?.id) {
         nodeMetadata.absorbed = true;
+        const owner = ownerResourceId(String(ipConfig.id));
+        if (owner) nodeMetadata.attachedTo = owner;
+      } else if (natGatewayId) {
+        nodeMetadata.attachedTo = natGatewayId;
       } else {
         nodeMetadata.unused = true; // allocated but not attached to any resource
       }
@@ -765,7 +716,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         nodeMetadata.defaultOutboundAccess = String(props.defaultOutboundAccess);
       }
       // Debug: log what property keys we have for subnets so we can verify CIDR extraction
-      console.log(`[azure] Subnet "${r.name}" props keys=[${Object.keys(props).join(",")}] addressPrefix=${safeString(props.addressPrefix)} endpoint=${extractEndpoint(r.type, r.name, r.properties)}`);
+      debug(`[azure] Subnet "${r.name}" props keys=[${Object.keys(props).join(",")}] addressPrefix=${safeString(props.addressPrefix)} endpoint=${extractEndpoint(r.type, r.name, r.properties)}`);
     }
 
     // AKS — store rich metadata for 3-plane diagram (접속면/실행면/노출면)
@@ -897,7 +848,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     // Always record the ARM ID reference so specGenerator can absorb this NIC into the PIP card.
     // pubIp may be absent for dynamic/unallocated PIPs — that's fine, we still need the link.
     node.metadata = { ...node.metadata, publicIPAzureId: pubRef, ...(pubIp ? { publicIP: pubIp } : {}) };
-    console.log(`[azure] NIC "${node.name}" → PIP ref=${pubRef.split("/").pop()} ip=${pubIp || "(unallocated)"} format=${nested ? "arm" : "flat"}`);
+    debug(`[azure] NIC "${node.name}" → PIP ref=${pubRef.split("/").pop()} ip=${pubIp || "(unallocated)"} format=${nested ? "arm" : "flat"}`);
   }
 
   // NAT Gateway: resolve actual public IP from publicIpById, then create subnet→natGateway edges
@@ -953,7 +904,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t !== "microsoft.network/virtualnetworks") continue;
 
     const vnetSubnetsArr = safePropArray(r.properties, "subnets");
-    console.log(`[azure] VNet "${r.name}" (${r.id.split("/").pop()}) has ${vnetSubnetsArr.length} embedded subnets`);
+    debug(`[azure] VNet "${r.name}" (${r.id.split("/").pop()}) has ${vnetSubnetsArr.length} embedded subnets`);
     for (const sub of vnetSubnetsArr) {
       if (!sub || typeof sub !== "object") continue;
       const subObj = sub as Record<string, unknown>;
@@ -1020,7 +971,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         return flat;
       })();
       const subLabel = safeString(subObj.name) ?? subId.split("/").pop();
-      console.log(`[azure]   Subnet "${subLabel}" has ${subnetIpConfigs.length} ipConfigurations (props=${!!subObj.properties}, flat=${Array.isArray(subObj.ipConfigurations)})`);
+      debug(`[azure]   Subnet "${subLabel}" has ${subnetIpConfigs.length} ipConfigurations (props=${!!subObj.properties}, flat=${Array.isArray(subObj.ipConfigurations)})`);
       for (const cfg of subnetIpConfigs) {
         if (!cfg || typeof cfg !== "object") continue;
         const nicConfigId = safeId((cfg as Record<string, unknown>).id);
@@ -1073,17 +1024,17 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (Array.isArray(ipCfgs) && ipCfgs.length > 0) {
       const first = ipCfgs[0] as Record<string, unknown>;
       const keys = Object.keys(first);
-      console.log(`[azure] NIC "${firstNic.name}" ipConfigurations[0] keys: [${keys.join(", ")}]`);
+      debug(`[azure] NIC "${firstNic.name}" ipConfigurations[0] keys: [${keys.join(", ")}]`);
       // Check which format: nested (.properties.subnet.id) or flat (.subnet.id)
       const hasNestedProps = first.properties != null;
       const hasFlatSubnet = first.subnet != null;
-      console.log(`[azure] NIC format: hasNestedProperties=${hasNestedProps}, hasFlatSubnet=${hasFlatSubnet}`);
+      debug(`[azure] NIC format: hasNestedProperties=${hasNestedProps}, hasFlatSubnet=${hasFlatSubnet}`);
       if (hasNestedProps) {
         const nested = first.properties as Record<string, unknown>;
-        console.log(`[azure] NIC .properties keys: [${Object.keys(nested).join(", ")}]`);
+        debug(`[azure] NIC .properties keys: [${Object.keys(nested).join(", ")}]`);
       }
     } else {
-      console.log(`[azure] NIC "${firstNic.name}" has no ipConfigurations array`);
+      debug(`[azure] NIC "${firstNic.name}" has no ipConfigurations array`);
     }
   }
 
@@ -1104,14 +1055,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         nicSubnetEdgeCount++;
         // Check if the subnet node actually exists in graph
         const subnetExists = nodes.some(n => n.id === subnetId);
-        console.log(`[azure] NIC→Subnet: "${nic.name}" → subnet "${subnetId.split("/").pop()}" (subnetInGraph=${subnetExists})`);
+        debug(`[azure] NIC→Subnet: "${nic.name}" → subnet "${subnetId.split("/").pop()}" (subnetInGraph=${subnetExists})`);
       }
     } else {
       nicSubnetMissCount++;
-      console.log(`[azure] NIC "${nic.name}" has NO subnet reference in properties`);
+      debug(`[azure] NIC "${nic.name}" has NO subnet reference in properties`);
     }
   }
-  console.log(`[azure] NIC→Subnet edges: ${nicSubnetEdgeCount} created, ${nicSubnetMissCount} missing subnet ref`);
+  debug(`[azure] NIC→Subnet edges: ${nicSubnetEdgeCount} created, ${nicSubnetMissCount} missing subnet ref`);
 
   let nicVmEdgeCount = 0;
   for (const r of resRows) {
@@ -1121,7 +1072,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const nicIds = getNicIdsFromVmProps(r.properties);
       for (const nicId of nicIds) {
         if (!nicById.has(nicId)) {
-          console.log(`[azure] VM "${r.name}" references NIC "${nicId.split("/").pop()}" but NIC not in graph`);
+          debug(`[azure] VM "${r.name}" references NIC "${nicId.split("/").pop()}" but NIC not in graph`);
           continue;
         }
         edges.push({
@@ -1131,10 +1082,10 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           kind: "bound-to"
         });
         nicVmEdgeCount++;
-        console.log(`[azure] NIC→VM: "${nicId.split("/").pop()}" → VM "${r.name}"`);
+        debug(`[azure] NIC→VM: "${nicId.split("/").pop()}" → VM "${r.name}"`);
       }
       if (nicIds.length === 0) {
-        console.log(`[azure] VM "${r.name}" has NO NIC references in properties`);
+        debug(`[azure] VM "${r.name}" has NO NIC references in properties`);
       }
     }
     if (t === "microsoft.containerservice/managedclusters") {
@@ -1267,7 +1218,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
 
-  console.log(`[azure] NIC→VM edges: ${nicVmEdgeCount} created`);
+  debug(`[azure] NIC→VM edges: ${nicVmEdgeCount} created`);
 
   // ── New relationship parsers ──
 
@@ -1401,7 +1352,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const subnetId = getSubnetIdFromNicProps(nic.properties);
     if (subnetId) discoveredSubnetIds.add(subnetId);
   }
-  console.log(`[subnet-discovery] Source (a) NIC properties: ${discoveredSubnetIds.size} subnet IDs`);
+  debug(`[subnet-discovery] Source (a) NIC properties: ${discoveredSubnetIds.size} subnet IDs`);
 
   // ── Source (b): VNet.properties.subnets[].id ──
   // Also capture addressPrefix so discovered subnet nodes get their CIDR displayed.
@@ -1424,7 +1375,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       if (prefix) subnetAddressPrefix.set(id.toLowerCase(), prefix);
     }
   }
-  console.log(`[subnet-discovery] Source (b) VNet embedded: +${discoveredSubnetIds.size - preNicCount} (total ${discoveredSubnetIds.size}, ${subnetAddressPrefix.size} with CIDR)`);
+  debug(`[subnet-discovery] Source (b) VNet embedded: +${discoveredSubnetIds.size - preNicCount} (total ${discoveredSubnetIds.size}, ${subnetAddressPrefix.size} with CIDR)`);
 
   // ── Source (c): Resource ID / edge ID parsing for /subnets/ pattern ──
   const preEdgeCount = discoveredSubnetIds.size;
@@ -1438,7 +1389,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const subId = extractSubnetIdFromResourceId(n.id);
     if (subId) discoveredSubnetIds.add(subId);
   }
-  console.log(`[subnet-discovery] Source (c) ID parsing: +${discoveredSubnetIds.size - preEdgeCount} (total ${discoveredSubnetIds.size})`);
+  debug(`[subnet-discovery] Source (c) ID parsing: +${discoveredSubnetIds.size - preEdgeCount} (total ${discoveredSubnetIds.size})`);
 
   // ── Patch existing subnet nodes that have no CIDR but have a discovered prefix ──
   // Subnets from resRows may have been created without addressPrefix if RG returned empty properties.
@@ -1447,7 +1398,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const prefix = subnetAddressPrefix.get(node.id.toLowerCase());
     if (prefix) {
       node.endpoint = prefix;
-      console.log(`[subnet-discovery] Patched CIDR for existing subnet "${node.name}": ${prefix}`);
+      debug(`[subnet-discovery] Patched CIDR for existing subnet "${node.name}": ${prefix}`);
     }
   }
 
@@ -1484,9 +1435,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       health: "unknown",
     });
     createdSubnets++;
-    console.log(`[subnet-discovery] Created subnet: "${subName}" (VNet: ${parentVnetId ? vnetNodeIds.has(parentVnetId) ? "found" : "MISSING" : "N/A"})`);
+    debug(`[subnet-discovery] Created subnet: "${subName}" (VNet: ${parentVnetId ? vnetNodeIds.has(parentVnetId) ? "found" : "MISSING" : "N/A"})`);
   }
-  console.log(`[subnet-discovery] Result: ${discoveredSubnetIds.size} total subnets, ${createdSubnets} newly created`);
+  debug(`[subnet-discovery] Result: ${discoveredSubnetIds.size} total subnets, ${createdSubnets} newly created`);
 
   // ── Ensure VNet→Subnet contains edges exist for ALL subnets ──
   const finalSubnetNodeIds = new Set(nodes.filter(n => n.kind === "subnet").map(n => n.id));
@@ -1508,7 +1459,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
   if (containsCreated > 0) {
-    console.log(`[subnet-discovery] Created ${containsCreated} VNet→Subnet contains edges`);
+    debug(`[subnet-discovery] Created ${containsCreated} VNet→Subnet contains edges`);
   }
 
   // ── Ensure Subnet→NIC edges exist for ALL NICs ──
@@ -1528,7 +1479,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
   if (nicEdgesCreated > 0) {
-    console.log(`[subnet-discovery] Created ${nicEdgesCreated} Subnet→NIC edges`);
+    debug(`[subnet-discovery] Created ${nicEdgesCreated} Subnet→NIC edges`);
   }
 
   // ── Generic fallback: scan ALL resource properties for subnet references ──
@@ -1562,7 +1513,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
   }
   if (genericSubnetEdges > 0) {
-    console.log(`[subnet-discovery] Generic scanner: ${genericSubnetEdges} additional subnet→resource edges`);
+    debug(`[subnet-discovery] Generic scanner: ${genericSubnetEdges} additional subnet→resource edges`);
   }
 
   // ── Diagnostic: graph summary ──
@@ -1574,9 +1525,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   for (const e of edges) {
     edgeKindCount.set(e.kind, (edgeKindCount.get(e.kind) ?? 0) + 1);
   }
-  console.log(`[azure] Graph built: ${nodes.length} nodes, ${edges.length} edges`);
-  console.log(`[azure] Node kinds: ${JSON.stringify(Object.fromEntries(kindCount))}`);
-  console.log(`[azure] Edge kinds: ${JSON.stringify(Object.fromEntries(edgeKindCount))}`);
+  debug(`[azure] Graph built: ${nodes.length} nodes, ${edges.length} edges`);
+  debug(`[azure] Node kinds: ${JSON.stringify(Object.fromEntries(kindCount))}`);
+  debug(`[azure] Edge kinds: ${JSON.stringify(Object.fromEntries(edgeKindCount))}`);
 
   // ── Diagnostic: containment edge counts (using final subnet set) ──
   const vnetToSubnet = edges.filter(e => e.kind === "contains" && finalSubnetNodeIds.has(e.target)).length;
@@ -1585,7 +1536,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     e.kind !== "contains" &&
     !finalSubnetNodeIds.has(e.target),
   ).length;
-  console.log(`[azure] Containment edges: ${vnetToSubnet} vnet→subnet, ${subnetToResource} subnet→resource`);
+  debug(`[azure] Containment edges: ${vnetToSubnet} vnet→subnet, ${subnetToResource} subnet→resource`);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1594,18 +1545,19 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   };
 }
 
+function hasCredentials(env: Env, bearerToken: string | undefined): boolean {
+  return !!bearerToken || !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);
+}
+
 export async function tryListAzureSubscriptionsFromAzure(
   env: Env,
-  bearerToken: string | undefined
+  bearerToken: string | undefined,
 ): Promise<AzureSubscriptionOption[] | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
-  // Require either bearer token or SP credentials
-  if (!bearerToken && !(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET)) return null;
+  if (!env.AZURE_SUBSCRIPTION_IDS || !hasCredentials(env, bearerToken)) return null;
 
-  const tokenKey = bearerToken ? bearerKey(bearerToken) : "sp";
-  const cacheKey = `${tokenKey}:${env.AZURE_SUBSCRIPTION_IDS}`;
-  const now = Date.now();
-  if (subsCache && subsCache.key === cacheKey && subsCache.expiresAt > now) return subsCache.subscriptions;
+  const cacheKey = `${cachePrefix(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const cached = subsCache.get(cacheKey);
+  if (cached) return cached;
 
   const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
   const subsQuery = "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
@@ -1613,43 +1565,39 @@ export async function tryListAzureSubscriptionsFromAzure(
 
   const nameById = new Map<string, string>();
   for (const r of rows) {
-    if (r.subscriptionId && r.name) nameById.set(r.subscriptionId, r.name);
+    if (r.subscriptionId && r.name) nameById.set(r.subscriptionId.toLowerCase(), r.name);
   }
 
   const out: AzureSubscriptionOption[] = subscriptions.map((subscriptionId) => ({
     subscriptionId,
-    name: nameById.get(subscriptionId),
+    name: nameById.get(subscriptionId.toLowerCase()),
   }));
 
-  subsCache = { key: cacheKey, expiresAt: now + env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS, subscriptions: out };
+  subsCache.set(cacheKey, out, env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS);
   return out;
 }
 
 export async function tryGetArchitectureGraphFromAzure(
   env: Env,
   bearerToken: string | undefined,
-  opts?: { subscriptionId?: string }
+  opts?: { subscriptionId?: string },
 ): Promise<ArchitectureGraph | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS) return null;
-  // Require either bearer token or SP credentials
-  if (!bearerToken && !(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET)) return null;
+  if (!env.AZURE_SUBSCRIPTION_IDS || !hasCredentials(env, bearerToken)) return null;
 
   // Optional narrowing to a single subscription (must be in the allow-list env)
   if (opts?.subscriptionId) {
-    const allowed = parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS);
-    if (!allowed.includes(opts.subscriptionId)) {
+    const wanted = opts.subscriptionId.toLowerCase();
+    if (!parseSubscriptionIds(env).some((s) => s.toLowerCase() === wanted)) {
       throw new Error("subscriptionId is not in AZURE_SUBSCRIPTION_IDS allow-list");
     }
     env = { ...env, AZURE_SUBSCRIPTION_IDS: opts.subscriptionId };
   }
 
-  const tokenKey = bearerToken ? bearerKey(bearerToken) : "sp";
-  const cacheKey = `${tokenKey}:${env.AZURE_SUBSCRIPTION_IDS}`;
-
-  const now = Date.now();
-  if (cache && cache.key === cacheKey && cache.expiresAt > now) return cache.graph;
+  const cacheKey = `${cachePrefix(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const cached = graphCache.get(cacheKey);
+  if (cached) return cached;
 
   const graph = await fetchTopologyFromResourceGraph(env, bearerToken);
-  cache = { key: cacheKey, expiresAt: now + env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS, graph };
+  graphCache.set(cacheKey, graph, env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS);
   return graph;
 }

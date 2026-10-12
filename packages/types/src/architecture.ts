@@ -1,4 +1,4 @@
-import type { NetworkFlowPair } from "./network";
+import type { NetworkFlowPair } from "./network.js";
 
 export type GraphNodeKind =
   | "subscription"
@@ -77,6 +77,9 @@ export type ArchitectureGraph = {
   generatedAt: string;
   nodes: ArchitectureNode[];
   edges: ArchitectureEdge[];
+  /** "mock" when Azure could not be read and sample data is served */
+  source?: "azure" | "mock";
+  note?: string;
 };
 
 export type ArchitectureFlowEdgeMetric = {

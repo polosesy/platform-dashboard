@@ -3,17 +3,44 @@
   --bg: #f6f4ef;
   --panel: rgba(255, 255, 255, 0.72);
   --panel-solid: #ffffff;
+  --panel-sunken: rgba(20, 21, 23, 0.035);
   --ink: #141517;
   --muted: rgba(20, 21, 23, 0.62);
+  --subtle: rgba(20, 21, 23, 0.45);
   --border: rgba(20, 21, 23, 0.12);
+  --border-strong: rgba(20, 21, 23, 0.22);
   --accent: #0078d4;
+  --accent-soft: rgba(0, 120, 212, 0.1);
   --accent-2: #00a3a3;
   --danger: #d83b01;
+  --danger-soft: rgba(216, 59, 1, 0.1);
   --warning: #d18400;
+  --warning-soft: rgba(209, 132, 0, 0.12);
+  --success: #107c10;
+  --success-soft: rgba(16, 124, 16, 0.1);
+
+  /* Severity scale (Defender / policy findings) */
+  --sev-high: var(--danger);
+  --sev-medium: var(--warning);
+  --sev-low: var(--accent);
+  --sev-info: var(--subtle);
 
   --radius-lg: 18px;
   --radius-md: 12px;
   --radius-sm: 10px;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 21, 23, 0.06);
+  --shadow-md: 0 8px 24px rgba(20, 21, 23, 0.08);
+  --shadow-pop: 0 12px 32px rgba(20, 21, 23, 0.14);
+
+  /* Aliases for names some page modules use — keep them pointing at the tokens above */
+  --surface: var(--panel-solid);
+  --surface-2: var(--panel-sunken);
+  --fg: var(--ink);
+  --text: var(--ink);
+  --line: var(--border);
 }
 
 html,
@@ -29,7 +56,10 @@ body {
     radial-gradient(900px 500px at 84% 18%, rgba(0, 163, 163, 0.16), transparent 55%),
     radial-gradient(900px 600px at 50% 100%, rgba(20, 21, 23, 0.06), transparent 60%),
     var(--bg);
-  font-family: var(--font-geist-sans);
+  /* Declared on body: next/font puts --font-geist-* on the body class, not on :root */
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, Consolas, monospace;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -1,215 +1,17 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
-export type Locale = "ko" | "en";
+export type { Locale } from "./i18nMessages";
+import type { Locale } from "./i18nMessages";
 
-type Translations = Record<string, Record<Locale, string>>;
-
-const T: Translations = {
-  // ── Live Diagram Page ──
-  "live.title": { ko: "라이브 아키텍처", en: "Live Architecture" },
-  "live.loading": { ko: "로딩중...", en: "Loading..." },
-  "live.noDiagram": { ko: "다이어그램 없음", en: "No diagram" },
-  "live.updated": { ko: "업데이트", en: "Updated" },
-  "live.connected": { ko: "연결됨", en: "Live" },
-  "live.disconnected": { ko: "연결 끊김", en: "Disconnected" },
-  "live.polling": { ko: "폴링 (30초)", en: "Polling (30s)" },
-  "live.sse": { ko: "SSE 스트림", en: "SSE Stream" },
-  "live.refresh": { ko: "새로고침", en: "Refresh" },
-  "live.generateFromAzure": { ko: "Azure에서 생성", en: "Generate from Azure" },
-  "live.generating": { ko: "생성 중...", en: "Generating..." },
-  "live.subscription": { ko: "구독", en: "Subscription" },
-  "live.networkFlow": { ko: "네트워크 플로우", en: "Network Flow" },
-  "live.particles": { ko: "파티클", en: "Particles" },
-  "live.faultRipple": { ko: "장애 파급", en: "Fault Ripple" },
-  "live.heatmap": { ko: "히트맵", en: "Heatmap" },
-  "live.timeline": { ko: "타임라인", en: "Timeline" },
-  "live.nodes": { ko: "노드", en: "Nodes" },
-  "live.edges": { ko: "엣지", en: "Edges" },
-  "live.bindings": { ko: "바인딩", en: "Bindings" },
-  "live.alerts": { ko: "알림", en: "Alerts" },
-  "live.faults": { ko: "장애", en: "Faults" },
-  "live.loading3d": { ko: "3D 로딩 중...", en: "Loading 3D..." },
-  "live.searchResource": { ko: "리소스 검색...", en: "Search resources..." },
-
-  // ── Visualization Modes ──
-  "viz.2d": { ko: "2D 기본", en: "2D Standard" },
-  "viz.2d-animated": { ko: "2D 애니메이션", en: "2D Animated" },
-  "viz.3d": { ko: "3D 토폴로지", en: "3D Topology" },
-
-  // ── Alert Sidebar ──
-  "alert.title": { ko: "활성 알림", en: "Active Alerts" },
-  "alert.empty": { ko: "활성 알림 없음", en: "No active alerts" },
-  "alert.causes": { ko: "원인:", en: "Causes:" },
-  "alert.affects": { ko: "영향:", en: "Affects:" },
-
-  // ── Fault Timeline ──
-  "fault.title": { ko: "장애 타임라인", en: "Fault Timeline" },
-  "fault.empty": { ko: "활성 장애 없음", en: "No active faults" },
-
-  // ── Resource Detail Panel ──
-  "detail.kind": { ko: "유형", en: "Type" },
-  "detail.location": { ko: "위치", en: "Location" },
-  "detail.resourceGroup": { ko: "리소스 그룹", en: "Resource Group" },
-  "detail.endpoint": { ko: "엔드포인트", en: "Endpoint" },
-  "detail.azureId": { ko: "Azure Resource ID", en: "Azure Resource ID" },
-  "detail.tags": { ko: "태그", en: "Tags" },
-  "detail.metrics": { ko: "메트릭", en: "Metrics" },
-  "detail.alerts": { ko: "알림", en: "Alerts" },
-  "detail.connections": { ko: "연결", en: "Connections" },
-  "detail.noAlerts": { ko: "활성 알림 없음", en: "No active alerts" },
-  "detail.inbound": { ko: "인바운드", en: "Inbound" },
-  "detail.outbound": { ko: "아웃바운드", en: "Outbound" },
-  "detail.health": { ko: "상태", en: "Health" },
-  "detail.noData": { ko: "데이터 없음", en: "No data" },
-  "detail.noMetrics": { ko: "메트릭 없음", en: "No metrics" },
-  "detail.essentials": { ko: "필수 정보", en: "Essentials" },
-  "detail.status": { ko: "상태", en: "Status" },
-  "detail.alertCauses": { ko: "원인 후보", en: "Root Causes" },
-  "detail.alertAffects": { ko: "영향", en: "Affects" },
-  "detail.alertNodes": { ko: "노드", en: "nodes" },
-  "detail.alertEdges": { ko: "엣지", en: "edges" },
-  "detail.alertRules": { ko: "경고 규칙", en: "Alert Rules" },
-  "detail.disabled": { ko: "비활성", en: "Disabled" },
-
-  // ── Backend Pool Detail ──
-  "detail.backendPool": { ko: "백엔드 풀", en: "Backend Pool" },
-  "detail.backendPool.members": { ko: "멤버", en: "Members" },
-  "detail.backendPool.probe": { ko: "상태 프로브", en: "Health Probe" },
-  "detail.backendPool.healthy": { ko: "정상", en: "Healthy" },
-  "detail.backendPool.unhealthy": { ko: "비정상", en: "Unhealthy" },
-  "detail.backendPool.unknown": { ko: "알 수 없음", en: "Unknown" },
-  "detail.backendPool.rules": { ko: "로드밸런싱 규칙", en: "LB Rules" },
-  "detail.backendPool.name": { ko: "풀 이름", en: "Pool Name" },
-
-  // ── NSG Detail Panel ──
-  "detail.nsgRules": { ko: "보안 규칙", en: "Security Rules" },
-  "detail.nsgAccess": { ko: "접근", en: "Access" },
-  "detail.nsgProto": { ko: "프로토콜", en: "Proto" },
-  "detail.nsgPort": { ko: "포트", en: "Port" },
-  "detail.nsgSource": { ko: "소스", en: "Source" },
-  "detail.nsgDest": { ko: "대상", en: "Dest" },
-  "detail.nsgPriority": { ko: "우선순위", en: "Priority" },
-
-  // ── Edge Detail Panel ──
-  "detail.edge.overview": { ko: "개요", en: "Overview" },
-  "detail.edge.endpoints": { ko: "엔드포인트", en: "Endpoints" },
-  "detail.edge.nsg": { ko: "NSG 규칙", en: "NSG Rules" },
-  "detail.edge.udr": { ko: "UDR 라우트", en: "UDR Routes" },
-  "detail.edge.inboundFlows": { ko: "인바운드 플로우", en: "Inbound Flows" },
-  "detail.edge.outboundFlows": { ko: "아웃바운드 플로우", en: "Outbound Flows" },
-  "detail.edge.portSummary": { ko: "포트 요약", en: "Port Summary" },
-  "detail.edge.lastUpdated": { ko: "마지막 업데이트", en: "Last updated" },
-  "detail.edge.noFlows": { ko: "플로우 없음", en: "No flows" },
-  "detail.edge.noNsg": { ko: "NSG 없음", en: "No NSG" },
-  "detail.edge.noUdr": { ko: "UDR 없음", en: "No UDR" },
-  "detail.edge.internet": { ko: "인터넷", en: "Internet" },
-  "detail.edge.allow": { ko: "허용", en: "Allow" },
-  "detail.edge.deny": { ko: "차단", en: "Deny" },
-
-  // ── Tenant / Subscription Selector ──
-  "live.tenant": { ko: "테넌트", en: "Tenant" },
-  "live.selectTenant": { ko: "테넌트 선택", en: "Select Tenant" },
-  "live.region": { ko: "리전", en: "Region" },
-  "live.vnet": { ko: "VNet", en: "VNet" },
-  "live.allRegions": { ko: "전체 리전", en: "All Regions" },
-  "live.allVnets": { ko: "전체 VNet", en: "All VNets" },
-
-  // ── Common ──
-  "common.language": { ko: "한국어", en: "English" },
-  "common.overview": { ko: "개요", en: "Overview" },
-  "common.architecture": { ko: "아키텍처 맵", en: "Architecture Map" },
-  "common.liveDiagram": { ko: "라이브 다이어그램", en: "Live Diagram" },
-  "common.cost": { ko: "비용 분석", en: "Cost Analysis" },
-  "common.security": { ko: "보안", en: "Security" },
-  "common.health": { ko: "상태", en: "Health" },
-  "common.network": { ko: "네트워크", en: "Network" },
-  "common.kubernetes": { ko: "Kubernetes", en: "Kubernetes" },
-
-  // ── Navigation / Sidebar ──
-  "nav.dashboard": { ko: "대시보드", en: "Dashboard" },
-  "nav.visualization": { ko: "시각화", en: "Visualization" },
-  "nav.monitoring": { ko: "모니터링", en: "Monitoring" },
-  "nav.operations": { ko: "운영", en: "Operations" },
-  "nav.settings": { ko: "설정", en: "Settings" },
-  "nav.resourceHealth": { ko: "리소스 상태", en: "Resource Health" },
-  "nav.networkFlow": { ko: "네트워크 흐름", en: "Network Flow" },
-  "nav.costManagement": { ko: "비용 관리", en: "Cost Management" },
-
-  // ── Settings ──
-  "settings.language": { ko: "언어", en: "Language" },
-  "settings.korean": { ko: "한국어", en: "Korean" },
-  "settings.english": { ko: "영어", en: "English" },
-
-  // ── Health Page ──
-  "health.title": { ko: "서비스 상태", en: "Service Health" },
-  "health.tabGlobal": { ko: "글로벌 상태", en: "Global Status" },
-  "health.tabInstance": { ko: "인스턴스 상태", en: "Instance Health" },
-  "health.tabService": { ko: "서비스 이벤트", en: "Service Events" },
-  "health.generatedAt": { ko: "갱신", en: "Updated" },
-  "health.loading": { ko: "로딩 중...", en: "Loading..." },
-  "health.error": { ko: "로드 실패", en: "Failed to load" },
-
-  // Tab 1 — Global Status
-  "health.allOperational": { ko: "모든 Azure 서비스가 정상 운영 중입니다", en: "All Azure services are operating normally" },
-  "health.allOperationalSub": { ko: "현재 활성 인시던트가 없습니다", en: "There are no active incidents at this time" },
-  "health.activeIncidents": { ko: "활성 인시던트", en: "Active Incidents" },
-  "health.azureStatusLink": { ko: "Azure 공식 상태 페이지", en: "Azure Official Status Page" },
-  "health.incident.Active": { ko: "활성", en: "Active" },
-  "health.incident.Investigating": { ko: "조사 중", en: "Investigating" },
-  "health.incident.Mitigated": { ko: "완화됨", en: "Mitigated" },
-  "health.incident.Resolved": { ko: "해결됨", en: "Resolved" },
-  "health.affectedRegions": { ko: "영향 리전", en: "Affected Regions" },
-  "health.affectedServices": { ko: "영향 서비스", en: "Affected Services" },
-  "health.viewDetails": { ko: "상세 보기", en: "View Details" },
-
-  // Tab 2 — Instance Health
-  "health.resources": { ko: "리소스", en: "Resources" },
-  "health.healthDistribution": { ko: "상태 분포", en: "Health Distribution" },
-  "health.filterAll": { ko: "전체", en: "All" },
-  "health.allSubscriptions": { ko: "모든 구독", en: "All Subscriptions" },
-  "health.occurred": { ko: "발생", en: "Occurred" },
-
-  // Tab 1 supplement — Regional Status
-  "health.yourRegions": { ko: "배포된 리전 상태", en: "Your Deployed Regions" },
-  "health.yourRegionsSub": { ko: "구독 내 리소스가 배포된 리전별 서비스 상태", en: "Service health for regions where your resources are deployed" },
-  "health.regionOperational": { ko: "정상", en: "Operational" },
-  "health.regionAffected": { ko: "영향 받음", en: "Affected" },
-  "health.regionServiceIssue": { ko: "서비스 문제", en: "service issue" },
-  "health.regionMaintenance": { ko: "유지 보수 예정", en: "maintenance" },
-  "health.globalIncidents": { ko: "글로벌 인시던트", en: "Global Incidents" },
-  "health.permissionsRequired": { ko: "필요 권한", en: "Required Permissions" },
-  "health.permissionsNote": { ko: "실데이터 연동을 위해 서비스 주체에 Reader 역할이 필요합니다", en: "Reader role on each subscription is required for real data" },
-  "health.isMockData": { ko: "Mock 데이터 표시 중", en: "Showing mock data" },
-
-  // Tab 3 — Service Events
-  "health.noEvents": { ko: "활성 이벤트 없음", en: "No active events" },
-  "health.impactStart": { ko: "영향 시작", en: "Impact Start" },
-  "health.impactEnd": { ko: "영향 종료", en: "Impact End" },
-  "health.lastUpdate": { ko: "최종 업데이트", en: "Last Update" },
-  "health.eventType.ServiceIssue": { ko: "서비스 문제", en: "Service Issue" },
-  "health.eventType.PlannedMaintenance": { ko: "계획된 유지 보수", en: "Planned Maintenance" },
-  "health.eventType.HealthAdvisory": { ko: "상태 권고", en: "Health Advisory" },
-  "health.eventType.SecurityAdvisory": { ko: "보안 권고", en: "Security Advisory" },
-  "health.viewInPortal": { ko: "Azure Portal에서 보기", en: "View in Azure Portal" },
-  "health.clickToExpand": { ko: "클릭하여 펼치기", en: "Click to expand" },
-
-  // Translation feature
-  "health.translating": { ko: "번역 중...", en: "Translating..." },
-  "health.translateNotConfigured": { ko: "번역 서비스 미설정 (AZURE_TRANSLATOR_KEY 필요)", en: "Translation not configured (AZURE_TRANSLATOR_KEY required)" },
-  "health.translateError": { ko: "번역 실패 — 잠시 후 다시 시도하세요", en: "Translation failed — please try again" },
-
-  // Fallback / mock data notices
-  "health.timeoutFallback": { ko: "Azure API 응답 시간 초과 — 임시 샘플 데이터를 표시합니다", en: "Azure API timed out — showing sample data" },
-  "health.mockFallback": { ko: "Azure API 미연결 — 임시 샘플 데이터를 표시합니다", en: "Azure API not connected — showing sample data" },
-  "health.errorFallback": { ko: "Azure API 오류 — 임시 샘플 데이터를 표시합니다", en: "Azure API error — showing sample data" },
-};
+import { T } from "./i18nMessages";
 
 type I18nContextValue = {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-  t: (key: string) => string;
+  /** Translate `key`; `{name}` placeholders are filled from `vars`. */
+  t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
 const I18nContext = createContext<I18nContextValue>({
@@ -218,35 +20,57 @@ const I18nContext = createContext<I18nContextValue>({
   t: (key) => key,
 });
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  // Always start with "ko" to avoid SSR/client hydration mismatch
-  const [locale, setLocaleState] = useState<Locale>("ko");
+const LOCALE_STORAGE_KEY = "aud-locale";
+const LOCALE_EVENT = "aud-locale-change";
 
-  // Sync from localStorage after hydration
-  useEffect(() => {
-    const saved = localStorage.getItem("aud-locale") as Locale | null;
-    if (saved && (saved === "ko" || saved === "en")) {
-      setLocaleState(saved);
-    }
-  }, []);
+function readStoredLocale(): Locale {
+  try {
+    const saved = localStorage.getItem(LOCALE_STORAGE_KEY);
+    return saved === "en" ? "en" : "ko";
+  } catch {
+    return "ko";
+  }
+}
+
+function subscribeLocale(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(LOCALE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(LOCALE_EVENT, onChange);
+  };
+}
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  // Server snapshot is always "ko" so SSR and the first client render match;
+  // the stored locale is applied right after hydration.
+  const locale = useSyncExternalStore(subscribeLocale, readStoredLocale, () => "ko" as Locale);
 
   const setLocale = useCallback((l: Locale) => {
-    setLocaleState(l);
-    localStorage.setItem("aud-locale", l);
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, l);
+    } catch {
+      /* storage unavailable — locale resets on reload */
+    }
+    window.dispatchEvent(new Event(LOCALE_EVENT));
   }, []);
 
   const t = useCallback(
-    (key: string): string => {
-      return T[key]?.[locale] ?? key;
+    (key: string, vars?: Record<string, string | number>): string => {
+      const s = T[key]?.[locale] ?? key;
+      return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
     },
     [locale],
   );
 
-  return (
-    <I18nContext.Provider value={{ locale, setLocale, t }}>
-      {children}
-    </I18nContext.Provider>
-  );
+  // Screen readers pronounce by <html lang>; keep it in step with the chosen locale
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n() {

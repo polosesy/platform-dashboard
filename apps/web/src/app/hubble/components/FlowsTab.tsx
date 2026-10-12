@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type { HubbleFlowsResponse, HubbleFlow } from "@aud/types";
+import type { HubbleCoverage, HubbleFlowsResponse, HubbleFlow } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { CoverageNote } from "./CoverageNote";
 
 type Props = { clusterId: string };
 
@@ -28,6 +29,7 @@ export function FlowsTab({ clusterId }: Props) {
   const getApiToken = useApiToken();
 
   const [flows, setFlows] = useState<HubbleFlow[]>([]);
+  const [coverage, setCoverage] = useState<HubbleCoverage>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,7 @@ export function FlowsTab({ clusterId }: Props) {
         token,
       );
       setFlows(data.flows);
+      setCoverage(data.coverage);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -110,6 +113,8 @@ export function FlowsTab({ clusterId }: Props) {
           {filtered.length}개 플로우 {loading && "· 로딩 중..."}
         </span>
       </div>
+
+      <CoverageNote coverage={coverage} />
 
       {error && <div className={styles.errorMsg}>Flows 오류: {error}</div>}
 

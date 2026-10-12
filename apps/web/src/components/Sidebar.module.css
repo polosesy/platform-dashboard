@@ -110,13 +110,29 @@
   gap: 2px;
 }
 
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .sectionLabel {
+  margin: 0;
   padding: 6px 10px 4px;
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--muted);
+}
+
+.subLabel {
+  padding: 6px 10px 2px 38px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--subtle);
 }
 
 .navItem {
@@ -151,10 +167,17 @@
 
 .navIcon {
   width: 20px;
-  text-align: center;
-  font-size: 14px;
+  display: inline-flex;
+  justify-content: center;
   flex: none;
   opacity: 0.7;
+}
+
+.navItem:focus-visible,
+.closeBtn:focus-visible,
+.langBtn:focus-visible {
+  outline: 2px solid rgba(0, 120, 212, 0.9);
+  outline-offset: 2px;
 }
 
 .navItemActive .navIcon {

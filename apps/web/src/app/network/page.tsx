@@ -1,33 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import styles from "./styles.module.css";
-import type { NetworkSummary } from "@/lib/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
-import { useApiToken } from "@/lib/useApiToken";
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let v = bytes;
-  let idx = 0;
-  while (v >= 1024 && idx < units.length - 1) {
-    v /= 1024;
-    idx++;
-  }
-  const digits = idx === 0 ? 0 : idx === 1 ? 1 : 2;
-  return `${v.toFixed(digits)} ${units[idx]}`;
-}
+import type { NetworkSummary } from "@aud/types";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { ErrorNotice, PageHeader, SampleDataNotice, Select } from "@/components/ui";
+import { useI18n } from "@/lib/i18n";
+import { formatBytes } from "@/lib/format";
+import { useApiQuery } from "@/lib/useApiQuery";
 
 function fmtInt(n: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
 }
 
 async function loadSummary(bearerToken: string | null, lookbackMinutes: number, top: number): Promise<NetworkSummary> {
-  const url = new URL(`${apiBaseUrl()}/api/network/summary`);
-  url.searchParams.set("lookbackMinutes", String(lookbackMinutes));
-  url.searchParams.set("top", String(top));
-  return await fetchJsonWithBearer<NetworkSummary>(url.toString(), bearerToken);
+  return await fetchJsonWithBearer<NetworkSummary>(apiUrl("/api/network/summary", { lookbackMinutes, top }), bearerToken);
 }
 
 type RangePreset = { label: string; minutes: number };
@@ -39,36 +26,13 @@ const ranges: RangePreset[] = [
 ];
 
 export default function NetworkPage() {
-  const getApiToken = useApiToken();
-  const [summary, setSummary] = useState<NetworkSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { t } = useI18n();
   const [lookbackMinutes, setLookbackMinutes] = useState(60);
   const [top, setTop] = useState(15);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    getApiToken()
-      .then((token) => loadSummary(token, lookbackMinutes, top))
-      .then((data) => {
-        if (cancelled) return;
-        setSummary(data);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Unknown error");
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [getApiToken, lookbackMinutes, top]);
+  const { data, error, loading } = useApiQuery(`network:${lookbackMinutes}:${top}`, (token) =>
+    loadSummary(token, lookbackMinutes, top),
+  );
+  const summary = data ?? null;
 
   const maxSubnetBytes = useMemo(() => {
     const max = Math.max(0, ...(summary?.topSubnetPairs ?? []).map((r) => r.totalBytes));
@@ -87,82 +51,45 @@ export default function NetworkPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.title}>Network Flow</div>
-          <div className={styles.subTitle}>
-            {summary ? (
-              <span>
-                Table: <span className={styles.mono}>{summary.table}</span> · Generated: {new Date(summary.generatedAt).toLocaleString()}
-              </span>
-            ) : (
-              <span>{loading ? "Loading..." : "No data"}</span>
-            )}
-          </div>
-        </div>
+      <PageHeader
+        meta={summary ? <span>{t("net.table")} <span className={styles.mono}>{summary.table}</span> · {t("common.updated")} {new Date(summary.generatedAt).toLocaleString()}</span> : loading ? <span>{t("common.loading")}</span> : null}
+        actions={
+          <>
+            <Select label={t("net.range")} value={String(lookbackMinutes)} onChange={(v) => setLookbackMinutes(Number(v))} options={ranges.map((r) => ({ value: String(r.minutes), label: r.label }))} />
+            <Select label={t("net.top")} value={String(top)} onChange={(v) => setTop(Number(v))} options={[10, 15, 20, 30, 50].map((n) => ({ value: String(n), label: String(n) }))} />
+          </>
+        }
+      />
 
-        <div className={styles.controls}>
-          <div className={styles.control}>
-            <div className={styles.controlLabel}>Range</div>
-            <select
-              className={styles.select}
-              value={lookbackMinutes}
-              onChange={(e) => setLookbackMinutes(Number(e.target.value))}
-            >
-              {ranges.map((r) => (
-                <option key={r.minutes} value={r.minutes}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.control}>
-            <div className={styles.controlLabel}>Top</div>
-            <select className={styles.select} value={top} onChange={(e) => setTop(Number(e.target.value))}>
-              {[10, 15, 20, 30, 50].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {error ? <div className={styles.error}>Failed to load: {error}</div> : null}
-      {summary?.note ? <div className={styles.note}>{summary.note}</div> : null}
+      <ErrorNotice error={error} />
+      <SampleDataNotice note={summary?.note} />
 
       <div className={styles.grid}>
         <section className={styles.card}>
-          <div className={styles.cardTitle}>Totals</div>
+          <div className={styles.cardTitle}>{t("net.totals")}</div>
           <div className={styles.kpis}>
             <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>Bytes</div>
+              <div className={styles.kpiLabel}>{t("net.bytes")}</div>
               <div className={styles.kpiValue}>{summary ? formatBytes(summary.totals.totalBytes) : "-"}</div>
             </div>
             <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>Allowed flows</div>
+              <div className={styles.kpiLabel}>{t("net.allowed")}</div>
               <div className={styles.kpiValue}>{summary ? fmtInt(summary.totals.allowedFlows) : "-"}</div>
             </div>
             <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>Denied flows</div>
+              <div className={styles.kpiLabel}>{t("net.denied")}</div>
               <div className={styles.kpiValue}>{summary ? fmtInt(summary.totals.deniedFlows) : "-"}</div>
-            </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>API</div>
-              <div className={styles.kpiValueMono}>{apiBaseUrl()}</div>
             </div>
           </div>
         </section>
 
         <section className={styles.card}>
-          <div className={styles.cardTitle}>Top subnet pairs</div>
+          <div className={styles.cardTitle}>{t("net.subnetPairs")}</div>
           <div className={styles.table}>
             <div className={styles.thead}>
-              <div>Pair</div>
-              <div>Bytes</div>
-              <div>Denied</div>
+              <div>{t("net.pair")}</div>
+              <div>{t("net.bytes")}</div>
+              <div>{t("net.deniedShort")}</div>
             </div>
             {(summary?.topSubnetPairs ?? []).map((r) => {
               const w = `${Math.round((r.totalBytes / maxSubnetBytes) * 100)}%`;
@@ -185,17 +112,17 @@ export default function NetworkPage() {
                 </div>
               );
             })}
-            {summary && summary.topSubnetPairs.length === 0 ? <div className={styles.empty}>No flow pairs found.</div> : null}
+            {summary && summary.topSubnetPairs.length === 0 ? <div className={styles.empty}>{t("net.noPairs")}</div> : null}
           </div>
         </section>
 
         <section className={styles.card}>
-          <div className={styles.cardTitle}>Top talkers (IP)</div>
+          <div className={styles.cardTitle}>{t("net.talkers")}</div>
           <div className={styles.table}>
             <div className={styles.thead}>
-              <div>Pair</div>
-              <div>Bytes</div>
-              <div>Denied</div>
+              <div>{t("net.pair")}</div>
+              <div>{t("net.bytes")}</div>
+              <div>{t("net.deniedShort")}</div>
             </div>
             {(summary?.topIpPairs ?? []).map((r) => {
               const w = `${Math.round((r.totalBytes / maxIpBytes) * 100)}%`;
@@ -218,17 +145,17 @@ export default function NetworkPage() {
                 </div>
               );
             })}
-            {summary && summary.topIpPairs.length === 0 ? <div className={styles.empty}>No talkers found.</div> : null}
+            {summary && summary.topIpPairs.length === 0 ? <div className={styles.empty}>{t("net.noTalkers")}</div> : null}
           </div>
         </section>
 
         <section className={styles.card}>
-          <div className={styles.cardTitle}>Top ports</div>
+          <div className={styles.cardTitle}>{t("net.ports")}</div>
           <div className={styles.table}>
             <div className={styles.thead}>
-              <div>Port</div>
-              <div>Bytes</div>
-              <div>Denied</div>
+              <div>{t("net.port")}</div>
+              <div>{t("net.bytes")}</div>
+              <div>{t("net.deniedShort")}</div>
             </div>
             {(summary?.topPorts ?? []).map((r) => {
               const w = `${Math.round((r.totalBytes / maxPortBytes) * 100)}%`;
@@ -250,7 +177,7 @@ export default function NetworkPage() {
                 </div>
               );
             })}
-            {summary && summary.topPorts.length === 0 ? <div className={styles.empty}>No ports found.</div> : null}
+            {summary && summary.topPorts.length === 0 ? <div className={styles.empty}>{t("net.noPorts")}</div> : null}
           </div>
         </section>
       </div>

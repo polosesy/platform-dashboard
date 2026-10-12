@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import type { LiveDiagramSnapshot } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 
-type UpdateMode = "polling" | "sse";
+export type UpdateMode = "polling" | "sse";
+
+type SnapshotState = {
+  /** `${diagramId}:${mode}` the state belongs to — anything else is stale. */
+  key: string;
+  snapshot: LiveDiagramSnapshot | null;
+  error: string | null;
+  connected: boolean;
+};
+
+const EMPTY = { snapshot: null, error: null, connected: false };
 
 export function useLiveSnapshot(
   diagramId: string,
@@ -13,90 +23,66 @@ export function useLiveSnapshot(
   intervalSec = 30,
 ) {
   const getApiToken = useApiToken();
-  const [snapshot, setSnapshot] = useState<LiveDiagramSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const key = `${diagramId}:${mode}`;
+  const [state, setState] = useState<SnapshotState>({ key: "", ...EMPTY });
+
+  const fetchSnapshot = useCallback(async () => {
+    const token = await getApiToken().catch(() => null);
+    return fetchJsonWithBearer<LiveDiagramSnapshot>(apiUrl("/api/live/snapshot", { diagramId }), token);
+  }, [diagramId, getApiToken]);
 
   // Manual refresh
   const refresh = useCallback(async () => {
     try {
-      const token = await getApiToken().catch(() => null);
-      const data = await fetchJsonWithBearer<LiveDiagramSnapshot>(
-        `${apiBaseUrl()}/api/live/snapshot?diagramId=${diagramId}`,
-        token,
-      );
-      setSnapshot(data);
-      setError(null);
+      const snapshot = await fetchSnapshot();
+      setState({ key, snapshot, error: null, connected: true });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setState((s) => ({ ...(s.key === key ? s : { key, ...EMPTY }), error: e instanceof Error ? e.message : "Unknown error" }));
     }
-  }, [diagramId, getApiToken]);
+  }, [fetchSnapshot, key]);
 
   useEffect(() => {
     let cancelled = false;
-    setSnapshot(null); // Clear stale snapshot on diagram/mode change
+    const update = (patch: Partial<Omit<SnapshotState, "key">>) => {
+      if (cancelled) return;
+      setState((s) => ({ ...(s.key === key ? s : { key, ...EMPTY }), ...patch }));
+    };
 
     if (mode === "sse") {
-      const es = new EventSource(
-        `${apiBaseUrl()}/api/live/stream?diagramId=${diagramId}`,
-      );
-      eventSourceRef.current = es;
-      setConnected(true);
-
+      // EventSource cannot send an Authorization header — the stream is served without the user's token
+      const es = new EventSource(apiUrl("/api/live/stream", { diagramId }));
+      es.onopen = () => update({ connected: true });
       es.onmessage = (e) => {
-        if (cancelled) return;
         try {
-          setSnapshot(JSON.parse(e.data));
-          setError(null);
+          update({ snapshot: JSON.parse(e.data) as LiveDiagramSnapshot, error: null, connected: true });
         } catch {
           /* ignore parse errors */
         }
       };
-
-      es.onerror = () => {
-        if (cancelled) return;
-        setConnected(false);
-        setError("SSE connection lost, reconnecting...");
-      };
+      es.onerror = () => update({ connected: false, error: "SSE connection lost, reconnecting..." });
 
       return () => {
         cancelled = true;
         es.close();
-        setConnected(false);
       };
     }
 
     // Polling mode
-    setConnected(true);
-    const load = async () => {
-      if (cancelled) return;
-      try {
-        const token = await getApiToken().catch(() => null);
-        const data = await fetchJsonWithBearer<LiveDiagramSnapshot>(
-          `${apiBaseUrl()}/api/live/snapshot?diagramId=${diagramId}`,
-          token,
-        );
-        if (!cancelled) {
-          setSnapshot(data);
-          setError(null);
-        }
-      } catch (e: unknown) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Unknown error");
-        }
-      }
-    };
+    const load = () =>
+      fetchSnapshot().then(
+        (snapshot) => update({ snapshot, error: null, connected: true }),
+        (e: unknown) => update({ error: e instanceof Error ? e.message : "Unknown error", connected: false }),
+      );
 
-    load();
+    void load();
     const timer = window.setInterval(load, intervalSec * 1000);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
-      setConnected(false);
     };
-  }, [diagramId, mode, intervalSec, getApiToken]);
+  }, [key, diagramId, mode, intervalSec, fetchSnapshot]);
 
-  return { snapshot, error, connected, refresh };
+  const current = state.key === key ? state : { key, ...EMPTY };
+  return { snapshot: current.snapshot, error: current.error, connected: current.connected, refresh };
 }

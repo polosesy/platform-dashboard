@@ -4,11 +4,11 @@ import "reactflow/dist/style.css";
 
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
-import { useLiveSnapshot } from "./hooks/useLiveSnapshot";
+import { useLiveSnapshot, type UpdateMode } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
 import { AlertSidebar } from "./components/AlertSidebar";
 import { FaultTimeline } from "./components/FaultTimeline";
@@ -16,12 +16,12 @@ import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
 import { EdgeDetailPanel } from "./components/EdgeDetailPanel";
 import { formatAzureRegion } from "./utils/regionFormat";
 import styles from "./styles.module.css";
+import { Button, PageHeader, Segmented, Select } from "@/components/ui";
 
 const Canvas3D = lazy(() =>
   import("./components/three/Canvas3D").then((m) => ({ default: m.Canvas3D })),
 );
 
-type UpdateMode = "polling" | "sse";
 
 // ── Multi-select dropdown (Region / VNet filter) ──
 type MultiSelectDropdownProps = {
@@ -252,38 +252,7 @@ export default function LiveDiagramPage() {
     setGenerateError(null);
     try {
       const token = await getApiToken().catch(() => null);
-      const resp = await fetchJsonWithBearer<{
-        ok: boolean;
-        diagram: DiagramSpec;
-        _diagnostics?: {
-          graphNodes: number;
-          graphEdges: number;
-          specNodes: number;
-          specEdges: number;
-          nodesWithParent: number;
-          groupNodes: number;
-        };
-        _containment?: {
-          subnetParentCount: number;
-          resourceSubnetCount: number;
-          pass1: number;
-          pass1b: number;
-          pass2Nic: number;
-          pass2Other: number;
-          pass3: number;
-          pass4: number;
-          pass5: number;
-          sampleChains: string[];
-          edgeKindCounts: Record<string, number>;
-          graphNodeCounts?: { vnet: number; subnet: number; nic: number; total: number };
-        };
-        _source?: string;
-        _verification?: {
-          counts: { vnetCount: number; subnetCount: number; nicCount: number; vmCount: number };
-          subnetSamples: Array<{ id: string; parentId: string | null; label: string }>;
-          nicSamples: Array<{ id: string; parentId: string | null; label: string }>;
-        };
-      }>(
+      const resp = await fetchJsonWithBearer<{ ok: boolean; diagram: DiagramSpec; _source?: string }>(
         `${apiBaseUrl()}/api/live/diagrams/generate`,
         token,
         {
@@ -292,39 +261,6 @@ export default function LiveDiagramPage() {
         },
       );
       if (resp.ok && resp.diagram?.id) {
-        // Log diagnostics for debugging containment
-        console.log(`[Generate] Source: ${resp._source ?? "unknown"}`);
-        if (resp._diagnostics) {
-          console.log("[Generate] Diagnostics:", resp._diagnostics);
-        }
-        if (resp._containment) {
-          const c = resp._containment;
-          console.log("[Generate] Containment:", c);
-          if (c.graphNodeCounts) {
-            console.log(`[Generate] Graph nodes: ${c.graphNodeCounts.total} total, VNet=${c.graphNodeCounts.vnet}, Subnet=${c.graphNodeCounts.subnet}, NIC=${c.graphNodeCounts.nic}`);
-          }
-          console.log(`[Generate] Containment passes: P1=${c.pass1} P1b=${c.pass1b} P2nic=${c.pass2Nic} P2other=${c.pass2Other} P3=${c.pass3} P4=${c.pass4} P5=${c.pass5}`);
-          console.log(`[Generate] Result: ${c.subnetParentCount} subnet→vnet, ${c.resourceSubnetCount} resource→subnet`);
-          console.log("[Generate] Edge kinds:", c.edgeKindCounts);
-          for (const chain of c.sampleChains) {
-            console.log(`[Generate]   ${chain}`);
-          }
-        }
-        // Verification logs (requirement #4)
-        if (resp._verification) {
-          const v = resp._verification;
-          console.log(`[Generate] Verification counts: VNet=${v.counts.vnetCount}, Subnet=${v.counts.subnetCount}, NIC=${v.counts.nicCount}, VM=${v.counts.vmCount}`);
-          console.log("[Generate] Subnet samples:", v.subnetSamples);
-          console.log("[Generate] NIC samples:", v.nicSamples);
-        }
-        // Log parentId distribution from returned spec
-        const groups = resp.diagram.nodes.filter((n) => n.nodeType === "group");
-        const withParent = resp.diagram.nodes.filter((n) => n.parentId);
-        console.log(`[Generate] Spec: ${resp.diagram.nodes.length} nodes, ${groups.length} groups, ${withParent.length} with parentId`);
-        for (const g of groups) {
-          const children = resp.diagram.nodes.filter((n) => n.parentId === g.id);
-          console.log(`[Generate]   Group "${g.id}" (${g.label}): ${children.length} children`);
-        }
         setDiagramId(resp.diagram.id);
       }
     } catch (e: unknown) {
@@ -386,7 +322,7 @@ export default function LiveDiagramPage() {
       if (count > maxCount) { maxCount = count; primaryId = vnet.id; }
     }
     setSelectedVnets(new Set([primaryId]));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [spec]); // Re-run only when spec object changes (new Generate)
 
   // ── Filtered spec (VNet + Region — multi-select) ──
@@ -527,11 +463,6 @@ export default function LiveDiagramPage() {
     [regionOptions],
   );
 
-  // fitView trigger: changes when VNet/Region filter changes → LiveCanvas centers visible nodes
-  const fitViewTrigger = useMemo(
-    () => JSON.stringify([[...selectedVnets].sort(), [...selectedRegions].sort()]),
-    [selectedVnets, selectedRegions],
-  );
   const isFiltered = selectedVnets.size > 0 || selectedRegions.size > 0;
 
   const handleAlertClick = useCallback((alert: LiveAlert) => {
@@ -559,7 +490,7 @@ export default function LiveDiagramPage() {
       try {
         const token = await getApiToken().catch(() => null);
         const data = await fetchJsonWithBearer<EdgeNetworkDetail>(
-          `${apiBaseUrl()}/api/live/edge-detail?diagramId=${diagramId}&edgeId=${encodeURIComponent(selectedEdgeId!)}`,
+          apiUrl("/api/live/edge-detail", { diagramId, edgeId: selectedEdgeId }),
           token,
         );
         if (!cancelled) setEdgeDetail(data);
@@ -574,53 +505,35 @@ export default function LiveDiagramPage() {
 
   return (
     <div className={styles.page}>
-      {/* Header */}
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <div className={styles.title}>{t("live.title")}</div>
-          <div className={styles.subTitle}>
-            {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}
-            {snapshot && ` · ${t("live.updated")} ${new Date(snapshot.generatedAt).toLocaleTimeString()}`}
-          </div>
-        </div>
-
-        <div className={styles.headerRight}>
-          {/* Connection status */}
-          <div
-            className={styles.statusDot}
-            style={{ background: connected ? "rgba(16,137,62,0.75)" : "rgba(216,59,1,0.75)" }}
-          />
-          <span className={styles.statusLabel}>{connected ? t("live.connected") : t("live.disconnected")}</span>
-
-          {/* Visualization mode selector */}
-          <div className={styles.modeGroup}>
-            {(["2d", "2d-animated", "3d"] as VisualizationMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`${styles.modeBtn} ${vizMode === m ? styles.modeBtnActive : ""}`}
-                onClick={() => setVizMode(m)}
-              >
-                {t(`viz.${m}`)}
-              </button>
-            ))}
-          </div>
-
-          {/* Update mode selector */}
-          <select
-            className={styles.select}
-            value={mode}
-            onChange={(e) => setMode(e.target.value as UpdateMode)}
-          >
-            <option value="polling">{t("live.polling")}</option>
-            <option value="sse">{t("live.sse")}</option>
-          </select>
-
-          <button className={styles.refreshBtn} onClick={refresh} type="button">
-            {t("live.refresh")}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        meta={
+          <>
+            <span className={styles.statusDot} style={{ background: connected ? "var(--success)" : "var(--danger)" }} aria-hidden="true" />
+            <span>{connected ? t("live.connected") : t("live.disconnected")}</span>
+            <span>· {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}</span>
+            {snapshot ? <span>· {t("live.updated")} {new Date(snapshot.generatedAt).toLocaleTimeString()}</span> : null}
+            <span>· {t("live.scopeHint")}</span>
+          </>
+        }
+        actions={
+          <>
+            <Segmented
+              label={t("live.vizMode")}
+              value={vizMode}
+              onChange={setVizMode}
+              items={(["2d", "2d-animated", "3d"] as VisualizationMode[]).map((m) => ({ id: m, label: t(`viz.${m}`) }))}
+            />
+            <Select
+              label={t("live.updateMode")}
+              hideLabel
+              value={mode}
+              onChange={(v) => setMode(v as UpdateMode)}
+              options={[{ value: "polling", label: t("live.polling") }, { value: "sse", label: t("live.sse") }]}
+            />
+            <Button onClick={refresh}>{t("live.refresh")}</Button>
+          </>
+        }
+      />
 
       {/* Tenant & Subscription Selector Bar */}
       <div className={styles.selectorBar}>
@@ -636,7 +549,7 @@ export default function LiveDiagramPage() {
             {tenants.length === 0 ? <option value="">{t("live.selectTenant")}</option> : null}
             {tenants.map((tn) => (
               <option key={tn.tenantId} value={tn.tenantId}>
-                {tn.displayName ?? tn.tenantId}
+                {tn.displayName && tn.displayName !== tn.tenantId ? tn.displayName : `${tn.tenantId.slice(0, 8)}…`}
               </option>
             ))}
           </select>
@@ -833,7 +746,6 @@ export default function LiveDiagramPage() {
               showParticles={showParticles}
               showFaultRipple={showFaultRipple}
               showHeatmap={showHeatmap}
-              fitViewTrigger={fitViewTrigger}
               isFiltered={isFiltered}
               focusNodeId={focusNodeId}
               onVmssInstanceSelect={handleVmssInstanceSelect}

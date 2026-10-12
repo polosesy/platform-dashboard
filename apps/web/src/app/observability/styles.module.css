@@ -1,47 +1,14 @@
 /* ── Page Layout ── */
 .page {
-  padding: 24px 28px;
-  max-width: 1400px;
-  margin: 0 auto;
-  font-family: var(--font-sans);
-  color: var(--fg);
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  color: var(--ink);
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
 
-.title {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-  flex: 1;
-}
 
-.clusterSelect {
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 13px;
-  min-width: 200px;
-}
 
-.refreshBtn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 12px;
-  cursor: pointer;
-}
-.refreshBtn:hover { background: var(--surface-2, #f0f0f0); }
 
 /* ── Data Source Status ── */
 .dsBadges {
@@ -84,30 +51,7 @@
 .noDataBanner strong { display: block; margin-bottom: 6px; font-size: 14px; color: rgba(20,21,23,0.6); }
 
 /* ── Tabs ── */
-.tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 24px;
-}
 
-.tab {
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: none;
-  background: none;
-  color: rgba(20,21,23,0.5);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.15s;
-}
-.tab:hover { color: var(--fg); }
-.tabActive {
-  color: var(--accent, #0078d4);
-  border-bottom-color: var(--accent, #0078d4);
-}
 
 /* ── Summary Cards (Overview) ── */
 .summaryCards {
@@ -203,7 +147,7 @@
 }
 .podRunning { background: rgba(16,137,62,0.65); }
 .podPending { background: rgba(209,132,0,0.65); }
-.podFailed  { background: rgba(196,43,28,0.75); }
+.podFailed  { background: rgba(216, 59, 1, 0.75); }
 
 .podBarLabel {
   font-size: 11px;
@@ -235,7 +179,7 @@
 }
 .gaugeOk      { background: rgba(16,137,62,0.65); }
 .gaugeWarn    { background: rgba(209,132,0,0.75); }
-.gaugeCrit    { background: rgba(196,43,28,0.80); }
+.gaugeCrit    { background: var(--danger); }
 
 .gaugeLabel {
   font-size: 11px;
@@ -257,7 +201,7 @@
 }
 .apmOk   { background: rgba(16,137,62,0.08);  color: rgba(16,137,62,0.85); }
 .apmWarn { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
-.apmCrit { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.90); }
+.apmCrit { background: rgba(216, 59, 1, 0.08); color: var(--danger); }
 .apmNone { background: rgba(20,21,23,0.05);  color: rgba(20,21,23,0.35); }
 
 /* ── Workload Detail Panel ── */
@@ -348,7 +292,7 @@
   text-transform: uppercase;
 }
 .nodeReady    { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
-.nodeNotReady { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.85); }
+.nodeNotReady { background: rgba(216, 59, 1, 0.08); color: var(--danger); }
 .nodeUnknown  { background: rgba(20,21,23,0.07); color: rgba(20,21,23,0.45); }
 
 .nodeMetrics { display: flex; flex-direction: column; gap: 8px; }
@@ -376,10 +320,10 @@
 
 .errorMsg {
   padding: 16px;
-  background: rgba(196,43,28,0.06);
-  border: 1px solid rgba(196,43,28,0.20);
+  background: rgba(216, 59, 1, 0.06);
+  border: 1px solid rgba(216, 59, 1, 0.20);
   border-radius: 8px;
-  color: rgba(196,43,28,0.85);
+  color: var(--danger);
   font-size: 13px;
   margin-bottom: 16px;
 }
@@ -511,7 +455,7 @@
 
 .podDetailRestarts {
   font-size: 10px;
-  color: rgba(196,43,28,0.75);
+  color: rgba(216, 59, 1, 0.75);
   font-weight: 600;
 }
 
@@ -524,7 +468,7 @@
 }
 .podStatusRunning    { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
 .podStatusWaiting    { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
-.podStatusTerminated { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.85); }
+.podStatusTerminated { background: rgba(216, 59, 1, 0.08); color: var(--danger); }
 .podStatusUnknown    { background: rgba(20,21,23,0.06); color: rgba(20,21,23,0.40); }
 
 .podDetailBody {
@@ -615,3 +559,23 @@
 }
 .nodeNetLabel { font-weight: 600; color: rgba(20,21,23,0.55); }
 .nodeNetValue { font-variant-numeric: tabular-nums; }
+
+/* Free-text cluster ID (when the cluster list is unavailable) */
+.clusterField {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clusterField input {
+  height: 34px;
+  min-width: 220px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+}

@@ -1,15 +1,14 @@
 import type { Request, Response, Router } from "express";
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { AzureSubscriptionsResponse, AzureTenantsResponse } from "@aud/types";
-import { tryListAzureSubscriptionsFromAzure } from "../services/azure";
+import { tryListAzureSubscriptionsFromAzure } from "../services/azure.js";
+import { parseSubscriptionIds } from "../infra/requestParams.js";
 
 export function registerAzureRoutes(router: Router, env: Env) {
   // ── Tenants ──
   router.get("/api/azure/tenants", (_req: Request, res: Response) => {
     const tenantId = env.AZURE_AD_TENANT_ID;
-    const tenants = tenantId
-      ? [{ tenantId, displayName: tenantId }]
-      : [];
+    const tenants = tenantId ? [{ tenantId, displayName: tenantId }] : [];
     const resp: AzureTenantsResponse = {
       generatedAt: new Date().toISOString(),
       tenants,
@@ -20,22 +19,20 @@ export function registerAzureRoutes(router: Router, env: Env) {
 
   // ── Subscriptions ──
   router.get("/api/azure/subscriptions", async (req: Request, res: Response) => {
-    const allowRaw = env.AZURE_SUBSCRIPTION_IDS ?? "";
-    const allowList = allowRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const allowListOnly = parseSubscriptionIds(env).map((subscriptionId) => ({ subscriptionId, name: subscriptionId }));
 
     try {
       const list = await tryListAzureSubscriptionsFromAzure(env, req.auth?.bearerToken);
-      const subscriptions = list ?? allowList.map((subscriptionId) => ({ subscriptionId, name: subscriptionId }));
-      const note = list ? undefined : "allow-list only";
-      const resp: AzureSubscriptionsResponse = { generatedAt: new Date().toISOString(), subscriptions, note };
+      const resp: AzureSubscriptionsResponse = {
+        generatedAt: new Date().toISOString(),
+        subscriptions: list ?? allowListOnly,
+        note: list ? undefined : "allow-list only",
+      };
       res.json(resp);
     } catch (e: unknown) {
       const resp: AzureSubscriptionsResponse = {
         generatedAt: new Date().toISOString(),
-        subscriptions: allowList.map((subscriptionId) => ({ subscriptionId, name: subscriptionId })),
+        subscriptions: allowListOnly,
         note: e instanceof Error ? e.message : "azure subscriptions error",
       };
       res.json(resp);

@@ -1,5 +1,5 @@
 import * as k8s from "@kubernetes/client-node";
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type {
   HubbleFlow,
   HubbleServiceMapResponse,
@@ -11,9 +11,9 @@ import type {
   HubbleNetworkSummary,
   HubbleSecuritySummary,
 } from "@aud/types";
-import { getHubbleFlows } from "./hubbleClient";
-import { getKubeconfig } from "./kubernetes";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
+import { getHubbleFlows } from "./hubbleClient.js";
+import { loadKubeConfig } from "./kubernetes.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 
 // ──────────────────────────────────────────────────────────────
 // Hubble Collector
@@ -29,7 +29,7 @@ const CILIUM_RESERVED: Record<number, HubbleServiceType> = {
   1: "host",       // local host
   2: "world",      // external traffic
   3: "unmanaged",  // unmanaged endpoints
-  4: "dns",        // health (used for DNS sometimes)
+  4: "health",     // cilium-health endpoints
   5: "init",       // init identity
   6: "kube-apiserver",
   7: "remote-node",
@@ -50,6 +50,19 @@ function resolveServiceType(identity: number, labels: Record<string, string>): H
   return "workload";
 }
 
+/**
+ * Keep only flows observed within the last `minutes`. `hubble observe --last N`
+ * returns the newest N flows regardless of age, so without this the time
+ * window selected in the UI had no effect.
+ */
+function withinTimeWindow(flows: HubbleFlow[], minutes: number): HubbleFlow[] {
+  const cutoff = Date.now() - minutes * 60_000;
+  return flows.filter((f) => {
+    const t = Date.parse(f.time);
+    return Number.isNaN(t) || t >= cutoff;
+  });
+}
+
 // ── Service Dependency Map ──
 
 export async function collectServiceMap(
@@ -61,13 +74,13 @@ export async function collectServiceMap(
   const timeWindowMinutes = opts?.timeWindowMinutes ?? 5;
   const nsFilter = opts?.namespace ?? "";
 
-  const flows = await getHubbleFlows(env, bearerToken, clusterId, {
+  const { flows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
     ...(nsFilter ? { namespace: nsFilter } : {}),
   });
 
   // reply 플로우 제외 (중복 방지)
-  const filtered = flows.filter((f) => !f.isReply);
+  const filtered = withinTimeWindow(flows, timeWindowMinutes).filter((f) => !f.isReply);
 
   // 타임스탬프 범위 (flowsPerSecond 계산용)
   let minTime = Infinity;
@@ -140,7 +153,6 @@ export async function collectServiceMap(
     latencySum: number;
     latencyCount: number;
     verdictCounts: Map<string, number>;
-    reverseFlowCount: number;
     httpMethods: Set<string>;
     topUrls: Map<string, number>;
     dnsQueries: Map<string, number>;
@@ -201,19 +213,16 @@ export async function collectServiceMap(
     const fwdKey = `${srcId}->${dstId}`;
     directionMap.set(fwdKey, (directionMap.get(fwdKey) ?? 0) + 1);
 
-    // 엣지 — 정규화된 키 (src,dst 정렬하여 A→B와 B→A 병합)
+    // 엣지 — reply를 제외했으므로 src는 연결을 시작한 쪽, port는 서버 포트
     const protocol = flow.l7?.type === "HTTP" ? "HTTP"
       : flow.l7?.type === "DNS" ? "DNS"
       : flow.l4Protocol;
-    const canonicalSrc = srcId < dstId ? srcId : dstId;
-    const canonicalDst = srcId < dstId ? dstId : srcId;
-    const isForward = srcId === canonicalSrc;
-    const edgeKey = `${canonicalSrc}<->${canonicalDst}:${flow.destinationPort}`;
+    const edgeKey = `${srcId}->${dstId}:${flow.destinationPort}`;
 
     if (!edgeMap.has(edgeKey)) {
       edgeMap.set(edgeKey, {
-        sourceId: canonicalSrc,
-        destId: canonicalDst,
+        sourceId: srcId,
+        destId: dstId,
         protocol,
         port: flow.destinationPort,
         flowCount: 0,
@@ -223,7 +232,6 @@ export async function collectServiceMap(
         latencySum: 0,
         latencyCount: 0,
         verdictCounts: new Map(),
-        reverseFlowCount: 0,
         httpMethods: new Set(),
         topUrls: new Map(),
         dnsQueries: new Map(),
@@ -231,7 +239,6 @@ export async function collectServiceMap(
     }
     const edge = edgeMap.get(edgeKey)!;
     edge.flowCount++;
-    if (!isForward) edge.reverseFlowCount++;
     if (flow.verdict === "DROPPED") edge.droppedCount++;
     edge.verdictCounts.set(flow.verdict, (edge.verdictCounts.get(flow.verdict) ?? 0) + 1);
 
@@ -257,7 +264,9 @@ export async function collectServiceMap(
   // ── Build response ──
   const allNamespaces = new Set<string>();
 
+  const fullLabelsById = new Map<string, Record<string, string>>();
   const nodes: HubbleServiceNode[] = Array.from(nodeMap.entries()).map(([id, n]) => {
+    fullLabelsById.set(id, n.labels);
     if (n.namespace) allNamespaces.add(n.namespace);
     // 주요 라벨만 추출 (표시용)
     const displayLabels: Record<string, string> = {};
@@ -294,8 +303,8 @@ export async function collectServiceMap(
       if (c > topCount) { topVerdict = v as HubbleFlow["verdict"]; topCount = c; }
     }
 
-    // 양방향 여부: 역방향 플로우가 전체의 10% 이상
-    const bidirectional = e.reverseFlowCount > e.flowCount * 0.1;
+    // 양방향 여부: 상대 쪽도 이 워크로드로 연결을 시작함 (포트 무관)
+    const bidirectional = (directionMap.get(`${e.destId}->${e.sourceId}`) ?? 0) > 0;
 
     // L7 summary
     const l7Summary: HubbleServiceEdge["l7Summary"] = {};
@@ -313,16 +322,10 @@ export async function collectServiceMap(
         .map(([q]) => q);
     }
 
-    // 원래 방향 복원 (canonical에서 실제 주요 방향으로)
-    const fwdCount = directionMap.get(`${e.sourceId}->${e.destId}`) ?? 0;
-    const revCount = directionMap.get(`${e.destId}->${e.sourceId}`) ?? 0;
-    const actualSrc = fwdCount >= revCount ? e.sourceId : e.destId;
-    const actualDst = fwdCount >= revCount ? e.destId : e.sourceId;
-
     return {
-      id: `${actualSrc}->${actualDst}:${e.port}`,
-      sourceId: actualSrc,
-      destinationId: actualDst,
+      id: `${e.sourceId}->${e.destId}:${e.port}`,
+      sourceId: e.sourceId,
+      destinationId: e.destId,
       protocol: e.protocol,
       port: e.port,
       bidirectional,
@@ -350,7 +353,8 @@ export async function collectServiceMap(
       const matched = services.filter((svc) =>
         Object.entries(svc.selector).every(([k, v]) => {
           // k8s: prefix 제거하여 비교 (Hubble 라벨은 k8s:app 형태)
-          const nodeVal = node.labels[`k8s:${k}`] ?? node.labels[k];
+          const labels = fullLabelsById.get(node.id) ?? node.labels;
+          const nodeVal = labels[`k8s:${k}`] ?? labels[k];
           return nodeVal === v;
         }),
       );
@@ -370,6 +374,7 @@ export async function collectServiceMap(
     edges: edges.sort((a, b) => b.metrics.flowCount - a.metrics.flowCount),
     totalFlowsAnalyzed: filtered.length,
     namespaces: Array.from(allNamespaces).sort(),
+    coverage,
   };
 }
 
@@ -381,9 +386,10 @@ export async function collectNetworkSummary(
   clusterId: string,
   timeWindowMinutes = 5,
 ): Promise<HubbleNetworkSummary> {
-  const flows = await getHubbleFlows(env, bearerToken, clusterId, {
+  const { flows: allFlows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
   });
+  const flows = withinTimeWindow(allFlows, timeWindowMinutes);
 
   const forwarded = flows.filter((f) => f.verdict === "FORWARDED").length;
   const dropped = flows.filter((f) => f.verdict === "DROPPED").length;
@@ -463,6 +469,7 @@ export async function collectNetworkSummary(
     dnsErrors,
     protocolBreakdown,
     namespaceTraffic,
+    coverage,
   };
 }
 
@@ -474,9 +481,10 @@ export async function collectSecuritySummary(
   clusterId: string,
   timeWindowMinutes = 5,
 ): Promise<HubbleSecuritySummary> {
-  const flows = await getHubbleFlows(env, bearerToken, clusterId, {
+  const { flows: allFlows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
   });
+  const flows = withinTimeWindow(allFlows, timeWindowMinutes);
 
   const allowed = flows.filter((f) => f.verdict === "FORWARDED").length;
   const denied = flows.filter((f) => f.verdict === "DROPPED").length;
@@ -544,6 +552,7 @@ export async function collectSecuritySummary(
     policyVerdicts: { allowed, denied, audit },
     topDenied,
     identityFlows,
+    coverage,
   };
 }
 
@@ -557,19 +566,17 @@ async function fetchK8sServiceMap(
   clusterId: string,
   namespaces: string[],
 ): Promise<Map<string, HubbleK8sService[]>> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:hubble-k8s-svc:${clusterId}`;
+  const sortedNs = [...namespaces].sort();
+  const cacheKey = `${cachePrefix(bearerToken)}:hubble-k8s-svc:${clusterId}:${sortedNs.join(",")}`;
   const cached = k8sSvcCache.get(cacheKey);
   if (cached) return cached;
 
-  const kubeconfigYaml = await getKubeconfig(env, bearerToken, clusterId);
-  const kc = new k8s.KubeConfig();
-  kc.loadFromString(kubeconfigYaml);
+  const kc = await loadKubeConfig(env, bearerToken, clusterId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
   const result = new Map<string, HubbleK8sService[]>();
 
-  for (const ns of namespaces) {
+  await Promise.all(sortedNs.map(async (ns) => {
     try {
       const [svcList, epList] = await Promise.all([
         coreV1.listNamespacedService({ namespace: ns }),
@@ -624,7 +631,7 @@ async function fetchK8sServiceMap(
     } catch (e) {
       console.warn(`[hubble] K8s service fetch failed for ns=${ns}:`, (e as Error).message);
     }
-  }
+  }));
 
   k8sSvcCache.set(cacheKey, result);
   return result;

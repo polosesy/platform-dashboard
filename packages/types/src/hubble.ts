@@ -47,12 +47,56 @@ export type HubbleFlow = {
   isReply: boolean;
   nodeName: string;
   summary: string;
+  /** Packet identity used to collapse the same packet seen at several observation points */
+  sourceIp?: string;
+  destinationIp?: string;
+  tcpFlags?: string;
+};
+
+// ── Collection coverage ──
+
+/** One cilium agent's ring buffer as read for this response. */
+export type HubbleNodeCoverage = {
+  nodeName: string;
+  podName: string;
+  /** Events returned by this agent before de-duplication */
+  events: number;
+  oldest: string | null;
+  newest: string | null;
+  /** Agent returned as many events as requested — older history was cut off */
+  bufferFull: boolean;
+  error?: string;
+};
+
+/**
+ * What the flows behind a response actually cover. Hubble keeps a small
+ * per-node ring buffer, so "last N minutes" is only as long as the busiest
+ * node's buffer lasts.
+ */
+export type HubbleCoverage = {
+  source: "agents" | "relay" | "api-proxy";
+  nodesObserved: number;
+  nodesTotal: number;
+  nodes: HubbleNodeCoverage[];
+  /** Start of the span every observed node covers (null when nothing was read) */
+  commonSince: string | null;
+  newest: string | null;
+  /** Minutes in which all observed nodes have complete data */
+  commonWindowMinutes: number;
+  /** Raw events read from all nodes, and how many were the same packet seen twice */
+  rawEvents: number;
+  duplicatesRemoved: number;
+};
+
+export type HubbleFlowSet = {
+  flows: HubbleFlow[];
+  coverage: HubbleCoverage;
 };
 
 // ── Service Dependency Map ──
 
 /** Cilium reserved identity 또는 워크로드 유형 */
-export type HubbleServiceType = "workload" | "world" | "host" | "dns" | "init" | "unmanaged" | "kube-apiserver" | "remote-node";
+export type HubbleServiceType = "workload" | "world" | "host" | "health" | "dns" | "init" | "unmanaged" | "kube-apiserver" | "remote-node";
 
 /** K8s Service에 연결된 Pod 엔드포인트 */
 export type HubbleEndpointPod = {
@@ -138,6 +182,7 @@ export type HubbleServiceMapResponse = {
   totalFlowsAnalyzed: number;
   /** 관측된 네임스페이스 목록 */
   namespaces: string[];
+  coverage: HubbleCoverage;
 };
 
 // ── Flows (raw flow table) ──
@@ -148,6 +193,7 @@ export type HubbleFlowsResponse = {
   flows: HubbleFlow[];
   totalReturned: number;
   hasMore: boolean;
+  coverage: HubbleCoverage;
 };
 
 // ── Network Monitoring ──
@@ -182,6 +228,7 @@ export type HubbleNetworkSummary = {
     outbound: number;
     dropped: number;
   }[];
+  coverage: HubbleCoverage;
 };
 
 // ── Security Observability ──
@@ -212,6 +259,7 @@ export type HubbleSecuritySummary = {
     allowed: number;
     denied: number;
   }[];
+  coverage: HubbleCoverage;
 };
 
 // ── Hubble Status ──
@@ -225,5 +273,7 @@ export type HubbleStatusResponse = {
   maxFlows: number;
   uptimeNs: number;
   nodeCount: number;
+  /** cilium agents found in the cluster (nodeCount = agents that answered) */
+  nodesTotal: number;
   message: string;
 };

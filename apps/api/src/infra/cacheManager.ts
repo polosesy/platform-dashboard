@@ -5,6 +5,7 @@ type CacheEntry<T> = {
   expiresAt: number;
 };
 
+/** In-memory LRU cache with per-entry TTL. Map insertion order tracks recency. */
 export class CacheManager<T> {
   private cache = new Map<string, CacheEntry<T>>();
   private hits = 0;
@@ -26,14 +27,20 @@ export class CacheManager<T> {
       this.misses++;
       return undefined;
     }
+    // Refresh recency
+    this.cache.delete(key);
+    this.cache.set(key, entry);
     this.hits++;
     return entry.value;
   }
 
   set(key: string, value: T, ttlMs?: number): void {
-    if (this.cache.size >= this.maxEntries) {
+    // Re-setting an existing key must not evict an unrelated entry
+    this.cache.delete(key);
+    while (this.cache.size >= this.maxEntries) {
       const oldest = this.cache.keys().next().value;
-      if (oldest !== undefined) this.cache.delete(oldest);
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
     }
     this.cache.set(key, {
       value,
@@ -57,4 +64,9 @@ export class CacheManager<T> {
 /** Generate a cache key prefix from a bearer token using SHA-256. */
 export function bearerKeyPrefix(bearerToken: string): string {
   return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
+}
+
+/** Cache key prefix for a request — per-user when a bearer token is present, shared "sp" otherwise. */
+export function cachePrefix(bearerToken: string | undefined): string {
+  return bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
 }

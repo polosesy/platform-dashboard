@@ -51,7 +51,6 @@ type LiveCanvasProps = {
   showParticles: boolean;
   showFaultRipple: boolean;
   showHeatmap: boolean;
-  fitViewTrigger?: string;
   isFiltered?: boolean;
   focusNodeId?: string | null;
   onVmssInstanceSelect?: (data: VmssInstanceNodeData) => void;
@@ -78,7 +77,6 @@ function LiveCanvasInner({
   showParticles,
   showFaultRipple,
   showHeatmap,
-  fitViewTrigger,
   isFiltered,
   focusNodeId,
   onVmssInstanceSelect,
@@ -375,7 +373,7 @@ function LiveCanvasInner({
 
     return result;
   // expandedVmssIds, expandedNatGwIds are refs — intentionally excluded from deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, natGwBySubnet, handleNsgSelect, stableVmssExpand, handleNatGwSelect]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -552,7 +550,7 @@ function LiveCanvasInner({
 
     return () => cancelAnimationFrame(rafId);
   // rfRef, fitModeRef, fitBoundsRef, topGroupIdsRef are stable refs — intentionally excluded
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [fitVersion]);
 
   // ── Focus node: zoom to a specific node when focusNodeId changes ──
@@ -570,7 +568,7 @@ function LiveCanvasInner({
       });
     });
     return () => cancelAnimationFrame(rafId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [focusNodeId]);
 
   // ── Effect A: Filter change — full node rebuild + compact layout ──
@@ -997,7 +995,7 @@ function LiveCanvasInner({
     // Trigger viewport fit after layout is committed
     setFitVersion((v) => v + 1);
   // snapshotRef, isFilteredRef, fitBoundsRef, fitModeRef are stable refs — intentionally excluded
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   // expandedVmssIds is a ref — intentionally excluded from deps
   }, [spec.nodes, onSubResourceSelect, setNodes, embeddedNsgIds, nsgByTarget, handleNsgSelect, stableVmssExpand]);
 

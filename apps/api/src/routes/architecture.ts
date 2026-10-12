@@ -1,25 +1,38 @@
 import type { Request, Response, Router } from "express";
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { ArchitectureFlowOverlayResponse } from "@aud/types";
-import { mockArchitectureGraph } from "../mockData";
-import { tryGetArchitectureGraphFromAzure } from "../services/azure";
-import { mockNetworkSummary, tryGetNetworkSummaryFromLogAnalytics } from "../services/network";
-import { mapSubnetPairsToGraphEdgeMetrics } from "../services/flowOverlay";
+import { mockArchitectureGraph } from "../mockData.js";
+import { tryGetArchitectureGraphFromAzure } from "../services/azure.js";
+import { mockNetworkSummary, tryGetNetworkSummaryFromLogAnalytics } from "../services/network.js";
+import { mapSubnetPairsToGraphEdgeMetrics } from "../services/flowOverlay.js";
+import { queryInt, querySubscriptionId, sendError } from "../infra/requestParams.js";
+import { safeMessage } from "../services/securityPosture.js";
 
 export function registerArchitectureRoutes(router: Router, env: Env) {
-  router.get("/api/architecture/graph", (req: Request, res: Response) => {
-    const subscriptionId = typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
-    tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, { subscriptionId })
-      .then((graph) => res.json(graph ?? mockArchitectureGraph))
-      .catch((e: unknown) => {
-        res.json({ ...mockArchitectureGraph, note: e instanceof Error ? e.message : "azure integration error" });
-      });
+  router.get("/api/architecture/graph", async (req: Request, res: Response) => {
+    try {
+      const subscriptionId = querySubscriptionId(req, env);
+      try {
+        const graph = await tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, { subscriptionId });
+        res.json(graph ? { ...graph, source: "azure" } : { ...mockArchitectureGraph, source: "mock" });
+      } catch (e: unknown) {
+        res.json({ ...mockArchitectureGraph, source: "mock", note: safeMessage(e) });
+      }
+    } catch (e: unknown) {
+      sendError(res, e, "architecture_graph_failed");
+    }
   });
 
   router.get("/api/architecture/flow-overlay", async (req: Request, res: Response) => {
-    const lookbackMinutes = Number(req.query.lookbackMinutes ?? 60);
-    const top = Number(req.query.top ?? 30);
-    const subscriptionId = typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
+    const lookbackMinutes = queryInt(req, "lookbackMinutes", 60, 5, 60 * 24 * 14);
+    const top = queryInt(req, "top", 30, 5, 50);
+
+    let subscriptionId: string | undefined;
+    try {
+      subscriptionId = querySubscriptionId(req, env);
+    } catch (e: unknown) {
+      return sendError(res, e, "flow_overlay_failed");
+    }
 
     try {
       const bearer = req.auth?.bearerToken;
@@ -29,10 +42,7 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
       ]);
 
       const graph = graphMaybe ?? mockArchitectureGraph;
-      const summary =
-        summaryMaybe ??
-        mockNetworkSummary(Number.isFinite(lookbackMinutes) ? lookbackMinutes : 60, env.AZURE_LOG_ANALYTICS_TABLE, "mock data");
-
+      const summary = summaryMaybe ?? mockNetworkSummary(lookbackMinutes, env.AZURE_LOG_ANALYTICS_TABLE, "mock data");
       const mapped = mapSubnetPairsToGraphEdgeMetrics(graph, summary.topSubnetPairs);
 
       const resp: ArchitectureFlowOverlayResponse = {
@@ -47,7 +57,7 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
     } catch (e: unknown) {
       const resp: ArchitectureFlowOverlayResponse = {
         generatedAt: new Date().toISOString(),
-        lookbackMinutes: Number.isFinite(lookbackMinutes) ? lookbackMinutes : 60,
+        lookbackMinutes,
         level: "subnet",
         edges: [],
         unmatchedPairs: [],

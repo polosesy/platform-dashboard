@@ -1,47 +1,40 @@
 /* ── Hubble Page Layout ── */
 .page {
-  padding: 24px 28px;
-  max-width: 1440px;
-  margin: 0 auto;
-  font-family: var(--font-sans);
-  color: var(--fg);
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  color: var(--ink);
 }
 
-.header {
+
+
+
+
+/* ── Collection coverage (nodes / window actually observed) ── */
+.coverageNote {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
   flex-wrap: wrap;
-}
-
-.title {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-  flex: 1;
-}
-
-.clusterSelect {
-  padding: 6px 10px;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 7px 12px;
+  margin-bottom: 14px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--fg);
-  font-size: 13px;
-  min-width: 200px;
-}
-
-.refreshBtn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
+  color: var(--muted);
   font-size: 12px;
-  cursor: pointer;
+  cursor: help;
 }
-.refreshBtn:hover { background: var(--surface-2, #f0f0f0); }
+.coverageNote strong { color: var(--fg); font-weight: 600; }
+.coverageWarn {
+  border-color: rgba(183,121,31,0.40);
+  background: rgba(183,121,31,0.07);
+}
+.coverageItem { white-space: nowrap; }
+.coverageHint {
+  flex-basis: 100%;
+  color: rgba(138,88,14,0.95);
+}
 
 /* ── Status badges ── */
 .statusBadges {
@@ -73,30 +66,7 @@
 }
 
 /* ── Tabs ── */
-.tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 24px;
-}
 
-.tab {
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: none;
-  background: none;
-  color: rgba(20,21,23,0.5);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.15s;
-}
-.tab:hover { color: var(--fg); }
-.tabActive {
-  color: var(--accent, #0078d4);
-  border-bottom-color: var(--accent, #0078d4);
-}
 
 /* ── Summary Cards ── */
 .summaryCards {
@@ -223,7 +193,7 @@
 }
 .svcNodeOk     { border-color: rgba(16,137,62,0.35); }
 .svcNodeWarn   { border-color: rgba(209,132,0,0.4); }
-.svcNodeCrit   { border-color: rgba(196,43,28,0.4); box-shadow: 0 0 0 1px rgba(196,43,28,0.15); }
+.svcNodeCrit   { border-color: rgba(216, 59, 1, 0.4); box-shadow: 0 0 0 1px rgba(216, 59, 1, 0.15); }
 .svcNodeSelected {
   border-color: rgba(0,120,212,0.7) !important;
   box-shadow: 0 0 0 2px rgba(0,120,212,0.2), 0 2px 12px rgba(0,120,212,0.15) !important;
@@ -296,7 +266,7 @@
   flex-shrink: 0;
 }
 .dotGreen  { background: rgba(16,137,62,0.65); }
-.dotRed    { background: rgba(196,43,28,0.70); }
+.dotRed    { background: rgba(216, 59, 1, 0.70); }
 .dotYellow { background: rgba(209,132,0,0.65); }
 .dotGray   { background: rgba(20,21,23,0.2); }
 
@@ -388,7 +358,7 @@
   font-weight: 600;
 }
 
-.textRed { color: rgba(196,43,28,0.85); }
+.textRed { color: var(--danger); }
 
 .detailLabelList {
   display: flex;
@@ -529,8 +499,8 @@
 
 .flowRow { transition: background 0.1s; }
 .flowRow:hover { background: rgba(0,120,212,0.03); }
-.flowRowDropped { background: rgba(196,43,28,0.03); }
-.flowRowDropped:hover { background: rgba(196,43,28,0.06); }
+.flowRowDropped { background: rgba(216, 59, 1, 0.03); }
+.flowRowDropped:hover { background: rgba(216, 59, 1, 0.06); }
 
 .verdictBadge {
   font-size: 10px;
@@ -540,7 +510,7 @@
   white-space: nowrap;
 }
 .verdictForwarded { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
-.verdictDropped   { background: rgba(196,43,28,0.08); color: rgba(196,43,28,0.85); }
+.verdictDropped   { background: rgba(216, 59, 1, 0.08); color: var(--danger); }
 .verdictAudit     { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
 
 .protocolBadge {
@@ -767,10 +737,10 @@
 
 .errorMsg {
   padding: 16px;
-  background: rgba(196,43,28,0.06);
-  border: 1px solid rgba(196,43,28,0.20);
+  background: rgba(216, 59, 1, 0.06);
+  border: 1px solid rgba(216, 59, 1, 0.20);
   border-radius: 8px;
-  color: rgba(196,43,28,0.85);
+  color: var(--danger);
   font-size: 13px;
   margin-bottom: 16px;
 }
@@ -845,6 +815,10 @@
   pointer-events: none;
   position: relative;
 }
+.nsGroupExternal {
+  border-color: rgba(107,76,154,0.25);
+  background: rgba(107,76,154,0.03);
+}
 .nsGroupLabel {
   position: absolute;
   top: 8px;
@@ -853,6 +827,34 @@
   font-weight: 700;
   color: rgba(20,21,23,0.35);
   letter-spacing: 0.03em;
+}
+.nsGroupExternal .nsGroupLabel {
+  color: rgba(107,76,154,0.55);
+}
+
+/* ── Flow Collapse Button ── */
+.flowCollapseBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.flowCollapseBtn:hover { background: rgba(20,21,23,0.03); }
+.flowCollapseArrow {
+  font-size: 10px;
+  color: rgba(20,21,23,0.35);
+  transition: transform 0.2s;
+  display: inline-block;
+}
+.flowCollapseOpen {
+  transform: rotate(90deg);
 }
 
 /* ── View Toggle ── */
@@ -967,4 +969,9 @@
   height: 1px;
   background: rgba(20,21,23,0.08);
   margin: 6px 0;
+}
+
+/* View switcher under the Hubble status line */
+.subTabs {
+  margin-bottom: 16px;
 }

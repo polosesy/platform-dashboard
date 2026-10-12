@@ -20,7 +20,6 @@ import {
   forceSimulation,
   forceLink,
   forceManyBody,
-  forceCenter,
   forceCollide,
   forceX,
   forceY,
@@ -39,6 +38,7 @@ import type {
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { CoverageNote } from "./CoverageNote";
 
 type Props = { clusterId: string };
 
@@ -48,6 +48,7 @@ const SERVICE_TYPE_META: Record<HubbleServiceType, { icon: string; label: string
   workload:       { icon: "⬡", label: "Workload",       color: "rgba(0,120,212,0.15)" },
   world:          { icon: "🌐", label: "External",       color: "rgba(107,76,154,0.15)" },
   host:           { icon: "🖥", label: "Host",           color: "rgba(20,21,23,0.08)" },
+  health:         { icon: "♡", label: "Health",         color: "rgba(20,21,23,0.06)" },
   dns:            { icon: "◈", label: "DNS",            color: "rgba(0,150,136,0.15)" },
   init:           { icon: "◎", label: "Init",           color: "rgba(20,21,23,0.06)" },
   unmanaged:      { icon: "◇", label: "Unmanaged",      color: "rgba(209,132,0,0.12)" },
@@ -142,11 +143,11 @@ const ServiceNode = memo(function ServiceNode({ data }: NodeProps<ServiceNodeDat
 
 // ── Namespace Group Node ──
 
-type NsGroupData = { label: string; nodeCount: number };
+type NsGroupData = { label: string; nodeCount: number; isExternal: boolean };
 
 const NsGroupNode = memo(function NsGroupNode({ data }: NodeProps<NsGroupData>) {
   return (
-    <div className={styles.nsGroupNode}>
+    <div className={`${styles.nsGroupNode} ${data.isExternal ? styles.nsGroupExternal : ""}`}>
       <span className={styles.nsGroupLabel}>{data.label}</span>
     </div>
   );
@@ -169,20 +170,63 @@ function computeForceLayout(
 
   const NODE_W = 200;
   const NODE_H = 90;
+  const COL_ITEMS = 4; // namespace 열 내 최대 노드 행 수
 
-  // namespace별 그룹 인덱스 (forceY 타겟용)
-  const nsSet = [...new Set(svcNodes.map((n) => n.namespace || "external"))];
-  const nsIndex = new Map(nsSet.map((ns, i) => [ns, i]));
+  // workload namespace vs external/특수 노드 분리
+  const EXTERNAL_TYPES = new Set<string>(["world", "host", "health", "dns", "init", "unmanaged", "kube-apiserver", "remote-node"]);
+  const workloadNs = [...new Set(
+    svcNodes.filter((n) => !EXTERNAL_TYPES.has(n.serviceType) && n.namespace).map((n) => n.namespace),
+  )].sort();
+  const externalNs = [...new Set(
+    svcNodes.filter((n) => EXTERNAL_TYPES.has(n.serviceType) || !n.namespace).map((n) => n.namespace || "external"),
+  )];
+  // namespace 인덱스: workload 먼저, external은 오른쪽 별도 영역
+  const nsIndex = new Map<string, number>();
+  workloadNs.forEach((ns, i) => nsIndex.set(ns, i));
+  const externalStartIdx = workloadNs.length + 1; // gap
+  externalNs.forEach((ns, i) => { if (!nsIndex.has(ns)) nsIndex.set(ns, externalStartIdx + i); });
+  const nsSet = [...new Set([...workloadNs, ...externalNs])];
 
-  // d3-force 시뮬레이션 노드 — 기존 위치가 있으면 재활용
+  // namespace별 노드 그룹핑 (결정론적 정렬)
+  const nodesByNs = new Map<string, HubbleServiceNode[]>();
+  for (const n of [...svcNodes].sort((a, b) => a.id.localeCompare(b.id))) {
+    const ns = n.namespace || "external";
+    if (!nodesByNs.has(ns)) nodesByNs.set(ns, []);
+    nodesByNs.get(ns)!.push(n);
+  }
+
+  // 결정론적 그리드 초기 위치 계산
   const hasCache = cachedPositions && cachedPositions.size > 0;
+  const ZONE_GAP = 500; // workload ↔ external 간격
+  const NS_SPREAD = 400; // namespace 간 X 간격
+  const ROW_GAP = 130; // 노드 간 Y 간격
+  const COL_GAP = 260; // namespace 내 열 간 X 간격
+
+  // namespace별 X 기준 좌표
+  const nsBaseX = new Map<string, number>();
+  for (const ns of nsSet) {
+    const isExternal = !workloadNs.includes(ns);
+    const idx = nsIndex.get(ns) ?? 0;
+    nsBaseX.set(ns, isExternal
+      ? workloadNs.length * NS_SPREAD + ZONE_GAP + (idx - externalStartIdx) * NS_SPREAD
+      : idx * NS_SPREAD);
+  }
+
   const forceNodes: ForceNode[] = svcNodes.map((n) => {
     const cached = cachedPositions?.get(n.id);
+    if (cached) return { id: n.id, namespace: n.namespace || "external", x: cached.x, y: cached.y };
+
+    const ns = n.namespace || "external";
+    const members = nodesByNs.get(ns) ?? [];
+    const memberIdx = members.findIndex((m) => m.id === n.id);
+    const col = Math.floor(memberIdx / COL_ITEMS);
+    const row = memberIdx % COL_ITEMS;
+    const baseX = nsBaseX.get(ns) ?? 0;
     return {
       id: n.id,
-      namespace: n.namespace || "external",
-      x: cached?.x ?? (nsIndex.get(n.namespace || "external") ?? 0) * 300 + Math.random() * 100,
-      y: cached?.y ?? Math.random() * 400,
+      namespace: ns,
+      x: baseX + col * COL_GAP,
+      y: 60 + row * ROW_GAP,
     };
   });
 
@@ -195,22 +239,38 @@ function computeForceLayout(
       flowCount: e.metrics.flowCount,
     }));
 
-  // 시뮬레이션 실행 (동기) — 캐시가 있으면 짧게 (미세 조정), 없으면 전체 수렴
-  const ticks = hasCache ? 50 : 300;
+  // 노드별 타겟 X 위치 (namespace 존 분리)
+  const nodeTargetX = new Map<string, number>();
+  for (const n of svcNodes) {
+    const ns = n.namespace || "external";
+    nodeTargetX.set(n.id, nsBaseX.get(ns) ?? 0);
+  }
+
+  // 노드별 타겟 Y 위치 (그리드 기준)
+  const nodeTargetY = new Map<string, number>();
+  for (const n of svcNodes) {
+    const ns = n.namespace || "external";
+    const members = nodesByNs.get(ns) ?? [];
+    const memberIdx = members.findIndex((m) => m.id === n.id);
+    const row = memberIdx % COL_ITEMS;
+    nodeTargetY.set(n.id, 60 + row * ROW_GAP);
+  }
+
+  // 시뮬레이션 — 캐시가 있으면 짧게, 없으면 수렴
+  const ticks = hasCache ? 30 : 200;
   const simulation = forceSimulation<ForceNode>(forceNodes)
     .force("link", forceLink<ForceNode, ForceLink>(forceLinks)
       .id((d) => d.id)
       .distance(180)
-      .strength((link) => Math.min(1, 0.3 + Math.log2((link as ForceLink).flowCount + 1) * 0.05)))
-    .force("charge", forceManyBody().strength(-400).distanceMax(600))
-    .force("center", forceCenter(400, 300))
-    .force("collide", forceCollide(NODE_W * 0.6))
+      .strength((link) => Math.min(0.5, 0.15 + Math.log2((link as ForceLink).flowCount + 1) * 0.03)))
+    .force("charge", forceManyBody().strength(-300).distanceMax(500))
+    .force("collide", forceCollide(NODE_W * 0.75))
     .force("x", forceX<ForceNode>()
-      .x((d) => (nsIndex.get(d.namespace) ?? 0) * 350)
-      .strength(0.15))
+      .x((d) => nodeTargetX.get(d.id) ?? 0)
+      .strength(0.6))
     .force("y", forceY<ForceNode>()
-      .y(300)
-      .strength(0.05))
+      .y((d) => nodeTargetY.get(d.id) ?? 300)
+      .strength(0.3))
     .stop();
 
   for (let i = 0; i < ticks; i++) simulation.tick();
@@ -249,22 +309,23 @@ function computeForceLayout(
   });
 
   // Namespace 그룹 노드 — 같은 namespace 노드를 감싸는 배경 박스
-  const NS_PAD = 40;
+  const NS_BOX_PAD = 50;
   const nsGroupNodes: Node<NsGroupData>[] = [];
   for (const ns of nsSet) {
     const members = nodes.filter((n) => (n.data.namespace || "external") === ns);
     if (members.length === 0) continue;
     const xs = members.map((n) => n.position.x);
     const ys = members.map((n) => n.position.y);
-    const minX = Math.min(...xs) - NS_PAD;
-    const minY = Math.min(...ys) - NS_PAD - 20; // 라벨 공간
-    const maxX = Math.max(...xs) + NODE_W + NS_PAD;
-    const maxY = Math.max(...ys) + NODE_H + NS_PAD;
+    const minX = Math.min(...xs) - NS_BOX_PAD;
+    const minY = Math.min(...ys) - NS_BOX_PAD - 20;
+    const maxX = Math.max(...xs) + NODE_W + NS_BOX_PAD;
+    const maxY = Math.max(...ys) + NODE_H + NS_BOX_PAD;
+    const isExternal = !workloadNs.includes(ns);
     nsGroupNodes.push({
       id: `ns-group-${ns}`,
       type: "nsGroup",
       position: { x: minX, y: minY },
-      data: { label: ns, nodeCount: members.length },
+      data: { label: isExternal ? `${ns} (external)` : ns, nodeCount: members.length, isExternal },
       style: { width: maxX - minX, height: maxY - minY },
       selectable: false,
       draggable: false,
@@ -556,6 +617,8 @@ export function ServiceMapTab({ clusterId }: Props) {
 
   // 위치 캐시 — 데이터 갱신 시 기존 배치 유지
   const positionCacheRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  // 데이터 fingerprint — 동일 노드 구성이면 레이아웃 재계산 생략
+  const dataFingerprintRef = useRef<string>("");
 
   const fetchMap = useCallback(async () => {
     if (!clusterId) return;
@@ -586,9 +649,10 @@ export function ServiceMapTab({ clusterId }: Props) {
     return () => clearInterval(iv);
   }, [fetchMap]);
 
-  // 필터 변경 시 캐시 초기화
+  // 필터 변경 시 캐시 + fingerprint 초기화 (새로운 레이아웃 필요)
   useEffect(() => {
     positionCacheRef.current = new Map();
+    dataFingerprintRef.current = "";
   }, [verdictFilter, searchTerm]);
 
   // 필터링된 노드/엣지 계산 + d3-force 레이아웃
@@ -617,10 +681,23 @@ export function ServiceMapTab({ clusterId }: Props) {
       );
     }
 
-    const layout = computeForceLayout(filteredNodes, filteredEdges, selectedNodeId, positionCacheRef.current);
-    positionCacheRef.current = layout.positions;
-    setNodes(layout.nodes);
-    setEdges(layout.edges);
+    // fingerprint: 노드 ID 집합이 동일하면 위치 재계산 생략 (메트릭만 업데이트)
+    const fp = filteredNodes.map((n) => n.id).sort().join("|");
+    const skipLayout = fp === dataFingerprintRef.current && positionCacheRef.current.size > 0;
+    dataFingerprintRef.current = fp;
+
+    if (skipLayout) {
+      // 노드 구성 동일 → 기존 위치 유지, data만 갱신
+      const layout = computeForceLayout(filteredNodes, filteredEdges, selectedNodeId, positionCacheRef.current);
+      positionCacheRef.current = layout.positions;
+      setNodes(layout.nodes);
+      setEdges(layout.edges);
+    } else {
+      const layout = computeForceLayout(filteredNodes, filteredEdges, selectedNodeId, positionCacheRef.current);
+      positionCacheRef.current = layout.positions;
+      setNodes(layout.nodes);
+      setEdges(layout.edges);
+    }
   }, [mapData, verdictFilter, searchTerm, setNodes, setEdges]); // selectedNodeId 제거!
 
   // 선택 변경 시 레이아웃 재계산 없이 data.selected만 업데이트
@@ -661,7 +738,8 @@ export function ServiceMapTab({ clusterId }: Props) {
         `${apiBaseUrl()}/api/hubble/flows?${params}`,
         token,
       );
-      setFlows(data.flows);
+      // Same rule as the map edges: replies would show server→client with an ephemeral port
+      setFlows(data.flows.filter((f) => !f.isReply));
     } catch { /* 무시 — map 오류와 별개 */ }
     finally { setFlowsLoading(false); }
   }, [clusterId, getApiToken, nsFilter, verdictFilter]);
@@ -685,6 +763,9 @@ export function ServiceMapTab({ clusterId }: Props) {
 
   // 뷰 모드: Visual(맵) / Table
   const [viewMode, setViewMode] = useState<"visual" | "table">("visual");
+
+  // FLOWS 패널 접기/펼치기
+  const [flowsExpanded, setFlowsExpanded] = useState(true);
 
   // 수신 상태 표시
   const isReceiving = loading || flowsLoading;
@@ -772,12 +853,18 @@ export function ServiceMapTab({ clusterId }: Props) {
         </span>
       </div>
 
+      <CoverageNote coverage={mapData?.coverage} requestedMinutes={mapData?.timeWindowMinutes} />
+
       {viewMode === "visual" ? (
         <>
           {/* ── Map + Detail Panel ── */}
           <div className={styles.mapLayout}>
             <div className={`${styles.mapContainer} ${selectedNode ? styles.mapContainerWithPanel : ""}`}
-              style={{ height: "calc(50vh - 80px)", minHeight: 320 }}>
+              style={{
+                height: flowsExpanded ? "calc(50vh - 80px)" : "calc(100vh - 200px)",
+                minHeight: 320,
+                transition: "height 0.3s ease",
+              }}>
               {nodes.length === 0 ? (
                 <div className={styles.noDataBanner} style={{ marginTop: 80 }}>
                   <strong>서비스 맵 데이터 없음</strong>
@@ -825,61 +912,70 @@ export function ServiceMapTab({ clusterId }: Props) {
             )}
           </div>
 
-          {/* ── Flow Table (하단) ── */}
+          {/* ── Flow Table (하단, 접기/펼치기) ── */}
           <div className={styles.visualFlowSection}>
-            <div className={styles.visualFlowHeader}>
-              <h3 className={styles.sectionTitle}>Flows</h3>
+            <button
+              className={styles.flowCollapseBtn}
+              onClick={() => { setFlowsExpanded((v) => !v); if (flowsExpanded) setSelectedFlow(null); }}
+            >
+              <span className={`${styles.flowCollapseArrow} ${flowsExpanded ? styles.flowCollapseOpen : ""}`}>
+                ▶
+              </span>
+              <span className={styles.sectionTitle}>Flows</span>
               <span className={styles.toolbarCount}>{filteredFlows.length}개</span>
-            </div>
-            <div className={styles.visualFlowLayout}>
-              <div className={`${styles.flowTableContainer} ${selectedFlow ? styles.flowTableWithDetail : ""}`}
-                style={{ maxHeight: "calc(50vh - 120px)" }}>
-                <table className={styles.flowTable}>
-                  <thead>
-                    <tr>
-                      <th>Source Service</th>
-                      <th>Destination Service</th>
-                      <th>Dst Port</th>
-                      <th>Verdict</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredFlows.slice(0, 300).map((f, i) => (
-                      <tr
-                        key={i}
-                        className={`${styles.flowRow} ${f.verdict === "DROPPED" ? styles.flowRowDropped : ""} ${selectedFlow === f ? styles.flowRowSelected : ""}`}
-                        onClick={() => setSelectedFlow((prev) => (prev === f ? null : f))}
-                      >
-                        <td>
-                          <span style={{ fontWeight: 600 }}>{f.source.workloadName}</span>{" "}
-                          <span className={styles.flowNs}>{f.source.namespace}</span>
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 600 }}>{f.destination.workloadName}</span>{" "}
-                          <span className={styles.flowNs}>{f.destination.namespace}</span>
-                        </td>
-                        <td className={styles.flowMono}>{f.destinationPort || "—"}</td>
-                        <td>
-                          <span className={`${styles.verdictBadge} ${
-                            f.verdict === "DROPPED" ? styles.verdictDropped
-                            : f.verdict === "AUDIT" ? styles.verdictAudit
-                            : styles.verdictForwarded
-                          }`}>{f.verdict.toLowerCase()}</span>
-                        </td>
+            </button>
+
+            {flowsExpanded && (
+              <div className={styles.visualFlowLayout}>
+                <div className={`${styles.flowTableContainer} ${selectedFlow ? styles.flowTableWithDetail : ""}`}
+                  style={{ maxHeight: "calc(50vh - 120px)" }}>
+                  <table className={styles.flowTable}>
+                    <thead>
+                      <tr>
+                        <th>Source Service</th>
+                        <th>Destination Service</th>
+                        <th>Dst Port</th>
+                        <th>Verdict</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {filteredFlows.length === 0 && !flowsLoading && (
-                  <div className={styles.noDataBanner}>플로우 데이터 없음</div>
+                    </thead>
+                    <tbody>
+                      {filteredFlows.slice(0, 300).map((f, i) => (
+                        <tr
+                          key={i}
+                          className={`${styles.flowRow} ${f.verdict === "DROPPED" ? styles.flowRowDropped : ""} ${selectedFlow === f ? styles.flowRowSelected : ""}`}
+                          onClick={() => setSelectedFlow((prev) => (prev === f ? null : f))}
+                        >
+                          <td>
+                            <span style={{ fontWeight: 600 }}>{f.source.workloadName}</span>{" "}
+                            <span className={styles.flowNs}>{f.source.namespace}</span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 600 }}>{f.destination.workloadName}</span>{" "}
+                            <span className={styles.flowNs}>{f.destination.namespace}</span>
+                          </td>
+                          <td className={styles.flowMono}>{f.destinationPort || "—"}</td>
+                          <td>
+                            <span className={`${styles.verdictBadge} ${
+                              f.verdict === "DROPPED" ? styles.verdictDropped
+                              : f.verdict === "AUDIT" ? styles.verdictAudit
+                              : styles.verdictForwarded
+                            }`}>{f.verdict.toLowerCase()}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filteredFlows.length === 0 && !flowsLoading && (
+                    <div className={styles.noDataBanner}>플로우 데이터 없음</div>
+                  )}
+                </div>
+
+                {/* Flow Detail Panel */}
+                {selectedFlow && (
+                  <FlowDetailPanel flow={selectedFlow} onClose={() => setSelectedFlow(null)} />
                 )}
               </div>
-
-              {/* Flow Detail Panel */}
-              {selectedFlow && (
-                <FlowDetailPanel flow={selectedFlow} onClose={() => setSelectedFlow(null)} />
-              )}
-            </div>
+            )}
           </div>
         </>
       ) : (

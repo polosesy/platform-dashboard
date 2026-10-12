@@ -1,23 +1,25 @@
 import type { Request, Response, Router } from "express";
-import type { Env } from "../env";
-import { mockReservationUtilization, tryGetReservationUtilization } from "../services/reservations";
+import type { Env } from "../env.js";
+import { mockReservationUtilization, tryGetReservationUtilization } from "../services/reservations.js";
+import { queryString, querySubscriptionId, sendError } from "../infra/requestParams.js";
 
 export function registerReservationRoutes(router: Router, env: Env) {
-  router.get("/api/reservations/utilization", (req: Request, res: Response) => {
-    const grain = (req.query.grain ?? env.AZURE_RESERVATIONS_GRAIN) as "daily" | "monthly";
-    const safeGrain = grain === "daily" || grain === "monthly" ? grain : env.AZURE_RESERVATIONS_GRAIN;
-    const subscriptionId = typeof req.query.subscriptionId === "string" ? req.query.subscriptionId : undefined;
+  router.get("/api/reservations/utilization", async (req: Request, res: Response) => {
+    const grainParam = queryString(req, "grain");
+    const grain = grainParam === "daily" || grainParam === "monthly" ? grainParam : env.AZURE_RESERVATIONS_GRAIN;
 
-    tryGetReservationUtilization(env, req.auth?.bearerToken, safeGrain, { subscriptionId })
-      .then((r) => {
-        if (r) {
-          res.json(r);
-          return;
-        }
-        res.json(mockReservationUtilization(safeGrain, "mock data"));
-      })
-      .catch((e: unknown) => {
-        res.json(mockReservationUtilization(safeGrain, e instanceof Error ? e.message : "reservations error"));
-      });
+    let subscriptionId: string | undefined;
+    try {
+      subscriptionId = querySubscriptionId(req, env);
+    } catch (e: unknown) {
+      return sendError(res, e, "reservations_failed");
+    }
+
+    try {
+      const r = await tryGetReservationUtilization(env, req.auth?.bearerToken, grain, { subscriptionId });
+      res.json(r ?? mockReservationUtilization(grain, "mock data"));
+    } catch (e: unknown) {
+      res.json(mockReservationUtilization(grain, e instanceof Error ? e.message : "reservations error"));
+    }
   });
 }

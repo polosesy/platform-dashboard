@@ -1,7 +1,8 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { SecureScoreSummary, SecureScoreControl, SecurityAlertsResponse, SecurityAlert } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager";
-import { getArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { getArmFetcher } from "../infra/azureClientFactory.js";
+import { parseSubscriptionIds } from "../infra/requestParams.js";
 
 // ────────────────────────────────────────────
 // Azure Defender for Cloud — Secure Score & Alerts
@@ -9,10 +10,6 @@ import { getArmFetcher } from "../infra/azureClientFactory";
 
 const scoreCache = new CacheManager<SecureScoreSummary>(50);
 const alertsCache = new CacheManager<SecurityAlertsResponse>(50);
-
-function parseSubscriptionIds(raw: string): string[] {
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
-}
 
 // ── Secure Score ──
 
@@ -39,9 +36,8 @@ export async function tryGetSecureScore(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<SecureScoreSummary | null> {
-  if (!bearerToken || !env.AZURE_SUBSCRIPTION_IDS) return null;
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS)[0];
-  if (!subId) return null;
+  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
+  if (!bearerToken || !subId) return null;
 
   const prefix = bearerKeyPrefix(bearerToken);
   const key = `${prefix}:security:score:${subId}`;
@@ -106,9 +102,8 @@ export async function tryGetSecurityAlerts(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<SecurityAlertsResponse | null> {
-  if (!bearerToken || !env.AZURE_SUBSCRIPTION_IDS) return null;
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env.AZURE_SUBSCRIPTION_IDS)[0];
-  if (!subId) return null;
+  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
+  if (!bearerToken || !subId) return null;
 
   const prefix = bearerKeyPrefix(bearerToken);
   const key = `${prefix}:security:alerts:${subId}`;

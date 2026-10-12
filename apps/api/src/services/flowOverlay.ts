@@ -1,6 +1,6 @@
-import type { ArchitectureGraph } from "../types";
-import type { NetworkFlowPair } from "../types";
-import type { ArchitectureFlowEdgeMetric } from "../types";
+import type { ArchitectureGraph } from "@aud/types";
+import type { NetworkFlowPair } from "@aud/types";
+import type { ArchitectureFlowEdgeMetric } from "@aud/types";
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();

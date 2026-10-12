@@ -2,12 +2,7 @@
 
 import type { NodeResourceSummary } from "@aud/types";
 import styles from "../styles.module.css";
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+import { formatBytes } from "@/lib/format";
 
 function GaugeBar({ pct }: { pct: number | null }) {
   if (pct === null) return <span style={{ fontSize: 11, color: "rgba(20,21,23,0.35)" }}>N/A</span>;

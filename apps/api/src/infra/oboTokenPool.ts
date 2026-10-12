@@ -1,6 +1,6 @@
 import { OnBehalfOfCredential } from "@azure/identity";
-import type { Env } from "../env";
-import { bearerKeyPrefix } from "./cacheManager";
+import type { Env } from "../env.js";
+import { bearerKeyPrefix } from "./cacheManager.js";
 
 type CachedCredential = {
   credential: OnBehalfOfCredential;

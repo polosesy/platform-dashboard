@@ -67,9 +67,6 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const hasFlow = count > 0 && duration > 0;
   const shouldShowParticles = showParticles && hasFlow && !isDimmed && kindStyle.showParticles;
 
-  // Particle dimensions proportional to edge width
-  const pRy = Math.max(width * 0.45, 0.8);
-  const pRx = Math.max(width * 2, 3);
   const pFill = isHighlighted ? particleColor : strokeColor;
   const pOpacity = isHighlighted ? 0.92 : 0.7;
 

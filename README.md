@@ -101,15 +101,6 @@ Env vars:
 
 The signed-in user (via OBO) must have permission to read reservation summaries on the target subscription(s) (e.g. `Cost Management Reader` or equivalent).
 
-## ArgoCD
-
-UI page: `/argocd`
-
-API endpoint: `/api/argocd/apps`
-
-- If `ARGOCD_BASE_URL` + `ARGOCD_TOKEN` are set, the API calls ArgoCD `/api/v1/applications` and maps results.
-- Otherwise it serves mock data.
-
 ## Notes
 
-- By default the API serves mock graph/metrics data until Azure/ArgoCD env vars are configured.
+- By default the API serves mock graph/metrics data until the Azure env vars are configured.

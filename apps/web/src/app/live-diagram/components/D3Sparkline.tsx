@@ -5,7 +5,6 @@ import { scaleLinear } from "d3-scale";
 import { area, line, curveMonotoneX } from "d3-shape";
 import { select } from "d3-selection";
 import "d3-transition";
-import styles from "../styles.module.css";
 
 interface D3SparklineProps {
   values: number[];

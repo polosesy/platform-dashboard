@@ -1,7 +1,7 @@
-import type { Env } from "../env";
+import type { Env } from "../env.js";
 import type { DiagramNodeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager";
-import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory";
+import { CacheManager } from "../infra/cacheManager.js";
+import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // IP → Resource Reverse Mapper

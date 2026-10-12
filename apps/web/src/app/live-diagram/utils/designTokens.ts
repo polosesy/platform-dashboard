@@ -6,9 +6,6 @@ import type {
   DiagramEdgeKind,
   NodeColorToken,
   EdgeColorToken,
-  FaultDesignTokens,
-  HeatmapDesignTokens,
-  CanvasParticleTokens,
 } from "@aud/types";
 
 // ────────────────────────────────────────────
@@ -90,34 +87,6 @@ export function particleCount(trafficLevel: EdgeTrafficLevel, tokens = defaultTo
 export function particleRadius(trafficLevel: EdgeTrafficLevel, tokens = defaultTokens): number {
   return tokens.dimensions.particleRadius[trafficLevel];
 }
-
-// ── Extended tokens for fault / heatmap / canvas particles ──
-
-export const faultTokens: FaultDesignTokens = {
-  rippleColor: {
-    critical: "rgba(216,59,1,0.65)",
-    warning: "rgba(209,132,0,0.55)",
-    info: "rgba(0,120,212,0.45)",
-  },
-  cascadeDelayMs: 300,
-  impactHighlight: "rgba(216,59,1,0.20)",
-  rippleDurationMs: 2400,
-  maxRippleRadius: 180,
-};
-
-export const heatmapTokens: HeatmapDesignTokens = {
-  colorScaleStart: "rgba(255,255,178,0.6)",
-  colorScaleEnd: "rgba(189,0,38,0.85)",
-  minOpacity: 0.25,
-  maxOpacity: 0.80,
-};
-
-export const canvasParticleTokens: CanvasParticleTokens = {
-  sizeRange: [2, 4.5],
-  glowRadius: 8,
-  trailLength: 3,
-  trailOpacity: 0.15,
-};
 
 // ── EdgeKind visual tokens ──
 
