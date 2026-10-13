@@ -21,11 +21,11 @@ export function AuthControls() {
       const result = await instance.loginPopup(loginRequest);
       if (result.account) instance.setActiveAccount(result.account);
     } catch (e) {
-      setError(loginErrorMessage(e));
+      setError(loginErrorMessage(e, t));
     }
   };
   // Redirect sign-out: no popup to relay, works even when popups are blocked
-  const logout = () => instance.logoutRedirect({ account: user }).catch((e: unknown) => setError(loginErrorMessage(e)));
+  const logout = () => instance.logoutRedirect({ account: user }).catch((e: unknown) => setError(loginErrorMessage(e, t)));
 
   return (
     <div className={styles.right}>

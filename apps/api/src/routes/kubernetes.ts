@@ -4,6 +4,7 @@ import type { KubernetesClusterInfo } from "@aud/types";
 import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes.js";
 import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
+import { queryLang } from "../infra/lang.js";
 import { assertArmResourceId, queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 
 /** Minimal cluster info derived from an ARM ID, used when the cluster is not in the listing. */
@@ -64,7 +65,7 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
   router.get("/api/kubernetes/policies/insights", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await collectPolicyInsights(env, req.auth?.bearerToken, clusterId));
+      res.json(await collectPolicyInsights(env, req.auth?.bearerToken, clusterId, queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "policy_insights_failed", "kubernetes");
     }
@@ -74,7 +75,7 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
   router.get("/api/kubernetes/policies", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await collectClusterPolicies(env, req.auth?.bearerToken, clusterId));
+      res.json(await collectClusterPolicies(env, req.auth?.bearerToken, clusterId, queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "policies_failed", "kubernetes");
     }

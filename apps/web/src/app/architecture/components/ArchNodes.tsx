@@ -17,6 +17,8 @@ export type ArchNodeData = {
   toggle?: "expand" | "collapse";
   toggleLabel?: string;
   ariaLabel: string;
+  /** Shown only as connection context of the category filter (drawn dashed and faded) */
+  context?: boolean;
   /** Box kind class (region, vnet, subnet, lane, group, global) */
   variant?: string;
 };
@@ -81,7 +83,7 @@ export const BoxNode = memo(function BoxNode({ data }: NodeProps<ArchNodeData>) 
 export const TileNode = memo(function TileNode({ data }: NodeProps<ArchNodeData>) {
   const kind = data.shape.shape;
   return (
-    <button type="button" className={`${s.tile} ${s[`tile_${kind}`] ?? ""}`} aria-label={data.ariaLabel}>
+    <button type="button" className={`${s.tile} ${s[`tile_${kind}`] ?? ""} ${data.context ? s.context : ""}`} aria-label={data.ariaLabel}>
       <Handles />
       <Icon src={data.icon} />
       <span className={s.tileText}>

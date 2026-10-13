@@ -12,7 +12,9 @@ import type {
   LiveEdge,
 } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
+import { localizeLabel } from "../utils/localizeLabel";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 type EdgeDetailPanelProps = {
   detail: EdgeNetworkDetail | null;
@@ -211,8 +213,8 @@ export function EdgeDetailPanel({
 }: EdgeDetailPanelProps) {
   const { t } = useI18n();
 
-  const sourceLabel = detail?.sourceNodeLabel ?? edgeSpec?.source ?? "Source";
-  const targetLabel = detail?.targetNodeLabel ?? edgeSpec?.target ?? "Target";
+  const sourceLabel = localizeLabel(detail?.sourceNodeLabel ?? edgeSpec?.source ?? t("hb.col.source"), t);
+  const targetLabel = localizeLabel(detail?.targetNodeLabel ?? edgeSpec?.target ?? t("hb.col.destination"), t);
   const protocol = detail?.protocol ?? edgeSpec?.protocol;
   const edgeKind = detail?.edgeKind ?? edgeSpec?.edgeKind;
 
@@ -221,10 +223,10 @@ export function EdgeDetailPanel({
   const status = liveEdge?.status ?? "idle";
 
   const STATUS_COLORS: Record<string, string> = {
-    normal: "rgba(16,137,62,0.75)",
-    degraded: "rgba(209,132,0,0.75)",
-    down: "rgba(216,59,1,0.75)",
-    idle: "rgba(20,21,23,0.25)",
+    normal: rgba("ok", 0.75),
+    degraded: rgba("warning", 0.75),
+    down: rgba("danger", 0.75),
+    idle: rgba("ink", 0.25),
   };
 
   return (
@@ -247,7 +249,7 @@ export function EdgeDetailPanel({
           type="button"
           className={styles.detailCloseBtn}
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t("hb.close")}
         >
           ×
         </button>
@@ -271,31 +273,31 @@ export function EdgeDetailPanel({
               <div className={styles.essentialsList}>
                 {edgeKind && (
                   <div className={styles.essentialsRow}>
-                    <span className={styles.essentialsLabel}>Kind</span>
+                    <span className={styles.essentialsLabel}>{t("hb.typeLabel")}</span>
                     <span className={styles.essentialsValue}>{edgeKind}</span>
                   </div>
                 )}
                 <div className={styles.essentialsRow}>
-                  <span className={styles.essentialsLabel}>Status</span>
+                  <span className={styles.essentialsLabel}>{t("hb.status")}</span>
                   <span className={styles.essentialsValue} style={{ color: STATUS_COLORS[status] }}>
                     {status}
                   </span>
                 </div>
                 {metrics?.throughputBps != null && (
                   <div className={styles.essentialsRow}>
-                    <span className={styles.essentialsLabel}>Throughput</span>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.throughput")}</span>
                     <span className={styles.essentialsValue}>{fmtThroughput(metrics.throughputBps)}</span>
                   </div>
                 )}
                 {metrics?.latencyMs != null && (
                   <div className={styles.essentialsRow}>
-                    <span className={styles.essentialsLabel}>Latency</span>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.latency")}</span>
                     <span className={styles.essentialsValue}>{metrics.latencyMs.toFixed(0)}ms</span>
                   </div>
                 )}
                 {metrics?.errorRate != null && (
                   <div className={styles.essentialsRow}>
-                    <span className={styles.essentialsLabel}>Error Rate</span>
+                    <span className={styles.essentialsLabel}>{t("ob.errorRate")}</span>
                     <span className={styles.essentialsValue}>{metrics.errorRate.toFixed(1)}%</span>
                   </div>
                 )}

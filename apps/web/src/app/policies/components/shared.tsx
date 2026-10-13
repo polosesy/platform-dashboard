@@ -1,22 +1,13 @@
 "use client";
 
 import type { PolicyCategory, PolicySeverity, PsaLevel } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 
-export const CATEGORY_LABEL: Record<PolicyCategory, string> = {
-  psa: "Pod Security",
-  networkPolicy: "네트워크 정책",
-  rbac: "RBAC",
-  autoscaling: "오토스케일링·가용성",
-  resources: "리소스 관리",
-};
-
-export const SEVERITY_LABEL: Record<PolicySeverity, string> = {
-  high: "높음",
-  medium: "중간",
-  low: "낮음",
-  info: "정보",
-};
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+export const POLICY_CATEGORIES: PolicyCategory[] = ["psa", "networkPolicy", "rbac", "autoscaling", "resources"];
+export const categoryLabel = (t: TFn, c: PolicyCategory) => t(`polc.cat.${c}`);
+export const severityLabel = (t: TFn, s: PolicySeverity) => t(`polc.sev.${s}`);
 
 const SEVERITY_CLASS: Record<PolicySeverity, string> = {
   high: styles.sevHigh,
@@ -26,9 +17,10 @@ const SEVERITY_CLASS: Record<PolicySeverity, string> = {
 };
 
 export function SeverityBadge({ severity, count }: { severity: PolicySeverity; count?: number }) {
+  const { t } = useI18n();
   return (
     <span className={`${styles.badge} ${SEVERITY_CLASS[severity]}`}>
-      {SEVERITY_LABEL[severity]}
+      {severityLabel(t, severity)}
       {count !== undefined ? ` ${count}` : ""}
     </span>
   );
@@ -41,11 +33,12 @@ const PSA_CLASS: Record<PsaLevel, string> = {
 };
 
 export function PsaBadge({ level, implicit }: { level?: PsaLevel; implicit?: boolean }) {
-  if (!level) return <span className={`${styles.badge} ${styles.psaUnset}`}>미설정</span>;
+  const { t } = useI18n();
+  if (!level) return <span className={`${styles.badge} ${styles.psaUnset}`}>{t("polc.psa.unset")}</span>;
   return (
-    <span className={`${styles.badge} ${PSA_CLASS[level]}`} title={implicit ? "라벨 없음 — PSA 기본값" : undefined}>
+    <span className={`${styles.badge} ${PSA_CLASS[level]}`} title={implicit ? t("polc.psa.implicitHint") : undefined}>
       {level}
-      {implicit ? " (기본값)" : ""}
+      {implicit ? ` (${t("polc.psa.default")})` : ""}
     </span>
   );
 }

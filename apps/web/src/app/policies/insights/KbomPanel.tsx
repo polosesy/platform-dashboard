@@ -2,34 +2,36 @@
 
 import { Fragment, useState } from "react";
 import type { PolicyInsightsResponse } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import { Pill } from "./Inspector";
 import styles from "./insights.module.css";
 
 const FLAG_TONE = { drift: "warn", snapshot: "warn", public: "unk" } as const;
 
 export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
+  const { t } = useI18n();
   const [showManaged, setShowManaged] = useState(false);
   const k = data.kbom;
   const cats = [...new Set(k.items.map((i) => i.category))];
   const managed = k.items.filter((i) => i.managed).length;
   const stats: Array<[boolean, string | number, string]> = [
-    [false, k.summary.images, "이미지(기술)"],
-    [false, k.summary.registries.length, `레지스트리 · ${k.summary.registries.join(", ")}`],
-    [k.summary.drift > 0, k.summary.drift, "버전 혼재"],
-    [k.summary.snapshot > 0, k.summary.snapshot, "비릴리스 태그 실행 중"],
-    [k.summary.publicPull > 0, k.summary.publicPull, "공개 레지스트리 직접 pull"],
-    [k.summary.digestPinned < k.summary.images, `${k.summary.digestPinned}/${k.summary.images}`, "다이제스트 고정"],
-    [false, "미연동", "취약점(CVE)"],
+    [false, k.summary.images, t("ins.kbom.images")],
+    [false, k.summary.registries.length, `${t("ins.kbom.registries")} · ${k.summary.registries.join(", ")}`],
+    [k.summary.drift > 0, k.summary.drift, t("ins.kbom.drift")],
+    [k.summary.snapshot > 0, k.summary.snapshot, t("ins.kbom.snapshot")],
+    [k.summary.publicPull > 0, k.summary.publicPull, t("ins.kbom.publicPull")],
+    [k.summary.digestPinned < k.summary.images, `${k.summary.digestPinned}/${k.summary.images}`, t("ins.kbom.digest")],
+    [false, t("ins.kbom.notConnected"), t("ins.kbom.cve")],
   ];
   return (
-    <section className={styles.panel} aria-label="클러스터 구성 목록">
+    <section className={styles.panel} aria-label={t("ins.kbom.aria")}>
       <div className={styles.panelH}>
         <div>
-          <h3>구성 목록 (KBOM) · 실행 중인 기술과 버전</h3>
-          <div className={styles.sub}>워크로드 파드 템플릿의 이미지와 노드 정보에서 생성. 취약점(CVE) 데이터는 연결되지 않았습니다.</div>
+          <h3>{t("ins.kbom.title")}</h3>
+          <div className={styles.sub}>{t("ins.kbom.sub")}</div>
         </div>
         <button className={styles.fchip} aria-pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>
-          {showManaged ? "AKS 관리 이미지 숨기기" : `AKS 관리 이미지 ${managed}개 포함`}
+          {showManaged ? t("ins.kbom.hideManaged") : t("ins.kbom.showManaged", { n: managed })}
         </button>
       </div>
       <div className={styles.panelB} style={{ display: "grid", gap: 12 }}>
@@ -47,7 +49,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.tbl}>
-            <thead><tr><th>기술</th><th>버전</th><th>출처</th><th>실행 위치</th><th>신호</th></tr></thead>
+            <thead><tr><th>{t("ins.kbom.col.tech")}</th><th>{t("ins.kbom.col.version")}</th><th>{t("ins.kbom.col.source")}</th><th>{t("ins.kbom.col.where")}</th><th>{t("ins.kbom.col.signals")}</th></tr></thead>
             <tbody>
               {cats.map((cat) => {
                 const all = k.items.filter((i) => i.category === cat);
@@ -55,10 +57,10 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
                 if (!items.length) return null;
                 return (
                   <Fragment key={cat}>
-                    <tr className={styles.catRow}><td colSpan={5}>{cat} <span className={styles.muted} style={{ fontWeight: 500 }}>{items.length}{all.length > items.length ? ` (+AKS 관리 ${all.length - items.length})` : ""}</span></td></tr>
+                    <tr className={styles.catRow}><td colSpan={5}>{cat} <span className={styles.muted} style={{ fontWeight: 500 }}>{items.length}{all.length > items.length ? ` (+${t("ins.managed")} ${all.length - items.length})` : ""}</span></td></tr>
                     {items.map((x) => (
                       <tr key={x.repo}>
-                        <td><b>{x.tech}</b>{x.managed && <span className={styles.mgd}>AKS 관리</span>}<div className={`${styles.mono} ${styles.muted}`} style={{ fontSize: 11 }}>{x.repo}</div></td>
+                        <td><b>{x.tech}</b>{x.managed && <span className={styles.mgd}>{t("ins.managed")}</span>}<div className={`${styles.mono} ${styles.muted}`} style={{ fontSize: 11 }}>{x.repo}</div></td>
                         <td>{x.versions.map((v) => <span key={v} className={styles.ver} data-bad={/snapshot|latest/i.test(v) || x.versions.length > 1 || undefined}>{v}</span>)}</td>
                         <td className={styles.mono}>{x.registry}</td>
                         <td className={styles.muted} style={{ fontSize: 12 }}>{x.workloads.map((w) => w.split("/")[1]).join(", ")}</td>

@@ -42,15 +42,15 @@ export function isAuthPopupResponse(loc: Pick<Location, "hash" | "search">): boo
   return false;
 }
 
-/** User-facing message for a failed sign-in (MSAL error codes → Korean guidance). */
-export function loginErrorMessage(e: unknown): string {
+/** User-facing message for a failed sign-in (MSAL error codes → guidance in the current language). */
+export function loginErrorMessage(e: unknown, t: (key: string, vars?: Record<string, string | number>) => string): string {
   const code = (e as { errorCode?: string })?.errorCode ?? "";
   const text = e instanceof Error ? e.message : String(e);
-  if (code === "user_cancelled") return "로그인 창이 닫혔습니다.";
-  if (code === "popup_window_error" || code === "empty_window_error") return "팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용한 뒤 다시 시도하세요.";
-  if (code === "timed_out") return "로그인 응답을 받지 못했습니다(시간 초과). 다시 시도하세요.";
-  if (code === "interaction_in_progress") return "다른 로그인 창이 이미 열려 있습니다.";
-  if (/AADSTS50011/.test(text)) return "리디렉트 URI가 앱 등록에 없습니다(AADSTS50011). Entra 앱 등록의 SPA 리디렉트 URI를 확인하세요.";
-  if (/AADSTS65001|consent/i.test(text)) return "API 권한 동의가 필요합니다. 관리자 동의 또는 앱 권한을 확인하세요.";
-  return `로그인 실패: ${code || text.slice(0, 120)}`;
+  if (code === "user_cancelled") return t("auth.err.cancelled");
+  if (code === "popup_window_error" || code === "empty_window_error") return t("auth.err.popupBlocked");
+  if (code === "timed_out") return t("auth.err.timeout");
+  if (code === "interaction_in_progress") return t("auth.err.inProgress");
+  if (/AADSTS50011/.test(text)) return t("auth.err.redirectUri");
+  if (/AADSTS65001|consent/i.test(text)) return t("auth.err.consent");
+  return t("auth.err.other", { detail: code || text.slice(0, 120) });
 }

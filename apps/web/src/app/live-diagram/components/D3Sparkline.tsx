@@ -4,6 +4,7 @@ import { useRef, useEffect, useId } from "react";
 import { scaleLinear } from "d3-scale";
 import { area, line, curveMonotoneX } from "d3-shape";
 import { select } from "d3-selection";
+import { hex } from "@/lib/palette";
 import "d3-transition";
 
 interface D3SparklineProps {
@@ -18,7 +19,7 @@ export function D3Sparkline({
   values,
   width = 80,
   height = 24,
-  color = "#3b82f6",
+  color = hex("accent"),
   className,
 }: D3SparklineProps) {
   const svgRef = useRef<SVGSVGElement>(null);

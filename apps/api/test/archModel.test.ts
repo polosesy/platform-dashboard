@@ -253,3 +253,82 @@ test("search and header width helpers", () => {
   assert.ok(labelWidth("가나다라", undefined, 0, 0) > labelWidth("abcd", undefined, 0, 0));
   assert.equal(ARCH.STACK_AT, 6);
 });
+
+// ── Category filter (표시 범위) ──
+const { filterArchModel, archCategoryOf, categoryCounts, ARCH_CATEGORIES } = m;
+const cat = (...c: Parameters<typeof archCategoryOf>[0][]) => new Set(c as ns.ArchCategory[]);
+
+test("filter: no filter (null or all nine) returns the same model and the same layout", () => {
+  for (const c of [null, new Set(ARCH_CATEGORIES)]) {
+    const v = filterArchModel(model, c);
+    assert.equal(v.model, model);
+    assert.equal(v.active, false);
+  }
+  const opts = { region: "koreacentral", collapsed: new Set<string>(), expandedStacks: new Set<string>() };
+  assert.deepEqual(JSON.stringify(layoutArch(filterArchModel(model, null).model, opts).shapes), JSON.stringify(layoutArch(model, opts).shapes));
+});
+
+test("filter: categories partition the tiles; unknown kinds are 'other', PE is network", () => {
+  const seen = new Map<string, string>();
+  for (const c of ARCH_CATEGORIES) {
+    for (const r of model.resources.values()) if (archCategoryOf(r.node.kind) === c) {
+      assert.ok(!seen.has(r.id), `${r.id} in two categories`);
+      seen.set(r.id, c);
+    }
+  }
+  assert.equal(seen.size, model.resources.size);
+  assert.equal(archCategoryOf("somethingNew"), "other");
+  assert.equal(archCategoryOf("privateEndpoint"), "network");
+  const counts = categoryCounts(model, "all");
+  assert.equal(Object.values(counts).reduce((a, b) => a + b, 0), model.resources.size);
+});
+
+test("filter compute: LB kept as one-hop context, Key Vault gone, no false ghosts", () => {
+  const v = filterArchModel(model, cat("compute"));
+  assert.ok(v.active);
+  assert.ok(v.context.has(LB_PUB), "LB routes to a VM → context");
+  assert.ok(!v.model.regions.some((r) => r.paas.security.includes(KV)));
+  assert.equal(v.model.accounting, model.accounting);
+  assert.equal(v.model.totals, model.totals);
+  assert.equal(v.model.resources, model.resources);
+  const L = layoutArch(v.model, { region: "koreacentral", collapsed: new Set(), expandedStacks: new Set() });
+  checkGeometry(L);
+  const ghosts = L.shapes.filter((s) => s.shape === "ghost").map((s) => (s as { ref: string }).ref);
+  for (const g of ghosts) assert.notEqual(model.resources.get(g)?.region, "koreacentral", `ghost ${g} is in the shown region`);
+  assert.ok(!L.shapes.some((s) => s.id === APPGW), "App Gateway (network, no route to compute) is hidden");
+  assert.ok(L.edges.some((e) => e.kind === "ingress"), "internet entry to the context LB stays");
+});
+
+test("filter security: PE kept as context with its subnet and VNet only; LB is not context (one hop)", () => {
+  const v = filterArchModel(model, cat("security"));
+  assert.ok(v.context.has(PE));
+  assert.ok(!v.context.has(LB_PUB));
+  assert.deepEqual([...v.model.subnets.keys()], [A1]);
+  assert.deepEqual([...v.model.vnets.keys()], [VNET_A]);
+  assert.equal(v.model.subnets.get(A1)!.resources.join(), PE);
+  assert.equal(v.hiddenIn.get(A1), model.subnets.get(A1)!.resources.length - 1);
+  assert.ok((v.hiddenIn.get(VNET_A) ?? 0) > 0);
+  assert.equal(model.subnets.get(A1)!.resources.length > 1, true, "original model untouched");
+});
+
+test("filter network: every VNet and subnet stays (peering / CIDR are network information)", () => {
+  const v = filterArchModel(model, cat("network"));
+  assert.equal(v.model.vnets.size, model.vnets.size);
+  assert.equal(v.model.subnets.size, model.subnets.size);
+  assert.ok(v.model.edges.some((e) => e.kind === "peering"));
+});
+
+test("filter: lines split exactly into kept / crossing / internal; kept lines have shown ends", () => {
+  for (const c of ARCH_CATEGORIES) {
+    const v = filterArchModel(model, cat(c));
+    assert.equal(v.model.edges.length + v.crossing.length + v.internal, model.edges.length, c);
+    const L = layoutArch(v.model, { region: "all", collapsed: new Set(), expandedStacks: new Set(), layers: new Set(ns.ARCH_EDGE_KINDS) });
+    checkGeometry(L);
+  }
+});
+
+test("filter: in 'all' view the filtered model does not start fully collapsed", () => {
+  const v = filterArchModel(model, cat("compute"));
+  assert.equal(initialCollapsed(v.model, "all", 24, true).size, 0);
+  assert.equal(initialCollapsed(model, "all").size, 2, "unfiltered all-regions view still collapses every VNet");
+});

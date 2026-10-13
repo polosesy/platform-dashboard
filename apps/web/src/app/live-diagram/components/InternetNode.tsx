@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 
 export type InternetNodeData = {
@@ -11,7 +12,10 @@ export type InternetNodeData = {
 };
 
 function InternetNodeInner({ data }: NodeProps<InternetNodeData>) {
-  const { label, outboundMethodCount, hasDeprecatedPath } = data;
+  const { t } = useI18n();
+  // The API names this node "인터넷"; this node type is only ever the internet, so the label is ours
+  const { outboundMethodCount, hasDeprecatedPath } = data;
+  const label = t("ld.internet");
 
   return (
     <div className={`${styles.internetNode} ${hasDeprecatedPath ? styles.internetNodeWarn : ""}`}>
@@ -37,12 +41,12 @@ function InternetNodeInner({ data }: NodeProps<InternetNodeData>) {
       <span className={styles.internetNodeLabel}>{label}</span>
 
       {outboundMethodCount !== undefined && outboundMethodCount > 0 && (
-        <span className={styles.internetNodeCount}>{outboundMethodCount}개 경로</span>
+        <span className={styles.internetNodeCount}>{t("ld.paths", { n: outboundMethodCount })}</span>
       )}
 
       {hasDeprecatedPath && (
         <div className={styles.internetNodeDeprecatedBadge}>
-          기본 아웃바운드 감지
+          {t("ld.defaultOutbound")}
         </div>
       )}
 

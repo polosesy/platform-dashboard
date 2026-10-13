@@ -17,6 +17,8 @@ type SecurityState = {
   posture: SecurityPostureResponse | undefined;
   error: string | null;
   loading: boolean;
+  /** The subscription list has loaded (subscriptionId is final) */
+  ready: boolean;
   reload: () => void;
 };
 
@@ -29,7 +31,7 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   );
   return (
     <SecurityCtx.Provider
-      value={{ subscriptions, subscriptionId, setSubscriptionId, posture: q.data, error: q.error, loading: q.loading || !loaded, reload: q.reload }}
+      value={{ subscriptions, subscriptionId, setSubscriptionId, posture: q.data, error: q.error, loading: q.loading || !loaded, ready: loaded, reload: q.reload }}
     >
       {children}
     </SecurityCtx.Provider>

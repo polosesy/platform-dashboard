@@ -20,6 +20,8 @@ type Props = {
   offscreen: ArchEdge[];
   onSelect: (shapeId: string) => void;
   shownAt: Map<string, string>;
+  /** Lines cut by the category filter (one end shown, one hidden) */
+  filteredOut?: ArchEdge[];
 };
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
@@ -33,7 +35,7 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 
 const portalUrl = (azureId?: string) => (azureId ? `https://portal.azure.com/#@/resource${azureId}` : null);
 
-export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt }: Props) {
+export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [] }: Props) {
   const { t } = useI18n();
   const kind = (k: string) => {
     const v = t(`arch.kind.${k}`);
@@ -85,6 +87,26 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt }
   const links = drawn.filter((e) => e.source === sh.id || e.target === sh.id);
   const ref = sh.shape === "internet" ? null : "ref" in sh ? sh.ref : null;
   const offs = ref ? offscreen.filter((e) => e.source === ref || e.target === ref) : [];
+
+  // Lines the category filter hid: the shown end is drawn as this shape
+  const cut = filteredOut.filter((e) => shownAt.get(e.source) === sh.id || shownAt.get(e.target) === sh.id);
+  const filteredList = cut.length ? (
+    <section className={s.iSection}>
+      <h3>{t("arch.filter.cutLinks", { n: cut.length })}</h3>
+      <ul className={s.iList}>
+        {cut.map((e) => {
+          const out = shownAt.get(e.source) === sh.id;
+          const other = out ? e.target : e.source;
+          return (
+            <li key={`cut-${e.id}`}>
+              <span>{out ? "→" : "←"} {nameOf(other)}</span>
+              <span className={s.iDim}>{t(`arch.edge.${e.kind}`)} · {t("arch.filter.outside")}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  ) : null;
 
   const linkList = (
     <section className={s.iSection}>
@@ -159,6 +181,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt }
           </ul>
         </section>
         {linkList}
+        {filteredList}
       </aside>
     );
   }
@@ -217,6 +240,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt }
         {res?.extraSubnets.length ? <Row k={t("arch.i.extraSubnets")}>{res.extraSubnets.map((x) => model.subnets.get(x)?.node.name ?? x).join(", ")}</Row> : null}
       </dl>
       {linkList}
+      {filteredList}
       <div className={s.iActions}>
         {portal ? <a href={portal} target="_blank" rel="noopener noreferrer" className={s.iAction}>{t("common.openPortal")} ↗</a> : null}
         {vnet ? <Link href="/live-diagram" className={s.iAction}>{t("arch.openLive")} →</Link> : null}

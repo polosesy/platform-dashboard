@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 import type {
   WorkloadHealth,
   WorkloadDetailResponse,
@@ -22,6 +23,7 @@ function MetricRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 function JvmSection({ jvm }: { jvm: JvmMetrics }) {
+  const { t } = useI18n();
   const heapPct = jvm.heapUsedPct !== null ? Math.round(jvm.heapUsedPct) : null;
   const heapCls = heapPct !== null
     ? heapPct >= 85 ? styles.gaugeCrit : heapPct >= 70 ? styles.gaugeWarn : styles.gaugeOk
@@ -29,10 +31,10 @@ function JvmSection({ jvm }: { jvm: JvmMetrics }) {
 
   return (
     <div className={styles.detailSection}>
-      <p className={styles.detailSectionTitle}>JVM 메트릭</p>
+      <p className={styles.detailSectionTitle}>{t("ob.jvm")}</p>
       {heapPct !== null && (
         <div style={{ marginBottom: 10 }}>
-          <div className={styles.gaugeLabel} style={{ marginBottom: 4 }}>Heap 사용률</div>
+          <div className={styles.gaugeLabel} style={{ marginBottom: 4 }}>{t("ob.heap")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className={styles.gaugeBar} style={{ width: 120 }}>
               <div className={`${styles.gaugeFill} ${heapCls}`} style={{ width: `${heapPct}%` }} />
@@ -41,15 +43,15 @@ function JvmSection({ jvm }: { jvm: JvmMetrics }) {
           </div>
         </div>
       )}
-      {jvm.gcTimeMs !== null && <MetricRow label="GC 시간 (1분)" value={`${jvm.gcTimeMs}ms`} />}
-      {jvm.gcCount !== null && <MetricRow label="GC 횟수 (1분)" value={jvm.gcCount} />}
+      {jvm.gcTimeMs !== null && <MetricRow label={t("ob.gcTime")} value={`${jvm.gcTimeMs}ms`} />}
+      {jvm.gcCount !== null && <MetricRow label={t("ob.gcCount")} value={jvm.gcCount} />}
       {jvm.threadCount !== null && (
         <MetricRow
-          label="스레드"
-          value={jvm.threadBlocked !== null ? `${jvm.threadCount} (차단: ${jvm.threadBlocked})` : jvm.threadCount}
+          label={t("ob.threads")}
+          value={jvm.threadBlocked !== null ? `${jvm.threadCount} (${t("ob.blocked")}: ${jvm.threadBlocked})` : jvm.threadCount}
         />
       )}
-      {jvm.classesLoaded !== null && <MetricRow label="클래스 로드" value={jvm.classesLoaded.toLocaleString()} />}
+      {jvm.classesLoaded !== null && <MetricRow label={t("ob.classes")} value={jvm.classesLoaded.toLocaleString()} />}
     </div>
   );
 }
@@ -84,6 +86,7 @@ function ContainerStateBadge({ state, reason }: { state: string; reason?: string
 // ── Sub-components for detail sections ──
 
 function PodDetailRow({ pod }: { pod: WorkloadPodDetail }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const totalRestarts = pod.containers.reduce((s, c) => s + c.restartCount, 0);
   const readyCount = pod.containers.filter((c) => c.ready).length;
@@ -106,10 +109,10 @@ function PodDetailRow({ pod }: { pod: WorkloadPodDetail }) {
             <span>IP</span><span className={styles.podDetailMono}>{pod.podIP || "—"}</span>
           </div>
           <div className={styles.podDetailMiniRow}>
-            <span>노드</span><span className={styles.podDetailMono}>{pod.nodeName || "—"}</span>
+            <span>{t("hb.node")}</span><span className={styles.podDetailMono}>{pod.nodeName || "—"}</span>
           </div>
           <div className={styles.podDetailMiniRow}>
-            <span>Age</span><span>{formatAge(pod.startTime)}</span>
+            <span>{t("ob.age")}</span><span>{formatAge(pod.startTime)}</span>
           </div>
 
           {pod.containers.map((c) => (
@@ -120,32 +123,32 @@ function PodDetailRow({ pod }: { pod: WorkloadPodDetail }) {
               </div>
               <div className={styles.containerDetailBody}>
                 <div className={styles.podDetailMiniRow}>
-                  <span>이미지</span>
+                  <span>{t("ob.image")}</span>
                   <span className={styles.podDetailMono} title={c.image}>
                     {c.image.length > 45 ? "…" + c.image.slice(-42) : c.image}
                   </span>
                 </div>
                 {c.ports.length > 0 && (
                   <div className={styles.podDetailMiniRow}>
-                    <span>포트</span>
+                    <span>{t("hb.ports")}</span>
                     <span>{c.ports.map((p) => `${p.containerPort}/${p.protocol}`).join(", ")}</span>
                   </div>
                 )}
                 {c.resourceRequests && (
                   <div className={styles.podDetailMiniRow}>
-                    <span>Requests</span>
+                    <span>{t("ob.requests")}</span>
                     <span>{c.resourceRequests.cpu || "—"} / {c.resourceRequests.memory || "—"}</span>
                   </div>
                 )}
                 {c.resourceLimits && (
                   <div className={styles.podDetailMiniRow}>
-                    <span>Limits</span>
+                    <span>{t("ob.limits")}</span>
                     <span>{c.resourceLimits.cpu || "—"} / {c.resourceLimits.memory || "—"}</span>
                   </div>
                 )}
                 {c.restartCount > 0 && (
                   <div className={styles.podDetailMiniRow}>
-                    <span>재시작</span>
+                    <span>{t("ob.restarts")}</span>
                     <span style={{ color: "rgba(196,43,28,0.85)" }}>{c.restartCount}</span>
                   </div>
                 )}
@@ -159,10 +162,11 @@ function PodDetailRow({ pod }: { pod: WorkloadPodDetail }) {
 }
 
 function ServiceSection({ services }: { services: WorkloadServiceInfo[] }) {
+  const { t } = useI18n();
   if (services.length === 0) return null;
   return (
     <div className={styles.detailSection}>
-      <p className={styles.detailSectionTitle}>서비스 / 엔드포인트</p>
+      <p className={styles.detailSectionTitle}>{t("ob.svcEndpoints")}</p>
       {services.map((svc) => (
         <div key={svc.name} className={styles.svcCard}>
           <div className={styles.svcCardHeader}>
@@ -170,18 +174,18 @@ function ServiceSection({ services }: { services: WorkloadServiceInfo[] }) {
             <span className={styles.svcTypeBadge}>{svc.type}</span>
           </div>
           <div className={styles.podDetailMiniRow}>
-            <span>Cluster IP</span>
+            <span>{t("ob.clusterIp")}</span>
             <span className={styles.podDetailMono}>{svc.clusterIP || "None"}</span>
           </div>
           {svc.externalIP && (
             <div className={styles.podDetailMiniRow}>
-              <span>External IP</span>
+              <span>{t("ob.externalIp")}</span>
               <span className={styles.podDetailMono}>{svc.externalIP}</span>
             </div>
           )}
           {svc.ports.length > 0 && (
             <div className={styles.podDetailMiniRow}>
-              <span>포트</span>
+              <span>{t("hb.ports")}</span>
               <span>
                 {svc.ports.map((p) =>
                   `${p.port}→${p.targetPort}/${p.protocol}${p.nodePort ? ` (NP:${p.nodePort})` : ""}`
@@ -204,6 +208,7 @@ export function WorkloadDetailPanel({
   clusterId: string;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const getApiToken = useApiToken();
   const { name, namespace, kind, pods, cpu, memory, apm, jvm } = wl;
 
@@ -249,33 +254,33 @@ export function WorkloadDetailPanel({
           <p className={styles.detailTitle}>{name}</p>
           <p className={styles.detailNs}>{namespace}</p>
         </div>
-        <button className={styles.detailClose} onClick={onClose} aria-label="닫기">×</button>
+        <button className={styles.detailClose} onClick={onClose} aria-label={t("hb.close")}>×</button>
       </div>
 
       <div className={styles.detailBody}>
         {/* Pod Summary */}
         <div className={styles.detailSection}>
-          <p className={styles.detailSectionTitle}>파드 상태</p>
-          <MetricRow label="전체" value={pods.total} />
+          <p className={styles.detailSectionTitle}>{t("ob.podStatus")}</p>
+          <MetricRow label={t("hb.total")} value={pods.total} />
           <MetricRow
-            label="Running"
+            label={t("ob.running")}
             value={<span style={{ color: "rgba(16,137,62,0.85)" }}>{pods.running}</span>}
           />
           {pods.pending > 0 && (
             <MetricRow
-              label="Pending"
+              label={t("ob.pending")}
               value={<span style={{ color: "rgba(209,132,0,0.85)" }}>{pods.pending}</span>}
             />
           )}
           {pods.failed > 0 && (
             <MetricRow
-              label="Failed"
+              label={t("ob.failed")}
               value={<span style={{ color: "rgba(196,43,28,0.85)" }}>{pods.failed}</span>}
             />
           )}
           {pods.restarts > 0 && (
             <MetricRow
-              label="재시작 횟수"
+              label={t("ob.restartCount")}
               value={<span style={{ color: "rgba(196,43,28,0.75)" }}>{pods.restarts}</span>}
             />
           )}
@@ -283,7 +288,7 @@ export function WorkloadDetailPanel({
 
         {/* Resource Usage */}
         <div className={styles.detailSection}>
-          <p className={styles.detailSectionTitle}>리소스 사용률</p>
+          <p className={styles.detailSectionTitle}>{t("ob.resourceUsage")}</p>
           {cpu ? (
             <div style={{ marginBottom: 8 }}>
               <div className={styles.nodeMetricLabel}>CPU</div>
@@ -301,7 +306,7 @@ export function WorkloadDetailPanel({
 
           {memory ? (
             <div>
-              <div className={styles.nodeMetricLabel}>메모리</div>
+              <div className={styles.nodeMetricLabel}>{t("ob.memory")}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div className={styles.gaugeBar} style={{ width: 120 }}>
                   <div
@@ -312,7 +317,7 @@ export function WorkloadDetailPanel({
                 <span className={styles.gaugeLabel}>{Math.round(memory.usagePct)}% / {memory.usageRaw}Mi</span>
               </div>
             </div>
-          ) : <MetricRow label="메모리" value="N/A" />}
+          ) : <MetricRow label={t("ob.memory")} value="N/A" />}
         </div>
 
         {/* Services & Endpoints (from detail API) */}
@@ -323,7 +328,7 @@ export function WorkloadDetailPanel({
           <div className={styles.detailSection}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
               <span className={styles.spinner} style={{ width: 14, height: 14 }} />
-              <span style={{ fontSize: 12, color: "rgba(20,21,23,0.4)" }}>파드 상세 로딩 중...</span>
+              <span style={{ fontSize: 12, color: "rgba(20,21,23,0.4)" }}>{t("ob.podDetailLoading")}</span>
             </div>
           </div>
         )}
@@ -331,14 +336,14 @@ export function WorkloadDetailPanel({
         {detailError && (
           <div className={styles.detailSection}>
             <div className={styles.errorMsg} style={{ fontSize: 11, padding: 10 }}>
-              상세 조회 실패: {detailError}
+              {t("ob.detailFailed")}: {detailError}
             </div>
           </div>
         )}
 
         {detail && detail.pods.length > 0 && (
           <div className={styles.detailSection}>
-            <p className={styles.detailSectionTitle}>파드 상세 ({detail.pods.length})</p>
+            <p className={styles.detailSectionTitle}>{t("ob.podDetail", { n: detail.pods.length })}</p>
             {detail.pods.map((pod) => (
               <PodDetailRow key={pod.name} pod={pod} />
             ))}
@@ -348,9 +353,9 @@ export function WorkloadDetailPanel({
         {/* No services banner */}
         {detail && detail.services.length === 0 && detail.pods.length > 0 && (
           <div className={styles.detailSection}>
-            <p className={styles.detailSectionTitle}>서비스</p>
+            <p className={styles.detailSectionTitle}>{t("ob.services")}</p>
             <div style={{ fontSize: 12, color: "rgba(20,21,23,0.4)", padding: "6px 0" }}>
-              이 워크로드에 연결된 서비스가 없습니다.
+              {t("ob.noServices")}
             </div>
           </div>
         )}
@@ -358,13 +363,13 @@ export function WorkloadDetailPanel({
         {/* APM Metrics */}
         {apm && apm.source !== "none" && (
           <div className={styles.detailSection}>
-            <p className={styles.detailSectionTitle}>APM 메트릭 ({apm.source})</p>
+            <p className={styles.detailSectionTitle}>{t("ob.apm", { src: apm.source })}</p>
             {apm.requestsPerSec !== null && (
-              <MetricRow label="요청/초" value={apm.requestsPerSec.toFixed(2)} />
+              <MetricRow label={t("ob.rps")} value={apm.requestsPerSec.toFixed(2)} />
             )}
             {errorPct !== null && (
               <MetricRow
-                label="에러율"
+                label={t("ob.errorRate")}
                 value={
                   <span style={{ color: errorPct >= 5 ? "rgba(196,43,28,0.85)" : errorPct >= 1 ? "rgba(160,100,0,0.85)" : "rgba(16,137,62,0.85)" }}>
                     {errorPct}%
@@ -372,9 +377,9 @@ export function WorkloadDetailPanel({
                 }
               />
             )}
-            {apm.p50Ms !== null && <MetricRow label="p50 레이턴시" value={`${Math.round(apm.p50Ms)}ms`} />}
-            {apm.p95Ms !== null && <MetricRow label="p95 레이턴시" value={`${Math.round(apm.p95Ms)}ms`} />}
-            {apm.p99Ms !== null && <MetricRow label="p99 레이턴시" value={`${Math.round(apm.p99Ms)}ms`} />}
+            {apm.p50Ms !== null && <MetricRow label={t("ob.latency", { p: "p50" })} value={`${Math.round(apm.p50Ms)}ms`} />}
+            {apm.p95Ms !== null && <MetricRow label={t("ob.latency", { p: "p95" })} value={`${Math.round(apm.p95Ms)}ms`} />}
+            {apm.p99Ms !== null && <MetricRow label={t("ob.latency", { p: "p99" })} value={`${Math.round(apm.p99Ms)}ms`} />}
           </div>
         )}
 
@@ -384,8 +389,8 @@ export function WorkloadDetailPanel({
         {/* No APM data */}
         {(!apm || apm.source === "none") && !jvm && (
           <div className={styles.noDataBanner} style={{ margin: "10px 0", padding: 16 }}>
-            <strong>APM 데이터 없음</strong>
-            App Insights가 구성되지 않았거나 이 워크로드에서 메트릭을 수집하지 않습니다.
+            <strong>{t("ob.noApm")}</strong>
+            {t("ob.noApmHint")}
           </div>
         )}
       </div>

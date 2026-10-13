@@ -32,6 +32,7 @@ export function TrafficHeatmap({
 }: TrafficHeatmapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Sequential data scale (ColorBrewer YlOrRd) — intentionally not a UI token
   const colorInterp = interpolateRgb("rgba(255,255,178,0.8)", "rgba(189,0,38,0.9)");
 
   const draw = useCallback(() => {
@@ -110,8 +111,9 @@ export function TrafficHeatmap({
     <canvas
       ref={canvasRef}
       className={styles.heatmapCanvas}
-      width={width}
-      height={height}
+      // The backing store is width × devicePixelRatio (set in the effect); the CSS size must stay in CSS px,
+      // or on a 125 % / 150 % display the whole overlay is drawn 1.25× / 1.5× too large and drifts off the cards
+      style={{ width, height }}
     />
   );
 }

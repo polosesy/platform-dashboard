@@ -2,7 +2,9 @@
 
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import type { PolicyInsightsResponse, RiskFactorKey, WorkloadRiskRow } from "@aud/types";
-import { COMBO_FORMULA, COMBO_LABEL, EVK, WEIGHT_LABEL, flowNote, hubbleLabel, issueNum, type InsightsNav } from "./model";
+import { useI18n } from "@/lib/i18n";
+import { issueNum, type InsightLabels, type InsightsNav, type TFn } from "./model";
+import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, type InspectorModel, type InspectorRow } from "./Inspector";
 import styles from "./insights.module.css";
 
@@ -18,14 +20,16 @@ type Props = {
 };
 
 export function ComboButton({ combo, data, nav }: { combo: WorkloadRiskRow["combos"][number]; data: PolicyInsightsResponse; nav: InsightsNav }) {
+  const { t } = useI18n();
+  const { COMBO_LABEL, COMBO_FORMULA } = useInsightLabels();
   if (!combo.issueId) {
-    return <span className={styles.cpill} data-na="true" title="AKS 관리 — 직접 수정 불가, 보완 통제 대상">{COMBO_LABEL[combo.type]}</span>;
+    return <span className={styles.cpill} data-na="true" title={t("ins.heat.managedHint")}>{COMBO_LABEL[combo.type]}</span>;
   }
   const idx = data.issues.findIndex((i) => i.id === combo.issueId);
   const issue = data.issues[idx];
-  const label = combo.type === "takeover" && issue?.sev === "warn" ? "클러스터 장악 경로 · 판정 주의" : COMBO_LABEL[combo.type];
+  const label = combo.type === "takeover" && issue?.sev === "warn" ? t("ins.heat.takeoverWarn") : COMBO_LABEL[combo.type];
   return (
-    <button className={styles.cpill} onClick={() => nav.openIssue(combo.issueId!)} title={`${COMBO_FORMULA[combo.type]} → 위험 조합 ${issueNum(idx)}`}>
+    <button className={styles.cpill} onClick={() => nav.openIssue(combo.issueId!)} title={`${COMBO_FORMULA[combo.type]} → ${t("ins.heat.comboN", { n: issueNum(idx) })}`}>
       {issueNum(idx)} {label}
     </button>
   );
@@ -39,7 +43,9 @@ export function FactorStrip({ row, data }: { row: WorkloadRiskRow; data: PolicyI
   );
 }
 
-function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFactorKey | null, nav: InsightsNav): InspectorModel {
+function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFactorKey | null, nav: InsightsNav, t: TFn, lb: InsightLabels): InspectorModel {
+  const { COMBO_FORMULA, EVK, WEIGHT_LABEL, flowNote, hubbleLabel } = lb;
+  const none = t("ins.heat.none");
   const f = key ? data.factors.find((x) => x.key === key)! : null;
   const user = data.rows.filter((x) => !x.managed);
   const net = data.network;
@@ -49,63 +55,67 @@ function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFa
   if (f && key) {
     const v = r.cells[key];
     const rows: InspectorRow[] = [
-      { k: "이 워크로드의 값", v: v ?? "해당 없음", ev: v ? f.ev : undefined, mono: true },
-      { k: "판정 기준", v: f.desc },
-      { k: "가중치", v: v ? WEIGHT_LABEL[r.weights[key] ?? f.weight] : "-" },
+      { k: t("ins.heat.value"), v: v ?? none, ev: v ? f.ev : undefined, mono: true },
+      { k: t("ins.heat.criteria"), v: f.desc },
+      { k: t("ins.heat.weight"), v: v ? WEIGHT_LABEL[r.weights[key] ?? f.weight] : "-" },
     ];
     if (key === "extEgress") {
       const eg = net.edges.filter((e) => e.from === r.id && (e.cls === "cloud" || e.cls === "internet"));
       rows.push(eg.length
-        ? { k: "관측 목적지", node: <>{eg.map((e) => <div key={e.to}>{nodeLabel(e.to)} <span className={`${styles.mono} ${styles.muted}`}>{e.ports.join(",")} · {e.count}</span></div>)}</>, ev: "obs", src: `${hubbleLabel(net.coverage)} · ${flowNote(net.coverage)}` }
-        : { k: "관측 목적지", v: net.available ? `관측 구간(${hubbleLabel(net.coverage)}) 동안 없음 — 부재의 증거 아님` : `Hubble 데이터 없음 — ${net.reason ?? ""}`, ev: net.available ? "obs" : "unk" });
+        ? { k: t("ins.heat.observedDest"), node: <>{eg.map((e) => <div key={e.to}>{nodeLabel(e.to)} <span className={`${styles.mono} ${styles.muted}`}>{e.ports.join(",")} · {e.count}</span></div>)}</>, ev: "obs", src: `${hubbleLabel(net.coverage)} · ${flowNote(net.coverage)}` }
+        : { k: t("ins.heat.observedDest"), v: net.available ? t("ins.heat.noneObserved", { cov: hubbleLabel(net.coverage) }) : `${t("ins.heat.noHubble")} — ${net.reason ?? ""}`, ev: net.available ? "obs" : "unk" });
     }
     if (key === "highRbac") {
       for (const m of data.matrix.filter((x) => x.workloadId === r.id)) {
         rows.push(
-          { k: "바인딩", v: `${m.kind} ${m.binding} → ${m.role}`, ev: "perm", mono: true, src: "RBAC API" },
-          { k: "규칙 원문", v: m.rules.join(" | "), ev: "perm", mono: true, src: "resources:verbs" },
-          ...(m.conditional.length ? [{ k: "조건부", v: m.conditional.map((k) => data.riskDict.find((d) => d.key === k)?.label ?? k).join(", "), ev: "unk" as const, src: "약한 동사로만 성립 — 미검증" }] : []),
+          { k: t("ins.heat.binding"), v: `${m.kind} ${m.binding} → ${m.role}`, ev: "perm", mono: true, src: "RBAC API" },
+          { k: t("ins.heat.rules"), v: m.rules.join(" | "), ev: "perm", mono: true, src: "resources:verbs" },
+          ...(m.conditional.length ? [{ k: t("ins.perm.conditionalShort"), v: m.conditional.map((k) => data.riskDict.find((d) => d.key === k)?.label ?? k).join(", "), ev: "unk" as const, src: t("ins.perm.condWeak") }] : []),
         );
       }
     }
     const combos = r.combos.filter((c) => c.keys.includes(key));
     const same = user.filter((x) => x.cells[key]);
     cellSections.push(
-      { h: `${f.label} — 칸 상세`, rows },
-      { h: `이 칸이 만드는 위험 조합 ${combos.length}`, body: combos.length ? <>{combos.map((c) => <div key={c.type} style={{ marginBottom: 6 }}><ComboButton combo={c} data={data} nav={nav} /><div className={styles.muted} style={{ fontSize: 12, marginTop: 3 }}>{COMBO_FORMULA[c.type]}</div></div>)}</> : <div className={styles.muted}>이 칸은 단독 요인입니다.</div> },
-      { h: `같은 요인을 가진 워크로드 ${same.length}/${user.length}`, body: <div className={styles.ctrls}>{same.map((x) => <button key={x.id} className={styles.fchip} aria-pressed={x.id === r.id} onClick={() => nav.openHeatRow(x.id)}>{x.name}</button>)}</div> },
+      { h: t("ins.heat.cellDetail", { label: f.label }), rows },
+      { h: t("ins.heat.cellCombos", { n: combos.length }), body: combos.length ? <>{combos.map((c) => <div key={c.type} style={{ marginBottom: 6 }}><ComboButton combo={c} data={data} nav={nav} /><div className={styles.muted} style={{ fontSize: 12, marginTop: 3 }}>{COMBO_FORMULA[c.type]}</div></div>)}</> : <div className={styles.muted}>{t("ins.heat.alone")}</div> },
+      { h: t("ins.heat.same", { n: same.length, m: user.length }), body: <div className={styles.ctrls}>{same.map((x) => <button key={x.id} className={styles.fchip} aria-pressed={x.id === r.id} onClick={() => nav.openHeatRow(x.id)}>{x.name}</button>)}</div> },
     );
   }
   const comboKeys = new Set(r.combos.flatMap((c) => c.keys));
   const factorRows: InspectorRow[] = groups.flatMap((g) => data.factors.filter((x) => x.group === g).map((x) => ({
-    k: `${comboKeys.has(x.key) ? "◆ " : ""}${g} · ${x.label}`, v: r.cells[x.key] ?? "해당 없음", ev: r.cells[x.key] ? x.ev : undefined, off: !r.cells[x.key], key: comboKeys.has(x.key),
+    k: `${comboKeys.has(x.key) ? "◆ " : ""}${g} · ${x.label}`, v: r.cells[x.key] ?? none, ev: r.cells[x.key] ? x.ev : undefined, off: !r.cells[x.key], key: comboKeys.has(x.key),
   })));
   const out = net.edges.filter((e) => e.from === r.id), inn = net.edges.filter((e) => e.to === r.id);
   const ext = out.filter((e) => e.cls === "cloud" || e.cls === "internet").slice(0, 3);
   const imgs = data.kbom.items.filter((x) => x.workloads.includes(r.id));
   return {
     id: `hx-${r.id}-${key ?? "row"}`,
-    kicker: f ? `${f.group} · 근거 ${EVK[f.ev]} · ${r.cells[key!] ? WEIGHT_LABEL[r.weights[key!] ?? f.weight] : "해당 없음"}` : `워크로드 · ${r.namespace} · ${r.kind} ×${r.pods} · ${r.owner}`,
+    kicker: f ? `${f.group} · ${t("ins.heat.evidence")} ${EVK[f.ev]} · ${r.cells[key!] ? WEIGHT_LABEL[r.weights[key!] ?? f.weight] : none}` : `${t("ins.col.1")} · ${r.namespace} · ${r.kind} ×${r.pods} · ${r.owner}`,
     title: f ? `${r.name} — ${f.label}` : r.name,
-    sub: f ? `${r.namespace} · ${r.kind} ×${r.pods}` : r.managed ? "AKS 관리 — 직접 수정 불가, 보완 통제 대상" : `서비스 계정 ${r.namespace}/${r.serviceAccount}`,
+    sub: f ? `${r.namespace} · ${r.kind} ×${r.pods}` : r.managed ? t("ins.heat.managedHint") : `${t("ins.heat.sa")} ${r.namespace}/${r.serviceAccount}`,
     chips: r.combos.length ? <>{r.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />)}</> : undefined,
     sections: [
       ...cellSections,
-      { h: `요인 ${data.factors.filter((x) => r.cells[x.key]).length}/${data.factors.length} (◆ = 위험 조합을 이루는 요인)`, rows: factorRows, grid: true },
-      { h: "네트워크 · 이미지", rows: [
-        { k: "연결", v: net.available ? `나가는 ${out.length} · 들어오는 ${inn.length}` : "Hubble 데이터 없음", ev: net.available ? "obs" : "unk", src: hubbleLabel(net.coverage) },
-        { k: "클러스터 밖 상위", v: ext.map((e) => `${nodeLabel(e.to)} ${e.ports.join(",")}`).join(" · ") || "관측 없음" },
-        ...imgs.map((x) => ({ k: `이미지 · ${x.tech}`, v: `${x.versions.join(", ")} · ${x.registry}${x.flags.length ? ` · ${x.flags.map((fl) => fl.label).join(", ")}` : ""}`, mono: true })),
+      { h: t("ins.heat.factors", { n: data.factors.filter((x) => r.cells[x.key]).length, m: data.factors.length }), rows: factorRows, grid: true },
+      { h: t("ins.heat.netImages"), rows: [
+        { k: t("ins.heat.conn"), v: net.available ? t("ins.heat.inOut", { out: out.length, in: inn.length }) : t("ins.heat.noHubble"), ev: net.available ? "obs" : "unk", src: hubbleLabel(net.coverage) },
+        { k: t("ins.heat.topExternal"), v: ext.map((e) => `${nodeLabel(e.to)} ${e.ports.join(",")}`).join(" · ") || t("ins.heat.notObserved") },
+        ...imgs.map((x) => ({ k: `${t("ins.heat.image")} · ${x.tech}`, v: `${x.versions.join(", ")} · ${x.registry}${x.flags.length ? ` · ${x.flags.map((fl) => fl.label).join(", ")}` : ""}`, mono: true })),
       ] },
     ],
     links: [
-      ...(net.nodes.some((n) => n.id === r.id) ? [{ label: "네트워크 맵에서 보기", onClick: () => nav.openNet(r.id) }] : []),
-      ...r.combos.filter((c) => c.issueId).map((c) => ({ label: `공격 경로 ${issueNum(data.issues.findIndex((i) => i.id === c.issueId))} 열기`, onClick: () => nav.openIssue(c.issueId!) })),
+      ...(net.nodes.some((n) => n.id === r.id) ? [{ label: t("ins.heat.openNet"), onClick: () => nav.openNet(r.id) }] : []),
+      ...r.combos.filter((c) => c.issueId).map((c) => ({ label: t("ins.heat.openPath", { n: issueNum(data.issues.findIndex((i) => i.id === c.issueId)) }), onClick: () => nav.openIssue(c.issueId!) })),
     ],
   };
 }
 
 export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, nav }: Props) {
+  const { t } = useI18n();
+  const lb = useInsightLabels();
+  const { EVK, hubbleLabel } = lb;
+  const none = t("ins.heat.none");
   const rows = data.rows.filter((r) => showManaged || !r.managed);
   const user = data.rows.filter((r) => !r.managed);
   const managedCount = data.rows.length - user.length;
@@ -157,24 +167,24 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
   };
 
   return (
-    <section className={styles.panel} aria-label="위험 요인 히트맵">
+    <section className={styles.panel} aria-label={t("ins.heat.title")}>
       <div className={styles.panelH}>
         <div>
-          <h3>위험 요인 히트맵 · 워크로드 × 요인</h3>
-          <div className={styles.sub}>굵은 테두리 = 위험 조합을 이루는 칸. 칸을 누르거나 방향키 + Enter로 상세, Esc로 닫기.</div>
+          <h3>{t("ins.heat.titleFull")}</h3>
+          <div className={styles.sub}>{t("ins.heat.sub")}</div>
         </div>
         <div className={styles.ctrls}>
           <button className={styles.fchip} aria-pressed={showManaged} onClick={() => onShowManaged(!showManaged)}>
-            {showManaged ? `AKS 관리 구성요소 ${managedCount}개 숨기기` : `AKS 관리 구성요소 ${managedCount}개 포함`}
+            {showManaged ? t("ins.heat.hideManaged", { n: managedCount }) : t("ins.heat.showManaged", { n: managedCount })}
           </button>
         </div>
       </div>
       <div className={styles.panelB}>
         {rows.length === 0 ? (
-          <div className={styles.notice}>파드를 실행 중인 워크로드가 없습니다.</div>
+          <div className={styles.notice}>{t("ins.heat.noWorkloads")}</div>
         ) : (
           <div className={styles.heatWrap}>
-            <table className={styles.heat} role="grid" aria-label="위험 요인 히트맵" onFocus={(e) => { const t = (e.target as HTMLElement).dataset.tip; if (t) setTip(t); }}>
+            <table className={styles.heat} role="grid" aria-label={t("ins.heat.title")} onFocus={(e) => { const t = (e.target as HTMLElement).dataset.tip; if (t) setTip(t); }}>
               <thead>
                 <tr>
                   <th />
@@ -182,15 +192,15 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
                   <th />
                 </tr>
                 <tr>
-                  <th className={styles.wl} scope="col">워크로드 <span className={styles.muted}>({rows.length})</span></th>
+                  <th className={styles.wl} scope="col">{t("ins.col.1")} <span className={styles.muted}>({rows.length})</span></th>
                   {F.map((f) => (
-                    <th key={f.key} scope="col" title={`${f.desc} · 근거: ${EVK[f.ev]}`} data-obs={f.ev === "obs" || undefined} data-hl={sel?.key === f.key || undefined}>
+                    <th key={f.key} scope="col" title={`${f.desc} · ${t("ins.heat.evidence")}: ${EVK[f.ev]}`} data-obs={f.ev === "obs" || undefined} data-hl={sel?.key === f.key || undefined}>
                       {f.label}
-                      {f.ev === "obs" && <span className={styles.sr}> (Hubble 관측 · {hubbleLabel(data.network.coverage)})</span>}
+                      {f.ev === "obs" && <span className={styles.sr}> ({t("ins.ev.obs")} · {hubbleLabel(data.network.coverage)})</span>}
                       <span className={styles.tot}>{user.filter((r) => r.cells[f.key]).length}/{user.length}</span>
                     </th>
                   ))}
-                  <th scope="col" style={{ textAlign: "left" }}>위험 조합</th>
+                  <th scope="col" style={{ textAlign: "left" }}>{t("ins.heat.combosCol")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,12 +226,12 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
                               tabIndex={fr === ri && focus.c === ci ? 0 : -1}
                               data-w={v ? r.weights[f.key] ?? f.weight : undefined}
                               data-combo={(v && comboKeys.has(f.key)) || undefined}
-                              data-tip={`${r.name} · ${f.label}: ${v ?? "해당 없음"}`}
+                              data-tip={`${r.name} · ${f.label}: ${v ?? none}`}
                               aria-selected={isSel}
-                              aria-label={`${r.name} · ${f.label}: ${v ? v.slice(0, 60) : "없음"} · ${EVK[f.ev]}`}
+                              aria-label={`${r.name} · ${f.label}: ${v ? v.slice(0, 60) : t("ins.heat.noneShort")} · ${EVK[f.ev]}`}
                               onClick={() => { setFocus({ r: ri, c: ci }); toggle(ri, f.key); }}
                               onKeyDown={(e) => onKey(e, ri, ci)}
-                              onMouseEnter={() => setTip(`${r.name} · ${f.label}: ${v ?? "해당 없음"}`)}
+                              onMouseEnter={() => setTip(`${r.name} · ${f.label}: ${v ?? none}`)}
                             >
                               {v && f.ev === "obs" && <span className={styles.obsDot} />}
                             </td>
@@ -235,7 +245,7 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
                         <tr className={styles.heatX}>
                           <td colSpan={F.length + 2}>
                             <div className={styles.hxInner}>
-                              <Inspector model={heatModel(data, openRow, sel!.key, nav)} onClose={closeDetail} cols />
+                              <Inspector model={heatModel(data, openRow, sel!.key, nav, t, lb)} onClose={closeDetail} cols />
                             </div>
                           </td>
                         </tr>
@@ -249,12 +259,12 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
         )}
         <div className={styles.heatTip} aria-live="polite">{tip}</div>
         <div className={styles.legend}>
-          <span><i style={{ background: "#e9a48c" }} />장악·탈출에 직결</span>
-          <span><i style={{ background: "#f0d7a9" }} />경로를 넓힘</span>
-          <span><i style={{ background: "#e4e3e0" }} />위생</span>
-          <span><i style={{ boxShadow: "inset 0 0 0 2px var(--ink)", background: "#fff" }} />위험 조합을 이루는 칸</span>
-          <span><EvidenceChip ev="obs" text="●" /> Hubble 관측 근거 (그 외는 구성·권한)</span>
-          <span>열 머리 숫자 = 사용자·애드온 워크로드 {user.length}개 중 해당 수</span>
+          <span><i style={{ background: "#e9a48c" }} />{t("ins.heat.legendCrit")}</span>
+          <span><i style={{ background: "#f0d7a9" }} />{t("ins.heat.legendWarn")}</span>
+          <span><i style={{ background: "#e4e3e0" }} />{t("ins.weight.low")}</span>
+          <span><i style={{ boxShadow: "inset 0 0 0 2px var(--ink)", background: "#fff" }} />{t("ins.heat.legendCombo")}</span>
+          <span><EvidenceChip ev="obs" text="●" /> {t("ins.heat.legendObs")}</span>
+          <span>{t("ins.heat.legendCount", { n: user.length })}</span>
         </div>
       </div>
     </section>

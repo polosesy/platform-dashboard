@@ -16,13 +16,15 @@ function severityOrder(s: AlertSeverity): number {
   }
 }
 
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s ago`;
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+function timeAgo(iso: string, t: TFn): string {
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 60) return t("common.secondsAgo", { n: Math.max(0, sec) });
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  return `${Math.floor(min / 60)}h ago`;
+  if (min < 60) return t("common.minutesAgo", { n: min });
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return t("common.hoursAgo", { n: hr });
+  return t("common.daysAgo", { n: Math.floor(hr / 24) });
 }
 
 export function AlertSidebar({ alerts, onAlertClick }: AlertSidebarProps) {
@@ -53,13 +55,13 @@ export function AlertSidebar({ alerts, onAlertClick }: AlertSidebarProps) {
                   style={{ background: defaultTokens.colors.alert[alert.severity] }}
                 />
                 <span className={styles.alertSeverity}>{alert.severity}</span>
-                <span className={styles.alertTime}>{timeAgo(alert.firedAt)}</span>
+                <span className={styles.alertTime}>{timeAgo(alert.firedAt, t)}</span>
               </div>
               <div className={styles.alertName}>{alert.title}</div>
               <div className={styles.alertSummary}>{alert.summary}</div>
               {alert.rootCauseCandidates && alert.rootCauseCandidates.length > 0 && (
                 <div className={styles.alertCauses}>
-                  <span className={styles.alertCausesLabel}>Possible causes:</span>
+                  <span className={styles.alertCausesLabel}>{t("ld.alert.causes")}:</span>
                   {alert.rootCauseCandidates.map((c) => (
                     <span key={c} className={styles.alertCause}>{c}</span>
                   ))}

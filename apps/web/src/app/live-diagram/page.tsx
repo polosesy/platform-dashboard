@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } fro
 import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition } from "@aud/types";
 import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
 import { useLiveSnapshot, type UpdateMode } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
@@ -35,6 +35,7 @@ type MultiSelectDropdownProps = {
 };
 
 function MultiSelectDropdown({ label, allLabel, options, selected, onChange, disabled, searchable }: MultiSelectDropdownProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -89,7 +90,7 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
             <input
               type="text"
               className={styles.multiSelectSearch}
-              placeholder={`${label} 검색...`}
+              placeholder={t("ld.searchIn", { label })}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onClick={(e) => e.stopPropagation()}
@@ -143,7 +144,7 @@ function buildConnectedEdges(
 }
 
 export default function LiveDiagramPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
   const [diagramId, setDiagramId] = useState("prod-infra");
   const [mode, setMode] = useState<UpdateMode>("polling");
@@ -511,7 +512,7 @@ export default function LiveDiagramPage() {
             <span className={styles.statusDot} style={{ background: connected ? "var(--success)" : "var(--danger)" }} aria-hidden="true" />
             <span>{connected ? t("live.connected") : t("live.disconnected")}</span>
             <span>· {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}</span>
-            {snapshot ? <span>· {t("live.updated")} {new Date(snapshot.generatedAt).toLocaleTimeString()}</span> : null}
+            {snapshot ? <span>· {t("live.updated")} {new Date(snapshot.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : null}
             <span>· {t("live.scopeHint")}</span>
           </>
         }

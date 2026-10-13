@@ -24,7 +24,7 @@ export function useApiToken() {
       return resp.accessToken;
     } catch (e) {
       if (e instanceof InteractionRequiredAuthError) {
-        console.warn("[auth] 세션이 만료되어 다시 로그인이 필요합니다", e.errorCode);
+        console.warn("[auth] session expired — sign in again", e.errorCode);
         return null;
       }
       throw e;

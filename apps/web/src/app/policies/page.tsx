@@ -7,7 +7,7 @@ import styles from "./styles.module.css";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
-import { CATEGORY_LABEL, SeverityBadge, scoreClass } from "./components/shared";
+import { SeverityBadge, categoryLabel, scoreClass } from "./components/shared";
 import { FindingsPanel } from "./components/FindingsPanel";
 import { NamespaceMatrix } from "./components/NamespaceMatrix";
 import { NetworkPolicyPanel } from "./components/NetworkPolicyPanel";
@@ -22,7 +22,7 @@ import type { HeatSel } from "./insights/RiskHeatmap";
 import type { InsightsNav } from "./insights/model";
 import insightStyles from "./insights/insights.module.css";
 import { Button, LoadingState, PageHeader, Segmented, Select, Tabs, Toggle } from "@/components/ui";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { PANELS, POLICY_GROUPS, groupOfPanel, type Panel } from "./tabs";
 
@@ -40,7 +40,7 @@ export default function PoliciesPage() {
 }
 
 function Policies() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { clusters, clusterId, setClusterId, loading: clustersLoading, error: clustersError } = useAksClusters();
   // The panel lives in the URL (?tab=rbac) so links from other pages open it directly
   const [tab, setTab] = useQueryParam<Panel>("tab", PANELS, "overview");
@@ -53,11 +53,12 @@ function Policies() {
   const [category, setCategory] = useState<PolicyCategory | "all">("all");
   const [showSystem, setShowSystem] = useState(false);
 
-  const query = useApiQuery(clusterId ? `k8s-policies:${clusterId}` : null, (token) =>
-    fetchJsonWithBearer<KubernetesPolicyResponse>(apiUrl("/api/kubernetes/policies", { clusterId }), token),
+  // Findings and insights text come from the API in the selected language
+  const query = useApiQuery(clusterId ? `k8s-policies:${clusterId}:${locale}` : null, (token) =>
+    fetchJsonWithBearer<KubernetesPolicyResponse>(apiUrl("/api/kubernetes/policies", { clusterId, lang: locale }), token),
   );
-  const insightsQuery = useApiQuery(clusterId ? `k8s-policy-insights:${clusterId}` : null, (token) =>
-    fetchJsonWithBearer<PolicyInsightsResponse>(apiUrl("/api/kubernetes/policies/insights", { clusterId }), token),
+  const insightsQuery = useApiQuery(clusterId ? `k8s-policy-insights:${clusterId}:${locale}` : null, (token) =>
+    fetchJsonWithBearer<PolicyInsightsResponse>(apiUrl("/api/kubernetes/policies/insights", { clusterId, lang: locale }), token),
   );
   // Only show data that belongs to the selected cluster
   const data = query.data?.clusterId === clusterId ? query.data : undefined;
@@ -76,7 +77,7 @@ function Policies() {
     openNet: (nodeId) => {
       setTab("network");
       setNetSel(nodeId);
-      reveal("[aria-label='워크로드 네트워크 맵']");
+      reveal(`[aria-label='${t("ins.net.title")}']`);
     },
     openIssue: (id) => {
       setTab("overview");
@@ -110,7 +111,7 @@ function Policies() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={data ? <span>{t("pol.scope")} · {t("common.updated")} {new Date(data.generatedAt).toLocaleTimeString()}</span> : <span>{t("pol.scope")}</span>}
+        meta={data ? <span>{t("pol.scope")} · {t("common.updated")} {new Date(data.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : <span>{t("pol.scope")}</span>}
         actions={
           <>
             <Select
@@ -128,22 +129,22 @@ function Policies() {
         }
       />
 
-      {clustersError && <div className={styles.error}>클러스터 목록 조회 실패: {clustersError}</div>}
-      {query.error && <div className={styles.error}>정책 조회 실패: {query.error}</div>}
+      {clustersError && <div className={styles.error}>{t("polc.page.clustersFailed")}: {clustersError}</div>}
+      {query.error && <div className={styles.error}>{t("polc.page.policiesFailed")}: {query.error}</div>}
       {data && data.capabilities.unavailable.length > 0 && (
         <div className={styles.notice}>
-          권한 또는 API 부재로 조회하지 못한 리소스: {data.capabilities.unavailable.join(", ")} — 해당 영역의 결과가 불완전할 수 있습니다.
+          {t("polc.page.unavailable")}: {data.capabilities.unavailable.join(", ")} — {t("polc.page.incomplete")}
         </div>
       )}
 
-      {!data && query.loading && <div className={styles.loading}>클러스터 정책을 수집·분석하는 중입니다...</div>}
-      {!clusterId && !clustersLoading && <div className={styles.notice}>AKS 클러스터를 찾을 수 없습니다.</div>}
+      {!data && query.loading && <div className={styles.loading}>{t("polc.page.loading")}</div>}
+      {!clusterId && !clustersLoading && <div className={styles.notice}>{t("polc.page.noCluster")}</div>}
 
       {data && (
         <>
           <div className={styles.scoreStrip}>
             <button className={`${styles.scoreCard} ${category === "all" && tab === "findings" ? styles.scoreCardActive : ""}`} onClick={() => openCategory("all")}>
-              <div className={styles.scoreLabel}>종합 점수</div>
+              <div className={styles.scoreLabel}>{t("polc.page.overall")}</div>
               <div className={`${styles.scoreValue} ${scoreClass(data.summary.score)}`}>{data.summary.score}</div>
               <div className={styles.scoreCounts}>
                 {SEVERITIES.map((s) => (
@@ -157,19 +158,19 @@ function Policies() {
                 className={`${styles.scoreCard} ${category === c.category && tab === "findings" ? styles.scoreCardActive : ""}`}
                 onClick={() => openCategory(c.category)}
               >
-                <div className={styles.scoreLabel}>{CATEGORY_LABEL[c.category]}</div>
+                <div className={styles.scoreLabel}>{categoryLabel(t, c.category)}</div>
                 <div className={`${styles.scoreValue} ${scoreClass(c.score)}`}>{c.score}</div>
                 <div className={styles.scoreCounts}>
                   {SEVERITIES.filter((s) => c.findings[s] > 0).map((s) => (
                     <SeverityBadge key={s} severity={s} count={c.findings[s]} />
                   ))}
-                  {SEVERITIES.every((s) => c.findings[s] === 0) && <span className={styles.muted}>발견 없음</span>}
+                  {SEVERITIES.every((s) => c.findings[s] === 0) && <span className={styles.muted}>{t("polc.page.nothingFound")}</span>}
                 </div>
               </button>
             ))}
           </div>
           <div className={styles.panelHint}>
-            점수: 영역별 100점에서 높음 10 · 중간 4 · 낮음 1점 감점 (Kubernetes/AKS 관리 객체 제외) · 네임스페이스 {data.summary.namespaces}개 · 워크로드 {data.summary.workloads}개
+            {t("polc.page.scoring", { ns: data.summary.namespaces, wl: data.summary.workloads })}
           </div>
 
           <Tabs
@@ -197,8 +198,8 @@ function Policies() {
 
           {INSIGHT_TABS.has(tab) && !insights && (
             insightsQuery.error
-              ? <div className={styles.error}>위험 분석 조회 실패: {insightsQuery.error}</div>
-              : <div className={styles.loading}>구성·권한·관측 트래픽·Azure 설정을 함께 분석하는 중입니다...</div>
+              ? <div className={styles.error}>{t("polc.page.insightsFailed")}: {insightsQuery.error}</div>
+              : <div className={styles.loading}>{t("polc.page.insightsLoading")}</div>
           )}
           {tab === "overview" && insights && (
             <PolicyOverview

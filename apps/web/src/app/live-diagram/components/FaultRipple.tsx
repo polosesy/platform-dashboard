@@ -5,10 +5,12 @@ import { timer as d3Timer, type Timer } from "d3-timer";
 import { interpolateNumber } from "d3-interpolate";
 import type { FaultImpact, AlertSeverity } from "@aud/types";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 type FaultRippleProps = {
   impacts: FaultImpact[];
-  nodePositions: Map<string, { x: number; y: number }>;
+  /** Absolute flow coordinates and measured size */
+  nodePositions: Map<string, { x: number; y: number; w?: number; h?: number }>;
   transform: { x: number; y: number; zoom: number };
   width: number;
   height: number;
@@ -16,9 +18,9 @@ type FaultRippleProps = {
 };
 
 const SEVERITY_COLORS: Record<AlertSeverity, string> = {
-  critical: "rgba(216,59,1,0.65)",
-  warning: "rgba(209,132,0,0.55)",
-  info: "rgba(0,120,212,0.45)",
+  critical: rgba("danger", 0.65),
+  warning: rgba("warning", 0.55),
+  info: rgba("accent", 0.45),
 };
 
 const RIPPLE_DURATION_MS = 2400;
@@ -69,7 +71,7 @@ export function FaultRipple({
           const opacity = interpolateNumber(0.7, 0)(t);
 
           ctx.beginPath();
-          ctx.arc(pos.x + 90, pos.y + 36, radius, 0, Math.PI * 2);
+          ctx.arc(pos.x + (pos.w ?? 180) / 2, pos.y + (pos.h ?? 72) / 2, radius, 0, Math.PI * 2);
           ctx.strokeStyle = baseColor;
           ctx.lineWidth = 2.5 - t * 1.5;
           ctx.globalAlpha = opacity;
@@ -89,8 +91,8 @@ export function FaultRipple({
           ctx.roundRect(
             affectedPos.x - 4,
             affectedPos.y - 4,
-            188,
-            80,
+            (affectedPos.w ?? 180) + 8,
+            (affectedPos.h ?? 72) + 8,
             18,
           );
           ctx.strokeStyle = SEVERITY_COLORS[impact.severity] ?? SEVERITY_COLORS.critical;
@@ -139,8 +141,9 @@ export function FaultRipple({
     <canvas
       ref={canvasRef}
       className={styles.faultRippleCanvas}
-      width={width}
-      height={height}
+      // The backing store is width × devicePixelRatio (set in the effect); the CSS size must stay in CSS px,
+      // or on a 125 % / 150 % display the whole overlay is drawn 1.25× / 1.5× too large and drifts off the cards
+      style={{ width, height }}
     />
   );
 }

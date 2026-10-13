@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { DiagramIconKind } from "@aud/types";
 import { getAzureIconUrl } from "../utils/azureIcons";
@@ -16,6 +17,7 @@ export type NsgBadgeData = {
 };
 
 export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBadgeData>) {
+  const { t } = useI18n();
   if (data.detached) {
     return (
       <div className={`${styles.nsgBadge} ${styles.nsgBadgeDetached}`}>
@@ -31,7 +33,7 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
         <span className={styles.nsgBadgeLabel}>{data.label}</span>
         <Handle type="source" position={Position.Right} className={styles.handleHidden} />
         <div className={styles.nsgDetachedTooltip}>
-          Subnet 또는 NIC에서 분리되어 미사용 중인 NSG입니다
+          {t("ld.nsgDetached")}
         </div>
       </div>
     );

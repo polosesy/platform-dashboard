@@ -5,6 +5,7 @@ import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, useReactFl
 import type { ArchNodeData } from "./ArchNodes";
 import { ArchActions, NODE_TYPES } from "./ArchNodes";
 import s from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 export type CanvasProps = {
   nodes: Node<ArchNodeData>[];
@@ -24,6 +25,8 @@ export type CanvasProps = {
   /** Shape to centre on after the next re-layout (search) */
   centerOn: string | null;
   onCentered: () => void;
+  /** PNG export in progress: render every node (no virtualization), full detail, no selection ring */
+  exporting?: boolean;
 };
 
 const zoomBucket = (z: number) => (z < 0.45 ? "far" : z < 0.85 ? "mid" : "near");
@@ -41,11 +44,11 @@ function Inner(p: CanvasProps) {
       p.nodes.map((n) => {
         const boxed = n.type === "archBox";
         const dim = !!p.focus && !boxed && !p.focus.has(n.id);
-        const sel = p.selectedId === n.id;
+        const sel = !p.exporting && p.selectedId === n.id;
         const cls = [dim ? s.dimmed : "", sel ? s.selected : ""].filter(Boolean).join(" ");
         return cls ? { ...n, className: cls } : n;
       }),
-    [p.nodes, p.focus, p.selectedId],
+    [p.nodes, p.focus, p.selectedId, p.exporting],
   );
   const edges = useMemo(
     () => (p.focus ? p.edges.map((e) => (p.focus!.has(e.source) && p.focus!.has(e.target) ? e : { ...e, className: s.dimmedEdge })) : p.edges),
@@ -97,7 +100,7 @@ function Inner(p: CanvasProps) {
   const actions = useMemo(() => ({ toggleVnet: p.onToggleVnet }), [p.onToggleVnet]);
 
   return (
-    <div className={s.canvas} data-zoom={zoom} data-focus={p.focus ? "on" : undefined}>
+    <div className={s.canvas} data-zoom={p.exporting ? "near" : zoom} data-focus={p.focus ? "on" : undefined}>
       <ArchActions.Provider value={actions}>
         <ReactFlow
           nodes={nodes}
@@ -112,20 +115,20 @@ function Inner(p: CanvasProps) {
           elementsSelectable={false}
           elevateNodesOnSelect={false}
           elevateEdgesOnSelect={false}
-          onlyRenderVisibleElements
+          onlyRenderVisibleElements={!p.exporting}
           minZoom={0.05}
           maxZoom={2}
           proOptions={{ hideAttribution: true }}
           zoomOnDoubleClick={false}
         >
-          <Background gap={20} size={1} color="rgba(20,21,23,0.07)" />
+          <Background gap={20} size={1} color={rgba("ink", 0.07)} />
           <Controls showInteractive={false} position="bottom-right" />
           <MiniMap
             className={s.minimap}
             pannable
             zoomable
-            nodeColor={(n) => (n.type === "archBox" ? "rgba(0,120,212,0.08)" : "rgba(20,21,23,0.35)")}
-            nodeStrokeColor={(n) => (n.type === "archBox" ? "rgba(0,120,212,0.35)" : "transparent")}
+            nodeColor={(n) => (n.type === "archBox" ? rgba("accent", 0.08) : rgba("ink", 0.35))}
+            nodeStrokeColor={(n) => (n.type === "archBox" ? rgba("accent", 0.35) : "transparent")}
           />
         </ReactFlow>
       </ArchActions.Provider>

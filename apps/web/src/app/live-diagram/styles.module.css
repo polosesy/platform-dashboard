@@ -24,7 +24,7 @@
   padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.66);
+  background: rgba(var(--paper-rgb), 0.66);
   font-weight: 800;
   letter-spacing: -0.01em;
   font-size: 12px;
@@ -34,14 +34,14 @@
   padding: 7px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.66);
+  background: rgba(var(--paper-rgb), 0.66);
   font-weight: 800;
   font-size: 12px;
   cursor: pointer;
 }
 
 .refreshBtn:hover {
-  background: rgba(255, 255, 255, 0.90);
+  background: rgba(var(--paper-rgb), 0.9);
 }
 
 .generateGroup {
@@ -56,9 +56,9 @@
 .generateBtn {
   padding: 7px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(0, 120, 212, 0.30);
-  background: rgba(0, 120, 212, 0.10);
-  color: rgba(0, 120, 212, 0.90);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  background: var(--accent-soft);
+  color: rgba(var(--accent-rgb), 0.9);
   font-weight: 800;
   font-size: 12px;
   cursor: pointer;
@@ -67,7 +67,7 @@
 }
 
 .generateBtn:hover {
-  background: rgba(0, 120, 212, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
 }
 
 .generateBtn:disabled {
@@ -82,7 +82,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.50);
+  background: rgba(var(--paper-rgb), 0.5);
 }
 
 .langBtn {
@@ -101,20 +101,20 @@
 }
 
 .langBtn:hover {
-  background: rgba(255, 255, 255, 0.80);
+  background: rgba(var(--paper-rgb), 0.8);
 }
 
 .langBtnActive {
-  background: rgba(0, 120, 212, 0.10);
-  color: rgba(0, 120, 212, 0.90);
+  background: var(--accent-soft);
+  color: rgba(var(--accent-rgb), 0.9);
 }
 
 .error {
   padding: 10px 12px;
-  border: 1px solid rgba(216, 59, 1, 0.26);
-  background: rgba(216, 59, 1, 0.10);
+  border: 1px solid rgba(var(--danger-rgb), 0.26);
+  background: var(--danger-soft);
   border-radius: var(--radius-md);
-  color: rgba(216, 59, 1, 0.95);
+  color: rgba(var(--danger-rgb), 0.95);
   font-size: 13px;
 }
 
@@ -125,7 +125,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.50);
+  background: rgba(var(--paper-rgb), 0.5);
 }
 
 .modeBtn {
@@ -145,12 +145,12 @@
 }
 
 .modeBtn:hover {
-  background: rgba(255, 255, 255, 0.80);
+  background: rgba(var(--paper-rgb), 0.8);
 }
 
 .modeBtnActive {
-  background: rgba(0, 120, 212, 0.10);
-  color: rgba(0, 120, 212, 0.90);
+  background: var(--accent-soft);
+  color: rgba(var(--accent-rgb), 0.9);
 }
 
 /* ── Control Bar ── */
@@ -180,7 +180,7 @@
   transition: border-color 0.15s;
 }
 .resourceSearchInput:focus {
-  border-color: #0078d4;
+  border-color: var(--accent);
 }
 .resourceSearchInput::placeholder {
   color: var(--muted);
@@ -196,7 +196,7 @@
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 16px rgba(var(--ink-rgb), 0.12);
   z-index: 100;
   padding: 4px;
 }
@@ -217,7 +217,7 @@
   transition: background 0.1s;
 }
 .resourceSearchItem:hover {
-  background: rgba(0, 120, 212, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .resourceSearchName {
   flex: 1;
@@ -230,7 +230,7 @@
   flex-shrink: 0;
   font-size: 10px;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -248,7 +248,7 @@
   padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.50);
+  background: rgba(var(--paper-rgb), 0.5);
   font-size: 11px;
   font-weight: 800;
   color: var(--muted);
@@ -258,13 +258,13 @@
 }
 
 .overlayToggle:hover {
-  background: rgba(255, 255, 255, 0.80);
+  background: rgba(var(--paper-rgb), 0.8);
 }
 
 .overlayToggle input {
   width: 12px;
   height: 12px;
-  accent-color: rgba(0, 120, 212, 0.80);
+  accent-color: rgba(var(--accent-rgb), 0.8);
 }
 
 /* ── Canvas layout ── */
@@ -281,7 +281,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
 }
 
@@ -300,15 +300,15 @@
   justify-content: center;
   border-radius: 6px;
   font-size: 13px;
-  color: rgba(20, 21, 23, 0.45);
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(20, 21, 23, 0.12);
+  color: var(--subtle);
+  background: rgba(var(--paper-rgb), 0.85);
+  border: 1px solid var(--border);
   backdrop-filter: blur(4px);
   transition: background 150ms ease, color 150ms ease;
 }
 .miniMapToggle:hover {
-  background: rgba(255, 255, 255, 0.98);
-  color: rgba(20, 21, 23, 0.8);
+  background: rgba(var(--paper-rgb), 0.98);
+  color: rgba(var(--ink-rgb), 0.8);
 }
 
 .sidebarStack {
@@ -331,8 +331,8 @@
 
 .liveNode {
   position: relative;
-  min-width: 200px;
-  max-width: 220px;
+  /* One width for every card — rows of cards line up and the strips below share one grid */
+  width: 220px;
   padding: 10px 12px;
   border-radius: 16px;
   border: 1.5px solid;
@@ -349,8 +349,8 @@
   width: 52px;
   height: 52px;
   border-radius: 12px;
-  border: 1.5px solid rgba(251, 146, 60, 0.35);
-  background: rgba(251, 146, 60, 0.06);
+  border: 1.5px solid rgba(var(--egress-rgb), 0.35);
+  background: rgba(var(--egress-rgb), 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -358,14 +358,14 @@
   transition: background 200ms ease, border-color 200ms ease;
 }
 .liveNodeIconOnly:hover {
-  background: rgba(251, 146, 60, 0.12);
-  border-color: rgba(251, 146, 60, 0.55);
+  background: rgba(var(--egress-rgb), 0.12);
+  border-color: rgba(var(--egress-rgb), 0.55);
 }
 
 .handle {
   width: 6px !important;
   height: 6px !important;
-  background: rgba(20, 21, 23, 0.20) !important;
+  background: rgba(var(--ink-rgb), 0.2) !important;
   border: none !important;
 }
 
@@ -373,9 +373,12 @@
   flex: none;
 }
 
+/* Trend slot (right end of the metric strip) */
 .sparklineWrap {
-  flex: none;
-  margin-left: -4px;
+  width: 40px;
+  height: 20px;
+  display: flex;
+  align-items: center;
 }
 
 .nodeInfo {
@@ -392,11 +395,20 @@
   text-overflow: ellipsis;
 }
 
+/* Icon + type / role / state badges: wraps instead of running past the card edge */
 .nodeIcon {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  row-gap: 2px;
+  min-width: 0;
   margin-top: 1px;
+}
+
+.nodeIcon > * {
+  flex: none;
+  white-space: nowrap;
 }
 
 .nodeIcon img {
@@ -408,8 +420,8 @@
 .nodeTypeAbbr {
   font-size: 9px;
   font-weight: 800;
-  color: rgba(0, 120, 212, 0.65);
-  background: rgba(0, 120, 212, 0.06);
+  color: rgba(var(--accent-rgb), 0.65);
+  background: rgba(var(--accent-rgb), 0.06);
   padding: 1px 5px;
   border-radius: 4px;
   letter-spacing: 0.02em;
@@ -418,8 +430,8 @@
 .archRoleBadge {
   font-size: 8px;
   font-weight: 600;
-  color: rgba(139, 92, 246, 0.70);
-  background: rgba(139, 92, 246, 0.08);
+  color: rgba(var(--private-link-rgb), 0.70);
+  background: rgba(var(--private-link-rgb), 0.08);
   padding: 1px 3px;
   border-radius: 3px;
   letter-spacing: 0.3px;
@@ -439,30 +451,30 @@
 }
 
 .powerStateBadge[data-state="running"] {
-  color: rgba(16, 137, 62, 0.85);
-  background: rgba(16, 137, 62, 0.08);
+  color: rgba(var(--ok-rgb), 0.85);
+  background: rgba(var(--ok-rgb), 0.08);
 }
 
 .powerStateBadge[data-state="stopped"] {
-  color: rgba(209, 132, 0, 0.85);
-  background: rgba(209, 132, 0, 0.10);
+  color: rgba(var(--warning-rgb), 0.85);
+  background: rgba(var(--warning-rgb), 0.1);
 }
 
 .powerStateBadge[data-state="deallocated"] {
-  color: rgba(20, 21, 23, 0.45);
-  background: rgba(20, 21, 23, 0.06);
+  color: var(--subtle);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .powerStateBadge[data-state="starting"],
 .powerStateBadge[data-state="stopping"] {
-  color: rgba(0, 120, 212, 0.80);
-  background: rgba(0, 120, 212, 0.08);
+  color: rgba(var(--accent-rgb), 0.8);
+  background: rgba(var(--accent-rgb), 0.08);
   animation: powerPulse 1.5s ease-in-out infinite;
 }
 
 .powerStateBadge[data-state="unknown"] {
-  color: rgba(20, 21, 23, 0.35);
-  background: rgba(20, 21, 23, 0.06);
+  color: rgba(var(--ink-rgb), 0.35);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .healthStatusBadge {
@@ -482,24 +494,24 @@
   border-radius: 4px;
   letter-spacing: 0.02em;
   line-height: 1.2;
-  color: rgba(209, 132, 0, 0.90);
-  background: rgba(209, 132, 0, 0.10);
-  border: 1px solid rgba(209, 132, 0, 0.25);
+  color: rgba(var(--warning-rgb), 0.9);
+  background: rgba(var(--warning-rgb), 0.1);
+  border: 1px solid rgba(var(--warning-rgb), 0.25);
 }
 
 .healthStatusBadge[data-health="ok"] {
-  color: rgba(16, 137, 62, 0.85);
-  background: rgba(16, 137, 62, 0.08);
+  color: rgba(var(--ok-rgb), 0.85);
+  background: rgba(var(--ok-rgb), 0.08);
 }
 
 .healthStatusBadge[data-health="warning"] {
-  color: rgba(209, 132, 0, 0.85);
-  background: rgba(209, 132, 0, 0.10);
+  color: rgba(var(--warning-rgb), 0.85);
+  background: rgba(var(--warning-rgb), 0.1);
 }
 
 .healthStatusBadge[data-health="critical"] {
-  color: rgba(196, 43, 28, 0.90);
-  background: rgba(196, 43, 28, 0.08);
+  color: rgba(var(--danger-rgb), 0.90);
+  background: rgba(var(--danger-rgb), 0.08);
 }
 
 @keyframes powerPulse {
@@ -522,7 +534,7 @@
   font-family: var(--font-geist-mono);
   font-size: 10px;
   font-weight: 600;
-  color: rgba(0, 120, 212, 0.70);
+  color: rgba(var(--accent-rgb), 0.7);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -530,44 +542,101 @@
   max-width: 140px;
 }
 
+/* Metric strip: [chips | trend] — one line, the trend always in the same right-hand slot */
 .metricBadges {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  column-gap: 4px;
+  width: 100%;
+  min-height: 22px;
+}
+
+.metricBadges[data-trend] {
+  grid-template-columns: minmax(0, 1fr) 40px;
+}
+
+.metricChips {
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
-  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.metricBadge[data-trend]::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--trend);
 }
 
 .metricBadge {
+  /* Chips may shrink: the key gets "…", the value never does (full text in the strip tooltip) */
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
-  gap: 3px;
+  gap: 2px;
   align-items: baseline;
-  padding: 3px 7px;
+  padding: 2px 4px;
   border-radius: 8px;
-  background: rgba(20, 21, 23, 0.04);
-  border: 1px solid rgba(20, 21, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.04);
+  border: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 
 .metricKey {
   font-size: 10px;
   color: var(--muted);
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metricVal {
+  flex: none;
+  white-space: nowrap;
   font-family: var(--font-geist-mono);
   font-size: 11px;
   font-weight: 800;
-  color: rgba(20, 21, 23, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
 }
 
 /* ── Sub-resource chips (NIC in VM, Frontend IP in AppGW) ── */
 
+/* Sub-resource strip: always one line (2 chips, or 1 + "+N") */
 .subResourceChips {
   display: flex;
   gap: 3px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   width: 100%;
-  padding: 0 8px 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.subResourceChips > * {
+  flex: 0 1 auto;
+}
+
+/* Several chips: the IP identifies each one; the name stays in the tooltip */
+.subResourceChips[data-compact] .subResourceLabel {
+  display: none;
+}
+
+.subResourceMore {
+  flex: none;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: rgba(var(--accent-rgb), 0.75);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  cursor: default;
 }
 
 .subResourceChip {
@@ -578,8 +647,8 @@
   align-items: center;
   padding: 2px 6px;
   border-radius: 6px;
-  background: rgba(0, 120, 212, 0.06);
-  border: 1px solid rgba(0, 120, 212, 0.12);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   transition: background 120ms ease, border-color 120ms ease;
   max-width: 100%;
   min-width: 0;
@@ -587,8 +656,8 @@
 }
 
 .subResourceChip:hover {
-  background: rgba(0, 120, 212, 0.14);
-  border-color: rgba(0, 120, 212, 0.28);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .subResourceChip img {
@@ -599,7 +668,7 @@
 .subResourceLabel {
   font-size: 9px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.62);
+  color: var(--muted);
   max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -610,7 +679,7 @@
   font-family: var(--font-geist-mono);
   font-size: 9px;
   font-weight: 600;
-  color: rgba(0, 120, 212, 0.55);
+  color: rgba(var(--accent-rgb), 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -641,12 +710,12 @@
   width: 8px !important;
   height: 8px !important;
   border-radius: 2px !important;
-  border: 1.5px solid rgba(0, 120, 212, 0.60) !important;
-  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1.5px solid rgba(var(--accent-rgb), 0.6) !important;
+  background: rgba(var(--paper-rgb), 0.92) !important;
 }
 
 .groupResizeLine {
-  border-color: rgba(0, 120, 212, 0.30) !important;
+  border-color: rgba(var(--accent-rgb), 0.3) !important;
   border-width: 1.5px !important;
 }
 
@@ -661,7 +730,7 @@
   font-size: 11px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: rgba(20, 21, 23, 0.50);
+  color: rgba(var(--ink-rgb), 0.5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -674,7 +743,7 @@
   font-family: var(--font-geist-mono);
   font-size: 10px;
   font-weight: 600;
-  color: rgba(0, 120, 212, 0.55);
+  color: rgba(var(--accent-rgb), 0.55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -683,8 +752,8 @@
 .groupNodeRegion {
   font-size: 10px;
   font-weight: 600;
-  color: rgba(20, 21, 23, 0.38);
-  background: rgba(20, 21, 23, 0.06);
+  color: rgba(var(--ink-rgb), 0.38);
+  background: rgba(var(--ink-rgb), 0.06);
   border-radius: 4px;
   padding: 1px 5px;
   white-space: nowrap;
@@ -697,7 +766,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   display: grid;
   grid-template-rows: auto 1fr;
@@ -716,8 +785,8 @@
 .alertBadge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(216, 59, 1, 0.12);
-  color: rgba(216, 59, 1, 0.90);
+  background: rgba(var(--danger-rgb), 0.12);
+  color: rgba(var(--danger-rgb), 0.9);
   font-size: 12px;
   font-weight: 900;
 }
@@ -742,7 +811,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   gap: 6px;
   text-align: left;
@@ -750,7 +819,7 @@
 }
 
 .alertCard:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(var(--paper-rgb), 0.95);
 }
 
 .alertHeader {
@@ -788,7 +857,7 @@
 
 .alertSummary {
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.70);
+  color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.4;
 }
 
@@ -809,11 +878,11 @@
 .alertCause {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(209, 132, 0, 0.08);
-  border: 1px solid rgba(209, 132, 0, 0.18);
+  background: rgba(var(--warning-rgb), 0.08);
+  border: 1px solid rgba(var(--warning-rgb), 0.18);
   font-size: 11px;
   font-weight: 700;
-  color: rgba(209, 132, 0, 0.85);
+  color: rgba(var(--warning-rgb), 0.85);
 }
 
 .alertAffected {
@@ -838,13 +907,13 @@
 }
 
 .statFault {
-  color: rgba(216, 59, 1, 0.80);
+  color: rgba(var(--danger-rgb), 0.8);
 }
 
 .statVal {
   font-weight: 800;
   font-family: var(--font-geist-mono);
-  color: rgba(20, 21, 23, 0.72);
+  color: rgba(var(--ink-rgb), 0.72);
 }
 
 /* ── Node hover dimming (applied via ReactFlow node className) ── */
@@ -909,11 +978,11 @@
   left: 14px;
   padding: 6px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(var(--paper-rgb), 0.85);
   backdrop-filter: blur(8px);
   font-size: 12px;
   font-weight: 800;
-  color: rgba(20, 21, 23, 0.80);
+  color: rgba(var(--ink-rgb), 0.8);
   border: 1px solid var(--border);
 }
 
@@ -923,7 +992,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   display: grid;
   grid-template-rows: auto auto 1fr;
@@ -942,8 +1011,8 @@
 .faultTimelineBadge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(216, 59, 1, 0.12);
-  color: rgba(216, 59, 1, 0.90);
+  background: rgba(var(--danger-rgb), 0.12);
+  color: rgba(var(--danger-rgb), 0.9);
   font-size: 12px;
   font-weight: 900;
 }
@@ -990,7 +1059,7 @@
 }
 
 .faultTimelineItem:hover {
-  background: rgba(20, 21, 23, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
 }
 
 .faultTimelineSevDot {
@@ -1028,7 +1097,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   display: grid;
   grid-template-rows: auto 1fr;
@@ -1090,7 +1159,7 @@
 }
 
 .detailCloseBtn:hover {
-  background: rgba(20, 21, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .detailBody {
@@ -1131,7 +1200,7 @@
 
 .detailVal {
   font-weight: 600;
-  color: rgba(20, 21, 23, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
   word-break: break-all;
 }
 
@@ -1139,7 +1208,7 @@
   font-family: var(--font-geist-mono);
   font-weight: 600;
   font-size: 11px;
-  color: rgba(0, 120, 212, 0.70);
+  color: rgba(var(--accent-rgb), 0.7);
   word-break: break-all;
 }
 
@@ -1152,11 +1221,11 @@
 .detailTag {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(0, 120, 212, 0.06);
-  border: 1px solid rgba(0, 120, 212, 0.14);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
   font-size: 11px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.75);
+  color: rgba(var(--accent-rgb), 0.75);
 }
 
 .detailMetricGrid {
@@ -1169,7 +1238,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   gap: 2px;
 }
@@ -1185,7 +1254,7 @@
   font-family: var(--font-geist-mono);
   font-size: 14px;
   font-weight: 800;
-  color: rgba(20, 21, 23, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
 }
 
 .detailSparklineWrap {
@@ -1196,7 +1265,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   gap: 4px;
 }
@@ -1221,7 +1290,7 @@
 
 .detailAlertSummary {
   font-size: 11px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.4;
 }
 
@@ -1240,7 +1309,7 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: rgba(20, 21, 23, 0.02);
+  background: rgba(var(--ink-rgb), 0.02);
 }
 
 .detailAlertCausesTitle {
@@ -1253,7 +1322,7 @@
 
 .detailAlertCause {
   font-size: 11px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.3;
   padding-left: 8px;
 }
@@ -1277,7 +1346,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   gap: 3px;
 }
@@ -1309,7 +1378,7 @@
 .detailAlertRuleDisabled {
   font-size: 9px;
   font-weight: 700;
-  color: #e74c3c;
+  color: var(--danger);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1322,7 +1391,7 @@
 .detailAlertRuleCondition {
   font-family: var(--font-geist-mono);
   font-size: 11px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.3;
   word-break: break-all;
 }
@@ -1346,7 +1415,7 @@
   padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(8px);
 }
 
@@ -1379,7 +1448,7 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   font-size: 11px;
 }
 
@@ -1404,7 +1473,7 @@
   font-family: var(--font-geist-mono);
   font-size: 10px;
   font-weight: 600;
-  color: rgba(20, 21, 23, 0.55);
+  color: rgba(var(--ink-rgb), 0.55);
   white-space: nowrap;
 }
 
@@ -1420,8 +1489,8 @@
   gap: 8px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(0, 120, 212, 0.04);
-  border: 1px solid rgba(0, 120, 212, 0.08);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
   margin-bottom: 4px;
 }
 
@@ -1436,7 +1505,7 @@
   display: grid;
   gap: 2px;
   padding: 7px 10px;
-  border-bottom: 1px solid rgba(20, 21, 23, 0.05);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.05);
 }
 
 .essentialsRow:last-child {
@@ -1446,7 +1515,7 @@
 .essentialsLabel {
   font-size: 9px;
   font-weight: 800;
-  color: rgba(20, 21, 23, 0.38);
+  color: rgba(var(--ink-rgb), 0.38);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -1454,26 +1523,26 @@
 .essentialsValue {
   font-size: 13px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
   word-break: break-word;
   line-height: 1.3;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(0, 120, 212, 0.04);
-  border: 1px solid rgba(0, 120, 212, 0.06);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.06);
 }
 
 .essentialsValueMono {
   font-family: var(--font-geist-mono);
   font-size: 11px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
   word-break: break-all;
   line-height: 1.3;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(0, 120, 212, 0.04);
-  border: 1px solid rgba(0, 120, 212, 0.06);
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.06);
 }
 
 /* ── Copyable Value (hover to copy) ── */
@@ -1514,8 +1583,8 @@
 }
 
 .copyBtn:hover {
-  color: rgba(0, 120, 212, 0.90);
-  background: rgba(0, 120, 212, 0.08);
+  color: rgba(var(--accent-rgb), 0.9);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 /* ── PowerState Badge in Detail Panel ── */
@@ -1533,24 +1602,24 @@
 }
 
 .powerStateBadgeDetail[data-state="running"] {
-  color: #10893e;
-  background: rgba(16, 137, 62, 0.12);
+  color: var(--ok);
+  background: rgba(var(--ok-rgb), 0.12);
 }
 
 .powerStateBadgeDetail[data-state="stopped"] {
-  color: #b85800;
-  background: rgba(209, 132, 0, 0.12);
+  color: var(--warning-strong);
+  background: var(--warning-soft);
 }
 
 .powerStateBadgeDetail[data-state="deallocated"] {
-  color: rgba(20, 21, 23, 0.50);
-  background: rgba(20, 21, 23, 0.07);
+  color: rgba(var(--ink-rgb), 0.5);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 .powerStateBadgeDetail[data-state="starting"],
 .powerStateBadgeDetail[data-state="stopping"] {
-  color: #0062ad;
-  background: rgba(0, 120, 212, 0.10);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
   animation: powerPulse 1.5s ease-in-out infinite;
 }
 
@@ -1568,18 +1637,18 @@
 }
 
 .nodeConditionBadge[data-condition="true"] {
-  color: #10893e;
-  background: rgba(16, 137, 62, 0.12);
+  color: var(--ok);
+  background: rgba(var(--ok-rgb), 0.12);
 }
 
 .nodeConditionBadge[data-condition="false"] {
-  color: #c4262e;
-  background: rgba(196, 38, 46, 0.10);
+  color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.10);
 }
 
 .nodeConditionBadge[data-condition="unknown"] {
-  color: rgba(20, 21, 23, 0.50);
-  background: rgba(20, 21, 23, 0.07);
+  color: rgba(var(--ink-rgb), 0.5);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 /* ── Outbound Type Badge ── */
@@ -1598,23 +1667,23 @@
 }
 
 .outboundTypeBadge[data-outbound="lb"] {
-  color: #0062ad;
-  background: rgba(0, 120, 212, 0.12);
+  color: var(--accent-strong);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .outboundTypeBadge[data-outbound="nat"] {
-  color: #005a9e;
-  background: rgba(0, 80, 217, 0.12);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
 }
 
 .outboundTypeBadge[data-outbound="udr"] {
-  color: #5c2d91;
-  background: rgba(92, 45, 145, 0.10);
+  color: rgba(var(--violet-rgb), 0.9);
+  background: rgba(var(--violet-rgb), 0.10);
 }
 
 .outboundTypeBadge[data-outbound="other"] {
-  color: rgba(20, 21, 23, 0.60);
-  background: rgba(20, 21, 23, 0.07);
+  color: rgba(var(--ink-rgb), 0.6);
+  background: rgba(var(--ink-rgb), 0.07);
 }
 
 /* ── Collapsible Section Toggle ── */
@@ -1637,7 +1706,7 @@
 }
 
 .detailSectionToggle:hover {
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
 }
 
 .toggleChevron {
@@ -1660,7 +1729,7 @@
 
 .edgeHeaderArrow {
   font-size: 14px;
-  color: rgba(0, 120, 212, 0.72);
+  color: rgba(var(--accent-rgb), 0.72);
   font-weight: 800;
   flex: none;
 }
@@ -1671,9 +1740,9 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.03em;
-  background: rgba(0, 120, 212, 0.08);
-  color: rgba(0, 120, 212, 0.82);
-  border: 1px solid rgba(0, 120, 212, 0.16);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: rgba(var(--accent-rgb), 0.82);
+  border: 1px solid rgba(var(--accent-rgb), 0.16);
   flex: none;
 }
 
@@ -1700,7 +1769,7 @@
 .edgeSubSectionLabel {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.55);
+  color: rgba(var(--ink-rgb), 0.55);
   text-transform: uppercase;
   letter-spacing: 0.02em;
   padding: 2px 0;
@@ -1721,7 +1790,7 @@
 .edgeEndpointLabel {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.72);
+  color: rgba(var(--accent-rgb), 0.72);
   padding-bottom: 2px;
 }
 
@@ -1739,13 +1808,13 @@
 }
 
 .nsgRuleAllow {
-  background: rgba(16, 137, 62, 0.07);
-  color: rgba(20, 21, 23, 0.80);
+  background: rgba(var(--ok-rgb), 0.07);
+  color: rgba(var(--ink-rgb), 0.8);
 }
 
 .nsgRuleDeny {
-  background: rgba(216, 59, 1, 0.07);
-  color: rgba(20, 21, 23, 0.80);
+  background: rgba(var(--danger-rgb), 0.07);
+  color: rgba(var(--ink-rgb), 0.8);
 }
 
 .nsgRuleAccess {
@@ -1755,8 +1824,8 @@
   letter-spacing: 0.03em;
 }
 
-.nsgRuleAllow .nsgRuleAccess { color: rgba(16, 137, 62, 0.88); }
-.nsgRuleDeny .nsgRuleAccess { color: rgba(216, 59, 1, 0.88); }
+.nsgRuleAllow .nsgRuleAccess { color: rgba(var(--ok-rgb), 0.88); }
+.nsgRuleDeny .nsgRuleAccess { color: rgba(var(--danger-rgb), 0.88); }
 
 .nsgRuleDir {
   text-align: center;
@@ -1795,7 +1864,7 @@
   display: flex;
   gap: 4px;
   padding: 2px;
-  background: rgba(20, 21, 23, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
   border-radius: 8px;
   margin-bottom: 8px;
 }
@@ -1814,13 +1883,13 @@
 }
 
 .nsgTab:hover {
-  background: rgba(20, 21, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 
 .nsgTabActive {
-  background: rgba(255, 255, 255, 0.92);
-  color: rgba(0, 120, 212, 0.88);
-  box-shadow: 0 1px 4px rgba(20, 21, 23, 0.08);
+  background: rgba(var(--paper-rgb), 0.92);
+  color: rgba(var(--accent-rgb), 0.88);
+  box-shadow: 0 1px 4px rgba(var(--ink-rgb), 0.08);
 }
 
 .nsgRuleHeader {
@@ -1833,7 +1902,7 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  border-bottom: 1px solid rgba(20, 21, 23, 0.08);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.08);
   margin-bottom: 2px;
   min-width: 0;
 }
@@ -1866,11 +1935,11 @@
 }
 
 .nsgDetailRuleAllow {
-  background: rgba(16, 137, 62, 0.06);
+  background: rgba(var(--ok-rgb), 0.06);
 }
 
 .nsgDetailRuleDeny {
-  background: rgba(216, 59, 1, 0.06);
+  background: rgba(var(--danger-rgb), 0.06);
 }
 
 .nsgDetailAccess {
@@ -1880,13 +1949,13 @@
   line-height: 1;
 }
 
-.nsgDetailRuleAllow .nsgDetailAccess { color: rgba(16, 137, 62, 0.88); }
-.nsgDetailRuleDeny .nsgDetailAccess { color: rgba(216, 59, 1, 0.88); }
+.nsgDetailRuleAllow .nsgDetailAccess { color: rgba(var(--ok-rgb), 0.88); }
+.nsgDetailRuleDeny .nsgDetailAccess { color: rgba(var(--danger-rgb), 0.88); }
 
 .nsgDetailProto {
   font-family: monospace;
   font-size: 9px;
-  color: rgba(20, 21, 23, 0.72);
+  color: rgba(var(--ink-rgb), 0.72);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1897,7 +1966,7 @@
   font-family: monospace;
   font-size: 9px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1927,7 +1996,7 @@
 .nsgRuleNameList {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px solid rgba(20, 21, 23, 0.06);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.06);
   display: grid;
   gap: 2px;
 }
@@ -1937,7 +2006,7 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: rgba(20, 21, 23, 0.55);
+  color: rgba(var(--ink-rgb), 0.55);
 }
 
 .nsgRuleNameDot {
@@ -1947,8 +2016,8 @@
   flex: none;
 }
 
-.nsgRuleNameDotAllow { background: rgba(16, 137, 62, 0.60); }
-.nsgRuleNameDotDeny { background: rgba(216, 59, 1, 0.60); }
+.nsgRuleNameDotAllow { background: rgba(var(--ok-rgb), 0.6); }
+.nsgRuleNameDotDeny { background: rgba(var(--danger-rgb), 0.6); }
 
 .nsgRuleNamePri {
   font-weight: 700;
@@ -1977,7 +2046,7 @@
   font-family: monospace;
   font-weight: 700;
   font-size: 11px;
-  color: rgba(20, 21, 23, 0.75);
+  color: rgba(var(--ink-rgb), 0.75);
 }
 
 .udrRouteArrow {
@@ -1987,7 +2056,7 @@
 
 .udrRouteHop {
   font-size: 11px;
-  color: rgba(0, 120, 212, 0.80);
+  color: rgba(var(--accent-rgb), 0.8);
   font-weight: 600;
 }
 
@@ -2001,15 +2070,15 @@
 .flowRecord {
   padding: 5px 8px;
   border-radius: 8px;
-  border: 1px solid rgba(20, 21, 23, 0.07);
-  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(var(--ink-rgb), 0.07);
+  background: rgba(var(--paper-rgb), 0.55);
   display: grid;
   gap: 3px;
 }
 
 .flowRecordExternal {
-  border-color: rgba(0, 120, 212, 0.18);
-  background: rgba(0, 120, 212, 0.03);
+  border-color: rgba(var(--accent-rgb), 0.18);
+  background: rgba(var(--accent-rgb), 0.03);
 }
 
 .flowRecordTop {
@@ -2027,7 +2096,7 @@
 .flowIp {
   font-family: monospace;
   font-size: 10px;
-  color: rgba(20, 21, 23, 0.80);
+  color: rgba(var(--ink-rgb), 0.8);
   font-weight: 600;
 }
 
@@ -2042,8 +2111,8 @@
   border-radius: 4px;
   font-size: 9px;
   font-weight: 700;
-  background: rgba(20, 21, 23, 0.07);
-  color: rgba(20, 21, 23, 0.55);
+  background: rgba(var(--ink-rgb), 0.07);
+  color: rgba(var(--ink-rgb), 0.55);
   text-transform: uppercase;
   letter-spacing: 0.02em;
   flex: none;
@@ -2060,13 +2129,13 @@
 }
 
 .flowActionAllow {
-  background: rgba(16, 137, 62, 0.10);
-  color: rgba(16, 137, 62, 0.88);
+  background: rgba(var(--ok-rgb), 0.1);
+  color: rgba(var(--ok-rgb), 0.88);
 }
 
 .flowActionDeny {
-  background: rgba(216, 59, 1, 0.10);
-  color: rgba(216, 59, 1, 0.88);
+  background: var(--danger-soft);
+  color: rgba(var(--danger-rgb), 0.88);
 }
 
 .flowBytes {
@@ -2083,7 +2152,7 @@
   display: grid;
   gap: 3px;
   padding-top: 4px;
-  border-top: 1px solid rgba(20, 21, 23, 0.07);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.07);
   margin-top: 4px;
 }
 
@@ -2098,7 +2167,7 @@
 .portSummaryPort {
   font-family: monospace;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.75);
+  color: rgba(var(--ink-rgb), 0.75);
 }
 
 .portSummaryCount {
@@ -2108,7 +2177,7 @@
 
 .portSummaryExternal {
   font-size: 10px;
-  color: rgba(0, 120, 212, 0.70);
+  color: rgba(var(--accent-rgb), 0.7);
   font-weight: 600;
   padding-top: 2px;
 }
@@ -2156,8 +2225,8 @@
   justify-content: center;
   padding: 2px;
   border-radius: 4px;
-  border: 1px solid rgba(251, 146, 60, 0.40);
-  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(var(--egress-rgb), 0.40);
+  background: rgba(var(--egress-rgb), 0.08);
   cursor: pointer;
   width: 22px;
   height: 22px;
@@ -2167,8 +2236,8 @@
 }
 
 .natGwBadge:hover {
-  background: rgba(251, 146, 60, 0.15);
-  border-color: rgba(251, 146, 60, 0.60);
+  background: rgba(var(--egress-rgb), 0.15);
+  border-color: rgba(var(--egress-rgb), 0.60);
 }
 
 /* ── NSG Badge embedded in LiveNode — corner tag at top-left ── */
@@ -2188,22 +2257,22 @@
   gap: 3px;
   padding: 2px 7px 2px 4px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 120, 212, 0.25);
+  background: rgba(var(--paper-rgb), 0.92);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
   font-size: 9px;
   font-weight: 700;
-  color: rgba(0, 90, 170, 0.85);
+  color: var(--accent-strong);
   cursor: pointer;
   white-space: nowrap;
   transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 4px rgba(var(--ink-rgb), 0.08);
   line-height: 1;
 }
 
 .nsgBadge:hover {
-  background: rgba(0, 120, 212, 0.08);
-  border-color: rgba(0, 120, 212, 0.40);
-  box-shadow: 0 2px 6px rgba(0, 120, 212, 0.15);
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.15);
 }
 
 .nsgBadgeIcon {
@@ -2218,20 +2287,20 @@
 }
 
 .nsgBadgeDetached {
-  background: rgba(216, 59, 1, 0.08);
-  border-color: rgba(216, 59, 1, 0.25);
-  color: rgba(216, 59, 1, 0.80);
+  background: rgba(var(--danger-rgb), 0.08);
+  border-color: rgba(var(--danger-rgb), 0.25);
+  color: rgba(var(--danger-rgb), 0.8);
 }
 
 .nsgBadgeDetached:hover {
-  background: rgba(216, 59, 1, 0.14);
-  border-color: rgba(216, 59, 1, 0.35);
+  background: rgba(var(--danger-rgb), 0.14);
+  border-color: rgba(var(--danger-rgb), 0.35);
 }
 
 .nsgDetachedX {
   font-weight: 800;
   font-size: 10px;
-  color: rgba(216, 59, 1, 0.72);
+  color: rgba(var(--danger-rgb), 0.72);
   flex: none;
 }
 
@@ -2243,7 +2312,7 @@
   left: 50%;
   transform: translateX(-50%);
   white-space: nowrap;
-  background: rgba(20, 21, 23, 0.88);
+  background: rgba(var(--ink-rgb), 0.88);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -2251,7 +2320,7 @@
   border-radius: 6px;
   pointer-events: none;
   z-index: 9999;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.18);
 }
 
 .nsgBadgeDetached:hover .nsgDetachedTooltip {
@@ -2272,7 +2341,7 @@
   padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.66);
+  background: rgba(var(--paper-rgb), 0.66);
   font-weight: 800;
   letter-spacing: -0.01em;
   font-size: 12px;
@@ -2289,12 +2358,12 @@
 }
 
 .multiSelectBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.90);
+  background: rgba(var(--paper-rgb), 0.9);
 }
 
 .multiSelectBtn[aria-expanded="true"] {
-  background: rgba(255, 255, 255, 0.90);
-  border-color: rgba(0, 120, 212, 0.35);
+  background: rgba(var(--paper-rgb), 0.9);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .multiSelectBtn:disabled {
@@ -2311,8 +2380,8 @@
 }
 
 .multiSelectBtnCount {
-  background: rgba(0, 120, 212, 0.12);
-  color: rgba(0, 120, 212, 0.9);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: rgba(var(--accent-rgb), 0.9);
   border-radius: 8px;
   padding: 1px 6px;
   font-size: 11px;
@@ -2331,7 +2400,7 @@
   background: white;
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+  box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.10);
   z-index: 200;
   padding: 4px;
   display: flex;
@@ -2348,13 +2417,13 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  background: rgba(247, 248, 250, 0.8);
+  background: rgba(var(--canvas-rgb), 0.8);
   outline: none;
   margin-bottom: 2px;
 }
 
 .multiSelectSearch:focus {
-  border-color: rgba(0, 120, 212, 0.5);
+  border-color: rgba(var(--accent-rgb), 0.5);
   background: white;
 }
 
@@ -2382,9 +2451,9 @@
 
 .multiSelectOptionBadge {
   flex-shrink: 0;
-  background: rgba(0, 120, 212, 0.08);
-  color: rgba(0, 80, 160, 0.85);
-  border: 1px solid rgba(0, 120, 212, 0.18);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent-strong);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
   border-radius: 6px;
   padding: 1px 6px;
   font-size: 10px;
@@ -2394,11 +2463,11 @@
 }
 
 .multiSelectOption:hover {
-  background: rgba(0, 120, 212, 0.07);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 
 .multiSelectOption input[type="checkbox"] {
-  accent-color: rgba(0, 120, 212, 0.85);
+  accent-color: rgba(var(--accent-rgb), 0.85);
   width: 14px;
   height: 14px;
   flex-shrink: 0;
@@ -2422,8 +2491,8 @@
 }
 
 .backendPoolRuleTag {
-  background: rgba(0, 120, 212, 0.08);
-  color: rgba(0, 120, 212, 0.85);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: rgba(var(--accent-rgb), 0.85);
   border-radius: 6px;
   padding: 2px 7px;
   font-size: 11px;
@@ -2443,7 +2512,7 @@
   gap: 6px;
   margin-bottom: 8px;
   padding: 5px 8px;
-  background: rgba(247, 248, 250, 0.7);
+  background: rgba(var(--canvas-rgb), 0.7);
   border-radius: 8px;
   border: 1px solid var(--border);
 }
@@ -2483,13 +2552,13 @@
   gap: 6px;
   padding: 5px 8px;
   border-radius: 8px;
-  background: rgba(247, 248, 250, 0.6);
+  background: rgba(var(--canvas-rgb), 0.6);
   border: 1px solid transparent;
   transition: background 0.12s;
 }
 
 .backendPoolMemberRow:hover {
-  background: rgba(247, 248, 250, 1);
+  background: rgba(var(--canvas-rgb), 1);
   border-color: var(--border);
 }
 
@@ -2519,7 +2588,7 @@
    ═══════════════════════════════════════════════════════ */
 
 .aksPlaneContainer {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(var(--paper-rgb), 0.06);
   margin-top: 4px;
 }
 
@@ -2551,22 +2620,22 @@
   letter-spacing: 0.3px;
 }
 .aksAccessBadge[data-private="true"] {
-  background: rgba(16, 137, 62, 0.15);
-  color: #10893e;
-  border: 1px solid rgba(16, 137, 62, 0.3);
+  background: rgba(var(--ok-rgb), 0.15);
+  color: var(--ok);
+  border: 1px solid rgba(var(--ok-rgb), 0.3);
 }
 .aksAccessBadge[data-private="false"] {
-  background: rgba(0, 120, 212, 0.12);
-  color: #0078d4;
-  border: 1px solid rgba(0, 120, 212, 0.25);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
 }
 
 .aksFlowPath {
   margin: 6px 0 2px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--paper-rgb), 0.03);
   border-radius: 4px;
-  border-left: 3px solid rgba(0, 120, 212, 0.4);
+  border-left: 3px solid rgba(var(--accent-rgb), 0.4);
 }
 .aksFlowLabel {
   font-size: 11px;
@@ -2577,11 +2646,11 @@
 /* ── 실행면 (Node Pools) ── */
 
 .aksNodePoolCard {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(var(--paper-rgb), 0.06);
   border-radius: 6px;
   margin-bottom: 6px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--paper-rgb), 0.02);
 }
 
 .aksNodePoolHeader {
@@ -2598,7 +2667,7 @@
   text-align: left;
 }
 .aksNodePoolHeader:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--paper-rgb), 0.04);
 }
 
 .aksPoolModeBadge {
@@ -2611,14 +2680,14 @@
   flex-shrink: 0;
 }
 .aksPoolModeBadge[data-mode="System"] {
-  background: rgba(209, 132, 0, 0.15);
-  color: #d18400;
-  border: 1px solid rgba(209, 132, 0, 0.3);
+  background: rgba(var(--warning-rgb), 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(var(--warning-rgb), 0.3);
 }
 .aksPoolModeBadge[data-mode="User"] {
-  background: rgba(0, 120, 212, 0.12);
-  color: #0078d4;
-  border: 1px solid rgba(0, 120, 212, 0.25);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
 }
 
 .aksPoolName {
@@ -2643,14 +2712,14 @@
   flex-shrink: 0;
 }
 .aksPoolPowerDot[data-state="running"] {
-  background: #10893e;
-  box-shadow: 0 0 4px rgba(16, 137, 62, 0.5);
+  background: var(--ok);
+  box-shadow: 0 0 4px rgba(var(--ok-rgb), 0.5);
 }
 .aksPoolPowerDot[data-state="stopped"] {
-  background: #d18400;
+  background: var(--warning);
 }
 .aksPoolPowerDot[data-state="deallocated"] {
-  background: #555;
+  background: rgba(var(--ink-rgb), 0.72);
 }
 
 .aksPoolSummary {
@@ -2665,7 +2734,7 @@
 /* VMSS Instance list (tree format) */
 
 .aksVmssInstanceList {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(var(--paper-rgb), 0.06);
   padding: 4px 0;
   max-height: 260px;
   overflow-y: auto;
@@ -2688,7 +2757,7 @@
   align-items: center;
 }
 .aksInstanceTreeRow:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--paper-rgb), 0.03);
 }
 
 .aksInstanceTreeBranch {
@@ -2711,13 +2780,13 @@
   font-size: 10px;
 }
 .aksVmssInstanceState[data-state="running"] {
-  color: #10893e;
+  color: var(--ok);
 }
 .aksVmssInstanceState[data-state="stopped"] {
-  color: #d18400;
+  color: var(--warning);
 }
 .aksVmssInstanceState[data-state="deallocated"] {
-  color: #555;
+  color: rgba(var(--ink-rgb), 0.72);
 }
 
 /* ── VMSS Instance Node (캔버스 확장 노드 — mini card) ── */
@@ -2728,27 +2797,27 @@
   gap: 6px;
   padding: 5px 10px 5px 5px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.10);
-  border-left: 3px solid rgba(0, 0, 0, 0.10);
+  border: 1px solid rgba(var(--ink-rgb), 0.10);
+  border-left: 3px solid rgba(var(--ink-rgb), 0.10);
   border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.08);
   min-width: 180px;
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .vmssInstanceNode:hover {
-  border-color: rgba(0, 120, 212, 0.35);
-  border-left-color: rgba(0, 120, 212, 0.60);
-  box-shadow: 0 4px 14px rgba(0, 120, 212, 0.12);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  border-left-color: rgba(var(--accent-rgb), 0.6);
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.12);
 }
 
 /* Left accent color by powerState — visually connects to parent VMSS */
-.vmssInstanceNode[data-state="running"]  { border-left-color: rgba(16, 137, 62, 0.70); }
+.vmssInstanceNode[data-state="running"]  { border-left-color: rgba(var(--ok-rgb), 0.7); }
 .vmssInstanceNode[data-state="starting"],
-.vmssInstanceNode[data-state="stopping"] { border-left-color: rgba(0, 120, 212, 0.65); }
-.vmssInstanceNode[data-state="stopped"]  { border-left-color: rgba(209, 132, 0, 0.60); }
+.vmssInstanceNode[data-state="stopping"] { border-left-color: rgba(var(--accent-rgb), 0.65); }
+.vmssInstanceNode[data-state="stopped"]  { border-left-color: rgba(var(--warning-rgb), 0.6); }
 .vmssInstanceNode[data-state="deallocated"],
-.vmssInstanceNode[data-state="unknown"]  { border-left-color: rgba(20, 21, 23, 0.20); }
+.vmssInstanceNode[data-state="unknown"]  { border-left-color: rgba(var(--ink-rgb), 0.2); }
 
 .vmssInstRing {
   flex-shrink: 0;
@@ -2778,7 +2847,7 @@
 .vmssInstName {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2798,30 +2867,30 @@
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(16, 137, 62, 0.10);
-  color: #10893e;
+  background: rgba(var(--ok-rgb), 0.1);
+  color: var(--ok);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 .vmssInstBadge[data-state="stopped"],
 .vmssInstBadge[data-state="stopping"] {
-  background: rgba(209, 132, 0, 0.10);
-  color: #d18400;
+  background: rgba(var(--warning-rgb), 0.1);
+  color: var(--warning);
 }
 .vmssInstBadge[data-state="starting"] {
-  background: rgba(0, 120, 212, 0.10);
-  color: #0078d4;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .vmssInstBadge[data-state="deallocated"],
 .vmssInstBadge[data-state="unknown"] {
-  background: rgba(0, 0, 0, 0.06);
-  color: #888;
+  background: rgba(var(--ink-rgb), 0.06);
+  color: var(--subtle);
 }
 
 .vmssInstIp {
   font-size: 9px;
   font-family: "SF Mono", "Fira Code", monospace;
-  color: #888;
+  color: var(--subtle);
 }
 
 /* VMSS expand toggle on LiveNode */
@@ -2831,23 +2900,23 @@
   left: 50%;
   transform: translateX(-50%);
   background: #fff;
-  border: 1px solid rgba(0, 120, 212, 0.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: 10px;
   padding: 2px 10px;
   font-size: 10px;
-  color: #333;
+  color: rgba(var(--ink-rgb), 0.85);
   cursor: pointer;
   z-index: 5;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
   white-space: nowrap;
   font-weight: 500;
   letter-spacing: -0.01em;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 4px rgba(var(--ink-rgb), 0.12);
 }
 .vmssExpandBtn:hover {
   color: #fff;
-  background: #0078d4;
-  border-color: #0078d4;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ── 노출면 (Exposure / Ingress-Egress) ── */
@@ -2866,7 +2935,7 @@
 }
 
 .aksExposureCard {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(var(--paper-rgb), 0.06);
   border-radius: 4px;
   margin-bottom: 4px;
   overflow: hidden;
@@ -2886,7 +2955,7 @@
   text-align: left;
 }
 .aksExposureHeader:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--paper-rgb), 0.04);
 }
 
 .aksExposureDirBadge {
@@ -2899,12 +2968,12 @@
   flex-shrink: 0;
 }
 .aksExposureDirBadge[data-dir="ingress"] {
-  background: rgba(0, 120, 212, 0.15);
-  color: #0078d4;
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
 }
 .aksExposureDirBadge[data-dir="egress"] {
-  background: rgba(209, 132, 0, 0.15);
-  color: #d18400;
+  background: rgba(var(--warning-rgb), 0.15);
+  color: var(--warning);
 }
 
 .aksExposureLabel {
@@ -2916,7 +2985,7 @@
 
 .aksExposureResources {
   padding: 4px 8px 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(var(--paper-rgb), 0.04);
 }
 
 .aksExposureResRow {
@@ -2933,7 +3002,7 @@
   border-radius: 3px;
   font-size: 9px;
   font-weight: 800;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(var(--paper-rgb), 0.06);
   color: var(--muted);
   flex-shrink: 0;
   min-width: 28px;
@@ -2944,7 +3013,7 @@
   font-size: 10px;
   color: var(--muted);
   padding: 0 4px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--paper-rgb), 0.04);
   border-radius: 2px;
 }
 
@@ -2959,58 +3028,58 @@
   width: 110px;
   padding: 12px 10px 10px;
   border-radius: 12px;
-  border: 1.5px dashed rgba(251, 146, 60, 0.55);
-  background: rgba(251, 146, 60, 0.06);
+  border: 1.5px dashed rgba(var(--egress-rgb), 0.55);
+  background: rgba(var(--egress-rgb), 0.06);
   backdrop-filter: blur(4px);
   cursor: default;
   transition: border-color 0.2s, background 0.2s;
 }
 
 .internetNode:hover {
-  border-color: rgba(251, 146, 60, 0.80);
-  background: rgba(251, 146, 60, 0.10);
+  border-color: rgba(var(--egress-rgb), 0.80);
+  background: rgba(var(--egress-rgb), 0.10);
 }
 
 .internetNodeWarn {
-  border-color: rgba(239, 68, 68, 0.55);
-  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(var(--fault-rgb), 0.55);
+  background: rgba(var(--fault-rgb), 0.06);
 }
 
 .internetNodeWarn:hover {
-  border-color: rgba(239, 68, 68, 0.80);
-  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(var(--fault-rgb), 0.80);
+  background: rgba(var(--fault-rgb), 0.10);
 }
 
 .internetNodeIcon {
   width: 32px;
   height: 32px;
-  color: rgba(251, 146, 60, 0.85);
+  color: rgba(var(--egress-rgb), 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .internetNodeWarn .internetNodeIcon {
-  color: rgba(239, 68, 68, 0.80);
+  color: rgba(var(--fault-rgb), 0.80);
 }
 
 .internetNodeLabel {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(251, 146, 60, 0.90);
+  color: rgba(var(--egress-rgb), 0.90);
   letter-spacing: 0.01em;
   text-align: center;
 }
 
 .internetNodeWarn .internetNodeLabel {
-  color: rgba(239, 68, 68, 0.85);
+  color: rgba(var(--fault-rgb), 0.85);
 }
 
 .internetNodeCount {
   font-size: 9px;
   font-weight: 600;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(var(--paper-rgb), 0.05);
   padding: 1px 5px;
   border-radius: 3px;
 }
@@ -3018,9 +3087,9 @@
 .internetNodeDeprecatedBadge {
   font-size: 9px;
   font-weight: 700;
-  color: rgba(239, 68, 68, 0.90);
-  background: rgba(239, 68, 68, 0.10);
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: rgba(var(--fault-rgb), 0.90);
+  background: rgba(var(--fault-rgb), 0.10);
+  border: 1px solid rgba(var(--fault-rgb), 0.25);
   padding: 2px 5px;
   border-radius: 3px;
   text-align: center;

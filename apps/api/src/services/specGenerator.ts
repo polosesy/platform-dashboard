@@ -2408,7 +2408,7 @@ export async function generateDiagramSpec(
     const children = subnetChildren.get(subnetShortId) ?? [];
     const hasExplicitChild = children.some((c) => outboundSourceSet.has(idMap.get(c.node.id) ?? ""));
     if (hasExplicitChild) continue;
-    outboundSources.push({ id: subnetShortId, label: "기본 아웃바운드 (지원 중단 예정)", deprecated: true });
+    outboundSources.push({ id: subnetShortId, label: "Default outbound (retiring)", deprecated: true });
     outboundSourceSet.add(subnetShortId);
   }
 
@@ -2430,7 +2430,8 @@ export async function generateDiagramSpec(
 
     diagramNodes.push({
       id: internetNodeId,
-      label: "인터넷",
+      // Stable token — the web shows the localized name (live-diagram/utils/localizeLabel.ts)
+      label: "Internet",
       icon: "internet" as DiagramIconKind,
       position: { x: 9999, y: 0 },
       bindings: {},

@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import type { PolicyCategory, PolicyFinding, PolicySeverity } from "@aud/types";
 import styles from "../styles.module.css";
-import { Badge, CATEGORY_LABEL, Empty, SEVERITY_LABEL, SeverityBadge } from "./shared";
+import { useI18n } from "@/lib/i18n";
+import { Badge, Empty, POLICY_CATEGORIES, SeverityBadge, categoryLabel, severityLabel } from "./shared";
 
 type Props = {
   findings: PolicyFinding[];
@@ -14,6 +15,7 @@ type Props = {
 const SEVERITIES: PolicySeverity[] = ["high", "medium", "low", "info"];
 
 export function FindingsPanel({ findings, category, onCategoryChange }: Props) {
+  const { t } = useI18n();
   const [severity, setSeverity] = useState<PolicySeverity | "all">("all");
   const [query, setQuery] = useState("");
 
@@ -32,35 +34,35 @@ export function FindingsPanel({ findings, category, onCategoryChange }: Props) {
     <div className={styles.panel}>
       <div className={styles.panelHeader}>
         <div className={styles.panelTitle}>
-          점검 결과 <span className={styles.muted}>({filtered.length}/{findings.length})</span>
+          {t("pol.panel.findings")} <span className={styles.muted}>({filtered.length}/{findings.length})</span>
         </div>
         <div className={styles.controls}>
           <select className={styles.select} value={category} onChange={(e) => onCategoryChange(e.target.value as PolicyCategory | "all")}>
-            <option value="all">전체 영역</option>
-            {(Object.keys(CATEGORY_LABEL) as PolicyCategory[]).map((c) => (
+            <option value="all">{t("polc.allAreas")}</option>
+            {POLICY_CATEGORIES.map((c: PolicyCategory) => (
               <option key={c} value={c}>
-                {CATEGORY_LABEL[c]}
+                {categoryLabel(t, c)}
               </option>
             ))}
           </select>
           <select className={styles.select} value={severity} onChange={(e) => setSeverity(e.target.value as PolicySeverity | "all")}>
-            <option value="all">전체 심각도</option>
+            <option value="all">{t("polc.allSeverities")}</option>
             {SEVERITIES.map((s) => (
               <option key={s} value={s}>
-                {SEVERITY_LABEL[s]}
+                {severityLabel(t, s)}
               </option>
             ))}
           </select>
           <input
             className={styles.search}
-            placeholder="규칙·리소스·네임스페이스 검색"
+            placeholder={t("polc.findingsSearch")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
       </div>
       {filtered.length === 0 ? (
-        <Empty>조건에 맞는 점검 결과가 없습니다.</Empty>
+        <Empty>{t("polc.noFindings")}</Empty>
       ) : (
         <div className={styles.findingList}>
           {filtered.map((f) => (
@@ -69,8 +71,8 @@ export function FindingsPanel({ findings, category, onCategoryChange }: Props) {
                 <SeverityBadge severity={f.severity} />
                 <span className={styles.findingTitle}>{f.title}</span>
                 <span className={styles.findingRule}>{f.ruleId}</span>
-                <Badge tone="neutral">{CATEGORY_LABEL[f.category]}</Badge>
-                {f.system && <Badge tone="system" title="Kubernetes/AKS가 관리하는 객체 — 점수에서 제외">시스템</Badge>}
+                <Badge tone="neutral">{categoryLabel(t, f.category)}</Badge>
+                {f.system && <Badge tone="system" title={t("polc.systemHint")}>{t("polc.system")}</Badge>}
               </div>
               {f.resource && (
                 <div className={styles.findingResource}>
@@ -79,9 +81,9 @@ export function FindingsPanel({ findings, category, onCategoryChange }: Props) {
                 </div>
               )}
               <div className={styles.findingDetail}>{f.detail}</div>
-              <div className={styles.findingFix}>권장: {f.recommendation}</div>
+              <div className={styles.findingFix}>{t("polc.recommendation")}: {f.recommendation}</div>
               <a className={styles.refLink} href={f.reference} target="_blank" rel="noreferrer">
-                근거 문서
+                {t("polc.reference")}
               </a>
             </div>
           ))}

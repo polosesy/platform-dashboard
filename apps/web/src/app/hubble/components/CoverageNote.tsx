@@ -1,6 +1,7 @@
 "use client";
 
 import type { HubbleCoverage } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 
 type Props = {
@@ -14,10 +15,11 @@ function spanMinutes(oldest: string | null, newest: string | null): number | nul
   return Math.round(((Date.parse(newest) - Date.parse(oldest)) / 60_000) * 10) / 10;
 }
 
+// i18n keys
 const SOURCE_LABEL: Record<HubbleCoverage["source"], string> = {
-  agents: "노드별 cilium agent",
-  relay: "hubble-relay",
-  "api-proxy": "API proxy",
+  agents: "hb.cov.src.agents",
+  relay: "hb.cov.src.relay",
+  "api-proxy": "hb.cov.src.apiProxy",
 };
 
 /**
@@ -26,13 +28,14 @@ const SOURCE_LABEL: Record<HubbleCoverage["source"], string> = {
  * often shorter than the one selected.
  */
 export function CoverageNote({ coverage, requestedMinutes }: Props) {
+  const { t } = useI18n();
   if (!coverage) return null;
 
   const missingNodes = coverage.nodesTotal > 0 && coverage.nodesObserved < coverage.nodesTotal;
   const spans = coverage.nodes
     .map((n) => spanMinutes(n.oldest, n.newest))
     .filter((m): m is number => m !== null);
-  const spanText = spans.length > 1 ? ` (노드별 ${Math.min(...spans)}–${Math.max(...spans)}분)` : "";
+  const spanText = spans.length > 1 ? ` ${t("hb.cov.perNode", { min: Math.min(...spans), max: Math.max(...spans) })}` : "";
   const shortWindow =
     requestedMinutes !== undefined &&
     coverage.nodes.some((n) => n.bufferFull) &&
@@ -40,37 +43,36 @@ export function CoverageNote({ coverage, requestedMinutes }: Props) {
   const failed = coverage.nodes.filter((n) => n.error);
 
   const detail = [
-    `수집: ${SOURCE_LABEL[coverage.source]}`,
+    `${t("hb.cov.source")}: ${t(SOURCE_LABEL[coverage.source])}`,
     ...coverage.nodes.map(
       (n) =>
-        `${n.nodeName}: ${n.error ? `실패 — ${n.error}` : `${n.events.toLocaleString()}건, ${spanMinutes(n.oldest, n.newest) ?? 0}분${n.bufferFull ? " (버퍼 가득 참)" : ""}`}`,
+        `${n.nodeName}: ${n.error ? `${t("hb.cov.failed")} — ${n.error}` : `${t("hb.cov.nodeLine", { n: n.events.toLocaleString(), min: spanMinutes(n.oldest, n.newest) ?? 0 })}${n.bufferFull ? ` ${t("hb.cov.bufferFull")}` : ""}`}`,
     ),
   ].join("\n");
 
   return (
     <div className={`${styles.coverageNote} ${missingNodes || shortWindow ? styles.coverageWarn : ""}`} title={detail}>
       <span className={styles.coverageItem}>
-        노드 <strong>{coverage.nodesObserved}</strong>
+        {t("hb.node")} <strong>{coverage.nodesObserved}</strong>
         {coverage.nodesTotal > 0 && <>/{coverage.nodesTotal}</>}
       </span>
       <span className={styles.coverageItem}>
-        공통 관측 <strong>{coverage.commonWindowMinutes}분</strong>
+        {t("hb.cov.common")} <strong>{t("hb.minutes", { n: coverage.commonWindowMinutes })}</strong>
         {spanText}
       </span>
       {coverage.duplicatesRemoved > 0 && (
         <span className={styles.coverageItem}>
-          중복 관측 {coverage.duplicatesRemoved.toLocaleString()}건 제거
+          {t("hb.cov.dupes", { n: coverage.duplicatesRemoved.toLocaleString() })}
         </span>
       )}
       {shortWindow && (
         <span className={styles.coverageHint}>
-          선택한 {requestedMinutes}분 중 모든 노드가 보관한 구간은 {coverage.commonWindowMinutes}분입니다 — Hubble 노드 버퍼가 가득 차
-          오래된 플로우는 남아 있지 않습니다.
+          {t("hb.cov.short", { req: requestedMinutes ?? 0, common: coverage.commonWindowMinutes })}
         </span>
       )}
       {failed.length > 0 && (
         <span className={styles.coverageHint}>
-          응답 없는 노드: {failed.map((n) => n.nodeName).join(", ")}
+          {t("hb.cov.noResponse")}: {failed.map((n) => n.nodeName).join(", ")}
         </span>
       )}
     </div>

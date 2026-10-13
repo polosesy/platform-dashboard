@@ -1,10 +1,12 @@
 "use client";
 
 import { memo } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { AksNodeCondition } from "@aud/types";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 export type VmssInstanceNodeData = {
   label: string;
@@ -23,12 +25,12 @@ export type VmssInstanceNodeData = {
 type PowerInfo = { color: string; label: string; score: number; spin: boolean };
 
 const POWER_INFO: Record<string, PowerInfo> = {
-  running:     { color: "rgba(16,137,62,0.70)",  label: "Running",     score: 1,    spin: true },
-  starting:    { color: "rgba(0,120,212,0.65)",  label: "Starting",    score: 0.5,  spin: true },
-  stopping:    { color: "rgba(209,132,0,0.70)",  label: "Stopping",    score: 0.5,  spin: true },
-  stopped:     { color: "rgba(209,132,0,0.60)",  label: "Stopped",     score: 0.3,  spin: false },
-  deallocated: { color: "rgba(20,21,23,0.25)",   label: "Deallocated", score: 0.15, spin: false },
-  unknown:     { color: "rgba(170,170,170,0.60)","label": "Unknown",   score: 0.2,  spin: false },
+  running:     { color: rgba("ok", 0.7),  label: "ld.power.running",     score: 1,    spin: true },
+  starting:    { color: rgba("accent", 0.65),  label: "ld.power.starting",    score: 0.5,  spin: true },
+  stopping:    { color: rgba("warning", 0.7),  label: "ld.power.stopping",    score: 0.5,  spin: true },
+  stopped:     { color: rgba("warning", 0.6),  label: "ld.power.stopped",     score: 0.3,  spin: false },
+  deallocated: { color: rgba("ink", 0.25),   label: "ld.power.deallocated", score: 0.15, spin: false },
+  unknown:     { color: rgba("ink", 0.3),label: "ld.power.unknown",   score: 0.2,  spin: false },
 };
 
 const RING_R = 13;
@@ -38,6 +40,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RING_R;
 export const VmssInstanceNode = memo(function VmssInstanceNode({
   data,
 }: NodeProps<VmssInstanceNodeData>) {
+  const { t } = useI18n();
   const { computerName, powerState, privateIp, onSelect } = data;
   const info = POWER_INFO[powerState] ?? POWER_INFO.unknown;
 
@@ -55,7 +58,7 @@ export const VmssInstanceNode = memo(function VmssInstanceNode({
           <circle
             cx="17" cy="17" r={RING_R}
             fill="none"
-            stroke="rgba(20,21,23,0.06)"
+            stroke={rgba("ink", 0.06)}
             strokeWidth={RING_STROKE}
           />
           <circle
@@ -82,7 +85,7 @@ export const VmssInstanceNode = memo(function VmssInstanceNode({
         </div>
         <div className={styles.vmssInstMeta}>
           <span className={styles.vmssInstBadge} data-state={powerState}>
-            {info.label}
+            {t(info.label)}
           </span>
           {privateIp && (
             <span className={styles.vmssInstIp}>{privateIp}</span>

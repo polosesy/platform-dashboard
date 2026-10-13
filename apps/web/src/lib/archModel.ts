@@ -412,6 +412,130 @@ export function regionTiles(reg: ArchRegion): number {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Category filter ("표시 범위") — hide + re-layout, with one hop of configured context.
+// Works on the model before layout, so layoutArch is unchanged and hidden tiles in the
+// same region can never turn into "other region" ghosts.
+// ──────────────────────────────────────────────────────────────
+
+export type ArchCategory = "network" | "compute" | PaasCategory;
+export const ARCH_CATEGORIES: ArchCategory[] = ["network", "compute", "app", "data", "security", "messaging", "monitoring", "dns", "other"];
+
+/** Same buckets as the layout lanes — never guessed from names. */
+export function archCategoryOf(kind: string): ArchCategory {
+  if (COMPUTE_KINDS.has(kind)) return "compute";
+  if (EDGE_KINDS.has(kind) || GLOBAL_KINDS.has(kind) || kind === "privateEndpoint") return "network";
+  return PAAS_KIND[kind] ?? "other";
+}
+
+/** Tile count per category in a region ("all" = every region) plus global services. */
+export function categoryCounts(model: ArchModel, region: string): Record<ArchCategory, number> {
+  const out = Object.fromEntries(ARCH_CATEGORIES.map((c) => [c, 0])) as Record<ArchCategory, number>;
+  for (const r of model.resources.values()) {
+    if (region !== "all" && r.region !== region && r.region !== "global") continue;
+    out[archCategoryOf(r.node.kind)]++;
+  }
+  return out;
+}
+
+/** Line kinds whose other end is kept as context (configured dependencies of a shown tile). */
+const CONTEXT_EDGES = new Set<ArchEdgeKind>(["routes", "privateLink"]);
+
+export type ArchFilterView = {
+  /** Filtered model (the same object when nothing is filtered) */
+  model: ArchModel;
+  active: boolean;
+  /** Every resource that is drawn (category match + context) */
+  keep: ReadonlySet<string> | null;
+  /** Resources kept only because a shown tile connects to them (routes / private link, one hop) */
+  context: ReadonlySet<string>;
+  /** Lines with exactly one end shown — what the filter cut off from visible tiles */
+  crossing: ArchEdge[];
+  /** Lines with both ends hidden */
+  internal: number;
+  /** VNet / subnet id → resources hidden inside it */
+  hiddenIn: ReadonlyMap<string, number>;
+  /** Resources kept (shown + context) / all resources */
+  kept: number;
+  total: number;
+};
+
+export function filterArchModel(model: ArchModel, cats: ReadonlySet<ArchCategory> | null): ArchFilterView {
+  const total = model.resources.size;
+  if (!cats || ARCH_CATEGORIES.every((c) => cats.has(c))) {
+    return { model, active: false, keep: null, context: new Set(), crossing: [], internal: 0, hiddenIn: new Map(), kept: total, total };
+  }
+  const k0 = new Set<string>();
+  for (const r of model.resources.values()) if (cats.has(archCategoryOf(r.node.kind))) k0.add(r.id);
+  const context = new Set<string>();
+  for (const e of model.edges) {
+    if (!CONTEXT_EDGES.has(e.kind)) continue;
+    if (k0.has(e.source) && model.resources.has(e.target) && !k0.has(e.target)) context.add(e.target);
+    if (k0.has(e.target) && model.resources.has(e.source) && !k0.has(e.source)) context.add(e.source);
+  }
+  const keep = new Set([...k0, ...context]);
+  const networkOn = cats.has("network");
+  const hiddenIn = new Map<string, number>();
+  const keptVnets = new Map<string, ArchVnet>();
+  const keptSubnets = new Map<string, ArchSubnet>();
+
+  const regions: ArchRegion[] = [];
+  for (const reg of model.regions) {
+    const vnets: ArchVnet[] = [];
+    for (const v of reg.vnets) {
+      const vid = lower(v.node.id);
+      let hiddenV = 0;
+      const subs: ArchSubnet[] = [];
+      for (const s of v.subnets) {
+        const res = s.resources.filter((id) => keep.has(id));
+        const hidden = s.resources.length - res.length;
+        hiddenV += hidden;
+        if (res.length || networkOn) {
+          const copy: ArchSubnet = { ...s, resources: res };
+          subs.push(copy);
+          keptSubnets.set(lower(s.node.id), copy);
+          if (hidden) hiddenIn.set(lower(s.node.id), hidden);
+        }
+      }
+      if (subs.length || networkOn) {
+        const copy: ArchVnet = { ...v, subnets: subs };
+        vnets.push(copy);
+        keptVnets.set(vid, copy);
+        if (hiddenV) hiddenIn.set(vid, hiddenV);
+      }
+    }
+    const pick = (ids: string[]) => ids.filter((id) => keep.has(id));
+    const paas = Object.fromEntries(PAAS_ORDER.map((c) => [c, pick(reg.paas[c])])) as Record<PaasCategory, string[]>;
+    const next: ArchRegion = { ...reg, vnets, edge: pick(reg.edge), outside: pick(reg.outside), paas };
+    if (vnets.length || regionTiles(next) > 0) regions.push(next);
+  }
+  const global = model.global.filter((id) => keep.has(id));
+
+  // An end is shown if it is a kept resource, subnet or VNet; the Internet only when its target is
+  const shown = (id: string, other: string) =>
+    keep.has(id) || keptSubnets.has(id) || keptVnets.has(id) || (id.startsWith("internet:") && keep.has(other));
+  const edges: ArchEdge[] = [];
+  const crossing: ArchEdge[] = [];
+  let internal = 0;
+  for (const e of model.edges) {
+    const s = shown(e.source, e.target), t = shown(e.target, e.source);
+    if (s && t) edges.push(e);
+    else if (s || t) crossing.push(e);
+    else internal++;
+  }
+  return {
+    model: { ...model, regions, global, edges, vnets: keptVnets, subnets: keptSubnets },
+    active: true,
+    keep,
+    context,
+    crossing,
+    internal,
+    hiddenIn,
+    kept: keep.size,
+    total,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────
 // Layout — header-on-top nested boxes, shelf packing, absolute coordinates
 // ──────────────────────────────────────────────────────────────
 
@@ -466,14 +590,20 @@ export type ArchViewOptions = {
   layers?: ReadonlySet<ArchEdgeKind>;
 };
 
-/** VNets collapsed when a view opens: in one region, empty ones and those with more than `limit` tiles; in "all", every VNet. */
-export function initialCollapsed(model: ArchModel, region: string, limit = 24): Set<string> {
+/**
+ * VNets collapsed when a view opens: in one region, empty ones and those with more than `limit`
+ * tiles; in "all", every VNet. With a category filter only VNets above `limit` are collapsed —
+ * a filtered VNet with no shown tiles is not "empty" (its tiles are hidden), and collapsing every
+ * VNet in "all" would hide exactly what the filter is meant to show.
+ */
+export function initialCollapsed(model: ArchModel, region: string, limit = 24, filtered = false): Set<string> {
   const s = new Set<string>();
   for (const reg of model.regions) {
     if (region !== "all" && reg.key !== region) continue;
     for (const v of reg.vnets) {
       const n = v.subnets.reduce((k, sb) => k + sb.resources.length, 0);
-      if (region === "all" || n === 0 || n > limit) s.add(lower(v.node.id));
+      const collapse = filtered ? n > limit : region === "all" || n === 0 || n > limit;
+      if (collapse) s.add(lower(v.node.id));
     }
   }
   return s;

@@ -17,14 +17,14 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { HubbleTab } from "./components/HubbleTab";
 import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Select, Tabs } from "@/components/ui";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 
 type Tab = "overview" | "workloads" | "infra" | "logs" | "hubble";
 
 const TABS: Tab[] = ["overview", "workloads", "infra", "logs", "hubble"];
 
 export default function ObservabilityPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("overview");
   const { clusters, clusterId, setClusterId, loading: clustersLoading } = useAksClusters();
   // Free-text cluster ID (used when the cluster list is unavailable) — committed on blur / Enter
@@ -72,7 +72,7 @@ export default function ObservabilityPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={lastRefresh ? <span>{t("common.updated")} {lastRefresh.toLocaleTimeString()}</span> : null}
+        meta={lastRefresh ? <span>{t("common.updated")} {lastRefresh.toLocaleTimeString(dateLocale(locale))}</span> : null}
         actions={
           <>
             {clusters.length > 0 ? (

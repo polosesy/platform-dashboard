@@ -34,7 +34,7 @@ test("every page route appears in the menu exactly once", () => {
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 15);
+  assert.equal(routes.length, 16);
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -50,6 +50,8 @@ test("each route activates exactly one item (longest match) and its group", () =
   assert.equal(isItemActive("/security/findings", "/security"), false, "a sub-page does not also light up its parent");
   assert.equal(activeNavItem("/security/findings/x")?.href, "/security/findings");
   assert.equal(activeNavItem("/security/unknown")?.href, "/security");
+  assert.equal(activeNavItem("/security/risk")?.href, "/security/risk");
+  assert.equal(isItemActive("/security/risk", "/security"), false);
   assert.equal(activeGroupKey("/policies"), "security");
   assert.equal(activeGroupKey("/does-not-exist"), null);
   assert.equal(activeNavItem("/does-not-exist"), null);
@@ -62,7 +64,7 @@ test("group order and shape: 6 slots, single-item groups are direct links", () =
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble"]);
   assert.deepEqual(
     NAV_GROUPS.find((g) => g.key === "security")!.items.map((i) => i.href),
-    ["/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance", "/policies"],
+    ["/security/risk", "/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance", "/policies"],
   );
 });
 
@@ -75,8 +77,8 @@ test("sections: only in the security group, contiguous, translated, never repeat
     secs.forEach((s, i) => {
       if (s !== secs[i - 1]) { assert.ok(!seen.has(s!), `section ${s} is contiguous`); seen.add(s!); }
     });
-    assert.deepEqual([...seen], ["nav.section.azureSecurity", "nav.section.clusterSecurity"]);
-    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.azureSecurity", null, null, null, null, "nav.section.clusterSecurity"]);
+    assert.deepEqual([...seen], ["nav.section.crossRisk", "nav.section.azureSecurity", "nav.section.clusterSecurity"]);
+    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.crossRisk", "nav.section.azureSecurity", null, null, null, null, "nav.section.clusterSecurity"]);
     for (const it of g.items) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[it.section!]!.ko, `${it.href} label differs from its section heading`);
   }
 });

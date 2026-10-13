@@ -1,14 +1,14 @@
 "use client";
 
 import { EmptyState, LoadingState, Notice, Panel } from "@/components/ui";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { useSecurity } from "../SecurityContext";
 import { PostureNotices, SecurityHeader, SeverityBadge, relativeTime, useGap, useLabel } from "../components";
 import s from "../security.module.css";
 
 /** 위협 탐지 — active Defender alerts and which plans leave detection off. */
 export default function SecurityThreatsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const label = useLabel();
   const { posture } = useSecurity();
   const alertsGap = useGap("alerts");
@@ -58,7 +58,7 @@ export default function SecurityThreatsPage() {
                         </div>
                       ))}
                     </td>
-                    <td title={a.detectedAt ? new Date(a.detectedAt).toLocaleString() : undefined} style={{ whiteSpace: "nowrap" }}>
+                    <td title={a.detectedAt ? new Date(a.detectedAt).toLocaleString(dateLocale(locale)) : undefined} style={{ whiteSpace: "nowrap" }}>
                       {a.detectedAt ? relativeTime(a.detectedAt, t) : "—"}
                     </td>
                   </tr>

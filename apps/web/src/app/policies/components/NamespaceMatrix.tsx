@@ -2,32 +2,34 @@
 
 import type { NamespacePolicySummary } from "@aud/types";
 import styles from "../styles.module.css";
+import { useI18n } from "@/lib/i18n";
 import { Badge, CoverageBar, Empty, PsaBadge, SeverityBadge } from "./shared";
 
 /** One row per namespace: every policy dimension at a glance. */
 export function NamespaceMatrix({ namespaces }: { namespaces: NamespacePolicySummary[] }) {
-  if (namespaces.length === 0) return <Empty>표시할 네임스페이스가 없습니다.</Empty>;
+  const { t } = useI18n();
+  if (namespaces.length === 0) return <Empty>{t("polc.ns.none")}</Empty>;
 
   return (
     <div className={styles.panel}>
       <div className={styles.panelHeader}>
-        <div className={styles.panelTitle}>네임스페이스별 정책 현황</div>
-        <div className={styles.panelHint}>격리 막대: 실행 중 파드(hostNetwork 제외) 중 NetworkPolicy에 선택된 비율</div>
+        <div className={styles.panelTitle}>{t("polc.ns.title")}</div>
+        <div className={styles.panelHint}>{t("polc.ns.hint")}</div>
       </div>
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>네임스페이스</th>
-              <th>파드 / 워크로드</th>
+              <th>{t("polc.namespace")}</th>
+              <th>{t("polc.ns.podsWorkloads")}</th>
               <th>PSA enforce</th>
-              <th>Ingress 격리</th>
-              <th>Egress 격리</th>
+              <th>{t("polc.ns.ingress")}</th>
+              <th>{t("polc.ns.egress")}</th>
               <th>NetPol</th>
               <th>RBAC (Role/RB)</th>
               <th>VPA / HPA / PDB</th>
               <th>Quota / LimitRange</th>
-              <th>점검 결과</th>
+              <th>{t("pol.panel.findings")}</th>
             </tr>
           </thead>
           <tbody>
@@ -35,7 +37,7 @@ export function NamespaceMatrix({ namespaces }: { namespaces: NamespacePolicySum
               <tr key={n.name}>
                 <td>
                   <div className={styles.mono}>{n.name}</div>
-                  {n.system && <Badge tone="system">시스템</Badge>}
+                  {n.system && <Badge tone="system">{t("polc.system")}</Badge>}
                 </td>
                 <td>
                   {n.podCount} / {n.workloadCount}
@@ -70,7 +72,7 @@ export function NamespaceMatrix({ namespaces }: { namespaces: NamespacePolicySum
                     {n.findings.high > 0 && <SeverityBadge severity="high" count={n.findings.high} />}
                     {n.findings.medium > 0 && <SeverityBadge severity="medium" count={n.findings.medium} />}
                     {n.findings.low > 0 && <SeverityBadge severity="low" count={n.findings.low} />}
-                    {n.findings.high + n.findings.medium + n.findings.low === 0 && <Badge tone="ok">양호</Badge>}
+                    {n.findings.high + n.findings.medium + n.findings.low === 0 && <Badge tone="ok">{t("polc.ns.good")}</Badge>}
                   </div>
                 </td>
               </tr>

@@ -6,6 +6,7 @@ import { Html, RoundedBox } from "@react-three/drei";
 import type { Mesh, MeshStandardMaterial } from "three";
 import type { HealthStatus, DiagramIconKind } from "@aud/types";
 import { getAzureIconUrl } from "../../utils/azureIcons";
+import { hex, rgba } from "@/lib/palette";
 
 type Node3DProps = {
   id: string;
@@ -19,12 +20,13 @@ type Node3DProps = {
 };
 
 const HEALTH_COLORS: Record<HealthStatus, string> = {
-  ok: "#10893e",
-  warning: "#d18400",
-  critical: "#d83b01",
+  ok: hex("ok"),
+  warning: hex("warning"),
+  critical: hex("danger"),
   unknown: "#8a8886",
 };
 
+// Darker shades for 3D lighting (emissive/shadow side) — scene colours, intentionally not UI tokens
 const HEALTH_EMISSIVE: Record<HealthStatus, string> = {
   ok: "#0a5c2a",
   warning: "#8a5700",
@@ -117,14 +119,14 @@ export function Node3D({
       >
         <div
           style={{
-            background: "rgba(255,255,255,0.92)",
+            background: rgba("paper", 0.92),
             padding: "2px 8px",
             borderRadius: "6px",
             fontSize: "11px",
             fontWeight: 800,
             whiteSpace: "nowrap",
             border: `1px solid ${baseColor}`,
-            color: "rgba(20,21,23,0.85)",
+            color: rgba("ink", 0.85),
           }}
         >
           <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} style={{ verticalAlign: "middle", marginRight: 4 }} />

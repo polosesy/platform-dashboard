@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { PodLogEntry, ObservabilityLogsResponse, ObservabilityNamespacesResponse, NamespacePodItem } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function LogsTab({ clusterId }: Props) {
+  const { t } = useI18n();
   const getApiToken = useApiToken();
 
   const [namespace, setNamespace] = useState("");
@@ -189,8 +191,8 @@ export function LogsTab({ clusterId }: Props) {
   if (nsPodItems.length === 0 && !loading) {
     return (
       <div className={styles.noDataBanner}>
-        <strong>로그 조회 불가</strong>
-        네임스페이스/파드 목록을 가져올 수 없습니다. 클러스터 연결 상태를 확인해 주세요.
+        <strong>{t("ob.logs.unavailable")}</strong>
+        {t("ob.logs.unavailableHint")}
       </div>
     );
   }
@@ -207,7 +209,7 @@ export function LogsTab({ clusterId }: Props) {
 
         <select value={podName} onChange={(e) => setPodName(e.target.value)}>
           {podOptions.length === 0 && (
-            <option value="">Pod 없음</option>
+            <option value="">{t("ob.logs.noPods")}</option>
           )}
           {podOptions.map((p) => (
             <option key={p} value={p}>{p}</option>
@@ -224,17 +226,12 @@ export function LogsTab({ clusterId }: Props) {
         )}
 
         <select value={sinceMinutes} onChange={(e) => setSinceMinutes(Number(e.target.value))}>
-          <option value={5}>최근 5분</option>
-          <option value={15}>최근 15분</option>
-          <option value={30}>최근 30분</option>
-          <option value={60}>최근 1시간</option>
-          <option value={360}>최근 6시간</option>
-          <option value={1440}>최근 24시간</option>
+          {[5, 15, 30, 60, 360, 1440].map((m) => <option key={m} value={m}>{m < 60 ? t("ob.logs.lastMin", { n: m }) : t("ob.logs.lastHour", { n: m / 60 })}</option>)}
         </select>
 
         {hasStreamInfo && (
           <select value={streamFilter} onChange={(e) => setStreamFilter(e.target.value as "all" | "stdout" | "stderr")}>
-            <option value="all">전체 스트림</option>
+            <option value="all">{t("ob.logs.allStreams")}</option>
             <option value="stdout">stdout</option>
             <option value="stderr">stderr</option>
           </select>
@@ -242,7 +239,7 @@ export function LogsTab({ clusterId }: Props) {
 
         <input
           type="text"
-          placeholder="로그 검색..."
+          placeholder={t("ob.logs.search")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ minWidth: 140 }}
@@ -252,25 +249,25 @@ export function LogsTab({ clusterId }: Props) {
           className={`${styles.logAutoScroll} ${autoScroll ? styles.logAutoScrollActive : ""}`}
           onClick={() => setAutoScroll(!autoScroll)}
         >
-          자동 스크롤 {autoScroll ? "ON" : "OFF"}
+          {t("ob.logs.autoScroll")} {autoScroll ? "ON" : "OFF"}
         </button>
 
         <span style={{ fontSize: 11, color: "rgba(20,21,23,0.4)", marginLeft: "auto" }}>
-          {filteredLogs.length}줄 {loading && "· 로딩 중..."}
+          {t("ob.logs.lines", { n: filteredLogs.length })} {loading && `· ${t("common.loading")}`}
         </span>
       </div>
 
-      {error && <div className={styles.errorMsg}>오류: {error}</div>}
+      {error && <div className={styles.errorMsg}>{t("ob.error")}: {error}</div>}
 
       {/* Log viewer */}
       <div className={styles.logContainer} ref={containerRef}>
         {filteredLogs.length === 0 && !loading && (
           <div style={{ padding: 32, textAlign: "center", color: "#6a6a6a" }}>
             {podOptions.length === 0
-              ? "선택한 네임스페이스에 실행 중인 파드가 없습니다."
+              ? t("ob.logs.noRunningPods")
               : namespace && podName
-                ? "선택한 파드에 대한 로그가 없습니다."
-                : "네임스페이스와 파드를 선택해 주세요."}
+                ? t("ob.logs.noLogs")
+                : t("ob.logs.pick")}
           </div>
         )}
         {filteredLogs.map((log, i) => (

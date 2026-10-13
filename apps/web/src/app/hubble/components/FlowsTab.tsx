@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { HubbleCoverage, HubbleFlowsResponse, HubbleFlow } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -26,6 +27,7 @@ function VerdictBadge({ verdict }: { verdict: string }) {
 }
 
 export function FlowsTab({ clusterId }: Props) {
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [flows, setFlows] = useState<HubbleFlow[]>([]);
@@ -43,7 +45,7 @@ export function FlowsTab({ clusterId }: Props) {
     setError(null);
     try {
       const token = await getApiToken();
-      const params = new URLSearchParams({ clusterId, limit: "2000" });
+      const params = new URLSearchParams({ clusterId, limit: "2000", lang: locale });
       if (nsFilter) params.set("namespace", nsFilter);
       if (verdictFilter) params.set("verdict", verdictFilter);
       const data = await fetchJsonWithBearer<HubbleFlowsResponse>(
@@ -57,7 +59,7 @@ export function FlowsTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, nsFilter, verdictFilter, getApiToken]);
+  }, [clusterId, nsFilter, verdictFilter, getApiToken, locale]);
 
   useEffect(() => {
     fetchFlows();
@@ -90,12 +92,12 @@ export function FlowsTab({ clusterId }: Props) {
       {/* Toolbar */}
       <div className={styles.toolbar}>
         <select value={nsFilter} onChange={(e) => setNsFilter(e.target.value)}>
-          <option value="">전체 네임스페이스</option>
+          <option value="">{t("hb.allNamespaces")}</option>
           {namespaces.map((ns) => <option key={ns} value={ns}>{ns}</option>)}
         </select>
 
         <select value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value)}>
-          <option value="">전체 Verdict</option>
+          <option value="">{t("hb.anyVerdict")}</option>
           <option value="FORWARDED">FORWARDED</option>
           <option value="DROPPED">DROPPED</option>
           <option value="AUDIT">AUDIT</option>
@@ -103,34 +105,34 @@ export function FlowsTab({ clusterId }: Props) {
 
         <input
           type="text"
-          placeholder="서비스 검색..."
+          placeholder={t("hb.searchServices")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ minWidth: 140 }}
         />
 
         <span className={styles.toolbarCount}>
-          {filtered.length}개 플로우 {loading && "· 로딩 중..."}
+          {t("hb.flowsN", { n: filtered.length })} {loading && `· ${t("common.loading")}`}
         </span>
       </div>
 
       <CoverageNote coverage={coverage} />
 
-      {error && <div className={styles.errorMsg}>Flows 오류: {error}</div>}
+      {error && <div className={styles.errorMsg}>{t("hb.flows.error")}: {error}</div>}
 
       {/* Flow Table */}
       <div className={styles.flowTableContainer}>
         <table className={styles.flowTable}>
           <thead>
             <tr>
-              <th>시간</th>
-              <th>Source</th>
-              <th>Destination</th>
-              <th>Verdict</th>
-              <th>Protocol</th>
-              <th>Port</th>
+              <th>{t("hb.col.time")}</th>
+              <th>{t("hb.col.source")}</th>
+              <th>{t("hb.col.destination")}</th>
+              <th>{t("hb.col.verdict")}</th>
+              <th>{t("hb.col.protocol")}</th>
+              <th>{t("hb.col.port")}</th>
               <th>L7</th>
-              <th>Summary</th>
+              <th>{t("hb.fd.summary")}</th>
             </tr>
           </thead>
           <tbody>
@@ -178,8 +180,8 @@ export function FlowsTab({ clusterId }: Props) {
 
         {filtered.length === 0 && !loading && (
           <div className={styles.noDataBanner}>
-            <strong>플로우 데이터 없음</strong>
-            Hubble에서 수집된 플로우가 없습니다.
+            <strong>{t("hb.noFlows")}</strong>
+            {t("hb.flows.noneHint")}
           </div>
         )}
       </div>

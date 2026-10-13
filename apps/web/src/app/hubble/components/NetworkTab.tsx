@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { HubbleNetworkSummary } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -10,6 +11,7 @@ import { CoverageNote } from "./CoverageNote";
 type Props = { clusterId: string };
 
 export function NetworkTab({ clusterId }: Props) {
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [data, setData] = useState<HubbleNetworkSummary | null>(null);
@@ -23,7 +25,7 @@ export function NetworkTab({ clusterId }: Props) {
     try {
       const token = await getApiToken();
       const resp = await fetchJsonWithBearer<HubbleNetworkSummary>(
-        `${apiBaseUrl()}/api/hubble/network-summary?clusterId=${encodeURIComponent(clusterId)}&timeWindow=5`,
+        `${apiBaseUrl()}/api/hubble/network-summary?clusterId=${encodeURIComponent(clusterId)}&timeWindow=5&lang=${locale}`,
         token,
       );
       setData(resp);
@@ -32,7 +34,7 @@ export function NetworkTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, getApiToken]);
+  }, [clusterId, getApiToken, locale]);
 
   useEffect(() => {
     fetch_();
@@ -44,12 +46,12 @@ export function NetworkTab({ clusterId }: Props) {
     return (
       <div className={styles.loadingRow}>
         <span className={styles.spinner} />
-        <span>네트워크 데이터 로딩 중...</span>
+        <span>{t("hb.net.loading")}</span>
       </div>
     );
   }
 
-  if (error) return <div className={styles.errorMsg}>Network 오류: {error}</div>;
+  if (error) return <div className={styles.errorMsg}>{t("hb.net.error")}: {error}</div>;
   if (!data) return null;
 
   const dropPct = data.totalFlows > 0 ? ((data.droppedFlows / data.totalFlows) * 100).toFixed(1) : "0";
@@ -61,36 +63,36 @@ export function NetworkTab({ clusterId }: Props) {
       {/* Summary Cards */}
       <div className={styles.summaryCards}>
         <div className={styles.summaryCard}>
-          <div className={styles.summaryCardLabel}>전체 플로우</div>
+          <div className={styles.summaryCardLabel}>{t("hb.totalFlows")}</div>
           <div className={styles.summaryCardValue}>{data.totalFlows.toLocaleString()}</div>
         </div>
         <div className={styles.summaryCard}>
-          <div className={styles.summaryCardLabel}>Forwarded</div>
+          <div className={styles.summaryCardLabel}>{t("hb.verdict.FORWARDED")}</div>
           <div className={styles.summaryCardValue} style={{ color: "rgba(16,137,62,0.85)" }}>
             {data.forwardedFlows.toLocaleString()}
           </div>
         </div>
         <div className={styles.summaryCard}>
-          <div className={styles.summaryCardLabel}>Dropped</div>
+          <div className={styles.summaryCardLabel}>{t("hb.verdict.DROPPED")}</div>
           <div className={styles.summaryCardValue} style={{ color: data.droppedFlows > 0 ? "rgba(196,43,28,0.85)" : undefined }}>
             {data.droppedFlows.toLocaleString()}
           </div>
           <div className={styles.summaryCardSub}>{dropPct}%</div>
         </div>
         <div className={styles.summaryCard}>
-          <div className={styles.summaryCardLabel}>DNS 에러</div>
+          <div className={styles.summaryCardLabel}>{t("hb.dnsErrors")}</div>
           <div className={styles.summaryCardValue}>{data.dnsErrors.length}</div>
         </div>
       </div>
 
       {/* Protocol Breakdown */}
-      <h3 className={styles.sectionTitle}>프로토콜 분포</h3>
+      <h3 className={styles.sectionTitle}>{t("hb.net.protocols")}</h3>
       <table className={styles.dataTable}>
         <thead>
           <tr>
-            <th>프로토콜</th>
-            <th>플로우 수</th>
-            <th>비율</th>
+            <th>{t("hb.col.protocol")}</th>
+            <th>{t("hb.net.flowCount")}</th>
+            <th>{t("hb.net.share")}</th>
           </tr>
         </thead>
         <tbody>
@@ -105,22 +107,22 @@ export function NetworkTab({ clusterId }: Props) {
       </table>
 
       {/* Namespace Traffic */}
-      <h3 className={styles.sectionTitle}>네임스페이스별 트래픽</h3>
+      <h3 className={styles.sectionTitle}>{t("hb.net.byNamespace")}</h3>
       <div className={styles.nsTrafficGrid}>
         {data.namespaceTraffic.slice(0, 12).map((ns) => (
           <div key={ns.namespace} className={styles.nsTrafficCard}>
             <div className={styles.nsTrafficName}>{ns.namespace}</div>
             <div className={styles.nsTrafficRow}>
-              <span>Inbound</span>
+              <span>{t("hb.net.in")}</span>
               <span style={{ fontWeight: 600 }}>{ns.inbound.toLocaleString()}</span>
             </div>
             <div className={styles.nsTrafficRow}>
-              <span>Outbound</span>
+              <span>{t("hb.net.out")}</span>
               <span style={{ fontWeight: 600 }}>{ns.outbound.toLocaleString()}</span>
             </div>
             {ns.dropped > 0 && (
               <div className={styles.nsTrafficRow}>
-                <span style={{ color: "rgba(196,43,28,0.75)" }}>Dropped</span>
+                <span style={{ color: "rgba(196,43,28,0.75)" }}>{t("hb.verdict.DROPPED")}</span>
                 <span style={{ fontWeight: 600, color: "rgba(196,43,28,0.85)" }}>{ns.dropped}</span>
               </div>
             )}
@@ -131,14 +133,14 @@ export function NetworkTab({ clusterId }: Props) {
       {/* Top Dropped */}
       {data.topDropped.length > 0 && (
         <>
-          <h3 className={styles.sectionTitle}>Top Dropped 플로우</h3>
+          <h3 className={styles.sectionTitle}>{t("hb.net.topDropped")}</h3>
           <table className={styles.dataTable}>
             <thead>
               <tr>
-                <th>Source</th>
-                <th>Destination</th>
-                <th>Count</th>
-                <th>Drop Reason</th>
+                <th>{t("hb.col.source")}</th>
+                <th>{t("hb.col.destination")}</th>
+                <th>{t("hb.col.count")}</th>
+                <th>{t("hb.fd.dropReason")}</th>
               </tr>
             </thead>
             <tbody>
@@ -158,13 +160,13 @@ export function NetworkTab({ clusterId }: Props) {
       {/* DNS Errors */}
       {data.dnsErrors.length > 0 && (
         <>
-          <h3 className={styles.sectionTitle}>DNS 에러</h3>
+          <h3 className={styles.sectionTitle}>{t("hb.dnsErrors")}</h3>
           <table className={styles.dataTable}>
             <thead>
               <tr>
-                <th>Query</th>
+                <th>{t("hb.net.query")}</th>
                 <th>RCODE</th>
-                <th>Count</th>
+                <th>{t("hb.col.count")}</th>
               </tr>
             </thead>
             <tbody>

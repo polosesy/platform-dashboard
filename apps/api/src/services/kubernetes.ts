@@ -495,7 +495,7 @@ export async function readPodLogs(
 
     // 404 = Pod가 삭제됨/교체됨 → 빈 로그 반환 (CI fallback 불필요)
     if (statusCode === 404 || errBody.includes('"code":404')) {
-      console.warn(`[k8s] readPodLogs 404: ${namespace}/${podName} — Pod가 존재하지 않음 (삭제/교체)`);
+      console.warn(`[k8s] readPodLogs 404: ${namespace}/${podName} — pod no longer exists (deleted / replaced)`);
       return "";
     }
 

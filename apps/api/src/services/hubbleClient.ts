@@ -5,6 +5,10 @@ import type { HubbleFlow, HubbleEndpoint, HubbleFlowSet } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { HttpError } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
+import type { Lang } from "../infra/lang.js";
+
+// Async code: pick the text directly (L() is only valid inside withLang)
+const pick = (lang: Lang, ko: string, en: string) => (lang === "en" ? en : ko);
 import { loadKubeConfig } from "./kubernetes.js";
 import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCoverage, type AgentBatch } from "./hubbleMerge.js";
 
@@ -77,6 +81,7 @@ async function discoverAgents(
   kc: k8s.KubeConfig,
   bearerToken: string | undefined,
   azureResourceId: string,
+  lang: Lang = "ko",
 ): Promise<AgentDiscovery> {
   const cacheKey = `${cachePrefix(bearerToken)}:hubble-agents:${azureResourceId}`;
   const cached = agentDiscoveryCache.get(cacheKey);
@@ -113,9 +118,10 @@ async function discoverAgents(
   }
 
   throw new Error(
-    `cilium-agent pod를 찾을 수 없습니다. ` +
-    `검색 namespace: [${namespaces.join(", ")}], labels: [${AGENT_LABEL_SELECTORS.join(", ")}]. ` +
-    `Cilium이 설치되어 있고 Hubble이 활성화되어 있는지 확인하세요.`,
+    pick(lang,
+      `cilium-agent pod를 찾을 수 없습니다. 검색 namespace: [${namespaces.join(", ")}], labels: [${AGENT_LABEL_SELECTORS.join(", ")}]. Cilium이 설치되어 있고 Hubble이 활성화되어 있는지 확인하세요.`,
+      `No cilium-agent pod found. Namespaces searched: [${namespaces.join(", ")}], labels: [${AGENT_LABEL_SELECTORS.join(", ")}]. Check that Cilium is installed and Hubble is enabled.`,
+    ),
   );
 }
 
@@ -274,6 +280,8 @@ export async function getHubbleFlows(
     last?: number;
     verdict?: string;
     type?: string;
+    /** Language of error messages */
+    lang?: Lang;
   },
 ): Promise<HubbleFlowSet> {
   if (!env.HUBBLE_ENABLED) return { flows: [], coverage: emptyCoverage() };
@@ -292,7 +300,7 @@ export async function getHubbleFlows(
   if (cached) return cached;
 
   const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
-  const discovery = await discoverAgents(env, kc, bearerToken, azureResourceId);
+  const discovery = await discoverAgents(env, kc, bearerToken, azureResourceId, opts?.lang);
   const result = await tryGetFlows(kc, env, discovery, azureResourceId, prefix, limit, filters);
 
   if (result.set) {
@@ -368,7 +376,7 @@ async function tryGetFlows(
     errors.push(`api-proxy: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  return { error: `모든 Hubble 연결 전략이 실패했습니다. 시도된 전략:\n${errors.join("\n")}` };
+  return { error: `All Hubble connection strategies failed. Tried:\n${errors.join("\n")}` };
 }
 
 /** `hubble observe` on one agent's local socket. Never throws — failures are reported in the batch. */
@@ -496,18 +504,19 @@ export async function getHubbleStatus(
   env: Env,
   bearerToken: string | undefined,
   azureResourceId: string,
+  lang: Lang = "ko",
 ): Promise<HubbleStatusInfo> {
   const off = { version: "", numFlows: 0, maxFlows: 0, uptimeNs: 0, nodeCount: 0, nodesTotal: 0 };
   if (!env.HUBBLE_ENABLED) return { available: false, ...off, message: "HUBBLE_ENABLED=false" };
 
   const prefix = cachePrefix(bearerToken);
-  const cacheKey = `${prefix}:hubble-status:${azureResourceId}`;
+  const cacheKey = `${prefix}:hubble-status:${azureResourceId}:${lang}`;
   const cached = statusCache.get(cacheKey);
   if (cached) return cached;
 
   try {
     const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
-    const { agents, total } = await discoverAgents(env, kc, bearerToken, azureResourceId);
+    const { agents, total } = await discoverAgents(env, kc, bearerToken, azureResourceId, lang);
     const statuses = (await mapWithConcurrency(agents, AGENT_EXEC_CONCURRENCY, (a) => getBufferStatus(kc, a)))
       .filter((s): s is BufferStatus => s !== null);
 
@@ -516,7 +525,7 @@ export async function getHubbleStatus(
         available: false,
         ...off,
         nodesTotal: total,
-        message: `cilium agent ${agents.length}개 발견, hubble status 조회 실패 (hubble 바이너리/소켓 확인 필요)`,
+        message: pick(lang, `cilium agent ${agents.length}개 발견, hubble status 조회 실패 (hubble 바이너리/소켓 확인 필요)`, `${agents.length} cilium agents found, but hubble status failed (check the hubble binary / socket)`),
       };
     }
 
@@ -528,7 +537,7 @@ export async function getHubbleStatus(
       uptimeNs: Math.min(...statuses.map((s) => s.uptimeNs)),
       nodeCount: statuses.length,
       nodesTotal: total,
-      message: statuses.length < total ? `${total - statuses.length}개 노드 응답 없음` : "connected",
+      message: statuses.length < total ? pick(lang, `${total - statuses.length}개 노드 응답 없음`, `${total - statuses.length} nodes did not respond`) : "connected",
     };
     statusCache.set(cacheKey, info, env.HUBBLE_CACHE_TTL_MS);
     return info;

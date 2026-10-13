@@ -858,7 +858,7 @@ export async function fetchAksPlaneDetail(
       if (ingressResources.length > 0) {
         exposurePaths.push({
           direction: "ingress",
-          label: `인터넷 → ${ingressResources.map((r) => r.name).join(" → ")} → AKS`,
+          label: `Internet → ${ingressResources.map((r) => r.name).join(" → ")} → AKS`,
           resources: ingressResources,
         });
       }
@@ -867,19 +867,19 @@ export async function fetchAksPlaneDetail(
       if (outboundType === "userDefinedRouting" && egressResources.length > 0) {
         exposurePaths.push({
           direction: "egress",
-          label: `AKS → ${egressResources.map((r) => r.name).join(" → ")} → 인터넷`,
+          label: `AKS → ${egressResources.map((r) => r.name).join(" → ")} → Internet`,
           resources: egressResources,
         });
       } else if (outboundType === "loadBalancer") {
         exposurePaths.push({
           direction: "egress",
-          label: "AKS → Load Balancer (SNAT) → 인터넷",
+          label: "AKS → Load Balancer (SNAT) → Internet",
           resources: [{ role: "lb", name: "AKS Standard LB", sku: lbSku }],
         });
       } else if (outboundType === "managedNATGateway") {
         exposurePaths.push({
           direction: "egress",
-          label: "AKS → NAT Gateway → 인터넷",
+          label: "AKS → NAT Gateway → Internet",
           resources: [{ role: "nat-gateway", name: "Managed NAT Gateway" }],
         });
       }
@@ -889,7 +889,7 @@ export async function fetchAksPlaneDetail(
     if (exposurePaths.length === 0) {
       exposurePaths.push({
         direction: "egress",
-        label: `AKS → ${outboundType === "userDefinedRouting" ? "UDR (Firewall)" : outboundType} → 인터넷`,
+        label: `AKS → ${outboundType === "userDefinedRouting" ? "UDR (Firewall)" : outboundType} → Internet`,
         resources: [{
           role: outboundType === "managedNATGateway" ? "nat-gateway" : "lb",
           name: outboundType === "userDefinedRouting" ? "Firewall (UDR)" : `AKS ${lbSku} LB`,
@@ -987,14 +987,14 @@ function mockAksPlaneDetail(resourceId: string): AksPlaneDetail {
     exposurePaths: [
       {
         direction: "ingress",
-        label: "인터넷 → Application Gateway → AKS",
+        label: "Internet → Application Gateway → AKS",
         resources: [
           { role: "app-gateway", name: "appgw-aks-prod", endpoint: "20.200.100.50", sku: "WAF_v2" },
         ],
       },
       {
         direction: "egress",
-        label: "AKS → Load Balancer (SNAT) → 인터넷",
+        label: "AKS → Load Balancer (SNAT) → Internet",
         resources: [
           { role: "lb", name: "kubernetes", sku: "standard" },
         ],

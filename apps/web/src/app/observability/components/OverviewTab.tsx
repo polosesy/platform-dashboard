@@ -1,6 +1,7 @@
 "use client";
 
 import type { ObservabilityOverview } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { WorkloadRow } from "./WorkloadsTab";
 
@@ -11,14 +12,15 @@ export function OverviewTab({
   data: ObservabilityOverview;
   onWorkloadSelect: (name: string, ns: string) => void;
 }) {
+  const { t } = useI18n();
   const { nodeSummary, podSummary, topAlertingWorkloads } = data;
 
   const summaryCards = [
-    { label: "전체 노드", value: nodeSummary.total, sub: `Ready ${nodeSummary.ready} / NotReady ${nodeSummary.notReady}` },
-    { label: "전체 파드", value: podSummary.total, sub: undefined },
-    { label: "Running", value: podSummary.running, sub: `${podSummary.total > 0 ? Math.round((podSummary.running / podSummary.total) * 100) : 0}%` },
-    { label: "Pending", value: podSummary.pending, sub: undefined },
-    { label: "Failed", value: podSummary.failed, sub: undefined },
+    { label: t("ob.allNodes"), value: nodeSummary.total, sub: `Ready ${nodeSummary.ready} / NotReady ${nodeSummary.notReady}` },
+    { label: t("ob.allPods"), value: podSummary.total, sub: undefined },
+    { label: t("ob.running"), value: podSummary.running, sub: `${podSummary.total > 0 ? Math.round((podSummary.running / podSummary.total) * 100) : 0}%` },
+    { label: t("ob.pending"), value: podSummary.pending, sub: undefined },
+    { label: t("ob.failed"), value: podSummary.failed, sub: undefined },
   ];
 
   return (
@@ -47,17 +49,17 @@ export function OverviewTab({
       {/* Top Alerting Workloads */}
       {topAlertingWorkloads.length > 0 && (
         <div>
-          <p className={styles.sectionTitle}>주의 워크로드 Top {topAlertingWorkloads.length}</p>
+          <p className={styles.sectionTitle}>{t("ob.topAlerting", { n: topAlertingWorkloads.length })}</p>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>워크로드</th>
-                <th>네임스페이스</th>
-                <th>파드 상태</th>
+                <th>{t("ins.col.1")}</th>
+                <th>{t("hb.namespace")}</th>
+                <th>{t("ob.podStatus")}</th>
                 <th>CPU</th>
-                <th>메모리</th>
-                <th>에러율</th>
-                <th>p95 레이턴시</th>
+                <th>{t("ob.memory")}</th>
+                <th>{t("ob.errorRate")}</th>
+                <th>{t("ob.latency", { p: "p95" })}</th>
               </tr>
             </thead>
             <tbody>
@@ -76,8 +78,8 @@ export function OverviewTab({
 
       {topAlertingWorkloads.length === 0 && (
         <div className={styles.noDataBanner}>
-          <strong>주의 워크로드 없음</strong>
-          모든 워크로드가 정상 상태이거나 데이터를 수집 중입니다.
+          <strong>{t("ob.noAlerting")}</strong>
+          {t("ob.noAlertingHint")}
         </div>
       )}
     </div>

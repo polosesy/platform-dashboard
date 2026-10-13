@@ -4,6 +4,7 @@ import { useEffect, useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EdgeStatus, EdgeTrafficLevel } from "@aud/types";
+import { hex } from "@/lib/palette";
 
 type Edge3DProps = {
   sourcePos: [number, number, number];
@@ -14,9 +15,9 @@ type Edge3DProps = {
 };
 
 const STATUS_COLORS: Record<EdgeStatus, string> = {
-  normal: "#0078d4",
-  degraded: "#d18400",
-  down: "#d83b01",
+  normal: hex("accent"),
+  degraded: hex("warning"),
+  down: hex("danger"),
   idle: "#8a8886",
 };
 
@@ -145,7 +146,7 @@ export function Edge3D({
         <points ref={pointsRef} geometry={particleGeo}>
           <pointsMaterial
             size={status === "down" ? 0.12 : 0.08}
-            color={status === "down" ? "#d83b01" : color}
+            color={status === "down" ? hex("danger") : color}
             transparent
             opacity={0.85}
             sizeAttenuation

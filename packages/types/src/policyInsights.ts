@@ -131,8 +131,9 @@ export type ClusterContainment = {
     azureRbac: boolean | null;
     outboundType: string | null;
   };
-  /** Azure resources the cluster talks to (network node ids) */
-  resources: Array<{ id: string; name: string; type: string; resourceGroup: string }>;
+  /** Azure resources the cluster talks to (network node ids). `type` is a display label; `armType` the full ARM type
+   *  ("microsoft.keyvault/vaults"), or only its last segment when unknown. `resourceGroup` is "" when the type + name pair is not unique. */
+  resources: Array<{ id: string; name: string; type: string; armType: string; resourceGroup: string }>;
 };
 
 // ── KBOM ──

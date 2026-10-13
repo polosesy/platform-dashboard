@@ -18,6 +18,7 @@ import type {
   VpaUpdateMode,
   WorkloadPolicyCoverage,
 } from "@aud/types";
+import { L } from "../infra/lang.js";
 
 // ──────────────────────────────────────────────────────────────
 // Cluster policy analyzer (pure — no I/O)
@@ -272,7 +273,7 @@ export function selectorMatches(sel: LabelSelector | undefined, labels: Record<s
 }
 
 export function formatSelector(sel: LabelSelector | undefined): string {
-  if (selectorIsEmpty(sel)) return "{} (모든 파드)";
+  if (selectorIsEmpty(sel)) return L("{} (모든 파드)", "{} (all pods)");
   const parts = Object.entries(sel!.matchLabels ?? {}).map(([k, v]) => `${k}=${v}`);
   for (const e of sel!.matchExpressions ?? []) {
     parts.push(e.values?.length ? `${e.key} ${e.operator} (${e.values.join(",")})` : `${e.key} ${e.operator}`);
@@ -327,30 +328,30 @@ export function analyzeRbacRules(rules: InvRbacRule[]): RbacRisk[] {
     const allVerbs = rule.verbs.includes("*");
     const allResources = rule.resources.includes("*");
     if (allVerbs && allResources && (rule.apiGroups ?? []).includes("*")) {
-      add({ code: "wildcard-all", label: "모든 API 그룹·리소스에 모든 권한 (*/*/*)", severity: "high" });
+      add({ code: "wildcard-all", label: L("모든 API 그룹·리소스에 모든 권한 (*/*/*)", "All permissions on every API group and resource (*/*/*)"), severity: "high" });
     } else if (allVerbs && allResources) {
-      add({ code: "wildcard-all", label: "API 그룹 내 모든 리소스에 모든 권한 (*/*)", severity: "high" });
+      add({ code: "wildcard-all", label: L("API 그룹 내 모든 리소스에 모든 권한 (*/*)", "All permissions on every resource in an API group (*/*)"), severity: "high" });
     } else if (allVerbs) {
       add({ code: "wildcard-verbs", label: `verbs: * (${rule.resources.join(", ")})`, severity: "medium" });
     } else if (allResources) {
       add({ code: "wildcard-resources", label: `resources: * (${rule.verbs.join(", ")})`, severity: "medium" });
     }
 
-    if (grants(rule, ["roles", "clusterroles"], ["escalate"])) add({ code: "escalate", label: "escalate (권한 상승)", severity: "high" });
-    if (grants(rule, ["roles", "clusterroles"], ["bind"])) add({ code: "bind", label: "bind (임의 역할 바인딩)", severity: "high" });
+    if (grants(rule, ["roles", "clusterroles"], ["escalate"])) add({ code: "escalate", label: L("escalate (권한 상승)", "escalate (privilege escalation)"), severity: "high" });
+    if (grants(rule, ["roles", "clusterroles"], ["bind"])) add({ code: "bind", label: L("bind (임의 역할 바인딩)", "bind (bind any role)"), severity: "high" });
     if (grants(rule, ["users", "groups", "serviceaccounts", "uids", "userextras/scopes"], ["impersonate"])) {
-      add({ code: "impersonate", label: "impersonate (다른 사용자 가장)", severity: "high" });
+      add({ code: "impersonate", label: L("impersonate (다른 사용자 가장)", "impersonate (act as another user)"), severity: "high" });
     }
     if (grants(rule, ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"], ["create", "update", "patch", "delete"])) {
-      add({ code: "webhook", label: "Admission webhook 구성 변경", severity: "high" });
+      add({ code: "webhook", label: L("Admission webhook 구성 변경", "Admission webhook configuration changes"), severity: "high" });
     }
-    if (grants(rule, ["nodes/proxy"], ["get", "create"])) add({ code: "nodes-proxy", label: "nodes/proxy (kubelet API 직접 접근)", severity: "high" });
-    if (grants(rule, ["secrets"], ["get", "list", "watch"])) add({ code: "secrets-read", label: "Secret 조회 (get/list/watch)", severity: "medium" });
-    if (grants(rule, ["pods/exec", "pods/attach"], ["create", "get"])) add({ code: "pod-exec", label: "pods/exec·attach (컨테이너 셸 접근)", severity: "medium" });
-    if (grants(rule, ["serviceaccounts/token"], ["create"])) add({ code: "sa-token", label: "serviceaccounts/token 발급", severity: "medium" });
-    if (grants(rule, ["certificatesigningrequests/approval"], ["update", "patch"])) add({ code: "csr-approve", label: "CSR 승인 (클라이언트 인증서 발급)", severity: "medium" });
-    if (grants(rule, ["persistentvolumes"], ["create"])) add({ code: "pv-create", label: "PersistentVolume 생성 (hostPath 노출 가능)", severity: "medium" });
-    if (grants(rule, ["namespaces"], ["patch", "update"])) add({ code: "ns-modify", label: "Namespace 수정 (PSA 라벨 변경 가능)", severity: "medium" });
+    if (grants(rule, ["nodes/proxy"], ["get", "create"])) add({ code: "nodes-proxy", label: L("nodes/proxy (kubelet API 직접 접근)", "nodes/proxy (direct kubelet API access)"), severity: "high" });
+    if (grants(rule, ["secrets"], ["get", "list", "watch"])) add({ code: "secrets-read", label: L("Secret 조회 (get/list/watch)", "Secret read (get/list/watch)"), severity: "medium" });
+    if (grants(rule, ["pods/exec", "pods/attach"], ["create", "get"])) add({ code: "pod-exec", label: L("pods/exec·attach (컨테이너 셸 접근)", "pods/exec·attach (container shell access)"), severity: "medium" });
+    if (grants(rule, ["serviceaccounts/token"], ["create"])) add({ code: "sa-token", label: L("serviceaccounts/token 발급", "serviceaccounts/token creation"), severity: "medium" });
+    if (grants(rule, ["certificatesigningrequests/approval"], ["update", "patch"])) add({ code: "csr-approve", label: L("CSR 승인 (클라이언트 인증서 발급)", "CSR approval (issues client certificates)"), severity: "medium" });
+    if (grants(rule, ["persistentvolumes"], ["create"])) add({ code: "pv-create", label: L("PersistentVolume 생성 (hostPath 노출 가능)", "PersistentVolume creation (can expose hostPath)"), severity: "medium" });
+    if (grants(rule, ["namespaces"], ["patch", "update"])) add({ code: "ns-modify", label: L("Namespace 수정 (PSA 라벨 변경 가능)", "Namespace changes (can change PSA labels)"), severity: "medium" });
   }
   return [...risks.values()];
 }
@@ -468,27 +469,27 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (np.allowsAllIngress) {
       findings.add({
         ruleId: "NET-004", category: "networkPolicy", severity: "medium", system, namespace: np.namespace || undefined, resource,
-        title: "모든 소스의 수신을 허용하는 규칙",
-        detail: `${resource.kind} '${np.name}'에 빈 ingress 규칙({}) 또는 fromEntities: all이 있어 선택된 파드(${np.selectedPods}개)의 수신 격리가 무효화됩니다.`,
-        recommendation: "허용할 출처를 podSelector / namespaceSelector / ipBlock으로 명시하세요.",
+        title: L("모든 소스의 수신을 허용하는 규칙", "Rule allows ingress from any source"),
+        detail: L(`${resource.kind} '${np.name}'에 빈 ingress 규칙({}) 또는 fromEntities: all이 있어 선택된 파드(${np.selectedPods}개)의 수신 격리가 무효화됩니다.`, `${resource.kind} '${np.name}' has an empty ingress rule ({}) or fromEntities: all, which voids ingress isolation for the ${np.selectedPods} selected pods.`),
+        recommendation: L("허용할 출처를 podSelector / namespaceSelector / ipBlock으로 명시하세요.", "Name the allowed sources with podSelector / namespaceSelector / ipBlock."),
         reference: REF.netpol,
       });
     }
     if (np.allowsAllEgress) {
       findings.add({
         ruleId: "NET-004", category: "networkPolicy", severity: "low", system, namespace: np.namespace || undefined, resource,
-        title: "모든 목적지로의 송신을 허용하는 규칙",
-        detail: `${resource.kind} '${np.name}'에 빈 egress 규칙({}) 또는 toEntities: all이 있습니다.`,
-        recommendation: "필요한 목적지(DNS, 의존 서비스, 외부 엔드포인트)만 허용하세요.",
+        title: L("모든 목적지로의 송신을 허용하는 규칙", "Rule allows egress to any destination"),
+        detail: L(`${resource.kind} '${np.name}'에 빈 egress 규칙({}) 또는 toEntities: all이 있습니다.`, `${resource.kind} '${np.name}' has an empty egress rule ({}) or toEntities: all.`),
+        recommendation: L("필요한 목적지(DNS, 의존 서비스, 외부 엔드포인트)만 허용하세요.", "Allow only the destinations you need (DNS, dependent services, external endpoints)."),
         reference: REF.netpol,
       });
     }
     if (np.selectedPods === 0 && np.source !== "cilium-clusterwide") {
       findings.add({
         ruleId: "NET-005", category: "networkPolicy", severity: "info", system, namespace: np.namespace || undefined, resource,
-        title: "파드를 선택하지 않는 정책",
-        detail: `셀렉터 '${np.podSelector}'와 일치하는 실행 중 파드가 없어 현재 효과가 없습니다.`,
-        recommendation: "라벨 오타 또는 삭제된 워크로드용 정책인지 확인하세요.",
+        title: L("파드를 선택하지 않는 정책", "Policy selects no pods"),
+        detail: L(`셀렉터 '${np.podSelector}'와 일치하는 실행 중 파드가 없어 현재 효과가 없습니다.`, `No running pod matches selector '${np.podSelector}', so the policy has no effect today.`),
+        recommendation: L("라벨 오타 또는 삭제된 워크로드용 정책인지 확인하세요.", "Check for a label typo or a policy for a deleted workload."),
         reference: REF.netpol,
       });
     }
@@ -545,9 +546,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
   if (!inv.capabilities.vpaInstalled) {
     findings.add({
       ruleId: "VPA-001", category: "autoscaling", severity: "info", system: false,
-      title: "Vertical Pod Autoscaler 미설치",
-      detail: "autoscaling.k8s.io/v1 VerticalPodAutoscaler CRD가 없어 리소스 요청값 추천을 받을 수 없습니다.",
-      recommendation: "AKS Standard: `az aks update --enable-vpa`로 VPA를 활성화한 뒤 updateMode \"Off\"(추천 전용)로 시작하세요.",
+      title: L("Vertical Pod Autoscaler 미설치", "Vertical Pod Autoscaler not installed"),
+      detail: L("autoscaling.k8s.io/v1 VerticalPodAutoscaler CRD가 없어 리소스 요청값 추천을 받을 수 없습니다.", "The autoscaling.k8s.io/v1 VerticalPodAutoscaler CRD is missing, so no request recommendations are available."),
+      recommendation: L("AKS Standard: `az aks update --enable-vpa`로 VPA를 활성화한 뒤 updateMode \"Off\"(추천 전용)로 시작하세요.", "AKS Standard: enable VPA with `az aks update --enable-vpa`, then start with updateMode \"Off\" (recommendations only)."),
       reference: REF.aksVpa,
     });
   }
@@ -558,18 +559,18 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (!v.targetFound) {
       findings.add({
         ruleId: "VPA-004", category: "autoscaling", severity: "medium", system, namespace: v.namespace, resource,
-        title: "대상 워크로드가 없는 VPA",
-        detail: `targetRef ${v.target.kind}/${v.target.name}을(를) 찾을 수 없습니다.`,
-        recommendation: "targetRef를 수정하거나 사용하지 않는 VPA를 삭제하세요.",
+        title: L("대상 워크로드가 없는 VPA", "VPA with no target workload"),
+        detail: L(`targetRef ${v.target.kind}/${v.target.name}을(를) 찾을 수 없습니다.`, `targetRef ${v.target.kind}/${v.target.name} not found.`),
+        recommendation: L("targetRef를 수정하거나 사용하지 않는 VPA를 삭제하세요.", "Fix targetRef or delete the unused VPA."),
         reference: REF.vpa,
       });
     }
     if (v.updateMode === "Auto") {
       findings.add({
         ruleId: "VPA-003", category: "autoscaling", severity: "low", system, namespace: v.namespace, resource,
-        title: "deprecated된 updateMode \"Auto\"",
-        detail: "Auto는 VPA 1.4.0부터 deprecated이며 Recreate의 별칭입니다 (updateMode 미지정 시 기본값).",
-        recommendation: "updateMode를 \"Recreate\" 또는 \"InPlaceOrRecreate\"(AKS 1.34+)로 명시하세요.",
+        title: L("deprecated된 updateMode \"Auto\"", "Deprecated updateMode \"Auto\""),
+        detail: L("Auto는 VPA 1.4.0부터 deprecated이며 Recreate의 별칭입니다 (updateMode 미지정 시 기본값).", "Auto is deprecated since VPA 1.4.0 and is an alias of Recreate (the default when updateMode is not set)."),
+        recommendation: L("updateMode를 \"Recreate\" 또는 \"InPlaceOrRecreate\"(AKS 1.34+)로 명시하세요.", "Set updateMode explicitly to \"Recreate\" or \"InPlaceOrRecreate\" (AKS 1.34+)."),
         reference: REF.aksVpa,
       });
     }
@@ -578,9 +579,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (hpa && v.updateMode !== "Off" && overlap.length > 0) {
       findings.add({
         ruleId: "VPA-002", category: "autoscaling", severity: v.updateMode === "Initial" ? "medium" : "high", system, namespace: v.namespace, resource,
-        title: "VPA와 HPA가 같은 리소스 지표로 충돌",
-        detail: `${v.target.kind}/${v.target.name}에 VPA(${v.updateMode})와 HPA '${hpa.name}'(${overlap.join(", ")})가 함께 적용되어 서로의 조정을 상쇄합니다.`,
-        recommendation: "VPA를 updateMode \"Off\"로 두거나, HPA를 사용자 정의/외부 지표로 전환하세요.",
+        title: L("VPA와 HPA가 같은 리소스 지표로 충돌", "VPA and HPA conflict on the same resource metric"),
+        detail: L(`${v.target.kind}/${v.target.name}에 VPA(${v.updateMode})와 HPA '${hpa.name}'(${overlap.join(", ")})가 함께 적용되어 서로의 조정을 상쇄합니다.`, `${v.target.kind}/${v.target.name} has VPA (${v.updateMode}) and HPA '${hpa.name}' (${overlap.join(", ")}) together, so they cancel each other's adjustments.`),
+        recommendation: L("VPA를 updateMode \"Off\"로 두거나, HPA를 사용자 정의/외부 지표로 전환하세요.", "Keep VPA at updateMode \"Off\", or move HPA to custom/external metrics."),
         reference: REF.aksVpa,
       });
     }
@@ -593,9 +594,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (!target) {
       findings.add({
         ruleId: "HPA-002", category: "autoscaling", severity: "medium", system, namespace: h.namespace, resource,
-        title: "대상 워크로드가 없는 HPA",
-        detail: `scaleTargetRef ${h.target.kind}/${h.target.name}을(를) 찾을 수 없습니다.`,
-        recommendation: "scaleTargetRef를 수정하거나 사용하지 않는 HPA를 삭제하세요.",
+        title: L("대상 워크로드가 없는 HPA", "HPA with no target workload"),
+        detail: L(`scaleTargetRef ${h.target.kind}/${h.target.name}을(를) 찾을 수 없습니다.`, `scaleTargetRef ${h.target.kind}/${h.target.name} not found.`),
+        recommendation: L("scaleTargetRef를 수정하거나 사용하지 않는 HPA를 삭제하세요.", "Fix scaleTargetRef or delete the unused HPA."),
         reference: REF.hpa,
       });
       continue;
@@ -604,9 +605,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (missing.length > 0) {
       findings.add({
         ruleId: "HPA-001", category: "autoscaling", severity: "medium", system, namespace: h.namespace, resource,
-        title: "HPA 지표에 필요한 requests 누락",
-        detail: `${h.target.kind}/${h.target.name}의 일부 컨테이너에 ${missing.join(", ")} requests가 없어 사용률 기반 스케일링이 계산되지 않습니다.`,
-        recommendation: "대상 컨테이너 모두에 해당 리소스 requests를 설정하세요.",
+        title: L("HPA 지표에 필요한 requests 누락", "Requests missing for HPA metrics"),
+        detail: L(`${h.target.kind}/${h.target.name}의 일부 컨테이너에 ${missing.join(", ")} requests가 없어 사용률 기반 스케일링이 계산되지 않습니다.`, `Some containers of ${h.target.kind}/${h.target.name} have no ${missing.join(", ")} requests, so utilization-based scaling cannot be computed.`),
+        recommendation: L("대상 컨테이너 모두에 해당 리소스 requests를 설정하세요.", "Set requests for that resource on every target container."),
         reference: REF.hpa,
       });
     }
@@ -619,9 +620,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (info.matchedWorkloads.length === 0) {
       findings.add({
         ruleId: "PDB-003", category: "autoscaling", severity: "info", system, namespace: p.namespace, resource,
-        title: "워크로드를 선택하지 않는 PDB",
-        detail: `셀렉터 '${formatSelector(p.selector)}'와 일치하는 워크로드가 없습니다.`,
-        recommendation: "셀렉터를 확인하거나 사용하지 않는 PDB를 삭제하세요.",
+        title: L("워크로드를 선택하지 않는 PDB", "PDB selects no workload"),
+        detail: L(`셀렉터 '${formatSelector(p.selector)}'와 일치하는 워크로드가 없습니다.`, `No workload matches selector '${formatSelector(p.selector)}'.`),
+        recommendation: L("셀렉터를 확인하거나 사용하지 않는 PDB를 삭제하세요.", "Check the selector or delete the unused PDB."),
         reference: REF.pdb,
       });
       continue;
@@ -632,9 +633,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (pdbBlocksEviction(p, replicas)) {
       findings.add({
         ruleId: "PDB-002", category: "autoscaling", severity: "medium", system, namespace: p.namespace, resource,
-        title: "자발적 중단을 허용하지 않는 PDB",
-        detail: `minAvailable=${p.minAvailable ?? "-"}, maxUnavailable=${p.maxUnavailable ?? "-"} (대상 replicas ${replicas}) — 노드 드레인/업그레이드가 멈춥니다.`,
-        recommendation: "최소 1개 파드의 중단을 허용하도록 maxUnavailable: 1 등으로 조정하세요.",
+        title: L("자발적 중단을 허용하지 않는 PDB", "PDB allows no voluntary disruption"),
+        detail: L(`minAvailable=${p.minAvailable ?? "-"}, maxUnavailable=${p.maxUnavailable ?? "-"} (대상 replicas ${replicas}) — 노드 드레인/업그레이드가 멈춥니다.`, `minAvailable=${p.minAvailable ?? "-"}, maxUnavailable=${p.maxUnavailable ?? "-"} (target replicas ${replicas}) — node drains and upgrades will block.`),
+        recommendation: L("최소 1개 파드의 중단을 허용하도록 maxUnavailable: 1 등으로 조정하세요.", "Allow at least one pod to be disrupted, e.g. maxUnavailable: 1."),
         reference: REF.pdb,
       });
     }
@@ -670,36 +671,36 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (w.containersWithoutRequests > 0) {
       findings.add({
         ...base, ruleId: "RES-001", category: "resources", severity: "medium",
-        title: "CPU/메모리 requests 누락",
-        detail: `${w.containers}개 컨테이너 중 ${w.containersWithoutRequests}개에 cpu 또는 memory requests가 없어 스케줄링과 QoS(BestEffort)가 불안정합니다.`,
-        recommendation: "모든 컨테이너에 cpu·memory requests를 설정하세요 (VPA \"Off\" 추천값 활용).",
+        title: L("CPU/메모리 requests 누락", "CPU/memory requests missing"),
+        detail: L(`${w.containers}개 컨테이너 중 ${w.containersWithoutRequests}개에 cpu 또는 memory requests가 없어 스케줄링과 QoS(BestEffort)가 불안정합니다.`, `${w.containersWithoutRequests} of ${w.containers} containers have no cpu or memory requests, making scheduling and QoS (BestEffort) unstable.`),
+        recommendation: L("모든 컨테이너에 cpu·memory requests를 설정하세요 (VPA \"Off\" 추천값 활용).", "Set cpu and memory requests on every container (use VPA \"Off\" recommendations)."),
         reference: REF.resources,
       });
     }
     if (w.containersWithoutMemoryLimit > 0) {
       findings.add({
         ...base, ruleId: "RES-002", category: "resources", severity: "low",
-        title: "메모리 limits 누락",
-        detail: `${w.containersWithoutMemoryLimit}개 컨테이너에 memory limit이 없어 노드 메모리 고갈 시 다른 파드에 영향을 줄 수 있습니다.`,
-        recommendation: "memory limits를 설정하거나 네임스페이스 LimitRange로 기본값을 지정하세요.",
+        title: L("메모리 limits 누락", "Memory limits missing"),
+        detail: L(`${w.containersWithoutMemoryLimit}개 컨테이너에 memory limit이 없어 노드 메모리 고갈 시 다른 파드에 영향을 줄 수 있습니다.`, `${w.containersWithoutMemoryLimit} containers have no memory limit and can affect other pods when node memory runs out.`),
+        recommendation: L("memory limits를 설정하거나 네임스페이스 LimitRange로 기본값을 지정하세요.", "Set memory limits, or defaults with a namespace LimitRange."),
         reference: REF.resources,
       });
     }
     if (w.serviceAccount === "default" && w.automountToken) {
       findings.add({
         ...base, ruleId: "SA-001", category: "rbac", severity: "low",
-        title: "default ServiceAccount 토큰 자동 마운트",
-        detail: "전용 ServiceAccount 없이 default SA 토큰이 파드에 마운트됩니다.",
-        recommendation: "API 접근이 필요 없으면 automountServiceAccountToken: false, 필요하면 전용 ServiceAccount를 사용하세요.",
+        title: L("default ServiceAccount 토큰 자동 마운트", "default ServiceAccount token auto-mounted"),
+        detail: L("전용 ServiceAccount 없이 default SA 토큰이 파드에 마운트됩니다.", "The default SA token is mounted into pods without a dedicated ServiceAccount."),
+        recommendation: L("API 접근이 필요 없으면 automountServiceAccountToken: false, 필요하면 전용 ServiceAccount를 사용하세요.", "Use automountServiceAccountToken: false when no API access is needed, otherwise a dedicated ServiceAccount."),
         reference: REF.saAutomount,
       });
     }
     if ((w.kind === "Deployment" || w.kind === "StatefulSet") && w.replicas > 1 && !w.pdb) {
       findings.add({
         ...base, ruleId: "PDB-001", category: "autoscaling", severity: "low",
-        title: "다중 레플리카 워크로드에 PDB 없음",
-        detail: `replicas ${w.replicas}개 워크로드가 노드 드레인 시 동시에 중단될 수 있습니다.`,
-        recommendation: "maxUnavailable: 1 등의 PodDisruptionBudget을 추가하세요.",
+        title: L("다중 레플리카 워크로드에 PDB 없음", "No PDB on a multi-replica workload"),
+        detail: L(`replicas ${w.replicas}개 워크로드가 노드 드레인 시 동시에 중단될 수 있습니다.`, `A workload with ${w.replicas} replicas can be stopped all at once during a node drain.`),
+        recommendation: L("maxUnavailable: 1 등의 PodDisruptionBudget을 추가하세요.", "Add a PodDisruptionBudget, e.g. maxUnavailable: 1."),
         reference: REF.pdb,
       });
     }
@@ -738,8 +739,8 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     const aksLocalAdmin = b.name === "aks-cluster-admin-binding";
     const system = !aksLocalAdmin && isSystemRbacObject(b.name, b.labels, b.namespace);
     const clusterScope = b.kind === "ClusterRoleBinding";
-    const scopeText = clusterScope ? "클러스터 전체" : `네임스페이스 '${b.namespace}'`;
-    const subjects = b.subjects.map((s) => `${s.kind}:${s.namespace ? `${s.namespace}/` : ""}${s.name}`).join(", ") || "(없음)";
+    const scopeText = clusterScope ? L("클러스터 전체", "whole cluster") : L(`네임스페이스 '${b.namespace}'`, `namespace '${b.namespace}'`);
+    const subjects = b.subjects.map((s) => `${s.kind}:${s.namespace ? `${s.namespace}/` : ""}${s.name}`).join(", ") || L("(없음)", "(none)");
     const resource: PolicyResourceRef = { kind: b.kind, name: b.name, namespace: b.namespace };
     const base = { category: "rbac" as const, system, namespace: b.namespace, resource };
     const bindingRisks: string[] = [];
@@ -750,11 +751,11 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
         bindingRisks.push("cluster-admin");
         findings.add({
           ...base, ruleId: "RBAC-001", severity: clusterScope ? "high" : "medium",
-          title: `cluster-admin 권한 부여 (${scopeText})`,
-          detail: `${subjects}에게 cluster-admin이 바인딩되어 있습니다.${aksLocalAdmin ? " AKS 로컬 계정(clusterAdmin/clusterUser) 바인딩으로, 로컬 kubeconfig를 가진 누구나 클러스터 관리자 권한을 가집니다." : ""}`,
+          title: L(`cluster-admin 권한 부여 (${scopeText})`, `cluster-admin granted (${scopeText})`),
+          detail: L(`${subjects}에게 cluster-admin이 바인딩되어 있습니다.${aksLocalAdmin ? " AKS 로컬 계정(clusterAdmin/clusterUser) 바인딩으로, 로컬 kubeconfig를 가진 누구나 클러스터 관리자 권한을 가집니다." : ""}`, `cluster-admin is bound to ${subjects}.${aksLocalAdmin ? " This is the AKS local account binding (clusterAdmin/clusterUser): anyone with the local kubeconfig is a cluster administrator." : ""}`),
           recommendation: aksLocalAdmin
-            ? "Microsoft Entra ID 통합 후 로컬 계정을 비활성화(--disable-local-accounts)하고 Azure RBAC/그룹 단위로 권한을 부여하세요."
-            : "필요한 리소스·동사만 가진 Role/ClusterRole로 대체하고 RoleBinding으로 네임스페이스 범위로 제한하세요.",
+            ? L("Microsoft Entra ID 통합 후 로컬 계정을 비활성화(--disable-local-accounts)하고 Azure RBAC/그룹 단위로 권한을 부여하세요.", "Integrate Microsoft Entra ID, disable local accounts (--disable-local-accounts) and grant access with Azure RBAC / groups.")
+            : L("필요한 리소스·동사만 가진 Role/ClusterRole로 대체하고 RoleBinding으로 네임스페이스 범위로 제한하세요.", "Replace it with a Role/ClusterRole that has only the needed resources and verbs, and limit it to a namespace with a RoleBinding."),
           reference: aksLocalAdmin ? REF.aksLocalAccounts : REF.rbac,
         });
       }
@@ -765,31 +766,31 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
       const severity: PolicySeverity = clusterScope ? worst.severity : worst.severity === "high" ? "medium" : "low";
       findings.add({
         ...base, ruleId: "RBAC-002", severity,
-        title: risks.length === 1 ? `위험 권한: ${worst.label}` : `위험 권한 ${risks.length}개 (${worst.label} 등)`,
-        detail: `${b.kind} '${b.name}' → ${b.roleRef.kind} '${b.roleRef.name}'가 ${subjects}에게 ${scopeText} 범위로 다음 권한을 부여합니다: ${risks.map((r) => r.label).join(" · ")}`,
-        recommendation: "권한 상승 경로가 되는 동사/리소스를 제거하거나 resourceNames로 범위를 좁히고, 가능하면 RoleBinding으로 네임스페이스 범위로 제한하세요.",
+        title: risks.length === 1 ? L(`위험 권한: ${worst.label}`, `Risky permission: ${worst.label}`) : L(`위험 권한 ${risks.length}개 (${worst.label} 등)`, `${risks.length} risky permissions (${worst.label}, …)`),
+        detail: L(`${b.kind} '${b.name}' → ${b.roleRef.kind} '${b.roleRef.name}'가 ${subjects}에게 ${scopeText} 범위로 다음 권한을 부여합니다: ${risks.map((r) => r.label).join(" · ")}`, `${b.kind} '${b.name}' → ${b.roleRef.kind} '${b.roleRef.name}' grants ${subjects} the following on ${scopeText}: ${risks.map((r) => r.label).join(" · ")}`),
+        recommendation: L("권한 상승 경로가 되는 동사/리소스를 제거하거나 resourceNames로 범위를 좁히고, 가능하면 RoleBinding으로 네임스페이스 범위로 제한하세요.", "Remove the verbs/resources that open an escalation path or narrow them with resourceNames, and prefer a namespace-scoped RoleBinding."),
         reference: REF.rbacEscalation,
       });
     }
 
     const anonymous = b.subjects.filter((s) => (s.kind === "Group" && s.name === "system:unauthenticated") || (s.kind === "User" && s.name === "system:anonymous"));
     if (anonymous.length > 0 && !system) {
-      bindingRisks.push("익명 접근");
+      bindingRisks.push(L("익명 접근", "anonymous access"));
       findings.add({
         ...base, ruleId: "RBAC-003", severity: "high",
-        title: "인증되지 않은 사용자에게 권한 부여",
-        detail: `${b.name}이(가) system:unauthenticated / system:anonymous에 '${b.roleRef.name}'을(를) 바인딩합니다. API 서버에 도달 가능한 누구나 사용할 수 있습니다.`,
-        recommendation: "익명 바인딩을 제거하세요.",
+        title: L("인증되지 않은 사용자에게 권한 부여", "Permissions granted to unauthenticated users"),
+        detail: L(`${b.name}이(가) system:unauthenticated / system:anonymous에 '${b.roleRef.name}'을(를) 바인딩합니다. API 서버에 도달 가능한 누구나 사용할 수 있습니다.`, `${b.name} binds '${b.roleRef.name}' to system:unauthenticated / system:anonymous. Anyone who can reach the API server can use it.`),
+        recommendation: L("익명 바인딩을 제거하세요.", "Remove the anonymous binding."),
         reference: REF.rbac,
       });
     }
     if (!system && b.subjects.some((s) => s.kind === "Group" && s.name === "system:authenticated")) {
-      bindingRisks.push("모든 인증 사용자");
+      bindingRisks.push(L("모든 인증 사용자", "all authenticated users"));
       findings.add({
         ...base, ruleId: "RBAC-004", severity: "medium",
-        title: "모든 인증 사용자(system:authenticated)에게 권한 부여",
-        detail: `${b.name}이(가) 클러스터에 인증된 모든 주체에게 '${b.roleRef.name}'을(를) 부여합니다.`,
-        recommendation: "특정 그룹/ServiceAccount로 대상을 좁히세요.",
+        title: L("모든 인증 사용자(system:authenticated)에게 권한 부여", "Permissions granted to all authenticated users (system:authenticated)"),
+        detail: L(`${b.name}이(가) 클러스터에 인증된 모든 주체에게 '${b.roleRef.name}'을(를) 부여합니다.`, `${b.name} grants '${b.roleRef.name}' to every principal authenticated to the cluster.`),
+        recommendation: L("특정 그룹/ServiceAccount로 대상을 좁히세요.", "Narrow it to specific groups / ServiceAccounts."),
         reference: REF.rbac,
       });
     }
@@ -797,18 +798,18 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
       bindingRisks.push("default SA");
       findings.add({
         ...base, ruleId: "RBAC-005", severity: "low",
-        title: "default ServiceAccount에 역할 바인딩",
-        detail: `${b.name}이(가) default ServiceAccount에 권한을 부여해 해당 네임스페이스의 모든 파드가 이 권한을 갖게 됩니다.`,
-        recommendation: "워크로드 전용 ServiceAccount를 만들어 바인딩하세요.",
+        title: L("default ServiceAccount에 역할 바인딩", "Role bound to the default ServiceAccount"),
+        detail: L(`${b.name}이(가) default ServiceAccount에 권한을 부여해 해당 네임스페이스의 모든 파드가 이 권한을 갖게 됩니다.`, `${b.name} grants permissions to the default ServiceAccount, so every pod in the namespace has them.`),
+        recommendation: L("워크로드 전용 ServiceAccount를 만들어 바인딩하세요.", "Create a dedicated ServiceAccount for the workload and bind that."),
         reference: REF.rbac,
       });
     }
     if (!roleFound && !system) {
       findings.add({
         ...base, ruleId: "RBAC-006", severity: "info",
-        title: "존재하지 않는 역할을 참조하는 바인딩",
-        detail: `${b.roleRef.kind} '${b.roleRef.name}'이(가) 없습니다. 같은 이름의 역할이 나중에 생성되면 의도치 않게 권한이 부여됩니다.`,
-        recommendation: "불필요한 바인딩을 삭제하세요.",
+        title: L("존재하지 않는 역할을 참조하는 바인딩", "Binding refers to a role that does not exist"),
+        detail: L(`${b.roleRef.kind} '${b.roleRef.name}'이(가) 없습니다. 같은 이름의 역할이 나중에 생성되면 의도치 않게 권한이 부여됩니다.`, `${b.roleRef.kind} '${b.roleRef.name}' does not exist. If a role with that name is created later, it is granted unintentionally.`),
+        recommendation: L("불필요한 바인딩을 삭제하세요.", "Delete the unneeded binding."),
         reference: REF.rbac,
       });
     }
@@ -850,35 +851,35 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (!psa.enforce) {
       findings.add({
         ...base, ruleId: "PSA-001", category: "psa", severity: "high",
-        title: "Pod Security enforce 라벨 없음",
-        detail: "pod-security.kubernetes.io/enforce 라벨이 없어 기본값(privileged)이 적용됩니다 — 특권 컨테이너, hostPath, hostNetwork 등이 모두 허용됩니다.",
-        recommendation: "pod-security.kubernetes.io/enforce: baseline(가능하면 restricted)과 enforce-version을 설정하세요. 먼저 warn/audit=restricted로 위반을 확인하는 것을 권장합니다.",
+        title: L("Pod Security enforce 라벨 없음", "No Pod Security enforce label"),
+        detail: L("pod-security.kubernetes.io/enforce 라벨이 없어 기본값(privileged)이 적용됩니다 — 특권 컨테이너, hostPath, hostNetwork 등이 모두 허용됩니다.", "Without a pod-security.kubernetes.io/enforce label the default (privileged) applies — privileged containers, hostPath, hostNetwork and so on are all allowed."),
+        recommendation: L("pod-security.kubernetes.io/enforce: baseline(가능하면 restricted)과 enforce-version을 설정하세요. 먼저 warn/audit=restricted로 위반을 확인하는 것을 권장합니다.", "Set pod-security.kubernetes.io/enforce: baseline (restricted if possible) and enforce-version. Check violations with warn/audit=restricted first."),
         reference: REF.psa,
       });
     } else if (psa.enforce === "privileged") {
       findings.add({
         ...base, ruleId: "PSA-002", category: "psa", severity: "medium",
         title: "Pod Security enforce=privileged",
-        detail: "privileged 레벨은 제한이 없어 노드 수준 권한 상승이 가능합니다.",
-        recommendation: "꼭 필요한 워크로드만 별도 네임스페이스로 분리하고, 나머지는 baseline 이상으로 강화하세요.",
+        detail: L("privileged 레벨은 제한이 없어 노드 수준 권한 상승이 가능합니다.", "The privileged level has no restrictions, so node-level privilege escalation is possible."),
+        recommendation: L("꼭 필요한 워크로드만 별도 네임스페이스로 분리하고, 나머지는 baseline 이상으로 강화하세요.", "Move only the workloads that need it to a separate namespace and raise the rest to baseline or higher."),
         reference: REF.pss,
       });
     }
     if (psa.enforce && psa.enforce !== "restricted" && psa.warn !== "restricted" && psa.audit !== "restricted") {
       findings.add({
         ...base, ruleId: "PSA-003", category: "psa", severity: "low",
-        title: "restricted 위반 가시성 없음 (warn/audit)",
-        detail: `enforce=${psa.enforce}이지만 warn/audit=restricted가 없어 restricted 전환 시 영향도를 알 수 없습니다.`,
-        recommendation: "pod-security.kubernetes.io/warn: restricted, audit: restricted를 추가하세요.",
+        title: L("restricted 위반 가시성 없음 (warn/audit)", "No visibility of restricted violations (warn/audit)"),
+        detail: L(`enforce=${psa.enforce}이지만 warn/audit=restricted가 없어 restricted 전환 시 영향도를 알 수 없습니다.`, `enforce=${psa.enforce}, but without warn/audit=restricted the impact of moving to restricted is unknown.`),
+        recommendation: L("pod-security.kubernetes.io/warn: restricted, audit: restricted를 추가하세요.", "Add pod-security.kubernetes.io/warn: restricted and audit: restricted."),
         reference: REF.psa,
       });
     }
     if (psa.enforce && !psa.enforceVersion) {
       findings.add({
         ...base, ruleId: "PSA-004", category: "psa", severity: "info",
-        title: "enforce-version 미고정",
-        detail: "버전을 고정하지 않으면 클러스터 업그레이드 시 정책 기준이 바뀔 수 있습니다.",
-        recommendation: "pod-security.kubernetes.io/enforce-version: v1.xx 로 고정하세요.",
+        title: L("enforce-version 미고정", "enforce-version not pinned"),
+        detail: L("버전을 고정하지 않으면 클러스터 업그레이드 시 정책 기준이 바뀔 수 있습니다.", "Without a pinned version the policy baseline can change on cluster upgrades."),
+        recommendation: L("pod-security.kubernetes.io/enforce-version: v1.xx 로 고정하세요.", "Pin it with pod-security.kubernetes.io/enforce-version: v1.xx."),
         reference: REF.psa,
       });
     }
@@ -888,26 +889,26 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
       if (ingressIso === 0) {
         findings.add({
           ...base, ruleId: "NET-001", category: "networkPolicy", severity: "high",
-          title: "수신(ingress) 네트워크 격리 없음",
-          detail: `실행 중 파드 ${nsPods.length}개 모두 어떤 NetworkPolicy에도 선택되지 않아 클러스터 내 모든 파드로부터 수신이 허용됩니다.`,
-          recommendation: "podSelector: {} + policyTypes: [Ingress]의 default-deny 정책을 추가한 뒤 필요한 트래픽만 허용하세요.",
+          title: L("수신(ingress) 네트워크 격리 없음", "No ingress network isolation"),
+          detail: L(`실행 중 파드 ${nsPods.length}개 모두 어떤 NetworkPolicy에도 선택되지 않아 클러스터 내 모든 파드로부터 수신이 허용됩니다.`, `None of the ${nsPods.length} running pods is selected by any NetworkPolicy, so ingress from every pod in the cluster is allowed.`),
+          recommendation: L("podSelector: {} + policyTypes: [Ingress]의 default-deny 정책을 추가한 뒤 필요한 트래픽만 허용하세요.", "Add a default-deny policy (podSelector: {} + policyTypes: [Ingress]) and allow only the traffic you need."),
           reference: REF.netpolDefault,
         });
       } else if (ingressIso < nsPods.length) {
         findings.add({
           ...base, ruleId: "NET-002", category: "networkPolicy", severity: "medium",
-          title: "일부 파드만 수신 격리됨",
-          detail: `파드 ${nsPods.length}개 중 ${ingressIso}개만 ingress 정책에 선택되어 있습니다.`,
-          recommendation: "네임스페이스 default-deny ingress 정책으로 나머지 파드도 격리하세요.",
+          title: L("일부 파드만 수신 격리됨", "Only some pods are ingress-isolated"),
+          detail: L(`파드 ${nsPods.length}개 중 ${ingressIso}개만 ingress 정책에 선택되어 있습니다.`, `Only ${ingressIso} of ${nsPods.length} pods are selected by an ingress policy.`),
+          recommendation: L("네임스페이스 default-deny ingress 정책으로 나머지 파드도 격리하세요.", "Isolate the rest with a namespace default-deny ingress policy."),
           reference: REF.netpolDefault,
         });
       }
       if (egressIso === 0) {
         findings.add({
           ...base, ruleId: "NET-003", category: "networkPolicy", severity: "low",
-          title: "송신(egress) 네트워크 격리 없음",
-          detail: "파드가 클러스터 내·외부 어디로든 연결할 수 있습니다.",
-          recommendation: "default-deny egress 후 DNS(kube-dns 53/UDP·TCP)와 필요한 목적지만 허용하세요.",
+          title: L("송신(egress) 네트워크 격리 없음", "No egress network isolation"),
+          detail: L("파드가 클러스터 내·외부 어디로든 연결할 수 있습니다.", "Pods can connect anywhere inside or outside the cluster."),
+          recommendation: L("default-deny egress 후 DNS(kube-dns 53/UDP·TCP)와 필요한 목적지만 허용하세요.", "After default-deny egress, allow only DNS (kube-dns 53/UDP·TCP) and the destinations you need."),
           reference: REF.netpolDefault,
         });
       }
@@ -917,9 +918,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (nsWorkloads.length > 0 && (quotas === 0 || limitRanges === 0)) {
       findings.add({
         ...base, ruleId: "RES-003", category: "resources", severity: "low",
-        title: `${[quotas === 0 ? "ResourceQuota" : "", limitRanges === 0 ? "LimitRange" : ""].filter(Boolean).join("·")} 없음`,
-        detail: "네임스페이스 단위 리소스 총량 제한 또는 컨테이너 기본 requests/limits가 없습니다.",
-        recommendation: "ResourceQuota로 총량을, LimitRange로 기본 requests/limits를 지정하세요.",
+        title: L(`${[quotas === 0 ? "ResourceQuota" : "", limitRanges === 0 ? "LimitRange" : ""].filter(Boolean).join("·")} 없음`, `No ${[quotas === 0 ? "ResourceQuota" : "", limitRanges === 0 ? "LimitRange" : ""].filter(Boolean).join("·")}`),
+        detail: L("네임스페이스 단위 리소스 총량 제한 또는 컨테이너 기본 requests/limits가 없습니다.", "No namespace resource quota or default container requests/limits."),
+        recommendation: L("ResourceQuota로 총량을, LimitRange로 기본 requests/limits를 지정하세요.", "Set totals with ResourceQuota and default requests/limits with LimitRange."),
         reference: quotas === 0 ? REF.quota : REF.limitRange,
       });
     }

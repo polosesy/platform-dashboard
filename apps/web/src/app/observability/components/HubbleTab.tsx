@@ -20,10 +20,10 @@ const SUB_TABS: SubTab[] = ["service-map", "flows", "network", "security"];
 
 /** Hubble status badges + Service Map / Flows / Network / Security sub-tabs for one cluster. */
 export function HubbleTab({ clusterId }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [subTab, setSubTab] = useState<SubTab>("service-map");
-  const status = useApiQuery(clusterId ? `hubble-status:${clusterId}` : null, (token) =>
-    fetchJsonWithBearer<HubbleStatusResponse>(apiUrl("/api/hubble/status", { clusterId }), token),
+  const status = useApiQuery(clusterId ? `hubble-status:${clusterId}:${locale}` : null, (token) =>
+    fetchJsonWithBearer<HubbleStatusResponse>(apiUrl("/api/hubble/status", { clusterId, lang: locale }), token),
   );
   // Ignore a previous cluster's status while the new one loads
   const hubbleStatus = status.data?.clusterId === clusterId ? status.data : null;
@@ -35,25 +35,25 @@ export function HubbleTab({ clusterId }: Props) {
         {hubbleStatus ? (
           <>
             <span className={`${styles.statusBadge} ${hubbleStatus.available ? styles.statusOk : styles.statusOff}`}>
-              Hubble: {hubbleStatus.available ? "연결됨" : "연결 안 됨"}
+              Hubble: {hubbleStatus.available ? t("ob.hb.connected") : t("ob.hb.disconnected")}
             </span>
             {hubbleStatus.available && (
               <>
                 <span
                   className={`${styles.statusBadge} ${hubbleStatus.nodeCount < hubbleStatus.nodesTotal ? styles.statusOff : styles.statusOk}`}
-                  title="cilium agent가 응답한 노드 / 전체 노드"
+                  title={t("ob.hb.nodesHint")}
                 >
-                  노드: {hubbleStatus.nodeCount}/{hubbleStatus.nodesTotal}
+                  {t("hb.node")}: {hubbleStatus.nodeCount}/{hubbleStatus.nodesTotal}
                 </span>
-                <span className={`${styles.statusBadge} ${styles.statusOk}`} title="모든 노드 링 버퍼 합계 (보관 중 / 최대)">
-                  버퍼: {hubbleStatus.numFlows.toLocaleString()} / {hubbleStatus.maxFlows.toLocaleString()}
+                <span className={`${styles.statusBadge} ${styles.statusOk}`} title={t("ob.hb.bufferHint")}>
+                  {t("ob.hb.buffer")}: {hubbleStatus.numFlows.toLocaleString()} / {hubbleStatus.maxFlows.toLocaleString()}
                 </span>
               </>
             )}
           </>
         ) : (
           <span className={`${styles.statusBadge} ${styles.statusOff}`}>
-            {status.loading ? "Hubble 상태 확인 중..." : "Hubble 상태 없음"}
+            {status.loading ? t("ob.hb.checking") : t("ob.hb.noStatus")}
           </span>
         )}
         <Button size="sm" onClick={status.reload} disabled={!clusterId}>
@@ -61,7 +61,7 @@ export function HubbleTab({ clusterId }: Props) {
         </Button>
       </div>
 
-      {status.error && <div className={styles.errorMsg}>Hubble 오류: {status.error}</div>}
+      {status.error && <div className={styles.errorMsg}>{t("ob.hb.error")}: {status.error}</div>}
 
       {hubbleStatus?.message && hubbleStatus.message !== "connected" && (
         <div className={styles.errorMsg} style={{ marginBottom: 16 }}>

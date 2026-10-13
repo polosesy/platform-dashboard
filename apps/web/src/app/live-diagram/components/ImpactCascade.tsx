@@ -6,6 +6,7 @@ import { easeCubicOut } from "d3-ease";
 import { interpolateNumber } from "d3-interpolate";
 import type { FaultImpact } from "@aud/types";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 type CascadeEdge = {
   sourceX: number;
@@ -16,7 +17,8 @@ type CascadeEdge = {
 
 type ImpactCascadeProps = {
   impacts: FaultImpact[];
-  nodePositions: Map<string, { x: number; y: number }>;
+  /** Absolute flow coordinates and measured size */
+  nodePositions: Map<string, { x: number; y: number; w?: number; h?: number }>;
   edgePaths: Map<string, CascadeEdge>;
   transform: { x: number; y: number; zoom: number };
   width: number;
@@ -66,11 +68,11 @@ export function ImpactCascade({
           const alpha = 0.6 + 0.3 * Math.sin(pulseT * Math.PI);
 
           ctx.save();
-          ctx.translate(sourcePos.x + 90, sourcePos.y + 36);
+          ctx.translate(sourcePos.x + (sourcePos.w ?? 180) / 2, sourcePos.y + (sourcePos.h ?? 72) / 2);
           ctx.scale(scale, scale);
           ctx.beginPath();
           ctx.arc(0, 0, 24, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(216,59,1,${alpha * 0.3})`;
+          ctx.fillStyle = rgba("danger", alpha * 0.3);
           ctx.fill();
           ctx.restore();
         }
@@ -96,7 +98,7 @@ export function ImpactCascade({
           ctx.beginPath();
           ctx.moveTo(edgePath.sourceX, edgePath.sourceY);
           ctx.lineTo(midX, midY);
-          ctx.strokeStyle = `rgba(216,59,1,${flashAlpha})`;
+          ctx.strokeStyle = rgba("danger", flashAlpha);
           ctx.lineWidth = 4;
           ctx.lineCap = "round";
           ctx.stroke();
@@ -104,7 +106,7 @@ export function ImpactCascade({
           // Leading point glow
           ctx.beginPath();
           ctx.arc(midX, midY, 6, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(216,59,1,${flashAlpha * 0.6})`;
+          ctx.fillStyle = rgba("danger", flashAlpha * 0.6);
           ctx.fill();
         }
 
@@ -123,8 +125,8 @@ export function ImpactCascade({
           const ringRadius = interpolateNumber(10, 30)(t);
 
           ctx.beginPath();
-          ctx.arc(pos.x + 90, pos.y + 36, ringRadius, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(216,59,1,${highlightAlpha})`;
+          ctx.arc(pos.x + (pos.w ?? 180) / 2, pos.y + (pos.h ?? 72) / 2, ringRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = rgba("danger", highlightAlpha);
           ctx.lineWidth = 2;
           ctx.stroke();
         }
@@ -165,8 +167,9 @@ export function ImpactCascade({
     <canvas
       ref={canvasRef}
       className={styles.cascadeCanvas}
-      width={width}
-      height={height}
+      // The backing store is width × devicePixelRatio (set in the effect); the CSS size must stay in CSS px,
+      // or on a 125 % / 150 % display the whole overlay is drawn 1.25× / 1.5× too large and drifts off the cards
+      style={{ width, height }}
     />
   );
 }

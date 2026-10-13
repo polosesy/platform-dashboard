@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from "react";
+import { useI18n } from "@/lib/i18n";
 import ReactFlow, {
   type Node,
   type Edge,
@@ -45,15 +46,15 @@ type Props = { clusterId: string };
 // ── Service Type 아이콘/라벨 ──
 
 const SERVICE_TYPE_META: Record<HubbleServiceType, { icon: string; label: string; color: string }> = {
-  workload:       { icon: "⬡", label: "Workload",       color: "rgba(0,120,212,0.15)" },
-  world:          { icon: "🌐", label: "External",       color: "rgba(107,76,154,0.15)" },
-  host:           { icon: "🖥", label: "Host",           color: "rgba(20,21,23,0.08)" },
-  health:         { icon: "♡", label: "Health",         color: "rgba(20,21,23,0.06)" },
-  dns:            { icon: "◈", label: "DNS",            color: "rgba(0,150,136,0.15)" },
-  init:           { icon: "◎", label: "Init",           color: "rgba(20,21,23,0.06)" },
-  unmanaged:      { icon: "◇", label: "Unmanaged",      color: "rgba(209,132,0,0.12)" },
-  "kube-apiserver": { icon: "⎈", label: "API Server",  color: "rgba(50,100,200,0.12)" },
-  "remote-node":  { icon: "⊞", label: "Remote Node",   color: "rgba(20,21,23,0.08)" },
+  workload:       { icon: "⬡", label: "hb.type.workload",       color: "rgba(0,120,212,0.15)" },
+  world:          { icon: "🌐", label: "hb.type.world",       color: "rgba(107,76,154,0.15)" },
+  host:           { icon: "🖥", label: "hb.type.host",           color: "rgba(20,21,23,0.08)" },
+  health:         { icon: "♡", label: "hb.type.health",         color: "rgba(20,21,23,0.06)" },
+  dns:            { icon: "◈", label: "hb.type.dns",            color: "rgba(0,150,136,0.15)" },
+  init:           { icon: "◎", label: "hb.type.init",           color: "rgba(20,21,23,0.06)" },
+  unmanaged:      { icon: "◇", label: "hb.type.unmanaged",      color: "rgba(209,132,0,0.12)" },
+  "kube-apiserver": { icon: "⎈", label: "hb.type.apiserver",  color: "rgba(50,100,200,0.12)" },
+  "remote-node":  { icon: "⊞", label: "hb.type.remoteNode",   color: "rgba(20,21,23,0.08)" },
 };
 
 // ── Custom Service Node ──
@@ -76,6 +77,7 @@ type ServiceNodeData = {
 };
 
 const ServiceNode = memo(function ServiceNode({ data }: NodeProps<ServiceNodeData>) {
+  const { t } = useI18n();
   const meta = SERVICE_TYPE_META[data.serviceType] ?? SERVICE_TYPE_META.workload;
   const statusCls =
     data.healthStatus === "crit" ? styles.svcNodeCrit
@@ -92,7 +94,7 @@ const ServiceNode = memo(function ServiceNode({ data }: NodeProps<ServiceNodeDat
           <span className={styles.svcNodeIcon}>{meta.icon}</span>
           <span className={styles.svcNodeNs}>{data.namespace || "external"}</span>
           {data.serviceType !== "workload" && (
-            <span className={styles.svcNodeTypeBadge}>{meta.label}</span>
+            <span className={styles.svcNodeTypeBadge}>{t(meta.label)}</span>
           )}
         </div>
         <div className={styles.svcNodeName} title={data.workloadName}>{data.workloadName}</div>
@@ -103,7 +105,7 @@ const ServiceNode = memo(function ServiceNode({ data }: NodeProps<ServiceNodeDat
               <span
                 key={svc.serviceName}
                 className={styles.svcNodeSvcBadge}
-                title={`${svc.type} · ${svc.clusterIP} · ${svc.endpoints.length} endpoints`}
+                title={`${svc.type} · ${svc.clusterIP} · ${t("hb.endpoints", { n: svc.endpoints.length })}`}
               >
                 ◉ {svc.serviceName}
                 <span className={styles.svcNodeEpCount}>
@@ -398,6 +400,7 @@ function NodeDetailPanel({
   allNodes: HubbleServiceNode[];
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const meta = SERVICE_TYPE_META[node.serviceType] ?? SERVICE_TYPE_META.workload;
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
 
@@ -421,46 +424,46 @@ function NodeDetailPanel({
           <span className={styles.detailPanelIcon}>{meta.icon}</span>
           <span className={styles.detailPanelTitle}>{node.workloadName}</span>
         </div>
-        <button className={styles.detailPanelClose} onClick={onClose}>✕</button>
+        <button className={styles.detailPanelClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
       </div>
 
       <div className={styles.detailPanelMeta}>
         <div className={styles.detailPanelMetaRow}>
-          <span>Namespace</span><span>{node.namespace || "—"}</span>
+          <span>{t("hb.namespace")}</span><span>{node.namespace || "—"}</span>
         </div>
         <div className={styles.detailPanelMetaRow}>
-          <span>유형</span><span>{meta.label}</span>
+          <span>{t("hb.typeLabel")}</span><span>{t(meta.label)}</span>
         </div>
         <div className={styles.detailPanelMetaRow}>
           <span>Identity</span><span>{node.identity}</span>
         </div>
         <div className={styles.detailPanelMetaRow}>
-          <span>Pod 수</span><span>{node.podCount}</span>
+          <span>{t("hb.podCount")}</span><span>{node.podCount}</span>
         </div>
       </div>
 
       {/* 메트릭 */}
       <div className={styles.detailPanelSection}>
-        <h4 className={styles.detailPanelSectionTitle}>메트릭</h4>
+        <h4 className={styles.detailPanelSectionTitle}>{t("hb.metrics")}</h4>
         <div className={styles.detailMetricGrid}>
           <div className={styles.detailMetricItem}>
             <span className={styles.detailMetricValue}>{node.metrics.totalFlows.toLocaleString()}</span>
-            <span className={styles.detailMetricLabel}>전체 플로우</span>
+            <span className={styles.detailMetricLabel}>{t("hb.totalFlows")}</span>
           </div>
           <div className={styles.detailMetricItem}>
             <span className={styles.detailMetricValue}>{node.metrics.forwardedFlows.toLocaleString()}</span>
-            <span className={styles.detailMetricLabel}>Forwarded</span>
+            <span className={styles.detailMetricLabel}>{t("hb.verdict.FORWARDED")}</span>
           </div>
           <div className={styles.detailMetricItem}>
             <span className={`${styles.detailMetricValue} ${node.metrics.droppedFlows > 0 ? styles.textRed : ""}`}>
               {node.metrics.droppedFlows.toLocaleString()} ({droppedPct}%)
             </span>
-            <span className={styles.detailMetricLabel}>Dropped</span>
+            <span className={styles.detailMetricLabel}>{t("hb.verdict.DROPPED")}</span>
           </div>
           {node.metrics.avgLatencyMs !== null && (
             <div className={styles.detailMetricItem}>
               <span className={styles.detailMetricValue}>{node.metrics.avgLatencyMs}ms</span>
-              <span className={styles.detailMetricLabel}>평균 레이턴시</span>
+              <span className={styles.detailMetricLabel}>{t("hb.avgLatency")}</span>
             </div>
           )}
           {node.metrics.httpRequestsTotal > 0 && (
@@ -471,7 +474,7 @@ function NodeDetailPanel({
                   <span className={styles.textRed}> ({node.metrics.httpErrorCount} err)</span>
                 )}
               </span>
-              <span className={styles.detailMetricLabel}>HTTP 요청</span>
+              <span className={styles.detailMetricLabel}>{t("hb.httpRequests")}</span>
             </div>
           )}
           {node.metrics.dnsQueryCount > 0 && (
@@ -482,7 +485,7 @@ function NodeDetailPanel({
                   <span className={styles.textRed}> ({node.metrics.dnsErrorCount} err)</span>
                 )}
               </span>
-              <span className={styles.detailMetricLabel}>DNS 쿼리</span>
+              <span className={styles.detailMetricLabel}>{t("hb.dnsQueries")}</span>
             </div>
           )}
         </div>
@@ -502,17 +505,17 @@ function NodeDetailPanel({
                 <span>ClusterIP</span><span>{svc.clusterIP}</span>
               </div>
               <div className={styles.detailPanelMetaRow}>
-                <span>Ports</span>
+                <span>{t("hb.ports")}</span>
                 <span>{svc.ports.map((p) => `${p.port}→${p.targetPort}/${p.protocol}`).join(", ")}</span>
               </div>
               <div className={styles.detailPanelMetaRow}>
-                <span>Selector</span>
+                <span>{t("hb.selector")}</span>
                 <span>{Object.entries(svc.selector).map(([k, v]) => `${k}=${v}`).join(", ")}</span>
               </div>
               {svc.endpoints.length > 0 && (
                 <div className={styles.detailEpTable}>
                   <div className={styles.detailEpHeader}>
-                    <span>Pod</span><span>IP</span><span>Node</span><span>상태</span>
+                    <span>Pod</span><span>IP</span><span>{t("hb.node")}</span><span>{t("hb.status")}</span>
                   </div>
                   {svc.endpoints.map((ep) => (
                     <div key={ep.podName} className={styles.detailEpRow}>
@@ -538,7 +541,7 @@ function NodeDetailPanel({
       {/* 라벨 */}
       {Object.keys(node.labels).length > 0 && (
         <div className={styles.detailPanelSection}>
-          <h4 className={styles.detailPanelSectionTitle}>라벨</h4>
+          <h4 className={styles.detailPanelSectionTitle}>{t("hb.labels")}</h4>
           <div className={styles.detailLabelList}>
             {Object.entries(node.labels).map(([k, v]) => (
               <span key={k} className={styles.detailLabel}>{k}={v}</span>
@@ -550,7 +553,7 @@ function NodeDetailPanel({
       {/* 인바운드 연결 */}
       {inbound.length > 0 && (
         <div className={styles.detailPanelSection}>
-          <h4 className={styles.detailPanelSectionTitle}>인바운드 ({inbound.length})</h4>
+          <h4 className={styles.detailPanelSectionTitle}>{t("hb.inbound", { n: inbound.length })}</h4>
           <div className={styles.detailConnList}>
             {inbound.map((e) => {
               const peer = nodeMap.get(e.sourceId);
@@ -571,7 +574,7 @@ function NodeDetailPanel({
       {/* 아웃바운드 연결 */}
       {outbound.length > 0 && (
         <div className={styles.detailPanelSection}>
-          <h4 className={styles.detailPanelSectionTitle}>아웃바운드 ({outbound.length})</h4>
+          <h4 className={styles.detailPanelSectionTitle}>{t("hb.outbound", { n: outbound.length })}</h4>
           <div className={styles.detailConnList}>
             {outbound.map((e) => {
               const peer = nodeMap.get(e.destinationId);
@@ -598,6 +601,7 @@ function NodeDetailPanel({
 // ── Main Component ──
 
 export function ServiceMapTab({ clusterId }: Props) {
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [mapData, setMapData] = useState<HubbleServiceMapResponse | null>(null);
@@ -629,6 +633,7 @@ export function ServiceMapTab({ clusterId }: Props) {
       const params = new URLSearchParams({
         clusterId,
         timeWindow: String(timeWindow),
+        lang: locale,
       });
       if (nsFilter) params.set("namespace", nsFilter);
       const data = await fetchJsonWithBearer<HubbleServiceMapResponse>(
@@ -641,7 +646,7 @@ export function ServiceMapTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, getApiToken, timeWindow, nsFilter]);
+  }, [clusterId, getApiToken, timeWindow, nsFilter, locale]);
 
   useEffect(() => {
     fetchMap();
@@ -731,7 +736,7 @@ export function ServiceMapTab({ clusterId }: Props) {
     setFlowsLoading(true);
     try {
       const token = await getApiToken();
-      const params = new URLSearchParams({ clusterId, limit: "500" });
+      const params = new URLSearchParams({ clusterId, limit: "500", lang: locale });
       if (nsFilter) params.set("namespace", nsFilter);
       if (verdictFilter) params.set("verdict", verdictFilter);
       const data = await fetchJsonWithBearer<HubbleFlowsResponse>(
@@ -742,7 +747,7 @@ export function ServiceMapTab({ clusterId }: Props) {
       setFlows(data.flows.filter((f) => !f.isReply));
     } catch { /* 무시 — map 오류와 별개 */ }
     finally { setFlowsLoading(false); }
-  }, [clusterId, getApiToken, nsFilter, verdictFilter]);
+  }, [clusterId, getApiToken, nsFilter, verdictFilter, locale]);
 
   useEffect(() => {
     fetchFlows();
@@ -774,13 +779,13 @@ export function ServiceMapTab({ clusterId }: Props) {
     return (
       <div className={styles.loadingRow}>
         <span className={styles.spinner} />
-        <span>서비스 맵 로딩 중...</span>
+        <span>{t("hb.map.loading")}</span>
       </div>
     );
   }
 
   if (error) {
-    return <div className={styles.errorMsg}>Service Map 오류: {error}</div>;
+    return <div className={styles.errorMsg}>{t("hb.map.error")}: {error}</div>;
   }
 
   return (
@@ -792,7 +797,7 @@ export function ServiceMapTab({ clusterId }: Props) {
           value={nsFilter}
           onChange={(e) => setNsFilter(e.target.value)}
         >
-          <option value="">전체 네임스페이스</option>
+          <option value="">{t("hb.allNamespaces")}</option>
           {mapData?.namespaces.map((ns) => (
             <option key={ns} value={ns}>{ns}</option>
           ))}
@@ -801,7 +806,7 @@ export function ServiceMapTab({ clusterId }: Props) {
         <input
           type="text"
           className={styles.mapToolbarSearch}
-          placeholder="Filter by: label key=val, ip, dns, identity, pod"
+          placeholder={t("hb.filterPlaceholder")}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           style={{ minWidth: 300 }}
@@ -812,10 +817,10 @@ export function ServiceMapTab({ clusterId }: Props) {
           value={verdictFilter}
           onChange={(e) => setVerdictFilter(e.target.value)}
         >
-          <option value="">Any verdict</option>
-          <option value="FORWARDED">Forwarded</option>
-          <option value="DROPPED">Dropped</option>
-          <option value="AUDIT">Audit</option>
+          <option value="">{t("hb.anyVerdict")}</option>
+          <option value="FORWARDED">{t("hb.verdict.FORWARDED")}</option>
+          <option value="DROPPED">{t("hb.verdict.DROPPED")}</option>
+          <option value="AUDIT">{t("hb.verdict.AUDIT")}</option>
         </select>
 
         <select
@@ -823,11 +828,7 @@ export function ServiceMapTab({ clusterId }: Props) {
           value={timeWindow}
           onChange={(e) => setTimeWindow(Number(e.target.value))}
         >
-          <option value={1}>1분</option>
-          <option value={5}>5분</option>
-          <option value={15}>15분</option>
-          <option value={30}>30분</option>
-          <option value={60}>60분</option>
+          {[1, 5, 15, 30, 60].map((m) => <option key={m} value={m}>{t("hb.minutes", { n: m })}</option>)}
         </select>
 
         {/* Visual / Table 토글 */}
@@ -836,20 +837,20 @@ export function ServiceMapTab({ clusterId }: Props) {
             className={`${styles.viewToggleBtn} ${viewMode === "visual" ? styles.viewToggleActive : ""}`}
             onClick={() => setViewMode("visual")}
           >
-            Visual
+            {t("hb.visual")}
           </button>
           <button
             className={`${styles.viewToggleBtn} ${viewMode === "table" ? styles.viewToggleActive : ""}`}
             onClick={() => setViewMode("table")}
           >
-            Table
+            {t("ins.combos.table")}
           </button>
         </div>
 
         {/* 수신 상태 */}
         <span className={styles.mapToolbarStats}>
           <span className={`${styles.receivingDot} ${isReceiving ? styles.receivingActive : ""}`} />
-          {isReceiving ? "Receiving data..." : `${mapData?.nodes.length ?? 0} 서비스 · ${filteredFlows.length} 플로우`}
+          {isReceiving ? t("hb.receiving") : t("hb.mapStats", { n: mapData?.nodes.length ?? 0, f: filteredFlows.length })}
         </span>
       </div>
 
@@ -867,8 +868,8 @@ export function ServiceMapTab({ clusterId }: Props) {
               }}>
               {nodes.length === 0 ? (
                 <div className={styles.noDataBanner} style={{ marginTop: 80 }}>
-                  <strong>서비스 맵 데이터 없음</strong>
-                  Hubble 플로우 데이터가 아직 수집되지 않았습니다.
+                  <strong>{t("hb.map.noData")}</strong>
+                  {t("hb.map.noDataHint")}
                 </div>
               ) : (
                 <ReactFlow
@@ -921,8 +922,8 @@ export function ServiceMapTab({ clusterId }: Props) {
               <span className={`${styles.flowCollapseArrow} ${flowsExpanded ? styles.flowCollapseOpen : ""}`}>
                 ▶
               </span>
-              <span className={styles.sectionTitle}>Flows</span>
-              <span className={styles.toolbarCount}>{filteredFlows.length}개</span>
+              <span className={styles.sectionTitle}>{t("hub.view.flows")}</span>
+              <span className={styles.toolbarCount}>{filteredFlows.length}</span>
             </button>
 
             {flowsExpanded && (
@@ -932,10 +933,10 @@ export function ServiceMapTab({ clusterId }: Props) {
                   <table className={styles.flowTable}>
                     <thead>
                       <tr>
-                        <th>Source Service</th>
-                        <th>Destination Service</th>
-                        <th>Dst Port</th>
-                        <th>Verdict</th>
+                        <th>{t("hb.col.source")}</th>
+                        <th>{t("hb.col.destination")}</th>
+                        <th>{t("hb.col.dstPort")}</th>
+                        <th>{t("hb.col.verdict")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -966,7 +967,7 @@ export function ServiceMapTab({ clusterId }: Props) {
                     </tbody>
                   </table>
                   {filteredFlows.length === 0 && !flowsLoading && (
-                    <div className={styles.noDataBanner}>플로우 데이터 없음</div>
+                    <div className={styles.noDataBanner}>{t("hb.noFlows")}</div>
                   )}
                 </div>
 
@@ -985,13 +986,13 @@ export function ServiceMapTab({ clusterId }: Props) {
             <table className={styles.flowTable}>
               <thead>
                 <tr>
-                  <th>시간</th>
-                  <th>Source Service</th>
-                  <th>Destination Service</th>
-                  <th>Dst Port</th>
-                  <th>Protocol</th>
-                  <th>Verdict</th>
-                  <th>Direction</th>
+                  <th>{t("hb.col.time")}</th>
+                  <th>{t("hb.col.source")}</th>
+                  <th>{t("hb.col.destination")}</th>
+                  <th>{t("hb.col.dstPort")}</th>
+                  <th>{t("hb.col.protocol")}</th>
+                  <th>{t("hb.col.verdict")}</th>
+                  <th>{t("hb.col.direction")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1027,7 +1028,7 @@ export function ServiceMapTab({ clusterId }: Props) {
               </tbody>
             </table>
             {filteredFlows.length === 0 && !flowsLoading && (
-              <div className={styles.noDataBanner}>플로우 데이터 없음</div>
+              <div className={styles.noDataBanner}>{t("hb.noFlows")}</div>
             )}
           </div>
 
@@ -1053,66 +1054,67 @@ function formatFlowTime(iso: string) {
 // ── Flow Detail Panel ──
 
 function FlowDetailPanel({ flow, onClose }: { flow: HubbleFlow; onClose: () => void }) {
+  const { t } = useI18n();
   return (
     <div className={styles.flowDetailPanel}>
       <div className={styles.detailPanelHeader}>
-        <span className={styles.detailPanelTitle}>Flow Details</span>
-        <button className={styles.detailPanelClose} onClick={onClose}>✕</button>
+        <span className={styles.detailPanelTitle}>{t("hb.fd.title")}</span>
+        <button className={styles.detailPanelClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
       </div>
 
       <div className={styles.flowDetailBody}>
-        <FlowDetailRow label="Timestamp" value={flow.time} />
-        <FlowDetailRow label="Verdict">
+        <FlowDetailRow label={t("hb.fd.time")} value={flow.time} />
+        <FlowDetailRow label={t("hb.col.verdict")}>
           <span className={`${styles.verdictBadge} ${
             flow.verdict === "DROPPED" ? styles.verdictDropped
             : flow.verdict === "AUDIT" ? styles.verdictAudit
             : styles.verdictForwarded
           }`}>{flow.verdict.toLowerCase()}</span>
         </FlowDetailRow>
-        <FlowDetailRow label="Traffic direction" value={flow.trafficDirection.toLowerCase()} />
-        <FlowDetailRow label="Cilium event type" value={flow.type} />
+        <FlowDetailRow label={t("hb.fd.direction")} value={flow.trafficDirection.toLowerCase()} />
+        <FlowDetailRow label={t("hb.fd.eventType")} value={flow.type} />
         {flow.l4Protocol !== "UNKNOWN" && (
-          <FlowDetailRow label="Protocol" value={flow.l4Protocol} />
+          <FlowDetailRow label={t("hb.col.protocol")} value={flow.l4Protocol} />
         )}
         {flow.l7?.http && (
           <>
-            <FlowDetailRow label="HTTP method" value={flow.l7.http.method} />
-            <FlowDetailRow label="HTTP status" value={String(flow.l7.http.code)} />
+            <FlowDetailRow label={t("hb.fd.httpMethod")} value={flow.l7.http.method} />
+            <FlowDetailRow label={t("hb.fd.httpStatus")} value={String(flow.l7.http.code)} />
             {flow.l7.http.url && <FlowDetailRow label="URL" value={flow.l7.http.url} />}
           </>
         )}
         {flow.l7?.dns && (
-          <FlowDetailRow label="DNS query" value={flow.l7.dns.query} />
+          <FlowDetailRow label={t("hb.fd.dnsQuery")} value={flow.l7.dns.query} />
         )}
         {flow.dropReasonDesc && (
-          <FlowDetailRow label="Drop reason" value={flow.dropReasonDesc} />
+          <FlowDetailRow label={t("hb.fd.dropReason")} value={flow.dropReasonDesc} />
         )}
 
         <div className={styles.flowDetailDivider} />
 
-        <FlowDetailRow label="Source pod" value={flow.source.podName || "—"} />
-        <FlowDetailRow label="Source identity" value={String(flow.source.identity)} />
-        <FlowDetailRow label="Source namespace" value={flow.source.namespace || "—"} />
-        {flow.sourcePort > 0 && <FlowDetailRow label="Source port" value={String(flow.sourcePort)} />}
+        <FlowDetailRow label={t("hb.fd.srcPod")} value={flow.source.podName || "—"} />
+        <FlowDetailRow label={t("hb.fd.srcIdentity")} value={String(flow.source.identity)} />
+        <FlowDetailRow label={t("hb.fd.srcNs")} value={flow.source.namespace || "—"} />
+        {flow.sourcePort > 0 && <FlowDetailRow label={t("hb.fd.srcPort")} value={String(flow.sourcePort)} />}
 
         <div className={styles.flowDetailDivider} />
 
-        <FlowDetailRow label="Destination pod" value={flow.destination.podName || "—"} />
-        <FlowDetailRow label="Destination identity" value={String(flow.destination.identity)} />
-        <FlowDetailRow label="Destination namespace" value={flow.destination.namespace || "—"} />
-        {flow.destinationPort > 0 && <FlowDetailRow label="Destination port" value={String(flow.destinationPort)} />}
+        <FlowDetailRow label={t("hb.fd.dstPod")} value={flow.destination.podName || "—"} />
+        <FlowDetailRow label={t("hb.fd.dstIdentity")} value={String(flow.destination.identity)} />
+        <FlowDetailRow label={t("hb.fd.dstNs")} value={flow.destination.namespace || "—"} />
+        {flow.destinationPort > 0 && <FlowDetailRow label={t("hb.fd.dstPort")} value={String(flow.destinationPort)} />}
 
         {flow.nodeName && (
           <>
             <div className={styles.flowDetailDivider} />
-            <FlowDetailRow label="Node" value={flow.nodeName} />
+            <FlowDetailRow label={t("hb.node")} value={flow.nodeName} />
           </>
         )}
 
         {flow.summary && (
           <>
             <div className={styles.flowDetailDivider} />
-            <FlowDetailRow label="Summary" value={flow.summary} />
+            <FlowDetailRow label={t("hb.fd.summary")} value={flow.summary} />
           </>
         )}
       </div>

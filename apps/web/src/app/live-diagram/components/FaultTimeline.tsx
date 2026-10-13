@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useRef, useEffect } from "react";
+import { useI18n } from "@/lib/i18n";
 import { scaleTime, scaleLinear } from "d3-scale";
 import { line, curveStepAfter } from "d3-shape";
 import type { LiveAlert, AlertSeverity } from "@aud/types";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 type FaultTimelineProps = {
   alerts: LiveAlert[];
@@ -12,9 +14,9 @@ type FaultTimelineProps = {
 };
 
 const SEVERITY_COLORS: Record<AlertSeverity, string> = {
-  critical: "rgba(216,59,1,0.90)",
-  warning: "rgba(209,132,0,0.85)",
-  info: "rgba(0,120,212,0.80)",
+  critical: rgba("danger", 0.9),
+  warning: rgba("warning", 0.85),
+  info: rgba("accent", 0.8),
 };
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = {
@@ -26,17 +28,19 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
 const TIMELINE_HEIGHT = 80;
 const PADDING = { top: 8, right: 12, bottom: 20, left: 40 };
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min}m ago`;
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+function timeAgo(iso: string, t: TFn): string {
+  const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 60) return t("common.secondsAgo", { n: Math.max(0, sec) });
+  const min = Math.floor(sec / 60);
+  if (min < 60) return t("common.minutesAgo", { n: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
+  if (hr < 24) return t("common.hoursAgo", { n: hr });
+  return t("common.daysAgo", { n: Math.floor(hr / 24) });
 }
 
 export function FaultTimeline({ alerts, onAlertClick }: FaultTimelineProps) {
+  const { t } = useI18n();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const sorted = useMemo(
@@ -90,8 +94,8 @@ export function FaultTimeline({ alerts, onAlertClick }: FaultTimelineProps) {
   if (alerts.length === 0) {
     return (
       <div className={styles.faultTimeline}>
-        <div className={styles.faultTimelineTitle}>Fault Timeline</div>
-        <div className={styles.faultTimelineEmpty}>No active faults</div>
+        <div className={styles.faultTimelineTitle}>{t("ld.fault.title")}</div>
+        <div className={styles.faultTimelineEmpty}>{t("ld.fault.none")}</div>
       </div>
     );
   }
@@ -99,7 +103,7 @@ export function FaultTimeline({ alerts, onAlertClick }: FaultTimelineProps) {
   return (
     <div className={styles.faultTimeline}>
       <div className={styles.faultTimelineTitle}>
-        Fault Timeline
+        {t("ld.fault.title")}
         <span className={styles.faultTimelineBadge}>{alerts.length}</span>
       </div>
 
@@ -118,13 +122,13 @@ export function FaultTimeline({ alerts, onAlertClick }: FaultTimelineProps) {
             y1={PADDING.top}
             x2={xScale(tick)}
             y2={TIMELINE_HEIGHT - PADDING.bottom}
-            stroke="rgba(20,21,23,0.06)"
+            stroke={rgba("ink", 0.06)}
             strokeWidth={1}
           />
         ))}
 
         {/* Cumulative line */}
-        <path d={cumulativePath} fill="none" stroke="rgba(216,59,1,0.40)" strokeWidth={1.5} />
+        <path d={cumulativePath} fill="none" stroke={rgba("danger", 0.4)} strokeWidth={1.5} />
 
         {/* Alert dots */}
         {sorted.map((alert, i) => {
@@ -161,7 +165,7 @@ export function FaultTimeline({ alerts, onAlertClick }: FaultTimelineProps) {
               style={{ background: SEVERITY_COLORS[alert.severity] }}
             />
             <span className={styles.faultTimelineItemTitle}>{alert.title}</span>
-            <span className={styles.faultTimelineItemTime}>{timeAgo(alert.firedAt)}</span>
+            <span className={styles.faultTimelineItemTime}>{timeAgo(alert.firedAt, t)}</span>
           </button>
         ))}
       </div>

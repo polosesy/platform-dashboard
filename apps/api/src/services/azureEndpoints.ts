@@ -84,12 +84,12 @@ export async function listAzureEndpoints(env: Env, bearerToken: string | undefin
     { subscriptions: subs, query, options: { resultFormat: "objectArray" } },
     { timeoutMs: 20_000 },
   );
-  const rows = (res.data ?? []).map((r) => {
+  const rows = (res.data ?? []).map((r): Omit<AzureEndpoint, "ips"> | null => {
     const def = PAAS_TYPES[r.type.toLowerCase()];
     const p = r.properties ?? {};
     const host = def?.[1](p);
     const pna = str(p.publicNetworkAccess) ?? str((p.network as Record<string, unknown> | undefined)?.publicNetworkAccess) ?? null;
-    return host && def ? { name: r.name, type: r.type.split("/").pop()!, typeLabel: def[0], resourceGroup: r.resourceGroup, host, publicAccess: pna } : null;
+    return host && def ? { name: r.name, type: r.type.split("/").pop()!, armType: r.type.toLowerCase(), typeLabel: def[0], resourceGroup: r.resourceGroup, host, publicAccess: pna } : null;
   }).filter((x): x is Omit<AzureEndpoint, "ips"> => !!x).slice(0, MAX_RESOLVED);
 
   const ips = await mapLimit(rows, 16, (r) => resolveAll(r.host));

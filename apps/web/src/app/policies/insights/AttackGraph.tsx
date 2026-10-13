@@ -2,7 +2,9 @@
 
 import { useLayoutEffect, useRef, type KeyboardEvent } from "react";
 import type { AttackEdge, AttackNode, RiskIssue } from "@aud/types";
-import { COLS, EVK, TYPE_LABEL, edgeKey } from "./model";
+import { useI18n } from "@/lib/i18n";
+import { edgeKey } from "./model";
+import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip } from "./Inspector";
 import styles from "./insights.module.css";
 
@@ -51,6 +53,8 @@ type Props = {
 };
 
 export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }: Props) {
+  const { t } = useI18n();
+  const { COLS, EVK, TYPE_LABEL } = useInsightLabels();
   const svgRef = useRef<SVGSVGElement>(null);
   const used = [...new Set(issue.nodes.map((n) => n.row))].sort((a, b) => a - b);
   const ry = (r: number) => 82 + used.indexOf(r) * 96;
@@ -80,7 +84,7 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
   };
 
   return (
-    <svg ref={svgRef} className={styles.graph} viewBox={`0 0 ${GW} ${GH}`} role="group" aria-label={`${issue.title} — 공격 경로. 노드와 간선을 선택하면 상세가 열립니다`}>
+    <svg ref={svgRef} className={styles.graph} viewBox={`0 0 ${GW} ${GH}`} role="group" aria-label={t("ins.graph.aria", { title: issue.title })}>
       <defs>
         {(["obs", "perm", "cfg", "unk"] as const).map((k) => (
           <marker key={k} id={`arr-${k}`} viewBox="0 0 8 8" refX={7} refY={4} markerWidth={7} markerHeight={7} orient="auto-start-reverse">
@@ -88,7 +92,7 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
           </marker>
         ))}
       </defs>
-      {COLS.map((t, i) => <text key={t} className={styles.colh} x={colX(i)} y={18} textAnchor="middle">{t}</text>)}
+      {COLS.map((c, i) => <text key={c} className={styles.colh} x={colX(i)} y={18} textAnchor="middle">{c}</text>)}
       {COLS.slice(1).map((_, i) => <line key={i} x1={(colX(i) + colX(i + 1)) / 2} y1={28} x2={(colX(i) + colX(i + 1)) / 2} y2={GH - 8} stroke="var(--line)" strokeDasharray="2 4" />)}
       {issue.edges.map((e) => {
         const a = pos.get(e.from), b = pos.get(e.to);
@@ -122,7 +126,7 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
             {cut ? (
               <g transform={`translate(${lx},${ly + 13})`} pointerEvents="none"><circle r={9} fill="var(--surface)" stroke="var(--ok)" strokeWidth={2} /><path d="M-4 -4 L4 4 M4 -4 L-4 4" stroke="var(--ok)" strokeWidth={2} /></g>
             ) : e.cut ? (
-              <g transform={`translate(${lx},${ly + 13})`} pointerEvents="none"><title>권장 차단 지점</title><circle r={8} fill="var(--surface)" stroke="var(--accent)" strokeWidth={2} /><path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="var(--accent)" strokeWidth={1.6} /></g>
+              <g transform={`translate(${lx},${ly + 13})`} pointerEvents="none"><title>{t("ins.graph.cut")}</title><circle r={8} fill="var(--surface)" stroke="var(--accent)" strokeWidth={2} /><path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="var(--accent)" strokeWidth={1.6} /></g>
             ) : null}
           </g>
         );
@@ -141,7 +145,7 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
             tabIndex={0}
             role="button"
             aria-pressed={isSel}
-            aria-label={`${TYPE_LABEL[n.type] ?? n.type} ${n.label}, ${n.sub}${n.unk ? ", 미확인" : ""}`}
+            aria-label={`${TYPE_LABEL[n.type] ?? n.type} ${n.label}, ${n.sub}${n.unk ? `, ${t("ins.unknown")}` : ""}`}
             onClick={() => onPick({ kind: "node", id: n.id })}
             onKeyDown={(ev) => keyAct(ev, { kind: "node", id: n.id })}
           >
@@ -165,11 +169,13 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
 }
 
 export function AttackTable({ issue, onPick }: { issue: RiskIssue; onPick: (s: GraphSel) => void }) {
+  const { t } = useI18n();
+  const { COLS } = useInsightLabels();
   const byId = new Map(issue.nodes.map((n) => [n.id, n]));
   const nb = (n: AttackNode) => <button className={styles.linkish} onClick={() => onPick({ kind: "node", id: n.id })}>{n.label}</button>;
   return (
     <table className={styles.etable}>
-      <thead><tr><th>단계</th><th>출발 → 도착</th><th>근거</th><th>내용</th></tr></thead>
+      <thead><tr><th>{t("ins.graph.col.step")}</th><th>{t("ins.graph.col.fromTo")}</th><th>{t("ins.graph.col.evidence")}</th><th>{t("ins.graph.col.detail")}</th></tr></thead>
       <tbody>
         {issue.edges.map((e) => {
           const a = byId.get(e.from), b = byId.get(e.to);

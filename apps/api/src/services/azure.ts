@@ -784,6 +784,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       if (k8sVersion) nodeMetadata.kubernetesVersion = k8sVersion;
     }
 
+    // Inbound rule count — backend-pool membership alone (e.g. the AKS outbound SNAT pool) is not an inbound path.
+    // Left unset when the properties do not list rules, so callers can tell "0" from "unknown".
+    if (kind === "lb" || kind === "appGateway") {
+      const props = (r.properties ?? {}) as Record<string, unknown>;
+      const lists = (kind === "lb" ? ["loadBalancingRules", "inboundNatRules", "inboundNatPools"] : ["httpListeners"]).map((k) => props[k]);
+      if (lists.some(Array.isArray)) nodeMetadata.inboundRules = lists.reduce<number>((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+    }
+
     nodes.push({
       id: r.id,
       kind,

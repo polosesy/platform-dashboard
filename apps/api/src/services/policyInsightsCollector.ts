@@ -1,6 +1,7 @@
 import type { HubbleFlowSet, PolicyInsightsResponse } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { withLang, type Lang } from "../infra/lang.js";
 import { debug } from "../infra/logger.js";
 import { collectClusterPolicies, collectPolicyInventory } from "./k8sPolicyCollector.js";
 import { getHubbleFlows } from "./hubbleClient.js";
@@ -18,22 +19,24 @@ const insightsCache = new CacheManager<PolicyInsightsResponse>(10, 60_000);
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
 
-export async function collectPolicyInsights(env: Env, bearerToken: string | undefined, clusterId: string): Promise<PolicyInsightsResponse> {
-  const cacheKey = `${cachePrefix(bearerToken)}:policy-insights:${clusterId.toLowerCase()}`;
+export async function collectPolicyInsights(env: Env, bearerToken: string | undefined, clusterId: string, lang: Lang = "ko"): Promise<PolicyInsightsResponse> {
+  const cacheKey = `${cachePrefix(bearerToken)}:policy-insights:${clusterId.toLowerCase()}:${lang}`;
+  // Async code — pick texts directly (L() is only valid inside withLang)
+  const tr = (ko: string, en: string) => (lang === "en" ? en : ko);
   const cached = insightsCache.get(cacheKey);
   if (cached) return cached;
 
   const gaps: string[] = [];
   const [inventory, policy] = await Promise.all([
-    collectPolicyInventory(env, bearerToken, clusterId),
-    collectClusterPolicies(env, bearerToken, clusterId),
+    collectPolicyInventory(env, bearerToken, clusterId, lang),
+    collectClusterPolicies(env, bearerToken, clusterId, lang),
   ]);
   gaps.push(...inventory.capabilities.unavailable.map((u) => `Kubernetes ${u}`));
 
   const [flowsR, azureR, ctxR] = await Promise.allSettled([
     env.HUBBLE_ENABLED
-      ? getHubbleFlows(env, bearerToken, clusterId, { last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000) })
-      : Promise.reject(new Error("HUBBLE_ENABLED=false — 관측 트래픽 없이 구성·권한만 분석")),
+      ? getHubbleFlows(env, bearerToken, clusterId, { last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000), lang })
+      : Promise.reject(new Error(tr("HUBBLE_ENABLED=false — 관측 트래픽 없이 구성·권한만 분석", "HUBBLE_ENABLED=false — configuration and permissions only, no observed traffic"))),
     listAzureEndpoints(env, bearerToken),
     getClusterContext(env, bearerToken, clusterId),
   ]);
@@ -42,7 +45,7 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   let flowsError: string | undefined;
   if (flowsR.status === "fulfilled") {
     flows = flowsR.value;
-    if (flows.coverage.nodesObserved === 0) { flowsError = "Hubble agent에서 flow를 읽지 못했습니다"; flows = null; }
+    if (flows.coverage.nodesObserved === 0) { flowsError = tr("Hubble agent에서 flow를 읽지 못했습니다", "No flows could be read from the Hubble agents"); flows = null; }
   } else {
     flowsError = msg(flowsR.reason);
   }
@@ -51,13 +54,13 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   const azure = azureR.status === "fulfilled"
     ? { available: true, endpoints: azureR.value.endpoints }
     : { available: false, endpoints: [] };
-  if (azureR.status === "rejected") gaps.push(`Azure 리소스 매칭: ${msg(azureR.reason)}`);
+  if (azureR.status === "rejected") gaps.push(`${tr("Azure 리소스 매칭", "Azure resource matching")}: ${msg(azureR.reason)}`);
 
   let ctx: ClusterContext;
   if (ctxR.status === "fulfilled") {
     ctx = ctxR.value;
   } else {
-    gaps.push(`AKS 설정(ARM): ${msg(ctxR.reason)}`);
+    gaps.push(`${tr("AKS 설정(ARM)", "AKS settings (ARM)")}: ${msg(ctxR.reason)}`);
     const m = /\/resourcegroups\/([^/]+)\/.*\/managedclusters\/([^/]+)$/i.exec(clusterId);
     ctx = {
       apiServerIps: [],
@@ -70,11 +73,11 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
     };
   }
 
-  const result = buildPolicyInsights({
+  const result = withLang(lang, () => buildPolicyInsights({
     clusterId, inventory, policy, flows, flowsError,
     azure: { ...azure, apiServerIps: ctx.apiServerIps },
     containment: ctx.containment, gaps,
-  });
+  }));
   debug(`[policy-insights] ${clusterId}: ${result.rows.length} rows, ${result.issues.length} issues, ${result.network.edges.length} edges, gaps ${gaps.length}`);
   insightsCache.set(cacheKey, result);
   return result;

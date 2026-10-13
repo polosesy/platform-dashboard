@@ -141,6 +141,15 @@
 - **원인**: 탭 상태를 URL에 둘 때 컴포넌트 state로 복사하면 같은 라우트 이동(쿼리 제거)을 놓침. `useSearchParams`는 정적 빌드에서 Suspense 경계가 필요
 - **해결**: `useQueryParam(name, allowed, fallback)`(`lib/useQueryParam.ts`) 사용 — 값은 URL에서 매 렌더 읽고, 쓰기는 `history.replaceState`(Next가 감지). 해당 페이지는 `<Suspense>`로 감쌈 (`/policies`, `/security/findings`)
 
+### FE-007: 영어로 바꿨는데 일부 문장이 한국어로 남음
+- **증상**: 한영 토글 후에도 정책 점검 결과·위험 조합 제목·Hubble 상태 문구 또는 날짜(오전/오후)가 한국어
+- **원인**: ① API가 만드는 문장은 요청의 `lang`으로 정해짐 — 호출에 `lang: locale`이 빠졌거나 쿼리 키에 `locale`이 없어 이전 언어 응답을 재사용. ② 날짜를 `toLocaleString()`(인자 없음)으로 찍으면 브라우저 로캘을 따름
+- **해결**: ① `apiUrl(path, { …, lang: locale })` + 쿼리 키에 `:${locale}`, API는 `queryLang(req)` → 동기 빌더는 `withLang`, 캐시 키에 `lang` (`apps/api/src/infra/lang.ts`). ② `toLocaleString(dateLocale(locale))`. 새 화면 문구는 `t()` 키로만 추가 — `apps/api/test/i18n.test.ts`가 웹 코드의 한국어 문자열·없는 키·ko/en 자리표시자 불일치를 잡음
+
+### FE-008: 구성도 PNG 내보내기가 '너무 커서 저장할 수 없습니다'
+- **원인**: 브라우저 캔버스 한도(약 16.7MP, 한 변 16,000px) — 전체 리전처럼 큰 화면은 배율 0.5 미만이 되어 중단
+- **해결**: 리전이나 표시 범위(카테고리)를 좁히거나 draw.io로 내보내기(크기 제한 없음, 같은 필터·접힘 상태). 노드 1,500개 초과도 같은 안내
+
 ---
 
 ## 6. 보안 (Defender for Cloud)
@@ -152,6 +161,10 @@
 ### SEC-002: 보안 화면에 '일부 데이터를 가져오지 못했습니다'
 - **원인**: Resource Graph 6개 쿼리 중 일부 실패(권한·스로틀링 429) — 실패 섹션은 `gaps`로 오고 화면에 '수집 실패'로 표시(0건으로 표시하지 않음)
 - **해결**: API 로그(`[posture]`, `AUD_DEBUG=true`)와 응답 `gaps[].message` 확인(구독 ID는 `[scope]`로 마스킹됨). 5분 캐시(`AZURE_SECURITY_CACHE_TTL_MS`) 후 재시도
+
+### SEC-003: 통합 위험에 '근거 있는 연결이 없습니다' 또는 '미확인'만 나옴
+- **원인**: 연결은 근거가 있을 때만 만듦 — ① 클러스터가 선택한 구독의 구성도에 없음(`clusterNotInGraph`), ② Hubble 관측 없음(`hubble`)이나 Azure PaaS 목록 실패(`azureMatch`), ③ Defender 샘플(권고당 최대 5개) 밖의 리소스, ④ 같은 키 후보가 둘 이상(모호), ⑤ 비로그인(예시 데이터는 조인하지 않음)
+- **해결**: 화면 위 '미확인' 알림의 항목부터 확인. 클러스터와 같은 구독을 고르고, AKS 보안 점검의 Hubble 상태를 확인. 연결 0건은 '안전'을 뜻하지 않으며 하단 '연결 근거가 없는 항목'에서 원 화면으로 이동
 
 ---
 

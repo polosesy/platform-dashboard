@@ -8,6 +8,7 @@ import type { EdgeStatus, EdgeTrafficLevel } from "@aud/types";
 import { Node3D } from "./Node3D";
 import { Edge3D } from "./Edge3D";
 import styles from "../../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 type Canvas3DProps = {
   spec: DiagramSpec;
@@ -109,10 +110,10 @@ export function Canvas3D({ spec, snapshot, onNodeSelect }: Canvas3DProps) {
           args={[40, 40]}
           cellSize={1}
           cellThickness={0.5}
-          cellColor="rgba(20,21,23,0.08)"
+          cellColor={rgba("ink", 0.08)}
           sectionSize={4}
           sectionThickness={1}
-          sectionColor="rgba(20,21,23,0.12)"
+          sectionColor={rgba("ink", 0.12)}
           position={[0, -2, 0]}
           fadeDistance={25}
         />

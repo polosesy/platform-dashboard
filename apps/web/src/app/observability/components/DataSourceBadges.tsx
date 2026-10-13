@@ -1,9 +1,11 @@
 "use client";
 
 import type { ObservabilityDataSourceStatus } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 
 export function DataSourceBadges({ status }: { status: ObservabilityDataSourceStatus }) {
+  const { t } = useI18n();
   const badges = [
     { label: "Container Insights", ok: status.containerInsights },
     { label: "Prometheus", ok: status.prometheus },
@@ -11,7 +13,7 @@ export function DataSourceBadges({ status }: { status: ObservabilityDataSourceSt
   ];
   return (
     <div className={styles.dsBadges}>
-      <span style={{ fontSize: 11, color: "rgba(20,21,23,0.4)", marginRight: 4 }}>데이터 소스:</span>
+      <span style={{ fontSize: 11, color: "rgba(20,21,23,0.4)", marginRight: 4 }}>{t("ob.dataSources")}:</span>
       {badges.map((b) => (
         <span key={b.label} className={`${styles.dsBadge} ${b.ok ? styles.dsBadgeOk : styles.dsBadgeOff}`}>
           {b.ok ? "✓" : "–"} {b.label}

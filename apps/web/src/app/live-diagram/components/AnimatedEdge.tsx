@@ -3,6 +3,7 @@
 import { type EdgeProps, getBezierPath, BaseEdge } from "reactflow";
 import type { EdgeStatus, EdgeTrafficLevel, DiagramEdgeKind } from "@aud/types";
 import { edgeColor, edgeWidth, particleCount, particleDuration, defaultTokens, edgeKindStyle, FLOW_TYPE_TINTS } from "../utils/designTokens";
+import { rgba } from "@/lib/palette";
 
 export type AnimatedEdgeData = {
   status: EdgeStatus;
@@ -149,7 +150,7 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
           style={{
             fontSize: defaultTokens.typography.edgeLabel.fontSize,
             fontWeight: defaultTokens.typography.edgeLabel.fontWeight,
-            fill: isDimmed ? "rgba(20,21,23,0.15)" : "rgba(20,21,23,0.55)",
+            fill: isDimmed ? rgba("ink", 0.15) : rgba("ink", 0.55),
             transition: "fill 400ms ease",
           }}
         >

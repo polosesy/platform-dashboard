@@ -5,7 +5,7 @@ import { broadcastResponseToMainFrame } from "@azure/msal-browser/redirect-bridg
 import { MsalProvider } from "@azure/msal-react";
 import { useMemo } from "react";
 import { isAuthPopupResponse, msalConfig } from "@/lib/msal";
-import { I18nProvider } from "@/lib/i18n";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 
 /*
  * MSAL v5 popup sign-in: Entra redirects the popup to redirectUri (this app) with the auth
@@ -37,6 +37,28 @@ function createMsal(): PublicClientApplication | null {
   }
 }
 
+function PopupBridgeNotice() {
+  const { t } = useI18n();
+  return (
+    <div style={{ display: "grid", placeItems: "center", minHeight: "100vh", fontFamily: "system-ui", color: "#555" }}>
+      {t("auth.popupRelay")}
+    </div>
+  );
+}
+
+function InsecureContextNotice() {
+  const { t } = useI18n();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 32, fontFamily: "system-ui", textAlign: "center" }}>
+      <h2 style={{ marginBottom: 12 }}>{t("auth.httpsTitle")}</h2>
+      <p style={{ color: "#555", marginBottom: 8 }}>{t("auth.httpsBody")}</p>
+      <p style={{ color: "#888", fontSize: 13 }}>
+        {t("auth.httpsHint1")}<code>localhost</code>{t("auth.httpsHint2")}
+      </p>
+    </div>
+  );
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const instance = useMemo(() => (popupResponse ? null : createMsal()), []);
 
@@ -44,9 +66,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // This window only relays the response and closes itself; never start the app inside it.
     return (
       <I18nProvider>
-        <div style={{ display: "grid", placeItems: "center", minHeight: "100vh", fontFamily: "system-ui", color: "#555" }}>
-          로그인 처리 중… 이 창은 자동으로 닫힙니다.
-        </div>
+        <PopupBridgeNotice />
       </I18nProvider>
     );
   }
@@ -54,13 +74,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   if (!instance) {
     return (
       <I18nProvider>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 32, fontFamily: "system-ui", textAlign: "center" }}>
-          <h2 style={{ marginBottom: 12 }}>HTTPS 연결이 필요합니다</h2>
-          <p style={{ color: "#555", marginBottom: 8 }}>브라우저 인증(MSAL)은 보안 컨텍스트에서만 동작합니다.</p>
-          <p style={{ color: "#888", fontSize: 13 }}>
-            HTTPS 또는 <code>localhost</code>를 통해 접속해 주세요.
-          </p>
-        </div>
+        <InsecureContextNotice />
       </I18nProvider>
     );
   }

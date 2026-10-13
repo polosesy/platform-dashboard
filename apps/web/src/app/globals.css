@@ -1,23 +1,45 @@
 /* Intentional light theme baseline (no dark-mode defaults). */
 :root {
+  /* Colour channels — the single source. Any other opacity: rgba() over the matching *-rgb token.
+     Mirrored for JS-drawn graphics (canvas, SVG attributes, three.js) in src/lib/palette.ts. */
+  --ink-rgb: 20, 21, 23;
+  --paper-rgb: 255, 255, 255;
+  --accent-rgb: 0, 120, 212;
+  --accent-2-rgb: 0, 163, 163;
+  --danger-rgb: 216, 59, 1;
+  --warning-rgb: 209, 132, 0;
+  --success-rgb: 16, 124, 16;
+  /* Status "OK" (healthy / running) — same green as success */
+  --ok-rgb: 16, 124, 16;
+  /* Visualization-only colours (diagram relationships and effects) — mirrored in palette.ts VIZ */
+  --egress-rgb: 251, 146, 60;
+  --private-link-rgb: 139, 92, 246;
+  --fault-rgb: 239, 68, 68;
+  --canvas-rgb: 247, 248, 250;
+  --violet-rgb: 112, 48, 160;
+
   --bg: #f6f4ef;
-  --panel: rgba(255, 255, 255, 0.72);
-  --panel-solid: #ffffff;
-  --panel-sunken: rgba(20, 21, 23, 0.035);
-  --ink: #141517;
-  --muted: rgba(20, 21, 23, 0.62);
-  --subtle: rgba(20, 21, 23, 0.45);
-  --border: rgba(20, 21, 23, 0.12);
-  --border-strong: rgba(20, 21, 23, 0.22);
-  --accent: #0078d4;
-  --accent-soft: rgba(0, 120, 212, 0.1);
-  --accent-2: #00a3a3;
-  --danger: #d83b01;
-  --danger-soft: rgba(216, 59, 1, 0.1);
-  --warning: #d18400;
-  --warning-soft: rgba(209, 132, 0, 0.12);
-  --success: #107c10;
-  --success-soft: rgba(16, 124, 16, 0.1);
+  --panel: rgba(var(--paper-rgb), 0.72);
+  --panel-solid: rgb(var(--paper-rgb));
+  --panel-sunken: rgba(var(--ink-rgb), 0.035);
+  --ink: rgb(var(--ink-rgb));
+  --muted: rgba(var(--ink-rgb), 0.62);
+  --subtle: rgba(var(--ink-rgb), 0.45);
+  --border: rgba(var(--ink-rgb), 0.12);
+  --border-strong: rgba(var(--ink-rgb), 0.22);
+  --accent: rgb(var(--accent-rgb));
+  --accent-soft: rgba(var(--accent-rgb), 0.1);
+  --accent-2: rgb(var(--accent-2-rgb));
+  --danger: rgb(var(--danger-rgb));
+  --danger-soft: rgba(var(--danger-rgb), 0.1);
+  --warning: rgb(var(--warning-rgb));
+  --warning-soft: rgba(var(--warning-rgb), 0.12);
+  --success: rgb(var(--success-rgb));
+  --success-soft: rgba(var(--success-rgb), 0.1);
+  --ok: rgb(var(--ok-rgb));
+  /* Darker variants for text on a tinted background (contrast) */
+  --accent-strong: #005a9e;
+  --warning-strong: #9a6100;
 
   /* Severity scale (Defender / policy findings) */
   --sev-high: var(--danger);

@@ -7,7 +7,13 @@ export type PostureSeverity = "High" | "Medium" | "Low";
 export type PostureDomain = "identity" | "network" | "data" | "compute" | "container" | "appServices" | "other";
 
 /** One affected resource — names only (no subscription IDs leave the API). */
-export type PostureResourceRef = { name: string; type: string; resourceGroup: string };
+export type PostureResourceRef = {
+  name: string;
+  type: string;
+  resourceGroup: string;
+  /** Full ARM type, lowercase ("microsoft.keyvault/vaults"); absent for non-ARM samples (Entra users, …) */
+  armType?: string;
+};
 
 /** One Defender recommendation, aggregated over every resource it was assessed on. */
 export type PostureRecommendation = {

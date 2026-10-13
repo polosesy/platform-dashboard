@@ -36,6 +36,7 @@ import { ImpactCascade } from "./ImpactCascade";
 import { TrafficHeatmap } from "./TrafficHeatmap";
 import { nodeColor } from "../utils/designTokens";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 /** Filter mode determines layout and fitView behavior */
 type FilterMode = "overview" | "single-focus" | "multi-focus";
@@ -1201,15 +1202,25 @@ function LiveCanvasInner({
     return result;
   }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled, showNetworkFlow]);
 
-  // Build node positions map with actual measured dimensions from ReactFlow
+  // Node boxes in absolute flow coordinates, with measured dimensions. Nodes inside VNet / subnet
+  // groups keep positions relative to their parent, so the parent chain is summed — the overlays
+  // (fault ripple, impact cascade, heatmap) draw in flow space, not inside the group.
   const nodePositions = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
     const map = new Map<string, { x: number; y: number; w: number; h: number }>();
     for (const node of nodes) {
-      map.set(node.id, {
-        ...node.position,
-        w: node.width ?? NODE_WIDTH,
-        h: node.height ?? NODE_HEIGHT,
-      });
+      if (node.hidden) continue;
+      let x = node.position.x;
+      let y = node.position.y;
+      const seen = new Set<string>([node.id]);
+      for (let p = node.parentNode; p && !seen.has(p); p = byId.get(p)?.parentNode) {
+        seen.add(p);
+        const parent = byId.get(p);
+        if (!parent) break;
+        x += parent.position.x;
+        y += parent.position.y;
+      }
+      map.set(node.id, { x, y, w: node.width ?? NODE_WIDTH, h: node.height ?? NODE_HEIGHT });
     }
     return map;
   }, [nodes]);
@@ -1290,7 +1301,7 @@ function LiveCanvasInner({
         proOptions={{ hideAttribution: true }}
         elevateEdgesOnSelect={true}
       >
-        <Background gap={20} size={1} color="rgba(20,21,23,0.06)" />
+        <Background gap={20} size={1} color={rgba("ink", 0.06)} />
         <Controls />
         {showMiniMap && (
           <MiniMap
@@ -1298,8 +1309,8 @@ function LiveCanvasInner({
               const health = (n.data as LiveNodeData | undefined)?.health ?? "unknown";
               return nodeColor(health).ringStroke;
             }}
-            maskColor="rgba(247,248,250,0.85)"
-            style={{ borderRadius: 12, border: "1px solid rgba(20,21,23,0.10)" }}
+            maskColor={rgba("canvas", 0.85)}
+            style={{ borderRadius: 12, border: `1px solid ${rgba("ink", 0.1)}` }}
           />
         )}
       </ReactFlow>

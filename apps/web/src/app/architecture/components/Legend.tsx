@@ -6,7 +6,7 @@ import { EDGE_STYLE } from "../utils/toFlow";
 import s from "../styles.module.css";
 
 /** Boundaries, line kinds and badges — line samples come from the same style table as the canvas. */
-export function Legend({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function Legend({ open, onToggle, showContext = false }: { open: boolean; onToggle: () => void; showContext?: boolean }) {
   const { t } = useI18n();
   return (
     <div className={s.legend}>
@@ -19,6 +19,7 @@ export function Legend({ open, onToggle }: { open: boolean; onToggle: () => void
             <span className={`${s.legendBox} ${s.lb_region}`} />{t("arch.box.region")}
             <span className={`${s.legendBox} ${s.lb_vnet}`} />VNet
             <span className={`${s.legendBox} ${s.lb_subnet}`} />{t("arch.box.subnet")}
+            {showContext ? <><span className={`${s.legendBox} ${s.lb_context}`} />{t("arch.filter.contextLegend")}</> : null}
           </div>
           <ul className={s.legendLines}>
             {[...ARCH_EDGE_KINDS, "traffic" as const].map((k) => {

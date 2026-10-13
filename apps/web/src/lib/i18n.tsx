@@ -3,6 +3,7 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 export type { Locale } from "./i18nMessages";
+export { dateLocale } from "./i18nMessages";
 import type { Locale } from "./i18nMessages";
 
 import { T } from "./i18nMessages";

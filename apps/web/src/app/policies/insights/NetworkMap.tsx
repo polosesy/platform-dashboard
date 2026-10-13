@@ -4,17 +4,20 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { NetEdge, NetEdgeClass, NetNode, PolicyInsightsResponse } from "@aud/types";
 import { layoutNest, parentsOf, visibleAncestor, type NestNode } from "@/lib/nestLayout";
 import { useLocalPreference, useMediaQuery } from "@/lib/useBrowserState";
-import { COMBO_LABEL, flowNote, hubbleLabel, issueNum, type InsightsNav } from "./model";
+import { useI18n } from "@/lib/i18n";
+import { issueNum, type InsightsNav } from "./model";
+import { useInsightLabels } from "./useInsightLabels";
 import { Inspector, type InspectorModel, type InspectorRow } from "./Inspector";
 import { ComboButton, FactorStrip } from "./RiskHeatmap";
 import styles from "./insights.module.css";
 
+// [label key, colour, dash]
 const ECLS: Record<NetEdgeClass, [string, string, string | undefined]> = {
-  eastwest: ["동서(클러스터 내부)", "var(--muted)", undefined],
-  cloud: ["클러스터 → Azure PaaS", "var(--accent)", undefined],
-  internet: ["클러스터 → 미식별 외부", "var(--crit)", "6 3"],
-  control: ["→ API server · 컨트롤 플레인", "var(--edge-cfg)", "2 3"],
-  platform: ["노드·프로브·플랫폼", "var(--faint)", "1 3"],
+  eastwest: ["ins.net.cls.eastwest", "var(--muted)", undefined],
+  cloud: ["ins.net.cls.cloud", "var(--accent)", undefined],
+  internet: ["ins.net.cls.internet", "var(--crit)", "6 3"],
+  control: ["ins.net.cls.control", "var(--edge-cfg)", "2 3"],
+  platform: ["ins.net.cls.platform", "var(--faint)", "1 3"],
 };
 const CLS_RANK: Record<NetEdgeClass, number> = { internet: 5, cloud: 4, control: 3, eastwest: 2, platform: 1 };
 const NS_ORDER = ["cloud-domain", "observability", "azure-alb-system", "kube-system"];
@@ -57,6 +60,8 @@ const leafColor = (n: NetNode) =>
 const textW = (s: string, px: number) => [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? px : px * 0.58), 0);
 
 export function NetworkMap({ data, sel, onSelect, nav }: Props) {
+  const { t } = useI18n();
+  const { COMBO_LABEL, flowNote, hubbleLabel } = useInsightLabels();
   const net = data.network;
   const [view, setView] = useLocalPreference<View>("aud-net-view", "nest", VIEWS);
   const [on, setOn] = useState<Record<NetEdgeClass, boolean>>({ eastwest: true, cloud: true, internet: true, control: false, platform: false });
@@ -70,9 +75,9 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
 
   if (!net.available) {
     return (
-      <section className={styles.panel} aria-label="워크로드 네트워크 맵">
-        <div className={styles.panelH}><h3>워크로드 네트워크 맵</h3></div>
-        <div className={styles.panelB}><div className={styles.notice}>관측 트래픽이 없어 맵을 그릴 수 없습니다 — {net.reason}. 위험 요인·권한 분석은 구성 정보만으로 계속됩니다.</div></div>
+      <section className={styles.panel} aria-label={t("ins.net.title")}>
+        <div className={styles.panelH}><h3>{t("ins.net.title")}</h3></div>
+        <div className={styles.panelB}><div className={styles.notice}>{t("ins.net.noTraffic", { reason: net.reason ?? "" })}</div></div>
       </section>
     );
   }
@@ -124,12 +129,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     const isOn = (e: NetEdge) => !!sel && (e.from === sel || e.to === sel);
     let ew = 0;
     return (
-      <svg className={styles.netsvg} viewBox={`0 0 ${W} ${H}`} role="group" aria-label="워크로드 간 관측 트래픽 (흐름)" data-focus={!!sel || undefined}>
+      <svg className={styles.netsvg} viewBox={`0 0 ${W} ${H}`} role="group" aria-label={t("ins.net.flowAria")} data-focus={!!sel || undefined}>
         <Markers prefix="nf" />
-        <text className={styles.colh} x={115} y={24} textAnchor="middle">들어오는 쪽</text>
-        <text className={styles.colh} x={465} y={24} textAnchor="middle">클러스터 워크로드 (네임스페이스별)</text>
-        <text className={styles.colh} x={850} y={24} textAnchor="middle">클러스터 밖</text>
-        {!left.length && <text className={styles.ns2} x={115} y={74} textAnchor="middle">노드·프로브 간선을 켜면 표시</text>}
+        <text className={styles.colh} x={115} y={24} textAnchor="middle">{t("ins.net.colIn")}</text>
+        <text className={styles.colh} x={465} y={24} textAnchor="middle">{t("ins.net.colWorkloads")}</text>
+        <text className={styles.colh} x={850} y={24} textAnchor="middle">{t("ins.net.colOut")}</text>
+        {!left.length && <text className={styles.ns2} x={115} y={74} textAnchor="middle">{t("ins.net.leftHint")}</text>}
         {groups.map((g) => (
           <g key={g.ns}><rect x={348} y={g.y0} width={234} height={g.y1 - g.y0} rx={10} fill="var(--surface-2)" stroke="var(--line)" /><text className={styles.nsl} x={358} y={g.y0 + 13}>{g.ns}</text></g>
         ))}
@@ -179,10 +184,10 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
                 <g transform={`translate(${p.w - 4},2)`}>
                   <rect x={-(n.combos.length * 15 + 4)} y={-1} width={n.combos.length * 15 + 6} height={15} rx={7} fill="var(--crit)" />
                   {n.combos.map((c, i) => <text key={c} x={-n.combos!.length * 15 + 4 + i * 15} y={10.5} style={{ fontSize: 9.5, fontWeight: 800, fill: "#fff" }}>{COMBO_LABEL[c].slice(0, 1)}</text>)}
-                  <title>위험 조합: {n.combos.map((c) => COMBO_LABEL[c]).join(", ")}</title>
+                  <title>{t("ins.heat.combosCol")}: {n.combos.map((c) => COMBO_LABEL[c]).join(", ")}</title>
                 </g>
               )}
-              {n.publicAccess === "Enabled" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={6} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>공용 네트워크 액세스 켜짐</title></g>}
+              {n.publicAccess === "Enabled" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={6} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.publicOn")}</title></g>}
             </g>
           );
         })}
@@ -212,20 +217,20 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       ? { id: "rg", kind: "box", dir: "col", labelW: textW(c.resourceGroup, 12.5), children: [cluster, { id: "paascol", kind: "group", maxW: 420, children: paasGroups }] }
       : { id: "rg", kind: "box", maxW: 1600, labelW: textW(c.resourceGroup, 12.5), children: [cluster, { id: "paascol", kind: "group", dir: "col", children: paasGroups }] };
     const platform: NestNode = { id: "platform", kind: "box", maxW: 300, labelW: 100, children: ["probe:lb", "platform:wireserver", "platform:imds"].map(leaf).filter((x): x is NestNode => !!x) };
-    const azureLabel = `Azure ▸ 구독 ${c.subscription ?? "(이름 미수집)"}`;
+    const azureLabel = `Azure ▸ ${t("ins.net.subscription")} ${c.subscription ?? t("ins.net.nameNotCollected")}`;
     const azure: NestNode = { id: "azure", kind: "box", dir: "col", labelW: textW(azureLabel, 12.5), children: [rg, ...((platform as { children: NestNode[] }).children.length ? [platform] : [])] };
     const unknown: NestNode = { id: "unknown", kind: "box", maxW: 300, labelW: 120, children: ["ext:world", "ext:unknown"].map(leaf).filter((x): x is NestNode => !!x) };
     const tree: NestNode = { id: "root", kind: "group", dir: "col", gap: 28, children: [...((unknown as { children: NestNode[] }).children.length ? [{ id: "internet", kind: "box" as const, maxW: 600, labelW: 120, children: [unknown] }] : []), azure] };
     const meta: Record<string, { label: string; type: string; dashed?: boolean; chip?: string }> = {
-      azure: { label: azureLabel, type: "클라우드 제공자 · 구독" },
-      rg: { label: c.resourceGroup || "(리소스 그룹 미수집)", type: "리소스 그룹" },
-      cluster: { label: clusterLabel, type: `AKS 클러스터 · ${c.cluster.location} · v${c.cluster.k8sVersion} · 노드 ${c.cluster.nodes}`, chip: c.cluster.privateCluster === null ? undefined : c.cluster.privateCluster ? "프라이빗 API" : `공용 API 엔드포인트 · 허용 IP 범위 ${c.cluster.authorizedIpRanges ? `${c.cluster.authorizedIpRanges}개` : "없음"}` },
-      cp: { label: "노드 · 컨트롤 플레인", type: "AKS 관리" },
-      platform: { label: "Azure 플랫폼", type: "Microsoft 관리" },
-      internet: { label: "인터넷", type: "클러스터 밖 · Azure 외부" },
-      unknown: { label: "미식별", type: "Azure 리소스와 매칭 안 됨", dashed: true },
+      azure: { label: azureLabel, type: t("ins.net.box.azure") },
+      rg: { label: c.resourceGroup || t("ins.net.rgNotCollected"), type: t("ins.net.box.rg") },
+      cluster: { label: clusterLabel, type: t("ins.net.box.cluster", { loc: c.cluster.location, ver: c.cluster.k8sVersion, n: c.cluster.nodes }), chip: c.cluster.privateCluster === null ? undefined : c.cluster.privateCluster ? t("ins.net.privateApi") : t("ins.net.publicApi", { ranges: c.cluster.authorizedIpRanges ? c.cluster.authorizedIpRanges : t("ins.heat.noneShort") }) },
+      cp: { label: t("ins.net.box.cp"), type: t("ins.managed") },
+      platform: { label: t("ins.net.box.platform"), type: t("ins.net.box.msManaged") },
+      internet: { label: t("ins.net.box.internet"), type: t("ins.net.box.internetType") },
+      unknown: { label: t("ins.net.box.unknown"), type: t("ins.net.box.unknownType"), dashed: true },
     };
-    for (const ns of nsNames) meta[`ns:${ns}`] = { label: ns, type: "Kubernetes 네임스페이스" };
+    for (const ns of nsNames) meta[`ns:${ns}`] = { label: ns, type: t("ins.net.box.ns") };
     for (const g of paasGroups) meta[g.id] = { label: g.id.slice(5), type: "Azure PaaS" };
 
     const parents = parentsOf(tree);
@@ -276,7 +281,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       if (!r.collapsed) for (const c2 of n.children) drawBoxes(c2, depth + (n.kind === "box" ? 1 : 0));
     };
     drawBoxes(tree, 0);
-    const leafLabel = (v: NetNode) => (v.id === "ext:world" ? (net.unmatchedExternal.filter((u) => u.from.some((f) => !rowById.get(f)?.managed && !f.startsWith("ext:"))).map((u) => u.ip).join(", ") || `미식별 IP ${net.unmatchedExternal.length}개`) : v.label);
+    const leafLabel = (v: NetNode) => (v.id === "ext:world" ? (net.unmatchedExternal.filter((u) => u.from.some((f) => !rowById.get(f)?.managed && !f.startsWith("ext:"))).map((u) => u.ip).join(", ") || t("ins.net.unknownIps", { n: net.unmatchedExternal.length })) : v.label);
     const drawFront = (n: NestNode) => {
       const r = rects.get(n.id);
       if (!r) return;
@@ -287,7 +292,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
         const lit = !!sel && (isSel || [...roll.values()].some((x) => rollOn(x) && (x.from === v.id || x.to === v.id)));
         const name = leafLabel(v);
         const short = name.length > 19 ? name.slice(0, 18) + "…" : name;
-        const typ = v.kind === "paas" ? v.azureType ?? "" : v.kind === "internet" ? "Azure 매칭 안 됨" : v.sub;
+        const typ = v.kind === "paas" ? v.azureType ?? "" : v.kind === "internet" ? t("ins.net.noAzureMatch") : v.sub;
         const pillW = Math.min(r.w - 4, textW(short, 11.5) + 14);
         const dropped = net.edges.some((e) => e.from === v.id && e.dropped);
         fronts.push(
@@ -295,10 +300,10 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
             <circle className={styles.lring} cx={cx} cy={cy} r={24} />
             <circle cx={cx} cy={cy} r={19} fill={leafColor(v)} fillOpacity={v.kind === "internet" || v.kind === "unknown" ? 0.75 : 1} stroke={v.kind === "internet" || v.kind === "unknown" ? "var(--faint)" : undefined} strokeDasharray={v.kind === "internet" || v.kind === "unknown" ? "3 3" : undefined} />
             <g transform={`translate(${cx},${cy})`}><LeafIcon kind={v.kind} /></g>
-            {overlay && !!v.combos?.length && <g transform={`translate(${cx + 15},${cy - 15})`}><circle r={8} fill="var(--crit)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9.5, fontWeight: 800, fill: "#fff" }}>{v.combos.length}</text><title>위험 조합: {v.combos.map((x) => COMBO_LABEL[x]).join(", ")}</title></g>}
-            {v.publicAccess === "Enabled" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={7} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>공용 네트워크 액세스 켜짐</title></g>}
-            {v.sharedIpWith && <g transform={`translate(${cx + 15},${cy + 13})`}><circle r={7} fill="var(--surface)" stroke="var(--faint)" strokeDasharray="2 2" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "var(--muted)" }}>?</text><title>프런트엔드 IP 공유 — 리소스 특정 불확실</title></g>}
-            {overlay && dropped && <circle cx={cx - 15} cy={cy + 14} r={4} fill="var(--crit)"><title>DROPPED flow 있음</title></circle>}
+            {overlay && !!v.combos?.length && <g transform={`translate(${cx + 15},${cy - 15})`}><circle r={8} fill="var(--crit)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9.5, fontWeight: 800, fill: "#fff" }}>{v.combos.length}</text><title>{t("ins.heat.combosCol")}: {v.combos.map((x) => COMBO_LABEL[x]).join(", ")}</title></g>}
+            {v.publicAccess === "Enabled" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={7} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.publicOn")}</title></g>}
+            {v.sharedIpWith && <g transform={`translate(${cx + 15},${cy + 13})`}><circle r={7} fill="var(--surface)" stroke="var(--faint)" strokeDasharray="2 2" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "var(--muted)" }}>?</text><title>{t("ins.net.sharedIp")}</title></g>}
+            {overlay && dropped && <circle cx={cx - 15} cy={cy + 14} r={4} fill="var(--crit)"><title>{t("ins.net.dropped")}</title></circle>}
             <rect className={styles.selpill} x={cx - pillW / 2} y={cy + 26} width={pillW} height={17} rx={8.5} fill="transparent" />
             <text className={`${styles.ln} ${styles.halo}`} x={cx} y={cy + 38} textAnchor="middle">{short}</text>
             <text className={`${styles.lt} ${styles.halo}`} x={cx} y={cy + 52} textAnchor="middle">{typ.length > 22 ? typ.slice(0, 21) + "…" : typ}</text>
@@ -318,17 +323,17 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
           fronts.push(
             <g key={`p-${n.id}`}>
               <text className={`${styles.bl} ${styles.halo}`} x={lx - 8} y={r.y + 24} textAnchor="middle">{m.label}</text>
-              <text className={`${styles.bt} ${styles.halo}`} x={lx - 8} y={r.y + 40} textAnchor="middle">{n.id === "cp" ? "숨긴 플랫폼 연결 포함" : `워크로드 ${leaves.length + (hiddenIn[n.id] ?? 0)}`} · 위험 조합 {combos}{inner[n.id] ? ` · 내부 연결 ${inner[n.id]}` : ""}</text>
-              {drop && <circle cx={r.x + 16} cy={r.y + 16} r={4} fill="var(--crit)"><title>DROPPED flow 있음</title></circle>}
+              <text className={`${styles.bt} ${styles.halo}`} x={lx - 8} y={r.y + 40} textAnchor="middle">{n.id === "cp" ? t("ins.net.cpHidden") : t("ins.net.workloadsN", { n: leaves.length + (hiddenIn[n.id] ?? 0) })} · {t("ins.heat.combosCol")} {combos}{inner[n.id] ? ` · ${t("ins.net.inner", { n: inner[n.id]! })}` : ""}</text>
+              {drop && <circle cx={r.x + 16} cy={r.y + 16} r={4} fill="var(--crit)"><title>{t("ins.net.dropped")}</title></circle>}
             </g>,
           );
         } else {
           fronts.push(
             <g key={`t-${n.id}`}>
               <text className={`${styles.bl} ${styles.halo}`} x={lx} y={r.y + r.h - 20} textAnchor="middle">{m.label}</text>
-              <text className={`${styles.bt} ${styles.halo}`} x={lx} y={r.y + r.h - 7} textAnchor="middle">{m.type}{hiddenIn[n.id] ? ` · AKS 관리 ${hiddenIn[n.id]} 숨김` : ""}</text>
+              <text className={`${styles.bt} ${styles.halo}`} x={lx} y={r.y + r.h - 7} textAnchor="middle">{m.type}{hiddenIn[n.id] ? ` · ${t("ins.net.managedHidden", { n: hiddenIn[n.id]! })}` : ""}</text>
               {m.chip && <text className={`${styles.bchip} ${styles.halo}`} x={r.x + r.w - 12} y={r.y + 14} textAnchor="end">⚙ {m.chip}</text>}
-              {!!inner[n.id] && <text className={`${styles.bchip} ${styles.halo}`} x={r.x + r.w - 12} y={r.y + 14} textAnchor="end">내부 연결 {inner[n.id]}</text>}
+              {!!inner[n.id] && <text className={`${styles.bchip} ${styles.halo}`} x={r.x + r.w - 12} y={r.y + 14} textAnchor="end">{t("ins.net.inner", { n: inner[n.id]! })}</text>}
             </g>,
           );
           n.children.forEach(drawFront);
@@ -338,7 +343,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
           const key = `c:${n.id}`;
           const toggle = () => { setToggled((t) => ({ ...t, [n.id]: !col })); focusLater(key); };
           fronts.push(
-            <g key={key} ref={register(key)} className={styles.boxToggle} role="button" tabIndex={0} aria-expanded={!col} aria-label={`${m.label} ${col ? "펼치기" : "접기"}`} transform={`translate(${r.x + r.w - 14},${r.y + r.h - 14})`}
+            <g key={key} ref={register(key)} className={styles.boxToggle} role="button" tabIndex={0} aria-expanded={!col} aria-label={`${m.label} ${col ? t("ins.net.expand") : t("ins.net.collapse")}`} transform={`translate(${r.x + r.w - 14},${r.y + r.h - 14})`}
               onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}>
               <circle r={10} /><text y={5} textAnchor="middle">{col ? "+" : "−"}</text>
             </g>,
@@ -350,7 +355,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     };
     drawFront(tree);
     return (
-      <svg className={styles.netsvg} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: Math.round(W * 0.85) }} role="group" aria-label="워크로드 네트워크 포함 관계" data-focus={!!sel || undefined}>
+      <svg className={styles.netsvg} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: Math.round(W * 0.85) }} role="group" aria-label={t("ins.net.nestAria")} data-focus={!!sel || undefined}>
         <Markers prefix="nn" />
         {boxes}
         {[...roll.values()].map((r) => {
@@ -362,7 +367,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
           const [, color, dash] = ECLS[r.cls];
           const D = Math.hypot(p0.x - p1.x, p0.y - p1.y) || 1;
           const cx = p1.x + ((p0.x - p1.x) / D) * 30, cy = p1.y + ((p0.y - p1.y) / D) * 30;
-          const txt = `${r.raw.length > 1 ? `×${r.raw.length} 연결 · ` : ""}${r.ports.slice(0, 3).join(",")}${r.ports.length > 3 ? "…" : ""} · ${r.count}`;
+          const txt = `${r.raw.length > 1 ? `×${r.raw.length} ${t("ins.net.links")} · ` : ""}${r.ports.slice(0, 3).join(",")}${r.ports.length > 3 ? "…" : ""} · ${r.count}`;
           const tw = txt.length * 5.6 + 12;
           return (
             <g key={`${r.from}>${r.to}`} className={styles.edge} data-on={rollOn(r) || undefined}>
@@ -390,13 +395,13 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       const drops = net.edges.filter((e) => e.dropped);
       const imds = net.edges.filter((e) => e.to === "platform:imds" && nodeById.get(e.from)?.kind === "workload");
       return {
-        id: "net-overview", kicker: "요약", title: "이 맵에서 읽히는 것", sub: `${hubbleLabel(net.coverage)} · ${note}`,
+        id: "net-overview", kicker: t("ins.net.ov.kicker"), title: t("ins.net.ov.title"), sub: `${hubbleLabel(net.coverage)} · ${note}`,
         callouts: [
-          { content: <>클러스터 → Azure PaaS <b>{cloud.length}개 연결</b> 중 <b>{pub.length}개 대상</b>이 공용 네트워크 액세스 켜짐{pub.length ? <> — 트래픽이 공인 IP로 나갑니다: <span className={styles.mono}>{pub.map((n) => n.label).join(", ")}</span></> : ""}</> },
-          { content: <>Azure 리소스로 매칭되지 않는 외부 송신 — 사용자·애드온: {usr.length ? usr.map((u) => <b key={u.ip}>{u.from.filter((f) => !isMgd(f)).map(label).join(", ")} → {u.ip}:{u.ports.join(",")} </b>) : "없음"}{mgd.length ? <span className={styles.muted}> · AKS 관리 구성요소 {mgd.length}개 IP — 미확인</span> : null}{!net.azureMatched && <span className={styles.muted}> (Azure 리소스 목록을 읽지 못해 매칭을 건너뜀)</span>}</> },
-          ...(drops.length ? [{ content: <>DROPPED flow {drops.length}건: {drops.map((e) => `${label(e.from)} → ${label(e.to)} ${e.ports.join(",")}`).join(" · ")} — 필터와 무관하게 항상 표시</> }] : []),
-          { tone: "info" as const, content: <>노출된 Service 수신: Azure LB 헬스 프로브 {probes} flows는 식별됨.{remote.length ? <> 단, remote-node 경유 flow({remote.map((e) => `${label(e.to)} ×${e.count}`).join(", ")})는 SNAT로 <b>VNet 클라이언트와 구분할 수 없어 판별 불가</b>입니다.</> : null}</> },
-          { tone: imds.length ? "warn" as const : "ok" as const, content: imds.length ? <>파드 → Azure IMDS 접근 관측: {imds.map((e) => label(e.from)).join(", ")} — 노드 관리 ID 토큰 요청 가능성 확인 필요</> : <>파드 → Azure IMDS(169.254.169.254) 접근 관측 0 (관측 구간 기준)</> },
+          { content: <>{t("ins.net.ov.paas1")}<b>{t("ins.net.ov.paasConn", { n: cloud.length })}</b>{t("ins.net.ov.paas2")}<b>{t("ins.net.ov.paasTargets", { n: pub.length })}</b>{t("ins.net.ov.paas3")}{pub.length ? <> — {t("ins.net.ov.paasPublic")}: <span className={styles.mono}>{pub.map((n) => n.label).join(", ")}</span></> : ""}</> },
+          { content: <>{t("ins.net.ov.unmatched")}: {usr.length ? usr.map((u) => <b key={u.ip}>{u.from.filter((f) => !isMgd(f)).map(label).join(", ")} → {u.ip}:{u.ports.join(",")} </b>) : t("ins.heat.noneShort")}{mgd.length ? <span className={styles.muted}> · {t("ins.net.ov.managedIps", { n: mgd.length })}</span> : null}{!net.azureMatched && <span className={styles.muted}> {t("ins.net.ov.matchSkipped")}</span>}</> },
+          ...(drops.length ? [{ content: <>{t("ins.net.ov.drops", { n: drops.length })}: {drops.map((e) => `${label(e.from)} → ${label(e.to)} ${e.ports.join(",")}`).join(" · ")} — {t("ins.net.ov.dropsAlways")}</> }] : []),
+          { tone: "info" as const, content: <>{t("ins.net.ov.probes", { n: probes })}{remote.length ? <>{t("ins.net.ov.remote1")}{remote.map((e) => `${label(e.to)} ×${e.count}`).join(", ")}{t("ins.net.ov.remote2")}<b>{t("ins.net.ov.remote3")}</b>{t("ins.net.ov.remote4")}</> : null}</> },
+          { tone: imds.length ? "warn" as const : "ok" as const, content: imds.length ? <>{t("ins.net.ov.imds")}: {imds.map((e) => label(e.from)).join(", ")} — {t("ins.net.ov.imdsCheck")}</> : <>{t("ins.net.ov.imdsNone")}</> },
         ],
         sections: [],
       };
@@ -410,57 +415,57 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       ev: "obs",
     });
     const issues = data.issues.filter((i) => i.nodes.some((x) => x.refs.includes(sel)));
-    const kinds: Record<NetNode["kind"], string> = { workload: "Kubernetes 워크로드", paas: "Azure PaaS", internet: "미식별 외부", apiserver: "컨트롤 플레인", node: "노드", probe: "Azure 플랫폼", platform: "Azure 플랫폼", unknown: "식별 불가" };
+    const kinds: Record<NetNode["kind"], string> = { workload: t("ins.type.workload"), paas: "Azure PaaS", internet: t("ins.net.kind.internet"), apiserver: t("ins.net.kind.apiserver"), node: t("ins.type.node"), probe: t("ins.net.box.platform"), platform: t("ins.net.box.platform"), unknown: t("ins.net.kind.unknown") };
     return {
-      id: `nd-${sel}`, kicker: kinds[n.kind], title: n.id === "ext:world" ? "미식별 외부 IP" : n.label, sub: n.sub,
+      id: `nd-${sel}`, kicker: kinds[n.kind], title: n.id === "ext:world" ? t("ins.net.unknownIp") : n.label, sub: n.sub,
       chips: row?.combos.length ? <>{row.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />)}</> : undefined,
       sections: [
-        { h: "사실", rows: [
+        { h: t("ins.combos.facts"), rows: [
           ...(row ? [
-            { k: "위치", v: `${row.namespace} · ${row.kind} ×${row.pods} · ${row.owner}` },
-            { k: "위험 요인", node: <><FactorStrip row={row} data={data} /><span className={styles.muted}>{data.factors.filter((f) => row.cells[f.key]).map((f) => f.label).join(" · ") || "-"}</span></>, ev: "cfg" as const },
+            { k: t("ins.net.f.location"), v: `${row.namespace} · ${row.kind} ×${row.pods} · ${row.owner}` },
+            { k: t("ins.net.f.factors"), node: <><FactorStrip row={row} data={data} /><span className={styles.muted}>{data.factors.filter((f) => row.cells[f.key]).map((f) => f.label).join(" · ") || "-"}</span></>, ev: "cfg" as const },
           ] : []),
           ...(n.kind === "paas" ? [
-            { k: "호스트", v: n.host ?? "?", ev: "cfg" as const, mono: true, src: "ARM 리소스 속성" },
-            { k: "공용 네트워크 액세스", v: n.publicAccess ?? "미확인", ev: n.publicAccess ? "cfg" as const : "unk" as const },
-            { k: "매칭", v: `Hubble 목적지 IP ${n.ips?.join(", ")} = 호스트 DNS 조회 IP`, ev: "obs" as const },
-            ...(n.sharedIpWith ? [{ k: "식별 확실성", v: `같은 프런트엔드 IP를 ${n.sharedIpWith.join(", ")}와 공유 — 같은 RG·이름이 맞는 쪽으로 판별, 확정 아님`, ev: "unk" as const }] : []),
-            { k: "Private Endpoint·방화벽", v: "미수집", ev: "unk" as const },
+            { k: t("ins.net.f.host"), v: n.host ?? "?", ev: "cfg" as const, mono: true, src: t("ins.net.f.armProp") },
+            { k: t("ins.net.f.publicAccess"), v: n.publicAccess ?? t("ins.unknown"), ev: n.publicAccess ? "cfg" as const : "unk" as const },
+            { k: t("ins.net.f.match"), v: t("ins.net.f.matchV", { ips: n.ips?.join(", ") ?? "" }), ev: "obs" as const },
+            ...(n.sharedIpWith ? [{ k: t("ins.net.f.certainty"), v: t("ins.net.f.sharedV", { with: n.sharedIpWith.join(", ") }), ev: "unk" as const }] : []),
+            { k: t("ins.net.f.peFw"), v: t("ins.notCollected"), ev: "unk" as const },
           ] : []),
           ...(n.id === "ext:world" ? net.unmatchedExternal.map((u) => ({ k: u.ip, v: `:${u.ports.join(",")} ← ${u.from.map(label).join(", ")} · ${u.count}`, ev: "obs" as const, mono: true })) : []),
-          ...(n.kind === "unknown" ? [{ k: "식별", v: "Hubble identity 미해석 — 대상 불명", ev: "unk" as const }] : []),
-          { k: "flow 수 기준", v: note },
+          ...(n.kind === "unknown" ? [{ k: t("ins.net.f.ident"), v: t("ins.net.f.identV"), ev: "unk" as const }] : []),
+          { k: t("ins.net.f.flowBasis"), v: note },
         ] },
-        { h: `나가는 연결 ${out.length} · 들어오는 연결 ${inn.length}`, rows: [...out.map((e) => line(e, e.to, "→")), ...inn.map((e) => line(e, e.from, "←"))] },
+        { h: t("ins.net.inOut", { out: out.length, in: inn.length }), rows: [...out.map((e) => line(e, e.to, "→")), ...inn.map((e) => line(e, e.from, "←"))] },
       ],
       links: [
-        ...(row ? [{ label: "히트맵에서 보기", onClick: () => nav.openHeatRow(row.id) }] : []),
-        ...issues.map((i) => ({ label: `공격 경로 ${issueNum(data.issues.indexOf(i))} 열기`, onClick: () => nav.openIssue(i.id) })),
+        ...(row ? [{ label: t("ins.combos.openHeat"), onClick: () => nav.openHeatRow(row.id) }] : []),
+        ...issues.map((i) => ({ label: t("ins.heat.openPath", { n: issueNum(data.issues.indexOf(i)) }), onClick: () => nav.openIssue(i.id) })),
       ],
     };
   };
 
   return (
-    <section className={styles.panel} aria-label="워크로드 네트워크 맵">
+    <section className={styles.panel} aria-label={t("ins.net.title")}>
       <div className={styles.panelH}>
         <div>
-          <h3>워크로드 네트워크 맵</h3>
-          <div className={styles.sub}><span className={styles.obsChip}>관측: {hubbleLabel(net.coverage)} · flow 수는 {note}</span> 응답 패킷 제외(연결 시작 → 서버 포트)</div>
+          <h3>{t("ins.net.title")}</h3>
+          <div className={styles.sub}><span className={styles.obsChip}>{t("ins.net.obsChip", { cov: hubbleLabel(net.coverage), note })}</span> {t("ins.net.noReplies")}</div>
         </div>
       </div>
       <div className={styles.panelB}>
         <div className={styles.ctrls} style={{ marginBottom: 10 }}>
-          <div className={styles.toggle} role="group" aria-label="맵 형식">
-            <button aria-pressed={view === "nest"} onClick={() => setView("nest")}>포함 관계</button>
-            <button aria-pressed={view === "flow"} onClick={() => setView("flow")}>흐름</button>
+          <div className={styles.toggle} role="group" aria-label={t("ins.net.viewAria")}>
+            <button aria-pressed={view === "nest"} onClick={() => setView("nest")}>{t("ins.net.viewNest")}</button>
+            <button aria-pressed={view === "flow"} onClick={() => setView("flow")}>{t("ins.net.viewFlow")}</button>
           </div>
           {(Object.keys(ECLS) as NetEdgeClass[]).map((k) => (
             <button key={k} className={styles.fchip} aria-pressed={on[k]} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>
-              <span className={styles.ecls} style={{ borderTopColor: ECLS[k][1], borderTopStyle: ECLS[k][2] ? "dashed" : "solid" }} />{ECLS[k][0]}
+              <span className={styles.ecls} style={{ borderTopColor: ECLS[k][1], borderTopStyle: ECLS[k][2] ? "dashed" : "solid" }} />{t(ECLS[k][0])}
             </button>
           ))}
-          <button className={styles.fchip} aria-pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>AKS 관리 포함</button>
-          <button className={styles.fchip} aria-pressed={overlay} onClick={() => setOverlay(!overlay)}>위험 오버레이</button>
+          <button className={styles.fchip} aria-pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>{t("ins.net.includeManaged")}</button>
+          <button className={styles.fchip} aria-pressed={overlay} onClick={() => setOverlay(!overlay)}>{t("ins.net.overlay")}</button>
         </div>
         <div className={styles.netLayout}>
           <div className={styles.graphWrap}>{view === "nest" ? renderNest() : renderFlow()}</div>
@@ -469,10 +474,10 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
           </aside>
         </div>
         <div className={styles.legend}>
-          <span>노드 아래 작은 칸 {data.factors.length}개 = 히트맵 요인</span>
-          <span>빨간 배지 = 위험 조합</span>
-          <span><svg width="12" height="12"><circle cx="6" cy="6" r="5.5" fill="var(--warnc)" /></svg> Azure 리소스 공용 네트워크 액세스 켜짐</span>
-          <span>노드를 누르면 그 노드의 연결만 강조 · Esc 해제</span>
+          <span>{t("ins.net.legendStrip", { n: data.factors.length })}</span>
+          <span>{t("ins.net.legendBadge")}</span>
+          <span><svg width="12" height="12"><circle cx="6" cy="6" r="5.5" fill="var(--warnc)" /></svg> {t("ins.net.legendPublic")}</span>
+          <span>{t("ins.net.legendClick")}</span>
         </div>
       </div>
     </section>

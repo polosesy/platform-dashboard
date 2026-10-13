@@ -1,4 +1,5 @@
 import * as k8s from "@kubernetes/client-node";
+import type { Lang } from "../infra/lang.js";
 import type { Env } from "../env.js";
 import type {
   HubbleFlow,
@@ -69,7 +70,7 @@ export async function collectServiceMap(
   env: Env,
   bearerToken: string | undefined,
   clusterId: string,
-  opts?: { timeWindowMinutes?: number; namespace?: string },
+  opts?: { timeWindowMinutes?: number; namespace?: string; lang?: Lang },
 ): Promise<HubbleServiceMapResponse> {
   const timeWindowMinutes = opts?.timeWindowMinutes ?? 5;
   const nsFilter = opts?.namespace ?? "";
@@ -77,6 +78,7 @@ export async function collectServiceMap(
   const { flows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
     ...(nsFilter ? { namespace: nsFilter } : {}),
+    lang: opts?.lang,
   });
 
   // reply 플로우 제외 (중복 방지)
@@ -385,9 +387,11 @@ export async function collectNetworkSummary(
   bearerToken: string | undefined,
   clusterId: string,
   timeWindowMinutes = 5,
+  lang: Lang = "ko",
 ): Promise<HubbleNetworkSummary> {
   const { flows: allFlows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
+    lang,
   });
   const flows = withinTimeWindow(allFlows, timeWindowMinutes);
 
@@ -480,9 +484,11 @@ export async function collectSecuritySummary(
   bearerToken: string | undefined,
   clusterId: string,
   timeWindowMinutes = 5,
+  lang: Lang = "ko",
 ): Promise<HubbleSecuritySummary> {
   const { flows: allFlows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
+    lang,
   });
   const flows = withinTimeWindow(allFlows, timeWindowMinutes);
 

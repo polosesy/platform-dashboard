@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import type { RbacBindingInfo, RbacRoleInfo } from "@aud/types";
 import styles from "../styles.module.css";
+import { useI18n } from "@/lib/i18n";
 import { Badge, Empty } from "./shared";
 
 function subjectText(b: RbacBindingInfo): string {
-  return b.subjects.map((s) => `${s.kind}:${s.namespace ? `${s.namespace}/` : ""}${s.name}`).join(", ") || "(없음)";
+  return b.subjects.map((s) => `${s.kind}:${s.namespace ? `${s.namespace}/` : ""}${s.name}`).join(", ") || "-";
 }
 
 export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo[]; bindings: RbacBindingInfo[]; showSystem: boolean }) {
+  const { t } = useI18n();
   const [riskyOnly, setRiskyOnly] = useState(true);
   const [query, setQuery] = useState("");
 
@@ -41,15 +43,15 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
     <div className={styles.page}>
       {clusterAdmins.length > 0 && (
         <div className={styles.error}>
-          cluster-admin 바인딩 {clusterAdmins.length}건: {clusterAdmins.map((b) => `${b.name} → ${subjectText(b)}`).join(" / ")}
+          {t("polc.rbac.clusterAdmins", { n: clusterAdmins.length })}: {clusterAdmins.map((b) => `${b.name} → ${subjectText(b)}`).join(" / ")}
         </div>
       )}
       <div className={styles.controls}>
         <label className={styles.toggle}>
           <input type="checkbox" checked={riskyOnly} onChange={(e) => setRiskyOnly(e.target.checked)} />
-          위험 권한이 있는 항목만
+          {t("polc.rbac.riskyOnly")}
         </label>
-        <input className={styles.search} placeholder="이름·주체·역할 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className={styles.search} placeholder={t("polc.rbac.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
         <a className={styles.refLink} href="https://kubernetes.io/docs/concepts/security/rbac-good-practices/" target="_blank" rel="noreferrer">
           RBAC Good Practices
         </a>
@@ -58,22 +60,22 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
           <div className={styles.panelTitle}>
-            바인딩 <span className={styles.muted}>({visibleBindings.length}/{bindings.length})</span>
+            {t("polc.rbac.bindings")} <span className={styles.muted}>({visibleBindings.length}/{bindings.length})</span>
           </div>
-          <div className={styles.panelHint}>누가(주체) 어떤 역할을 어느 범위로 받았는지</div>
+          <div className={styles.panelHint}>{t("polc.rbac.bindingsHint")}</div>
         </div>
         {visibleBindings.length === 0 ? (
-          <Empty>조건에 맞는 바인딩이 없습니다.</Empty>
+          <Empty>{t("polc.rbac.noBindings")}</Empty>
         ) : (
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>바인딩</th>
-                  <th>범위</th>
-                  <th>역할</th>
-                  <th>주체</th>
-                  <th>위험 권한</th>
+                  <th>{t("polc.rbac.binding")}</th>
+                  <th>{t("polc.rbac.scope")}</th>
+                  <th>{t("polc.rbac.role")}</th>
+                  <th>{t("ins.perm.subject")}</th>
+                  <th>{t("polc.rbac.risks")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,17 +83,17 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
                   <tr key={`${b.kind}/${b.namespace ?? ""}/${b.name}`}>
                     <td>
                       <div className={styles.mono}>{b.name}</div>
-                      {b.system && <Badge tone="system">시스템</Badge>}
+                      {b.system && <Badge tone="system">{t("polc.system")}</Badge>}
                     </td>
-                    <td>{b.kind === "ClusterRoleBinding" ? <Badge tone="medium">클러스터</Badge> : <span className={styles.mono}>{b.namespace}</span>}</td>
+                    <td>{b.kind === "ClusterRoleBinding" ? <Badge tone="medium">{t("polc.rbac.cluster")}</Badge> : <span className={styles.mono}>{b.namespace}</span>}</td>
                     <td className={styles.mono}>
                       {b.roleRef.kind}/{b.roleRef.name}
-                      {!b.roleFound && <div><Badge tone="info">역할 없음</Badge></div>}
+                      {!b.roleFound && <div><Badge tone="info">{t("polc.rbac.noRole")}</Badge></div>}
                     </td>
                     <td className={styles.mono}>{subjectText(b)}</td>
                     <td>
                       <div className={styles.chips}>
-                        {b.risks.length === 0 ? <span className={styles.muted}>-</span> : b.risks.map((r) => <Badge key={r} tone={r === "cluster-admin" || r === "익명 접근" ? "high" : "medium"}>{r}</Badge>)}
+                        {b.risks.length === 0 ? <span className={styles.muted}>-</span> : b.risks.map((r) => <Badge key={r} tone={r === "cluster-admin" || r === "익명 접근" || r === "anonymous access" ? "high" : "medium"}>{r}</Badge>)}
                       </div>
                     </td>
                   </tr>
@@ -105,21 +107,21 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
           <div className={styles.panelTitle}>
-            역할 <span className={styles.muted}>({visibleRoles.length}/{roles.length})</span>
+            {t("polc.rbac.roles")} <span className={styles.muted}>({visibleRoles.length}/{roles.length})</span>
           </div>
-          <div className={styles.panelHint}>규칙에 포함된 권한 상승 경로 (escalate·bind·impersonate·secrets·와일드카드 등)</div>
+          <div className={styles.panelHint}>{t("polc.rbac.rolesHint")}</div>
         </div>
         {visibleRoles.length === 0 ? (
-          <Empty>조건에 맞는 역할이 없습니다.</Empty>
+          <Empty>{t("polc.rbac.noRoles")}</Empty>
         ) : (
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>역할</th>
-                  <th>규칙 수</th>
-                  <th>바인딩 수</th>
-                  <th>위험 권한</th>
+                  <th>{t("polc.rbac.role")}</th>
+                  <th>{t("polc.rbac.rules")}</th>
+                  <th>{t("polc.rbac.bindingCount")}</th>
+                  <th>{t("polc.rbac.risks")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,12 +133,12 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
                         {r.name}
                       </div>
                       <div className={styles.chips}>
-                        {r.system && <Badge tone="system">시스템</Badge>}
+                        {r.system && <Badge tone="system">{t("polc.system")}</Badge>}
                         {r.aggregated && <Badge tone="neutral">aggregated</Badge>}
                       </div>
                     </td>
                     <td>{r.ruleCount}</td>
-                    <td>{r.bindingCount === 0 ? <span className={styles.muted}>미사용</span> : r.bindingCount}</td>
+                    <td>{r.bindingCount === 0 ? <span className={styles.muted}>{t("polc.rbac.unused")}</span> : r.bindingCount}</td>
                     <td>
                       <div className={styles.chips}>
                         {r.risks.length === 0 ? <span className={styles.muted}>-</span> : r.risks.map((x) => <Badge key={x} tone="medium">{x}</Badge>)}

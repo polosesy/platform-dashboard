@@ -4,13 +4,14 @@ import { getHubbleFlows, getHubbleStatus } from "../services/hubbleClient.js";
 import { collectServiceMap, collectNetworkSummary, collectSecuritySummary } from "../services/hubbleCollector.js";
 import type { HubbleStatusResponse, HubbleFlowsResponse } from "@aud/types";
 import { queryArmResourceId, queryInt, queryString, sendError } from "../infra/requestParams.js";
+import { queryLang } from "../infra/lang.js";
 
 export function registerHubbleRoutes(router: Router, env: Env) {
   // ── Status — Hubble Relay 연결 상태 ──
   router.get("/api/hubble/status", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      const status = await getHubbleStatus(env, req.auth?.bearerToken, clusterId);
+      const status = await getHubbleStatus(env, req.auth?.bearerToken, clusterId, queryLang(req));
       const data: HubbleStatusResponse = { clusterId, generatedAt: new Date().toISOString(), ...status };
       res.json(data);
     } catch (e: unknown) {
@@ -25,6 +26,7 @@ export function registerHubbleRoutes(router: Router, env: Env) {
       const data = await collectServiceMap(env, req.auth?.bearerToken, clusterId, {
         timeWindowMinutes: queryInt(req, "timeWindow", 5, 1, 60),
         namespace: queryString(req, "namespace"),
+        lang: queryLang(req),
       });
       res.json(data);
     } catch (e: unknown) {
@@ -42,6 +44,7 @@ export function registerHubbleRoutes(router: Router, env: Env) {
         verdict: queryString(req, "verdict"),
         type: queryString(req, "type"),
         last: limit,
+        lang: queryLang(req),
       });
       const data: HubbleFlowsResponse = {
         clusterId,
@@ -61,7 +64,7 @@ export function registerHubbleRoutes(router: Router, env: Env) {
   router.get("/api/hubble/network-summary", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await collectNetworkSummary(env, req.auth?.bearerToken, clusterId, queryInt(req, "timeWindow", 5, 1, 60)));
+      res.json(await collectNetworkSummary(env, req.auth?.bearerToken, clusterId, queryInt(req, "timeWindow", 5, 1, 60), queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "network_summary_failed", "hubble");
     }
@@ -71,7 +74,7 @@ export function registerHubbleRoutes(router: Router, env: Env) {
   router.get("/api/hubble/security-summary", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await collectSecuritySummary(env, req.auth?.bearerToken, clusterId, queryInt(req, "timeWindow", 5, 1, 60)));
+      res.json(await collectSecuritySummary(env, req.auth?.bearerToken, clusterId, queryInt(req, "timeWindow", 5, 1, 60), queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "security_summary_failed", "hubble");
     }

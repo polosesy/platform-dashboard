@@ -5,7 +5,7 @@ import styles from "./styles.module.css";
 import type { NetworkSummary } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { ErrorNotice, PageHeader, SampleDataNotice, Select } from "@/components/ui";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { formatBytes } from "@/lib/format";
 import { useApiQuery } from "@/lib/useApiQuery";
 
@@ -26,7 +26,7 @@ const ranges: RangePreset[] = [
 ];
 
 export default function NetworkPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [lookbackMinutes, setLookbackMinutes] = useState(60);
   const [top, setTop] = useState(15);
   const { data, error, loading } = useApiQuery(`network:${lookbackMinutes}:${top}`, (token) =>
@@ -52,7 +52,7 @@ export default function NetworkPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={summary ? <span>{t("net.table")} <span className={styles.mono}>{summary.table}</span> · {t("common.updated")} {new Date(summary.generatedAt).toLocaleString()}</span> : loading ? <span>{t("common.loading")}</span> : null}
+        meta={summary ? <span>{t("net.table")} <span className={styles.mono}>{summary.table}</span> · {t("common.updated")} {new Date(summary.generatedAt).toLocaleString(dateLocale(locale))}</span> : loading ? <span>{t("common.loading")}</span> : null}
         actions={
           <>
             <Select label={t("net.range")} value={String(lookbackMinutes)} onChange={(v) => setLookbackMinutes(Number(v))} options={ranges.map((r) => ({ value: String(r.minutes), label: r.label }))} />

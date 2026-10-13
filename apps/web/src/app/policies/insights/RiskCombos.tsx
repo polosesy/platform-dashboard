@@ -3,7 +3,9 @@
 import { useRef, useState } from "react";
 import type { AttackEdge, AttackNode, PolicyFinding, PolicyInsightsResponse, RemediationAction, RiskIssue } from "@aud/types";
 import { useMediaQuery } from "@/lib/useBrowserState";
-import { COLS, EVK, KIND_LABEL, TYPE_LABEL, confOf, edgeKey, evidenceOf, flowNote, hubbleLabel, issueNum, type InsightsNav } from "./model";
+import { useI18n } from "@/lib/i18n";
+import { edgeKey, issueNum, type InsightLabels, type InsightsNav, type TFn } from "./model";
+import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
 import { AttackGraph, AttackTable, type GraphSel } from "./AttackGraph";
 import styles from "./insights.module.css";
@@ -19,8 +21,7 @@ type Props = {
 };
 
 type Owner = "all" | RiskIssue["ownerGroup"];
-const OWNERS: Array<[Owner, string]> = [["all", "전체"], ["mine", "내 워크로드"], ["addon", "애드온"], ["azure", "Azure 설정"]];
-const SEV_LABEL = { crit: "위험", warn: "주의" } as const;
+const OWNERS: Owner[] = ["all", "mine", "addon", "azure"];
 
 export function issueState(issue: RiskIssue, checked: ReadonlySet<string>): "open" | "reduced" | "closed" {
   const resolved = new Set(issue.actions.filter((a) => checked.has(a.id)).flatMap((a) => a.closes));
@@ -54,6 +55,7 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 function ActionRow({ a, checked, onToggle }: { a: RemediationAction; checked: boolean; onToggle: (on: boolean) => void }) {
+  const { t } = useI18n();
   return (
     <label className={styles.action}>
       <input type="checkbox" data-act={a.id} checked={checked} onChange={(e) => onToggle(e.target.checked)} />
@@ -62,27 +64,30 @@ function ActionRow({ a, checked, onToggle }: { a: RemediationAction; checked: bo
         <div className={styles.actionD}>{a.desc}</div>
       </div>
       <div className={styles.effect}>
-        <Pill tone={a.risk}>수정: {a.riskLabel}</Pill>
-        <span className={styles.muted}>{a.effect === "closed" ? `점검 ${a.closes.length}건 해소${a.cuts.length ? " · 경로 차단" : ""}` : a.effect === "exception" ? "예외 처리" : "경로 축소(닫힘 아님)"}</span>
+        <Pill tone={a.risk}>{t("ins.combos.fixRisk")}: {a.riskLabel}</Pill>
+        <span className={styles.muted}>{a.effect === "closed" ? `${t("ins.combos.resolves", { n: a.closes.length })}${a.cuts.length ? ` · ${t("ins.combos.cutsPath")}` : ""}` : a.effect === "exception" ? t("ins.combos.exception") : t("ins.combos.reduces")}</span>
       </div>
     </label>
   );
 }
 
-function ticketText(issue: RiskIssue, data: PolicyInsightsResponse, checked: ReadonlySet<string>): string {
+function ticketText(issue: RiskIssue, data: PolicyInsightsResponse, checked: ReadonlySet<string>, t: TFn, lb: InsightLabels): string {
   const acts = issue.actions.filter((a) => checked.has(a.id));
   return [
-    `## [${SEV_LABEL[issue.sev]}] ${issue.title}`, "",
-    `- 클러스터: ${data.containment.cluster.name} (${data.containment.cluster.location})`,
-    `- 근거: ${confOf(issue, data.network.coverage)}`,
-    `- 관련 점검: ${issue.findingIds.map((f) => f.split(":")[0]).join(", ") || "-"}`,
-    `- 소유: ${issue.owner}`, "", "### 조치",
-    ...(acts.length ? acts : issue.actions).map((a) => `- [ ] ${a.title} — 수정 위험: ${a.riskLabel}`), "",
-    "### 롤백", "- 적용한 리소스를 이전 매니페스트로 되돌리고 Hubble DROPPED 흐름을 확인",
+    `## [${t(`ins.sev.${issue.sev}`)}] ${issue.title}`, "",
+    `- ${t("ins.ticket.cluster")}: ${data.containment.cluster.name} (${data.containment.cluster.location})`,
+    `- ${t("ins.ticket.evidence")}: ${lb.confOf(issue, data.network.coverage)}`,
+    `- ${t("ins.ticket.findings")}: ${issue.findingIds.map((f) => f.split(":")[0]).join(", ") || "-"}`,
+    `- ${t("ins.ticket.owner")}: ${issue.owner}`, "", `### ${t("ins.ticket.actions")}`,
+    ...(acts.length ? acts : issue.actions).map((a) => `- [ ] ${a.title} — ${t("ins.combos.fixRisk")}: ${a.riskLabel}`), "",
+    `### ${t("ins.ticket.rollback")}`, `- ${t("ins.ticket.rollbackStep")}`,
   ].join("\n");
 }
 
 export function RiskCombos({ data, findings, selectedId, onSelect, checked, onToggleAction, nav }: Props) {
+  const { t } = useI18n();
+  const lb = useInsightLabels();
+  const { COLS, EVK, KIND_LABEL, TYPE_LABEL, confOf, evidenceOf, flowNote, hubbleLabel } = lb;
   const [owner, setOwner] = useState<Owner>("all");
   const [quickOnly, setQuickOnly] = useState(false);
   const [graphSel, setGraphSel] = useState<(GraphSel & { issue: string }) | null>(null);
@@ -106,7 +111,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
   const findingById = new Map(findings.map((f) => [f.id, f]));
 
   if (!issue) {
-    return <div className={styles.notice}>서로 이어지는 위험 조합이 발견되지 않았습니다. 개별 점검 결과는 &lsquo;점검 결과&rsquo; 탭에서 확인하세요.</div>;
+    return <div className={styles.notice}>{t("ins.combos.none")}</div>;
   }
   const num = (id: string) => issueNum(data.issues.findIndex((i) => i.id === id));
 
@@ -124,11 +129,11 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
     if (prev) (els.current.get(`${prev.kind}:${prev.id}`) as HTMLElement | SVGElement | undefined)?.focus();
   };
   const toggleAct = (id: string, on: boolean) => onToggleAction(id, on);
-  const flash = (t: string) => { setToast(t); setTimeout(() => setToast(""), 2500); };
+  const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
   const refLinks = (refs: string[]) => refs.flatMap((id) => [
-    ...(data.rows.some((r) => r.id === id) ? [{ label: `히트맵에서 보기 · ${data.rows.find((r) => r.id === id)!.name}`, onClick: () => nav.openHeatRow(id) }] : []),
-    ...(data.network.nodes.some((n) => n.id === id) ? [{ label: `네트워크 맵에서 보기 · ${data.network.nodes.find((n) => n.id === id)!.label}`, onClick: () => nav.openNet(id) }] : []),
+    ...(data.rows.some((r) => r.id === id) ? [{ label: `${t("ins.combos.openHeat")} · ${data.rows.find((r) => r.id === id)!.name}`, onClick: () => nav.openHeatRow(id) }] : []),
+    ...(data.network.nodes.some((n) => n.id === id) ? [{ label: `${t("ins.heat.openNet")} · ${data.network.nodes.find((n) => n.id === id)!.label}`, onClick: () => nav.openNet(id) }] : []),
   ]).filter((l, i, a) => a.findIndex((x) => x.label === l.label) === i);
 
   const nodeModel = (n: AttackNode): InspectorModel => {
@@ -140,34 +145,34 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
       kicker: `${COLS[n.col]} · ${TYPE_LABEL[n.type] ?? n.type}`,
       title: n.label,
       sub: n.sub,
-      chips: <>{n.unk && <EvidenceChip ev="unk" text="미확인" />}{(n.badges ?? []).map((b) => <Pill key={b.what} tone="ev">{b.n} {b.what}</Pill>)}</>,
-      callouts: (n.notes ?? []).map((t) => ({ tone: "warn" as const, content: `확인 필요 — ${t}` })),
+      chips: <>{n.unk && <EvidenceChip ev="unk" text={t("ins.unknown")} />}{(n.badges ?? []).map((b) => <Pill key={b.what} tone="ev">{b.n} {b.what}</Pill>)}</>,
+      callouts: (n.notes ?? []).map((note) => ({ tone: "warn" as const, content: `${t("ins.combos.check")} — ${note}` })),
       sections: [
-        n.facts.length ? { h: "사실 · 값 | 근거 | 출처", rows: n.facts as InspectorRow[] } : { h: "사실", body: <div className={styles.muted}>이 노드에 대해 수집된 추가 사실이 없습니다.</div> },
-        { h: `연결 ${conn.length}`, body: (
+        n.facts.length ? { h: t("ins.combos.factsHead"), rows: n.facts as InspectorRow[] } : { h: t("ins.combos.facts"), body: <div className={styles.muted}>{t("ins.combos.noFacts")}</div> },
+        { h: t("ins.combos.links", { n: conn.length }), body: (
           <ul className={styles.list}>
             {conn.map((e) => (
               <li key={edgeKey(e)}>
                 <span>{e.from === n.id ? `→ ${byId.get(e.to)?.label}` : `← ${byId.get(e.from)?.label}`}</span>
                 <span className={styles.muted}>{e.label}</span>
                 <EvidenceChip ev={e.ev} />
-                {e.cut && <span className={styles.cut} data-done={cutDone.has(edgeKey(e)) || undefined}>{cutDone.has(edgeKey(e)) ? "✓ 차단됨" : "⊗ 권장 차단"}</span>}
+                {e.cut && <span className={styles.cut} data-done={cutDone.has(edgeKey(e)) || undefined}>{cutDone.has(edgeKey(e)) ? `✓ ${t("ins.combos.cutDone")}` : `⊗ ${t("ins.combos.cut")}`}</span>}
               </li>
             ))}
           </ul>
         ) },
-        acts.length > 0 && { h: "이 지점을 끊는 조치", body: <>{acts.map((a) => <ActionRow key={a.id} a={a} checked={checked.has(a.id)} onToggle={(on) => toggleAct(a.id, on)} />)}</> },
-        { h: `이 조합의 점검 ${issue.findingIds.length}건 (노드 단위 아님)`, body: (
+        acts.length > 0 && { h: t("ins.combos.cutsHere"), body: <>{acts.map((a) => <ActionRow key={a.id} a={a} checked={checked.has(a.id)} onToggle={(on) => toggleAct(a.id, on)} />)}</> },
+        { h: t("ins.combos.findings", { n: issue.findingIds.length }), body: (
           <ul className={styles.list}>
             {issue.findingIds.map((id) => { const f = findingById.get(id); return <li key={id}><span className={styles.mono}>{f?.ruleId ?? id}</span><span>{f?.title}</span><span className={styles.muted}>{f?.namespace ?? f?.resource?.name ?? ""}</span></li>; })}
-            {!issue.findingIds.length && <li className={styles.muted}>연결된 점검 없음</li>}
+            {!issue.findingIds.length && <li className={styles.muted}>{t("ins.combos.noFindings")}</li>}
           </ul>
         ) },
-        n.cmd ? { h: "확인 명령 (읽기 전용)", body: (
+        n.cmd ? { h: t("ins.combos.cmd"), body: (
           <details>
-            <summary className={styles.muted}>권한 실측 — kubectl auth can-i</summary>
+            <summary className={styles.muted}>{t("ins.combos.cmdSummary")} — kubectl auth can-i</summary>
             <CodeBlock code={n.cmd} />
-            <div className={styles.copyRow}><button className={styles.btnGhost} onClick={() => copyText(n.cmd!).then((ok) => flash(ok ? "명령을 복사했습니다" : "복사하지 못했습니다"))}>명령 복사</button></div>
+            <div className={styles.copyRow}><button className={styles.btnGhost} onClick={() => copyText(n.cmd!).then((ok) => flash(ok ? t("ins.combos.copiedCmd") : t("ins.combos.copyFailed")))}>{t("ins.combos.copyCmd")}</button></div>
           </details>
         ) } : null,
       ],
@@ -179,21 +184,21 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
     const byId = new Map(issue.nodes.map((x) => [x.id, x]));
     const a = byId.get(e.from)!, b = byId.get(e.to)!;
     const act = e.cut ? issue.actions.find((x) => x.id === e.cut) : undefined;
-    const src = { obs: `Hubble · ${hubbleLabel(data.network.coverage)} · ${flowNote(data.network.coverage)} · 연결 시작 패킷`, perm: `RBAC 바인딩·역할 — ${e.label || "-"}`, cfg: `구성 필드 — ${e.label || "-"}`, unk: e.why ?? "수집되지 않은 연결고리 — 추가 수집 시 확정" }[e.ev];
+    const src = { obs: `Hubble · ${hubbleLabel(data.network.coverage)} · ${flowNote(data.network.coverage)} · ${t("ins.combos.srcObs")}`, perm: `${t("ins.combos.srcPerm")} — ${e.label || "-"}`, cfg: `${t("ins.combos.srcCfg")} — ${e.label || "-"}`, unk: e.why ?? t("ins.combos.srcUnk") }[e.ev];
     return {
       id: `ge-${issue.id}-${edgeKey(e)}`,
-      kicker: `경로 간선 · ${EVK[e.ev]}`,
+      kicker: `${t("ins.combos.edge")} · ${EVK[e.ev]}`,
       title: `${a.label} → ${b.label}`,
       sub: e.label,
       chips: <EvidenceChip ev={e.ev} />,
       sections: [
-        { h: "근거", rows: [
-          { k: "등급", v: { obs: "실제 트래픽이 관측됨 (정상 트래픽 포함)", perm: "권한이 부여되어 있음 (사용 여부와 무관)", cfg: "구성상 가능함", unk: "연결고리가 확인되지 않음" }[e.ev], ev: e.ev },
-          { k: "원문", v: e.label || "-", mono: true },
-          { k: "출처", v: src },
+        { h: t("ins.heat.evidence"), rows: [
+          { k: t("ins.combos.grade"), v: t(`ins.combos.grade.${e.ev}`), ev: e.ev },
+          { k: t("ins.combos.raw"), v: e.label || "-", mono: true },
+          { k: t("ins.combos.source"), v: src },
         ] },
-        act ? { h: `권장 차단${checked.has(act.id) ? " · 적용됨" : ""}`, body: <ActionRow a={act} checked={checked.has(act.id)} onToggle={(on) => toggleAct(act.id, on)} /> }
-          : { h: "권장 차단", body: <div className={styles.muted}>이 간선에 지정된 차단 지점이 없습니다.</div> },
+        act ? { h: `${t("ins.combos.cut")}${checked.has(act.id) ? ` · ${t("ins.combos.applied")}` : ""}`, body: <ActionRow a={act} checked={checked.has(act.id)} onToggle={(on) => toggleAct(act.id, on)} /> }
+          : { h: t("ins.combos.cut"), body: <div className={styles.muted}>{t("ins.combos.noCut")}</div> },
       ],
       links: refLinks([...a.refs, ...b.refs]),
     };
@@ -211,8 +216,8 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
   const cuts = issue.edges.filter((e) => e.cut);
   const sim = (
     <div className={styles.sim}>
-      <span>이 위험 조합: <b>{st === "closed" ? "닫힘" : st === "reduced" ? "축소 — 묶인 점검이 남아 있음" : "열림"}</b> · 권장 차단 {cuts.length}곳 중 <b>{cuts.filter((e) => cutDone.has(edgeKey(e))).length}</b>곳 차단</span>
-      <span>전체: 위험 조합 <b>{data.issues.length} → {openCount}</b>{reduced ? ` · 축소 ${reduced}` : ""} · 해결된 보안 점검 {[...resolvedAll].filter((f) => security.some((s) => s.id === f)).length}/{security.length}</span>
+      <span>{t("ins.combos.thisCombo")}: <b>{t(`ins.combos.state.${st}`)}</b> · {t("ins.combos.cutProgress", { n: cuts.length, done: cuts.filter((e) => cutDone.has(edgeKey(e))).length })}</span>
+      <span>{t("ins.combos.total")}: <b>{data.issues.length} → {openCount}</b>{reduced ? ` · ${t("ins.combos.state.reducedShort")} ${reduced}` : ""} · {t("ins.combos.resolved", { n: [...resolvedAll].filter((f) => security.some((s) => s.id === f)).length, m: security.length })}</span>
     </div>
   );
 
@@ -221,10 +226,10 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
       <div className={styles.queue}>
         <div className={styles.queueIn}>
           <div className={styles.queueH}>
-            <h3>위험 조합 <span className={styles.muted}>{openCount}건</span></h3>
+            <h3>{t("ins.heat.combosCol")} <span className={styles.muted}>{openCount}</span></h3>
             <div className={styles.ctrls}>
-              <button className={styles.fchip} aria-pressed={quickOnly} onClick={() => setQuickOnly(!quickOnly)}>빠른 성과만</button>
-              {OWNERS.map(([k, l]) => <button key={k} className={styles.fchip} aria-pressed={owner === k} onClick={() => setOwner(k)}>{l}</button>)}
+              <button className={styles.fchip} aria-pressed={quickOnly} onClick={() => setQuickOnly(!quickOnly)}>{t("ins.combos.quickOnly")}</button>
+              {OWNERS.map((k) => <button key={k} className={styles.fchip} aria-pressed={owner === k} onClick={() => setOwner(k)}>{t(`ins.owner.${k}`)}</button>)}
             </div>
           </div>
           {shown.map((i) => {
@@ -247,27 +252,27 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
                 }}
               >
                 <div className={styles.cardTop}>
-                  <Pill tone={i.sev}>{num(i.id)} {SEV_LABEL[i.sev]}</Pill>
-                  <span className={styles.cardNum}>{KIND_LABEL[i.kind]} · 점검 {i.findingIds.length}건{s === "closed" ? " · 닫힘" : s === "reduced" ? " · 축소" : ""}</span>
+                  <Pill tone={i.sev}>{num(i.id)} {t(`ins.sev.${i.sev}`)}</Pill>
+                  <span className={styles.cardNum}>{KIND_LABEL[i.kind]} · {t("ins.combos.checksN", { n: i.findingIds.length })}{s === "closed" ? ` · ${t("ins.combos.state.closed")}` : s === "reduced" ? ` · ${t("ins.combos.state.reducedShort")}` : ""}</span>
                 </div>
                 <div className={styles.cardTitle}>{i.title}</div>
                 <div className={styles.cardMeta}>
-                  {evidenceOf(i).map(([k, t]) => <Pill key={t} tone={k === "unk" ? "unk" : "ev"}>{k === "unk" ? "? " : ""}{t}</Pill>)}
-                  {i.actions[0] && <Pill tone={i.actions[0].risk} title="대표 조치의 수정 시 운영 영향">수정: {i.actions[0].riskLabel}</Pill>}
+                  {evidenceOf(i).map(([k, txt]) => <Pill key={txt} tone={k === "unk" ? "unk" : "ev"}>{k === "unk" ? "? " : ""}{txt}</Pill>)}
+                  {i.actions[0] && <Pill tone={i.actions[0].risk} title={t("ins.combos.fixRiskHint")}>{t("ins.combos.fixRisk")}: {i.actions[0].riskLabel}</Pill>}
                 </div>
-                <div className={styles.owner}>소유: {i.owner}</div>
+                <div className={styles.owner}>{t("ins.ticket.owner")}: {i.owner}</div>
               </button>
             );
           })}
-          {shown.length === 0 && <div className={styles.muted}>조건에 맞는 위험 조합이 없습니다.</div>}
+          {shown.length === 0 && <div className={styles.muted}>{t("ins.combos.noneMatch")}</div>}
           {hidden.length > 0 && (
             <>
               <div className={styles.dimH}>
-                <span>필터 밖 위험 {hidden.length}건</span>
-                <button className={styles.linkish} onClick={() => { setOwner("all"); setQuickOnly(false); }}>필터 해제</button>
+                <span>{t("ins.combos.hidden", { n: hidden.length })}</span>
+                <button className={styles.linkish} onClick={() => { setOwner("all"); setQuickOnly(false); }}>{t("ins.combos.clearFilter")}</button>
               </div>
               {hidden.map((i) => (
-                <button key={i.id} className={`${styles.card} ${styles.dim}`} data-sev={i.sev} aria-label={`${num(i.id)} ${KIND_LABEL[i.kind]}: ${i.title} — 필터를 해제하고 보기`}
+                <button key={i.id} className={`${styles.card} ${styles.dim}`} data-sev={i.sev} aria-label={`${num(i.id)} ${KIND_LABEL[i.kind]}: ${i.title} — ${t("ins.combos.showUnfiltered")}`}
                   onClick={() => { setOwner("all"); setQuickOnly(false); select(i.id, true); }}>
                   <span className={styles.cardNum}>{num(i.id)}</span>
                   <span className={styles.dimT}>{KIND_LABEL[i.kind]} · {i.title}</span>
@@ -278,14 +283,14 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
         </div>
       </div>
 
-      <section className={`${styles.panel} ${styles.gPanel}`} aria-label="공격 경로">
+      <section className={`${styles.panel} ${styles.gPanel}`} aria-label={t("ins.combos.pathAria")}>
         <div className={styles.panelH}>
-          <h3>공격 경로 · 근거 등급</h3>
+          <h3>{t("ins.combos.pathTitle")}</h3>
           <div className={styles.ctrls}>
-            <span className={styles.sub}>경로 근거: {confOf(issue, data.network.coverage)}</span>
+            <span className={styles.sub}>{t("ins.combos.pathEvidence")}: {confOf(issue, data.network.coverage)}</span>
             <div className={styles.toggle}>
-              <button aria-pressed={view === "graph"} onClick={() => setViewChoice("graph")}>그래프</button>
-              <button aria-pressed={view === "table"} onClick={() => setViewChoice("table")}>표</button>
+              <button aria-pressed={view === "graph"} onClick={() => setViewChoice("graph")}>{t("ins.combos.graph")}</button>
+              <button aria-pressed={view === "table"} onClick={() => setViewChoice("table")}>{t("ins.combos.table")}</button>
             </div>
           </div>
         </div>
@@ -304,28 +309,28 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
             </div>
           )}
           <div className={styles.gLegend}>
-            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-obs)" strokeWidth="2.5" /></svg>통신 관측(정상 트래픽 포함)</span>
-            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-perm)" strokeWidth="2" strokeDasharray="7 4" /></svg>RBAC 권한</span>
-            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-cfg)" strokeWidth="2" strokeDasharray="2 3" /></svg>구성·마운트</span>
-            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--unk)" strokeWidth="2" strokeDasharray="2 3" opacity="0.6" /></svg>추정·미확인 (?)</span>
-            <span>노드·간선 클릭 또는 Tab+Enter → 상세 · Esc 닫기</span>
+            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-obs)" strokeWidth="2.5" /></svg>{t("ins.combos.legendObs")}</span>
+            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-perm)" strokeWidth="2" strokeDasharray="7 4" /></svg>{t("ins.ev.perm")}</span>
+            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--edge-cfg)" strokeWidth="2" strokeDasharray="2 3" /></svg>{t("ins.combos.legendCfg")}</span>
+            <span><svg width="30" height="8"><line x1="0" y1="4" x2="30" y2="4" stroke="var(--unk)" strokeWidth="2" strokeDasharray="2 3" opacity="0.6" /></svg>{t("ins.ev.unk")} (?)</span>
+            <span>{t("ins.combos.legendKeys")}</span>
           </div>
           {sim}
         </div>
       </section>
 
-      <section className={`${styles.panel} ${styles.fPanel}`} aria-label="출처에서 수정">
-        <div className={styles.panelH}><h3>출처에서 수정</h3><span className={styles.sub}>체크하면 그래프와 판정 숫자에 반영됩니다 (이 화면 안의 시뮬레이션)</span></div>
+      <section className={`${styles.panel} ${styles.fPanel}`} aria-label={t("ins.combos.fixTitle")}>
+        <div className={styles.panelH}><h3>{t("ins.combos.fixTitle")}</h3><span className={styles.sub}>{t("ins.combos.fixSub")}</span></div>
         <div className={styles.panelB}>
           <div className={styles.fixGrid}>
             <div>
-              <h4>조치</h4>
+              <h4>{t("ins.ticket.actions")}</h4>
               {issue.actions.map((a) => <ActionRow key={a.id} a={a} checked={checked.has(a.id)} onToggle={(on) => toggleAct(a.id, on)} />)}
             </div>
             <div>
               <div className={styles.tabs} role="tablist">
-                <button role="tab" aria-selected={fixTab === "code"} onClick={() => setFixTab("code")}>YAML · 명령</button>
-                <button role="tab" aria-selected={fixTab === "ticket"} onClick={() => setFixTab("ticket")}>티켓 초안</button>
+                <button role="tab" aria-selected={fixTab === "code"} onClick={() => setFixTab("code")}>{t("ins.combos.tabCode")}</button>
+                <button role="tab" aria-selected={fixTab === "ticket"} onClick={() => setFixTab("ticket")}>{t("ins.combos.tabTicket")}</button>
               </div>
               {fixTab === "code" ? (
                 issue.actions.map((a, n) => (
@@ -336,10 +341,10 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
                 ))
               ) : (
                 <>
-                  <CodeBlock code={ticketText(issue, data, checked)} />
+                  <CodeBlock code={ticketText(issue, data, checked, t, lb)} />
                   <div className={styles.copyRow}>
                     <span className={styles.muted} aria-live="polite">{toast}</span>
-                    <button className={styles.btnGhost} onClick={() => copyText(ticketText(issue, data, checked)).then((ok) => flash(ok ? "티켓 초안을 복사했습니다" : "복사하지 못했습니다"))}>티켓 초안 복사</button>
+                    <button className={styles.btnGhost} onClick={() => copyText(ticketText(issue, data, checked, t, lb)).then((ok) => flash(ok ? t("ins.combos.copiedTicket") : t("ins.combos.copyFailed")))}>{t("ins.combos.copyTicket")}</button>
                   </div>
                 </>
               )}

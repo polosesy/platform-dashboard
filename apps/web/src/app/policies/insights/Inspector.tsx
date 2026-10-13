@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import type { EvidenceKind } from "@aud/types";
-import { EVK, domId } from "./model";
+import { useI18n } from "@/lib/i18n";
+import { domId } from "./model";
+import { useInsightLabels } from "./useInsightLabels";
 import styles from "./insights.module.css";
 
 export function EvidenceChip({ ev, text }: { ev: EvidenceKind; text?: string }) {
+  const { EVK } = useInsightLabels();
   return (
     <span className={styles.evc} data-ev={ev}>
       {ev === "unk" ? "? " : ""}
@@ -58,6 +61,7 @@ export function FactRows({ rows, grid }: { rows: InspectorRow[]; grid?: boolean 
  * Focus moves to the title when a different subject opens; Escape and ✕ call `onClose`.
  */
 export function Inspector({ model, onClose, cols, autoFocus = true }: { model: InspectorModel; onClose?: () => void; cols?: boolean; autoFocus?: boolean }) {
+  const { t } = useI18n();
   const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (autoFocus) titleRef.current?.focus({ preventScroll: true });
@@ -84,7 +88,7 @@ export function Inspector({ model, onClose, cols, autoFocus = true }: { model: I
           {model.chips && <div className={styles.dcChips}>{model.chips}</div>}
         </div>
         {onClose && (
-          <button className={styles.dcX} onClick={onClose} aria-label="상세 닫기">
+          <button className={styles.dcX} onClick={onClose} aria-label={t("ins.closeDetail")}>
             ✕
           </button>
         )}

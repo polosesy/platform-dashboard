@@ -1,6 +1,7 @@
 "use client";
 
 import type { NodeResourceSummary } from "@aud/types";
+import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { formatBytes } from "@/lib/format";
 
@@ -50,11 +51,12 @@ function PressureIndicators({ conditions }: { conditions: NodeResourceSummary["c
 }
 
 export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
+  const { t } = useI18n();
   if (nodes.length === 0) {
     return (
       <div className={styles.noDataBanner}>
-        <strong>노드 데이터 없음</strong>
-        Container Insights가 연결되어 있지 않거나 노드를 수집하지 않습니다.
+        <strong>{t("ob.noNodes")}</strong>
+        {t("ob.noNodesHint")}
       </div>
     );
   }
@@ -65,7 +67,7 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "rgba(20,21,23,0.6)" }}>
-        <span>전체 <strong style={{ color: "var(--fg)" }}>{nodes.length}</strong> 노드</span>
+        <span>{t("ob.allNodes")} <strong style={{ color: "var(--fg)" }}>{nodes.length}</strong></span>
         <span style={{ color: "rgba(16,137,62,0.85)" }}>Ready: <strong>{ready}</strong></span>
         {notReady > 0 && <span style={{ color: "rgba(196,43,28,0.85)" }}>NotReady: <strong>{notReady}</strong></span>}
       </div>
@@ -84,7 +86,7 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
                 <GaugeBar pct={node.cpuUsagePct} />
               </div>
               <div>
-                <div className={styles.nodeMetricLabel}>메모리</div>
+                <div className={styles.nodeMetricLabel}>{t("ob.memory")}</div>
                 <GaugeBar pct={node.memoryUsagePct} />
               </div>
             </div>
@@ -92,7 +94,7 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
             {/* Disk */}
             {node.diskUsagePct !== null && (
               <div>
-                <div className={styles.nodeMetricLabel}>디스크</div>
+                <div className={styles.nodeMetricLabel}>{t("ob.disk")}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <GaugeBar pct={node.diskUsagePct} />
                   {node.diskCapacityGB !== null && (
@@ -103,7 +105,7 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
             )}
 
             <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 11, color: "rgba(20,21,23,0.45)" }}>
-              <span>파드 {node.podCount}개</span>
+              <span>{t("ob.podsN", { n: node.podCount })}</span>
               {node.cpuCapacityMillicores != null && <span>CPU {node.cpuCapacityMillicores}m</span>}
               {node.memoryCapacityMiB != null && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}
             </div>

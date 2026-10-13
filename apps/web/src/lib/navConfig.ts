@@ -6,7 +6,8 @@
 // layers side by side), Kubernetes, security, cost.
 // A group with one item renders as a direct link; two or more render as a dropdown.
 // Security follows the Wiz/CNAPP axes that have data: posture overview, findings (CSPM),
-// identity (CIEM), threats, compliance — and cluster security (KSPM). Items may carry a
+// identity (CIEM), threats, compliance — and cluster security (KSPM). The integrated view that joins
+// Azure and cluster evidence comes first, under its own section. Items may carry a
 // `section` (i18n key) that is shown as a heading where the section changes.
 // ──────────────────────────────────────────────────────────────
 
@@ -14,7 +15,7 @@ export type NavIcon =
   | "home" | "cloud" | "waypoints" | "helm" | "lock" | "coins"
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
-  | "listChecks" | "fingerprint" | "siren" | "scale";
+  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -47,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     key: "security", labelKey: "nav.group.security", icon: "lock", items: [
+      item("/security/risk", "securityRisk", "radar", "nav.section.crossRisk"),
       item("/security", "securityOverview", "shieldCheck", "nav.section.azureSecurity"),
       item("/security/findings", "securityFindings", "listChecks", "nav.section.azureSecurity"),
       item("/security/identity", "securityIdentity", "fingerprint", "nav.section.azureSecurity"),

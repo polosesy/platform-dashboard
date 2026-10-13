@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { HubbleSecuritySummary } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
@@ -10,6 +11,7 @@ import { CoverageNote } from "./CoverageNote";
 type Props = { clusterId: string };
 
 export function SecurityTab({ clusterId }: Props) {
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [data, setData] = useState<HubbleSecuritySummary | null>(null);
@@ -23,7 +25,7 @@ export function SecurityTab({ clusterId }: Props) {
     try {
       const token = await getApiToken();
       const resp = await fetchJsonWithBearer<HubbleSecuritySummary>(
-        `${apiBaseUrl()}/api/hubble/security-summary?clusterId=${encodeURIComponent(clusterId)}&timeWindow=5`,
+        `${apiBaseUrl()}/api/hubble/security-summary?clusterId=${encodeURIComponent(clusterId)}&timeWindow=5&lang=${locale}`,
         token,
       );
       setData(resp);
@@ -32,7 +34,7 @@ export function SecurityTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, getApiToken]);
+  }, [clusterId, getApiToken, locale]);
 
   useEffect(() => {
     fetch_();
@@ -44,12 +46,12 @@ export function SecurityTab({ clusterId }: Props) {
     return (
       <div className={styles.loadingRow}>
         <span className={styles.spinner} />
-        <span>보안 데이터 로딩 중...</span>
+        <span>{t("hb.sec.loading")}</span>
       </div>
     );
   }
 
-  if (error) return <div className={styles.errorMsg}>Security 오류: {error}</div>;
+  if (error) return <div className={styles.errorMsg}>{t("hb.sec.error")}: {error}</div>;
   if (!data) return null;
 
   const total = data.policyVerdicts.allowed + data.policyVerdicts.denied + data.policyVerdicts.audit;
@@ -64,23 +66,23 @@ export function SecurityTab({ clusterId }: Props) {
           <div className={styles.verdictBoxValue} style={{ color: "rgba(16,137,62,0.85)" }}>
             {data.policyVerdicts.allowed.toLocaleString()}
           </div>
-          <div className={styles.verdictBoxLabel}>Allowed</div>
+          <div className={styles.verdictBoxLabel}>{t("hb.allowed")}</div>
         </div>
         <div className={styles.verdictBox}>
           <div className={styles.verdictBoxValue} style={{ color: "rgba(196,43,28,0.85)" }}>
             {data.policyVerdicts.denied.toLocaleString()}
           </div>
-          <div className={styles.verdictBoxLabel}>Denied</div>
+          <div className={styles.verdictBoxLabel}>{t("hb.denied")}</div>
         </div>
         <div className={styles.verdictBox}>
           <div className={styles.verdictBoxValue} style={{ color: "rgba(209,132,0,0.85)" }}>
             {data.policyVerdicts.audit.toLocaleString()}
           </div>
-          <div className={styles.verdictBoxLabel}>Audit</div>
+          <div className={styles.verdictBoxLabel}>{t("hb.verdict.AUDIT")}</div>
         </div>
         <div className={styles.verdictBox}>
           <div className={styles.verdictBoxValue}>{total.toLocaleString()}</div>
-          <div className={styles.verdictBoxLabel}>Total</div>
+          <div className={styles.verdictBoxLabel}>{t("hb.total")}</div>
         </div>
         {total > 0 && (
           <div className={styles.verdictBox}>
@@ -89,7 +91,7 @@ export function SecurityTab({ clusterId }: Props) {
             }}>
               {((data.policyVerdicts.denied / total) * 100).toFixed(1)}%
             </div>
-            <div className={styles.verdictBoxLabel}>Deny Rate</div>
+            <div className={styles.verdictBoxLabel}>{t("hb.denyRate")}</div>
           </div>
         )}
       </div>
@@ -97,16 +99,16 @@ export function SecurityTab({ clusterId }: Props) {
       {/* Top Denied Flows */}
       {data.topDenied.length > 0 && (
         <>
-          <h3 className={styles.sectionTitle}>Top Denied 플로우</h3>
+          <h3 className={styles.sectionTitle}>{t("hb.sec.topDenied")}</h3>
           <table className={styles.dataTable}>
             <thead>
               <tr>
-                <th>Source</th>
-                <th>Destination</th>
-                <th>Port</th>
-                <th>Protocol</th>
-                <th>Count</th>
-                <th>Direction</th>
+                <th>{t("hb.col.source")}</th>
+                <th>{t("hb.col.destination")}</th>
+                <th>{t("hb.col.port")}</th>
+                <th>{t("hb.col.protocol")}</th>
+                <th>{t("hb.col.count")}</th>
+                <th>{t("hb.col.direction")}</th>
               </tr>
             </thead>
             <tbody>
@@ -127,24 +129,24 @@ export function SecurityTab({ clusterId }: Props) {
 
       {data.topDenied.length === 0 && (
         <div className={styles.noDataBanner}>
-          <strong>차단된 플로우 없음</strong>
-          현재 시간 범위에서 차단된 네트워크 플로우가 없습니다.
+          <strong>{t("hb.sec.noDenied")}</strong>
+          {t("hb.sec.noDeniedHint")}
         </div>
       )}
 
       {/* Identity-based Flow Matrix */}
       {data.identityFlows.length > 0 && (
         <>
-          <h3 className={styles.sectionTitle}>Identity 기반 플로우 매트릭스</h3>
+          <h3 className={styles.sectionTitle}>{t("hb.sec.matrix")}</h3>
           <table className={styles.dataTable}>
             <thead>
               <tr>
-                <th>Source Identity</th>
-                <th>Source Label</th>
-                <th>Dest Identity</th>
-                <th>Dest Label</th>
-                <th>Allowed</th>
-                <th>Denied</th>
+                <th>{t("hb.fd.srcIdentity")}</th>
+                <th>{t("hb.sec.srcLabel")}</th>
+                <th>{t("hb.fd.dstIdentity")}</th>
+                <th>{t("hb.sec.dstLabel")}</th>
+                <th>{t("hb.allowed")}</th>
+                <th>{t("hb.denied")}</th>
               </tr>
             </thead>
             <tbody>

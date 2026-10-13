@@ -7,6 +7,7 @@ import type {
   NodeColorToken,
   EdgeColorToken,
 } from "@aud/types";
+import { rgba } from "@/lib/palette";
 
 // ────────────────────────────────────────────
 // Default design tokens (matches figma-tokens.json)
@@ -20,24 +21,24 @@ export const defaultTokens: DesignTokenSet = {
   source: "manual",
   colors: {
     node: {
-      ok:       { fill: "rgba(255,255,255,0.88)", border: "rgba(16,137,62,0.30)",  shadow: "rgba(16,137,62,0.12)",  ringStroke: "rgba(16,137,62,0.70)",  text: "rgba(20,21,23,0.90)" },
-      warning:  { fill: "rgba(255,255,255,0.88)", border: "rgba(209,132,0,0.35)",  shadow: "rgba(209,132,0,0.14)",  ringStroke: "rgba(209,132,0,0.75)",  text: "rgba(20,21,23,0.90)" },
-      critical: { fill: "rgba(255,255,255,0.88)", border: "rgba(216,59,1,0.35)",   shadow: "rgba(216,59,1,0.14)",   ringStroke: "rgba(216,59,1,0.80)",   text: "rgba(20,21,23,0.90)" },
-      unknown:  { fill: "rgba(255,255,255,0.88)", border: "rgba(20,21,23,0.12)",   shadow: "rgba(20,21,23,0.06)",   ringStroke: "rgba(20,21,23,0.20)",   text: "rgba(20,21,23,0.60)" },
+      ok:       { fill: rgba("paper", 0.88), border: rgba("ok", 0.3),  shadow: rgba("ok", 0.12),  ringStroke: rgba("ok", 0.7),  text: rgba("ink", 0.9) },
+      warning:  { fill: rgba("paper", 0.88), border: rgba("warning", 0.35),  shadow: rgba("warning", 0.14),  ringStroke: rgba("warning", 0.75),  text: rgba("ink", 0.9) },
+      critical: { fill: rgba("paper", 0.88), border: rgba("danger", 0.35),   shadow: rgba("danger", 0.14),   ringStroke: rgba("danger", 0.8),   text: rgba("ink", 0.9) },
+      unknown:  { fill: rgba("paper", 0.88), border: rgba("ink", 0.12),   shadow: rgba("ink", 0.06),   ringStroke: rgba("ink", 0.2),   text: rgba("ink", 0.6) },
     },
     edge: {
-      normal:   { stroke: "rgba(0,120,212,0.55)",   particle: "rgba(0,120,212,0.90)" },
-      degraded: { stroke: "rgba(209,132,0,0.60)",   particle: "rgba(209,132,0,0.90)", glow: "rgba(209,132,0,0.20)" },
-      down:     { stroke: "rgba(216,59,1,0.70)",     particle: "rgba(216,59,1,0.95)", glow: "rgba(216,59,1,0.25)" },
-      idle:     { stroke: "rgba(20,21,23,0.12)",     particle: "rgba(20,21,23,0.30)" },
+      normal:   { stroke: rgba("accent", 0.55),   particle: rgba("accent", 0.9) },
+      degraded: { stroke: rgba("warning", 0.6),   particle: rgba("warning", 0.9), glow: rgba("warning", 0.2) },
+      down:     { stroke: rgba("danger", 0.7),     particle: rgba("danger", 0.95), glow: rgba("danger", 0.25) },
+      idle:     { stroke: rgba("ink", 0.12),     particle: rgba("ink", 0.3) },
     },
     alert: {
-      info: "rgba(0,120,212,0.90)",
-      warning: "rgba(209,132,0,0.90)",
-      critical: "rgba(216,59,1,0.95)",
+      info: rgba("accent", 0.9),
+      warning: rgba("warning", 0.9),
+      critical: rgba("danger", 0.95),
     },
-    background: "rgba(247,248,250,1)",
-    border: "rgba(20,21,23,0.10)",
+    background: rgba("canvas"),
+    border: rgba("ink", 0.1),
   },
   animation: {
     particleDuration: { none: 0, low: 8, medium: 5, high: 3.5, burst: 2.0 },
@@ -98,18 +99,18 @@ export type EdgeKindStyle = {
 };
 
 const EDGE_KIND_STYLES: Record<DiagramEdgeKind, EdgeKindStyle> = {
-  network:       { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
-  peering:       { stroke: "rgba(16,185,129,0.60)",  particle: "rgba(16,185,129,0.90)",  dashArray: "8 4",       showParticles: false },
-  privateLink:   { stroke: "rgba(139,92,246,0.60)",  particle: "rgba(139,92,246,0.90)",  dashArray: "none",      showParticles: true },
-  routes:        { stroke: "rgba(0,120,212,0.60)",   particle: "rgba(0,120,212,0.90)",   dashArray: "none",      showParticles: true },
-  logging:       { stroke: "rgba(107,113,122,0.30)", particle: "rgba(107,113,122,0.50)", dashArray: "4 6",       showParticles: false },
-  inferred:      { stroke: "rgba(107,113,122,0.25)", particle: "rgba(107,113,122,0.40)", dashArray: "2 4 6 4",   showParticles: false },
-  "attached-to":        { stroke: "rgba(95,75,139,0.50)",   particle: "rgba(95,75,139,0.70)",   dashArray: "none",    showParticles: false },
-  "bound-to":           { stroke: "rgba(0,120,212,0.45)",   particle: "rgba(0,120,212,0.70)",   dashArray: "4 4",     showParticles: false },
+  network:       { stroke: rgba("accent", 0.6),   particle: rgba("accent", 0.9),   dashArray: "none",      showParticles: true },
+  peering:       { stroke: rgba("peering", 0.6),  particle: rgba("peering", 0.9),  dashArray: "8 4",       showParticles: false },
+  privateLink:   { stroke: rgba("privateLink", 0.6),  particle: rgba("privateLink", 0.9),  dashArray: "none",      showParticles: true },
+  routes:        { stroke: rgba("accent", 0.6),   particle: rgba("accent", 0.9),   dashArray: "none",      showParticles: true },
+  logging:       { stroke: rgba("neutral", 0.3), particle: rgba("neutral", 0.5), dashArray: "4 6",       showParticles: false },
+  inferred:      { stroke: rgba("neutral", 0.25), particle: rgba("neutral", 0.4), dashArray: "2 4 6 4",   showParticles: false },
+  "attached-to":        { stroke: rgba("subnet", 0.5),   particle: rgba("subnet", 0.7),   dashArray: "none",    showParticles: false },
+  "bound-to":           { stroke: rgba("accent", 0.45),   particle: rgba("accent", 0.7),   dashArray: "4 4",     showParticles: false },
   // Outbound internet: orange-amber for explicit, dashed handled via animation override for deprecated
-  "outbound-internet":  { stroke: "rgba(251,146,60,0.75)",  particle: "rgba(251,146,60,0.95)",  dashArray: "none",    showParticles: false },
+  "outbound-internet":  { stroke: rgba("egress", 0.75),  particle: rgba("egress", 0.95),  dashArray: "none",    showParticles: false },
   // NAT GW association: subnet → NAT GW card, same orange family, dashed
-  "natgw-association":  { stroke: "rgba(251,146,60,0.60)",  particle: "rgba(251,146,60,0.80)",  dashArray: "6 4",     showParticles: false },
+  "natgw-association":  { stroke: rgba("egress", 0.6),  particle: rgba("egress", 0.8),  dashArray: "6 4",     showParticles: false },
 };
 
 export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle {
@@ -122,10 +123,10 @@ export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle 
 export type FlowTypeTint = { tint: string; glowWidth: number };
 
 export const FLOW_TYPE_TINTS: Record<string, FlowTypeTint> = {
-  ingress:    { tint: "rgba(16,185,129,0.12)",  glowWidth: 4 },
-  egress:     { tint: "rgba(239,68,68,0.10)",   glowWidth: 4 },
-  dependency: { tint: "rgba(139,92,246,0.10)",  glowWidth: 4 },
-  control:    { tint: "rgba(107,113,122,0.08)", glowWidth: 3 },
+  ingress:    { tint: rgba("peering", 0.12),  glowWidth: 4 },
+  egress:     { tint: rgba("fault", 0.1),   glowWidth: 4 },
+  dependency: { tint: rgba("privateLink", 0.1),  glowWidth: 4 },
+  control:    { tint: rgba("neutral", 0.08), glowWidth: 3 },
   // east-west: no tint (uses default edgeKind styling)
 };
 
@@ -139,10 +140,10 @@ export type ScopeStyle = {
 };
 
 export const SCOPE_STYLES: Record<string, ScopeStyle> = {
-  subscription:  { borderColor: "rgba(0,120,212,0.15)",  background: "rgba(0,120,212,0.02)",  borderStyle: "solid",  borderWidth: "1px" },
-  resourceGroup: { borderColor: "rgba(107,113,122,0.20)", background: "rgba(107,113,122,0.02)", borderStyle: "dashed", borderWidth: "1px" },
-  vnet:          { borderColor: "rgba(0,120,212,0.25)",   background: "rgba(0,120,212,0.03)",   borderStyle: "dashed", borderWidth: "1.5px" },
-  subnet:        { borderColor: "rgba(95,75,139,0.22)",   background: "rgba(95,75,139,0.03)",   borderStyle: "dashed", borderWidth: "1.5px" },
+  subscription:  { borderColor: rgba("accent", 0.15),  background: rgba("accent", 0.02),  borderStyle: "solid",  borderWidth: "1px" },
+  resourceGroup: { borderColor: rgba("neutral", 0.2), background: rgba("neutral", 0.02), borderStyle: "dashed", borderWidth: "1px" },
+  vnet:          { borderColor: rgba("accent", 0.25),   background: rgba("accent", 0.03),   borderStyle: "dashed", borderWidth: "1.5px" },
+  subnet:        { borderColor: rgba("subnet", 0.22),   background: rgba("subnet", 0.03),   borderStyle: "dashed", borderWidth: "1.5px" },
 };
 
 export function scopeStyle(icon: string): ScopeStyle {

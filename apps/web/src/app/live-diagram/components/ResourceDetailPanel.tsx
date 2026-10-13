@@ -23,9 +23,11 @@ import { getAzureIconUrl } from "../utils/azureIcons";
 import { fmtMetric } from "./LiveNode";
 import { D3Sparkline } from "./D3Sparkline";
 import { useI18n } from "@/lib/i18n";
+import { localizeLabel } from "../utils/localizeLabel";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import styles from "../styles.module.css";
+import { hex, rgba } from "@/lib/palette";
 
 type ConnectedEdge = {
   edgeSpec: DiagramEdgeSpec;
@@ -128,6 +130,7 @@ function CopyableValue({
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(value).then(() => {
@@ -143,7 +146,7 @@ function CopyableValue({
         type="button"
         className={styles.copyBtn}
         onClick={handleCopy}
-        aria-label="Copy to clipboard"
+        aria-label={t("ld.copy")}
       >
         {copied ? "\u2713" : "\u2398"}
       </button>
@@ -178,11 +181,11 @@ const SEVERITY_LABELS: Record<number, string> = {
 };
 
 const SEVERITY_COLORS: Record<number, string> = {
-  0: "#e74c3c",
-  1: "#e67e22",
-  2: "#f1c40f",
-  3: "#3498db",
-  4: "#95a5a6",
+  0: hex("danger"),
+  1: hex("egress"),
+  2: hex("warning"),
+  3: hex("accent"),
+  4: rgba("ink", 0.45),
 };
 
 // ── Backend Pool Detail Section (LB / Application Gateway) ──
@@ -201,9 +204,9 @@ function useBackendPool(azureResourceId: string | undefined, resourceKind: strin
 }
 
 const MEMBER_STATE_COLOR: Record<string, string> = {
-  Healthy: "#10893e",
-  Unhealthy: "#d83b01",
-  Unknown: "#797775",
+  Healthy: hex("ok"),
+  Unhealthy: hex("danger"),
+  Unknown: rgba("ink", 0.45),
 };
 
 function BackendPoolSection({ pools, loading }: { pools: BackendPoolInfo[]; loading: boolean }) {
@@ -431,16 +434,17 @@ const EXPOSURE_ROLE_ICON: Record<string, string> = {
 // ── AKS Essentials (클러스터 정보 — 접속면 포함) ──
 
 function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
+  const { t } = useI18n();
   const cp = detail.controlPlane;
   const np = detail.networkProfile;
 
   return (
     <div className={styles.detailSection}>
-      <div className={styles.detailSectionTitle}>클러스터 정보</div>
+      <div className={styles.detailSectionTitle}>{t("ld.aks.info")}</div>
       <div className={styles.essentialsList}>
         {/* API 서버 주소 */}
         <div className={styles.aksApiServerRow}>
-          <span className={styles.essentialsLabel}>API 서버 주소</span>
+          <span className={styles.essentialsLabel}>{t("ld.aks.apiAddress")}</span>
           <CopyableValue value={cp.apiServerEndpoint} className={styles.aksApiServerFqdn}>
             {cp.apiServerEndpoint}
           </CopyableValue>
@@ -450,7 +454,7 @@ function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
         {np && (
           <>
             <div className={styles.essentialsRow}>
-              <span className={styles.essentialsLabel}>네트워크 구성</span>
+              <span className={styles.essentialsLabel}>{t("ld.aks.network")}</span>
               <span className={styles.essentialsValue}>
                 {np.networkPlugin === "azure" ? "Azure CNI" : np.networkPlugin}
                 {np.networkPolicy ? ` + ${np.networkPolicy}` : ""}
@@ -464,25 +468,25 @@ function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
             )}
             {np.serviceCidr && (
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>서비스 CIDR</span>
+                <span className={styles.essentialsLabel}>{t("ld.aks.serviceCidr")}</span>
                 <span className={styles.essentialsValueMono}>{np.serviceCidr}</span>
               </div>
             )}
             {np.dnsServiceIp && (
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>DNS 서비스 IP</span>
+                <span className={styles.essentialsLabel}>{t("ld.aks.dnsIp")}</span>
                 <span className={styles.essentialsValueMono}>{np.dnsServiceIp}</span>
               </div>
             )}
             {np.networkPolicy && (
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>네트워크 정책 엔진</span>
+                <span className={styles.essentialsLabel}>{t("ld.aks.policyEngine")}</span>
                 <span className={styles.essentialsValue}>{np.networkPolicy}</span>
               </div>
             )}
             {np.loadBalancerSku && (
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>부하 분산 장치</span>
+                <span className={styles.essentialsLabel}>{t("ld.aks.lb")}</span>
                 <span className={styles.essentialsValue}>{np.loadBalancerSku}</span>
               </div>
             )}
@@ -491,23 +495,23 @@ function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
 
         {/* 프라이빗 클러스터 */}
         <div className={styles.essentialsRow}>
-          <span className={styles.essentialsLabel}>프라이빗 클러스터</span>
+          <span className={styles.essentialsLabel}>{t("ld.aks.private")}</span>
           <span className={styles.essentialsValue}>
             {cp.isPrivateCluster ? (
-              <span className={styles.aksAccessBadge} data-private="true">사용</span>
+              <span className={styles.aksAccessBadge} data-private="true">{t("ld.on")}</span>
             ) : (
-              "사용 안 함"
+              t("ld.off")
             )}
           </span>
         </div>
 
         {/* 권한 있는 IP 범위 */}
         <div className={styles.essentialsRow}>
-          <span className={styles.essentialsLabel}>권한 있는 IP 범위</span>
+          <span className={styles.essentialsLabel}>{t("ld.aks.authorizedIps")}</span>
           <span className={styles.essentialsValue}>
             {cp.authorizedIpRanges && cp.authorizedIpRanges.length > 0
               ? cp.authorizedIpRanges.join(", ")
-              : "사용 안 함"}
+              : t("ld.off")}
           </span>
         </div>
 
@@ -527,12 +531,13 @@ function AksEssentialsSection({ detail }: { detail: AksPlaneDetail }) {
 // ── 실행면 (NODE POOLS) ──
 
 function AksNodePoolSection({ pools }: { pools: AksNodePoolInfo[] }) {
+  const { t } = useI18n();
   const [expandedPool, setExpandedPool] = useState<string | null>(null);
 
   return (
     <div className={styles.detailSection}>
       <div className={styles.detailSectionTitle}>
-        실행면 (NODE POOLS) ({pools.length})
+        {t("ld.aks.nodePools", { n: pools.length })}
       </div>
       {pools.map((pool) => {
         const isExpanded = expandedPool === pool.name;
@@ -567,7 +572,7 @@ function AksNodePoolSection({ pools }: { pools: AksNodePoolInfo[] }) {
             {/* Node count + autoscale */}
             <div className={styles.aksPoolSummary}>
               <span>
-                노드: {pool.nodeCount}
+                {t("hb.node")}: {pool.nodeCount}
                 {pool.enableAutoScaling && ` (auto ${pool.minCount ?? 0}–${pool.maxCount ?? 0})`}
               </span>
             </div>
@@ -577,7 +582,7 @@ function AksNodePoolSection({ pools }: { pools: AksNodePoolInfo[] }) {
             )}
             {isExpanded && (!pool.vmssInstances || pool.vmssInstances.length === 0) && (
               <div className={styles.detailEmpty}>
-                VMSS 인스턴스 정보를 가져올 수 없습니다
+                {t("ld.aks.noVmss")}
               </div>
             )}
           </div>
@@ -623,6 +628,7 @@ function VmssInstanceGrid({ instances, poolName }: { instances: AksVmssInstance[
 // ── 노출면 (Ingress / Egress) ──
 
 function AksExposureSection({ paths }: { paths: AksExposurePathInfo[] }) {
+  const { t } = useI18n();
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
 
   const ingressPaths = paths.filter((p) => p.direction === "ingress");
@@ -644,7 +650,7 @@ function AksExposureSection({ paths }: { paths: AksExposurePathInfo[] }) {
               <span className={styles.aksExposureDirBadge} data-dir={dir}>
                 {dir === "ingress" ? "IN" : "OUT"}
               </span>
-              <span className={styles.aksExposureLabel}>{path.label}</span>
+              <span className={styles.aksExposureLabel}>{localizeLabel(path.label, t)}</span>
               <span className={styles.toggleChevron}>{isExp ? "\u25B2" : "\u25BC"}</span>
             </button>
             {isExp && (
@@ -669,10 +675,10 @@ function AksExposureSection({ paths }: { paths: AksExposurePathInfo[] }) {
 
   return (
     <div className={styles.detailSection}>
-      <div className={styles.detailSectionTitle}>노출면 (Ingress / Egress)</div>
+      <div className={styles.detailSectionTitle}>{t("ld.aks.exposure")}</div>
       {ingressPaths.length > 0 && renderGroup(ingressPaths, "ingress")}
       {egressPaths.length > 0 && renderGroup(egressPaths, "egress")}
-      {paths.length === 0 && <div className={styles.detailEmpty}>경로 정보 없음</div>}
+      {paths.length === 0 && <div className={styles.detailEmpty}>{t("ld.aks.noPaths")}</div>}
     </div>
   );
 }
@@ -680,6 +686,7 @@ function AksExposureSection({ paths }: { paths: AksExposurePathInfo[] }) {
 // ── AKS API Endpoint 노드 (접속면 카드, 캔버스 외부 노드 클릭 시) ──
 
 function AksApiEndpointSection({ nodeSpec }: { nodeSpec: DiagramNodeSpec }) {
+  const { t } = useI18n();
   const meta = nodeSpec.metadata ?? {};
   const fqdn = meta.fqdn ?? "";
   const isPrivate = meta.isPrivateCluster === "true";
@@ -688,20 +695,20 @@ function AksApiEndpointSection({ nodeSpec }: { nodeSpec: DiagramNodeSpec }) {
   return (
     <div className={styles.aksPlaneContainer}>
       <div className={styles.detailSection}>
-        <div className={styles.detailSectionTitle}>접속면 (Control Plane)</div>
+        <div className={styles.detailSectionTitle}>{t("ld.aks.controlPlane")}</div>
         <div className={styles.essentialsList}>
           <div className={styles.essentialsRow}>
-            <span className={styles.essentialsLabel}>클러스터</span>
+            <span className={styles.essentialsLabel}>{t("ins.ticket.cluster")}</span>
             <span className={styles.essentialsValue}>{clusterName}</span>
           </div>
           <div className={styles.aksApiServerRow}>
-            <span className={styles.essentialsLabel}>API 서버 FQDN</span>
+            <span className={styles.essentialsLabel}>{t("ld.aks.apiFqdn")}</span>
             <CopyableValue value={fqdn} className={styles.aksApiServerFqdn}>
               {fqdn}
             </CopyableValue>
           </div>
           <div className={styles.essentialsRow}>
-            <span className={styles.essentialsLabel}>접근 유형</span>
+            <span className={styles.essentialsLabel}>{t("ld.aks.accessType")}</span>
             <span className={styles.essentialsValue}>
               <span className={styles.aksAccessBadge} data-private={String(isPrivate)}>
                 {isPrivate ? "Private" : "Public"}
@@ -709,7 +716,7 @@ function AksApiEndpointSection({ nodeSpec }: { nodeSpec: DiagramNodeSpec }) {
             </span>
           </div>
           <div className={styles.essentialsRow}>
-            <span className={styles.essentialsLabel}>접속 경로</span>
+            <span className={styles.essentialsLabel}>{t("ld.aks.accessPath")}</span>
             <span className={styles.essentialsValue}>
               {isPrivate ? "VNet / Private DNS → API Server" : "Internet → API Server"}
             </span>
@@ -729,11 +736,12 @@ function AksPlaneDetailSection({
   detail: AksPlaneDetail | null;
   loading: boolean;
 }) {
+  const { t } = useI18n();
   if (loading) {
     return (
       <div className={styles.detailSection}>
-        <div className={styles.detailSectionTitle}>AKS 클러스터 정보</div>
-        <div className={styles.detailEmpty}>로딩 중...</div>
+        <div className={styles.detailSectionTitle}>{t("ld.aks.clusterInfo")}</div>
+        <div className={styles.detailEmpty}>{t("common.loading")}</div>
       </div>
     );
   }
@@ -759,6 +767,7 @@ function AksVmssDetailSection({
   instances: AksVmssInstance[];
   loading: boolean;
 }) {
+  const { t } = useI18n();
   const meta = nodeSpec.metadata ?? {};
   const poolName = meta.nodepoolName;
   const poolMode = meta.nodepoolMode;
@@ -773,10 +782,10 @@ function AksVmssDetailSection({
     <div className={styles.aksPlaneContainer}>
       {/* Nodepool summary */}
       <div className={styles.detailSection}>
-        <div className={styles.detailSectionTitle}>Node Pool 정보</div>
+        <div className={styles.detailSectionTitle}>{t("ld.pool.info")}</div>
         <div className={styles.essentialsList}>
           <div className={styles.essentialsRow}>
-            <span className={styles.essentialsLabel}>Pool 이름</span>
+            <span className={styles.essentialsLabel}>{t("ld.pool.name")}</span>
             <span className={styles.essentialsValue}>
               {poolMode && (
                 <span className={styles.aksPoolModeBadge} data-mode={poolMode}>
@@ -788,13 +797,13 @@ function AksVmssDetailSection({
           </div>
           {vmSize && (
             <div className={styles.essentialsRow}>
-              <span className={styles.essentialsLabel}>VM 크기</span>
+              <span className={styles.essentialsLabel}>{t("ld.pool.vmSize")}</span>
               <span className={styles.essentialsValue}>{vmSize}</span>
             </div>
           )}
           {nodeCount && (
             <div className={styles.essentialsRow}>
-              <span className={styles.essentialsLabel}>노드 수</span>
+              <span className={styles.essentialsLabel}>{t("ld.pool.nodes")}</span>
               <span className={styles.essentialsValue}>
                 {nodeCount}
                 {autoScale && ` (auto ${autoScale})`}
@@ -803,7 +812,7 @@ function AksVmssDetailSection({
           )}
           {powerState && (
             <div className={styles.essentialsRow}>
-              <span className={styles.essentialsLabel}>상태</span>
+              <span className={styles.essentialsLabel}>{t("hb.status")}</span>
               <span className={styles.essentialsValue}>
                 <span
                   className={styles.aksPoolPowerDot}
@@ -823,12 +832,12 @@ function AksVmssDetailSection({
           VMSS Instances ({loading ? "..." : instances.length})
         </div>
         {loading ? (
-          <div className={styles.detailEmpty}>인스턴스 로딩 중...</div>
+          <div className={styles.detailEmpty}>{t("ld.pool.loading")}</div>
         ) : instances.length > 0 ? (
           <VmssInstanceGrid instances={instances} poolName={poolName} />
         ) : (
           <div className={styles.detailEmpty}>
-            인스턴스 정보를 가져올 수 없습니다
+            {t("ld.pool.noInstances")}
           </div>
         )}
       </div>
@@ -859,22 +868,19 @@ export function ResourceDetailPanel({
   // ── VMSS Instance detail (canvas instance node click) ──
   if (!nodeSpec && vmssInstance) {
     const INST_POWER_COLOR: Record<string, string> = {
-      running: "rgba(16,137,62,0.85)", starting: "rgba(0,120,212,0.85)",
-      stopping: "rgba(209,132,0,0.85)", stopped: "rgba(209,132,0,0.85)",
-      deallocated: "rgba(20,21,23,0.45)", unknown: "rgba(20,21,23,0.35)",
+      running: rgba("ok", 0.85), starting: rgba("accent", 0.85),
+      stopping: rgba("warning", 0.85), stopped: rgba("warning", 0.85),
+      deallocated: rgba("ink", 0.45), unknown: rgba("ink", 0.35),
     };
     const dotColor = INST_POWER_COLOR[vmssInstance.powerState] ?? INST_POWER_COLOR.unknown;
     // Node pool name: prefer explicit nodePoolName, fall back to parsing parentVmssId
     const poolName = vmssInstance.nodePoolName
       ?? vmssInstance.parentVmssId.split("/").pop()?.replace(/^aks-/, "").replace(/-[0-9a-f]+-vmss$/i, "")
       ?? vmssInstance.parentVmssId;
-    const PROVISIONING_LABEL: Record<string, string> = {
-      Succeeded: "준비됨", Creating: "생성 중", Updating: "업데이트 중",
-      Deleting: "삭제 중", Failed: "실패",
-    };
+    const PROV_STATES = ["Succeeded", "Creating", "Updating", "Deleting", "Failed"];
     const provLabel = vmssInstance.provisioningState
-      ? (PROVISIONING_LABEL[vmssInstance.provisioningState] ?? vmssInstance.provisioningState)
-      : "준비됨";
+      ? (PROV_STATES.includes(vmssInstance.provisioningState) ? t(`ld.prov.${vmssInstance.provisioningState}`) : vmssInstance.provisioningState)
+      : t("ld.prov.Succeeded");
     // K8s conditions (from real K8s Node API), or fall back to ARM-derived estimate
     const k8sConditions = vmssInstance.conditions;
     const conditionMap = k8sConditions
@@ -887,18 +893,18 @@ export function ResourceDetailPanel({
           <img src={getAzureIconUrl("vm")} alt="vm" className={styles.detailHeaderIcon} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <span className={styles.detailHeaderName}>{vmssInstance.computerName}</span>
-            <div className={styles.detailHeaderSubtitle}>AKS 노드 (VM Instance)</div>
+            <div className={styles.detailHeaderSubtitle}>{t("ld.node.subtitle")}</div>
           </div>
           <div className={styles.detailHealthDot} style={{ background: dotColor }} title={vmssInstance.powerState} />
-          <button className={styles.detailCloseBtn} onClick={onClose} type="button" aria-label="Close">&times;</button>
+          <button className={styles.detailCloseBtn} onClick={onClose} type="button" aria-label={t("hb.close")}>&times;</button>
         </div>
         <div className={styles.detailBody}>
           {/* 필수 항목 — Azure portal 개요 기준 */}
           <div className={styles.detailSection}>
-            <div className={styles.detailSectionTitle}>필수</div>
+            <div className={styles.detailSectionTitle}>{t("ld.node.essentials")}</div>
             <div className={styles.essentialsList}>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>상태</span>
+                <span className={styles.essentialsLabel}>{t("hb.status")}</span>
                 <div>
                   <span className={styles.powerStateBadgeDetail} data-state={vmssInstance.powerState}>
                     {POWER_STATE_LABEL[vmssInstance.powerState as PowerState] ?? vmssInstance.powerState}
@@ -906,30 +912,30 @@ export function ResourceDetailPanel({
                 </div>
               </div>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>프로비저닝 상태</span>
+                <span className={styles.essentialsLabel}>{t("ld.node.provisioning")}</span>
                 <span className={styles.essentialsValue}>{provLabel}</span>
               </div>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>노드 풀</span>
+                <span className={styles.essentialsLabel}>{t("ld.node.pool")}</span>
                 <span className={styles.essentialsValue}>{poolName}</span>
               </div>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>내부 IP</span>
+                <span className={styles.essentialsLabel}>{t("ld.node.internalIp")}</span>
                 <span className={styles.essentialsValueMono}>
                   {vmssInstance.privateIp ?? "—"}
                 </span>
               </div>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>외부 IP</span>
-                <span className={styles.essentialsValue}>해당 없음</span>
+                <span className={styles.essentialsLabel}>{t("ob.externalIp")}</span>
+                <span className={styles.essentialsValue}>{t("ins.heat.none")}</span>
               </div>
               <div className={styles.essentialsRow}>
-                <span className={styles.essentialsLabel}>호스트 이름</span>
+                <span className={styles.essentialsLabel}>{t("ld.node.hostname")}</span>
                 <span className={styles.essentialsValueMono}>{vmssInstance.computerName}</span>
               </div>
               {vmssInstance.nodeImageVersion && (
                 <div className={styles.essentialsRow}>
-                  <span className={styles.essentialsLabel}>노드 이미지 버전</span>
+                  <span className={styles.essentialsLabel}>{t("ld.node.image")}</span>
                   <span className={styles.essentialsValueMono}>{vmssInstance.nodeImageVersion}</span>
                 </div>
               )}
@@ -938,14 +944,14 @@ export function ResourceDetailPanel({
                 if (!outboundType) return null;
                 const OUTBOUND_LABEL: Record<string, { label: string; badge: string }> = {
                   loadBalancer:            { label: "Load Balancer (SNAT)",      badge: "lb" },
-                  userDefinedRouting:      { label: "UDR / 방화벽 (사용자 정의)", badge: "udr" },
-                  managedNATGateway:       { label: "NAT Gateway (관리형)",       badge: "nat" },
-                  userAssignedNATGateway:  { label: "NAT Gateway (사용자 지정)",  badge: "nat" },
+                  userDefinedRouting:      { label: t("ld.out.udr"), badge: "udr" },
+                  managedNATGateway:       { label: t("ld.out.managedNat"), badge: "nat" },
+                  userAssignedNATGateway:  { label: t("ld.out.userNat"), badge: "nat" },
                 };
                 const info = OUTBOUND_LABEL[outboundType];
                 return (
                   <div className={styles.essentialsRow}>
-                    <span className={styles.essentialsLabel}>아웃바운드</span>
+                    <span className={styles.essentialsLabel}>{t("ld.out.label")}</span>
                     <span
                       className={styles.outboundTypeBadge}
                       data-outbound={info?.badge ?? "other"}
@@ -960,20 +966,18 @@ export function ResourceDetailPanel({
           </div>
           {/* 조건 — K8s Node API 기반 (없으면 ARM 추정) */}
           <div className={styles.detailSection}>
-            <div className={styles.detailSectionTitle}>조건</div>
+            <div className={styles.detailSectionTitle}>{t("ld.node.conditions")}</div>
             <div className={styles.essentialsList}>
               {(["Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"] as const).map((type) => {
-                const CONDITION_LABEL: Record<string, string> = {
-                  Ready: "준비 상태", MemoryPressure: "메모리 압력",
-                  DiskPressure: "디스크 압력", PIDPressure: "PID 압력",
-                  NetworkUnavailable: "네트워크 불가",
-                };
+                const CONDITION_LABEL: Record<string, string> = Object.fromEntries(
+                  ["Ready", "MemoryPressure", "DiskPressure", "PIDPressure", "NetworkUnavailable"].map((c) => [c, t(`ld.cond.${c}`)]),
+                );
                 if (conditionMap) {
                   const c = conditionMap[type];
                   // Ready=True is good; pressure/unavailable=False is good
                   const isNormal = type === "Ready" ? c?.status === "True" : c?.status === "False";
                   const condAttr = !c ? "unknown" : isNormal ? "true" : "false";
-                  const label = !c ? "알 수 없음" : isNormal ? "정상" : "비정상";
+                  const label = !c ? t("ld.cond.unknown") : isNormal ? t("ld.cond.normal") : t("ld.cond.abnormal");
                   return (
                     <div key={type} className={styles.essentialsRow}>
                       <span className={styles.essentialsLabel}>{CONDITION_LABEL[type]}</span>
@@ -989,7 +993,7 @@ export function ResourceDetailPanel({
                 // Running+Succeeded node = all standard conditions assumed normal
                 const armReady = vmssInstance.powerState === "running" && vmssInstance.provisioningState === "Succeeded";
                 const condAttr = armReady ? "true" : (type === "Ready" ? "false" : "unknown");
-                const label = armReady ? "정상" : (type === "Ready" ? "비정상" : "알 수 없음");
+                const label = armReady ? t("ld.cond.normal") : (type === "Ready" ? t("ld.cond.abnormal") : t("ld.cond.unknown"));
                 return (
                   <div key={type} className={styles.essentialsRow}>
                     <span className={styles.essentialsLabel}>{CONDITION_LABEL[type]}</span>
@@ -1050,7 +1054,7 @@ export function ResourceDetailPanel({
           className={styles.detailCloseBtn}
           onClick={onClose}
           type="button"
-          aria-label="Close"
+          aria-label={t("hb.close")}
         >
           &times;
         </button>
@@ -1132,7 +1136,7 @@ export function ResourceDetailPanel({
         {/* Sub-Resources (NICs in VM, Frontend IPs in AppGW) */}
         {nodeSpec.subResources && nodeSpec.subResources.length > 0 && (
           <div className={styles.detailSection}>
-            <div className={styles.detailSectionTitle}>Sub-Resources</div>
+            <div className={styles.detailSectionTitle}>{t("ld.subResources")}</div>
             {nodeSpec.subResources.map((sr: SubResource) => (
               <div key={sr.id} className={styles.subResourceDetailCard}>
                 <img
@@ -1322,7 +1326,7 @@ export function ResourceDetailPanel({
                   <div className={styles.detailAlertRuleHeader}>
                     <div
                       className={styles.detailHealthDot}
-                      style={{ background: SEVERITY_COLORS[rule.severity] ?? "#95a5a6" }}
+                      style={{ background: SEVERITY_COLORS[rule.severity] ?? rgba("ink", 0.45) }}
                     />
                     <span className={styles.detailAlertRuleSeverity}>
                       {SEVERITY_LABELS[rule.severity] ?? `Sev${rule.severity}`}

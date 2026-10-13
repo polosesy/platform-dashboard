@@ -2,29 +2,33 @@
 
 import "reactflow/dist/style.css";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MarkerType, type Edge, type Node } from "reactflow";
 import type { ArchitectureGraph } from "@aud/types";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
-import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, SampleDataNotice, Select } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Select } from "@/components/ui";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import {
-  ARCH_EDGE_KINDS, DEFAULT_LAYERS, buildArchModel, defaultRegion, initialCollapsed, layoutArch, locationPath, neighbours, regionTiles, searchArch,
-  type ArchEdgeKind,
+  ARCH_EDGE_KINDS, DEFAULT_LAYERS, archCategoryOf, buildArchModel, categoryCounts, defaultRegion, filterArchModel, initialCollapsed, layoutArch,
+  locationPath, neighbours, regionTiles, searchArch,
+  type ArchCategory, type ArchEdgeKind,
 } from "@/lib/archModel";
 import { formatBytes } from "@/lib/format";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { formatAzureRegion } from "@/app/live-diagram/utils/regionFormat";
 import type { ArchNodeData } from "./components/ArchNodes";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 import { Inspector, type InspectorTarget } from "./components/Inspector";
+import { CategoryFilter } from "./components/CategoryFilter";
 import { Legend } from "./components/Legend";
+import { useDiagramExport } from "./hooks/useDiagramExport";
 import { useFlowOverlay } from "./hooks/useFlowOverlay";
 import { EDGE_STYLE, buildEdges, buildNodes } from "./utils/toFlow";
 import s from "./styles.module.css";
+import { hex } from "@/lib/palette";
 
 /** 인프라 구성도 — the whole subscription as a draw.io-style diagram (configuration, not live state). */
 export default function ArchitecturePage() {
@@ -64,7 +68,7 @@ type Anchor = { id: string; x: number; y: number };
 const CLEANUP = "__cleanup__";
 
 function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscriptionId: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const model = useMemo(() => buildArchModel(graph), [graph]);
   const firstRegion = useMemo(() => defaultRegion(model), [model]);
 
@@ -82,11 +86,22 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   const [centerOn, setCenterOn] = useState<string | null>(null);
   const [legendOpen, setLegendOpen] = useState(true);
   const [fitNonce, setFitNonce] = useState(0);
+  // 표시 범위: null = every category. The filtered view drives layout; the original model keeps
+  // counts, search, cleanup items and inspector details.
+  const [cats, setCats] = useState<ReadonlySet<ArchCategory> | null>(null);
+  const [searchNote, setSearchNote] = useState("");
+  const view = useMemo(() => filterArchModel(model, cats), [model, cats]);
+  const vm = view.model;
+  const canvasRef = useRef<HTMLDivElement>(null);
 
-  const layout = useMemo(() => layoutArch(model, { region, collapsed, expandedStacks: stacks, layers }), [model, region, collapsed, stacks, layers]);
+  const layout = useMemo(() => layoutArch(vm, { region, collapsed, expandedStacks: stacks, layers }), [vm, region, collapsed, stacks, layers]);
   const flow = useFlowOverlay(subscriptionId, traffic, lookback);
 
-  const baseNodes = useMemo(() => buildNodes(model, layout, t), [model, layout, t]);
+  const baseNodes = useMemo(() => buildNodes(vm, layout, t, { context: view.context, hiddenIn: view.hiddenIn }), [vm, layout, t, view]);
+  const trafficDropped = useMemo(() => {
+    if (!view.active) return 0;
+    return (flow.overlay?.edges ?? []).filter((e) => !layout.shownAt.get(e.source.toLowerCase()) || !layout.shownAt.get(e.target.toLowerCase())).length;
+  }, [flow.overlay, layout.shownAt, view.active]);
   const trafficEdges = useMemo<Edge[]>(() => {
     const list = flow.overlay?.edges ?? [];
     const max = Math.max(1, ...list.map((e) => e.totalBytes));
@@ -99,9 +114,9 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
       const w = 1.5 + (e.totalBytes / max) * 4.5;
       seen.set(id, {
         id, source: a, target: b, type: "smoothstep", zIndex: 1, animated: true, focusable: false,
-        label: formatBytes(e.totalBytes), labelStyle: { fontSize: 10, fontWeight: 700, fill: "#0078d4" }, labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
+        label: formatBytes(e.totalBytes), labelStyle: { fontSize: 10, fontWeight: 700, fill: hex("accent") }, labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
         style: { stroke: EDGE_STYLE.traffic.stroke, strokeWidth: w, strokeDasharray: e.deniedFlows > 0 ? "5 3" : undefined },
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#0078d4" },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: hex("accent") },
       });
     }
     return [...seen.values()];
@@ -112,15 +127,17 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   const target: InspectorTarget = selectedId === CLEANUP ? { type: "cleanup" } : selectedShape ? { type: "shape", shape: selectedShape } : null;
 
   const rgs = useMemo(() => [...new Set([...model.resources.values()].map((r) => r.node.resourceGroup).filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b)), [model]);
+  const rgFocus = useMemo<ReadonlySet<string> | null>(() => {
+    if (!rg) return null;
+    const keep = new Set<string>();
+    for (const r of model.resources.values()) if (r.node.resourceGroup === rg) { const at = layout.shownAt.get(r.id); if (at) keep.add(at); }
+    return keep;
+  }, [rg, model, layout]);
   const focus = useMemo<ReadonlySet<string> | null>(() => {
-    if (rg) {
-      const keep = new Set<string>();
-      for (const r of model.resources.values()) if (r.node.resourceGroup === rg) { const at = layout.shownAt.get(r.id); if (at) keep.add(at); }
-      return keep;
-    }
+    if (rgFocus) return rgFocus;
     if (selectedShape && selectedShape.shape !== "box") return neighbours(layout.edges, selectedShape.id);
     return null;
-  }, [rg, model, layout, selectedShape]);
+  }, [rgFocus, layout, selectedShape]);
 
   const posOf = (id: string): Anchor | null => {
     const sh = layout.shapes.find((x) => x.id === id);
@@ -128,7 +145,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   };
   const setRegion = (r: string) => {
     setRegionState(r);
-    setCollapsed(initialCollapsed(model, r));
+    setCollapsed(initialCollapsed(vm, r, 24, view.active));
     setStacks(new Set());
     setSelectedId(null);
     setAnchor(null);
@@ -146,6 +163,17 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     },
     [layout.shapes],
   );
+  const changeCats = (next: ReadonlySet<ArchCategory> | null) => {
+    const nv = filterArchModel(model, next);
+    setCats(next);
+    setCollapsed(initialCollapsed(nv.model, region, 24, nv.active));
+    setStacks(new Set());
+    setSelectedId(null);
+    setAnchor(null);
+    setCenterOn(null);
+    setSearchNote("");
+    setFitNonce((n) => n + 1);
+  };
   const onNodeClick = (n: Node<ArchNodeData>) => {
     const sh = n.data.shape;
     if (sh.shape === "stack") {
@@ -170,16 +198,30 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     const i = match && match.q === query && match.n === hits.length ? (match.i + 1) % hits.length : 0;
     const id = hits[i]!;
     setMatch({ q: query, i, n: hits.length });
+    // A hit hidden by the filter: add its category (VNets / subnets belong to network) and go there
+    let nextView = view;
+    const shownNow = view.keep?.has(id) || vm.vnets.has(id) || vm.subnets.has(id) || !view.active;
+    if (!shownNow) {
+      const r = model.resources.get(id);
+      const c: ArchCategory = r ? archCategoryOf(r.node.kind) : "network";
+      const next = new Set(cats ?? []);
+      next.add(c);
+      nextView = filterArchModel(model, next);
+      setCats(nextView.active ? next : null);
+      setSearchNote(t("arch.filter.added", { cat: t(`arch.cat.${c}`) }));
+    } else setSearchNote("");
+    const fm = nextView.model;
+    const changed = nextView !== view;
     // Make the hit visible: its region, its VNet expanded, its stack opened
     const reg = locationPath(model, id)?.region ?? "all";
     const nextRegion = region === "all" || reg === region || reg === "global" ? region : reg;
-    const col = new Set(nextRegion === region ? collapsed : initialCollapsed(model, nextRegion));
+    const col = new Set(nextRegion === region && !changed ? collapsed : initialCollapsed(fm, nextRegion, 24, nextView.active));
     const subId = model.resources.get(id)?.subnetId ?? (model.subnets.has(id) ? id : null);
     const vnetOf = subId ? model.subnets.get(subId)?.vnetId : undefined;
     if (vnetOf) col.delete(vnetOf);
     if (model.vnets.has(id)) col.delete(id);
-    const st = new Set(nextRegion === region ? stacks : []);
-    const probe = layoutArch(model, { region: nextRegion, collapsed: col, expandedStacks: st, layers });
+    const st = new Set(nextRegion === region && !changed ? stacks : []);
+    const probe = layoutArch(fm, { region: nextRegion, collapsed: col, expandedStacks: st, layers });
     const at = probe.shownAt.get(id);
     if (at?.startsWith("stack:")) st.add(at);
     if (nextRegion !== region) setRegionState(nextRegion);
@@ -192,14 +234,14 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   const onCentered = useCallback(() => setCenterOn(null), []);
 
   const expandAll = () => {
-    const probe = layoutArch(model, { region, collapsed: new Set(), expandedStacks: new Set(), layers });
+    const probe = layoutArch(vm, { region, collapsed: new Set(), expandedStacks: new Set(), layers });
     setCollapsed(new Set());
     setStacks(new Set(probe.shapes.filter((x) => x.shape === "stack").map((x) => x.id)));
     setAnchor(null);
     setFitNonce((n) => n + 1);
   };
   const collapseAll = () => {
-    setCollapsed(new Set(model.regions.filter((r) => region === "all" || r.key === region).flatMap((r) => r.vnets.map((v) => v.node.id.toLowerCase()))));
+    setCollapsed(new Set(vm.regions.filter((r) => region === "all" || r.key === region).flatMap((r) => r.vnets.map((v) => v.node.id.toLowerCase()))));
     setAnchor(null);
     setFitNonce((n) => n + 1);
   };
@@ -213,7 +255,40 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
 
   const totals = model.totals;
   const cleanup = totals.unusedPublicIps + totals.unresolvedPublicIps + totals.unusedNsgs;
-  const regionHasNothing = region !== "all" && !model.regions.some((r) => r.key === region && (regionTiles(r) > 0 || r.vnets.length > 0));
+  const regionHasNothing = region !== "all" && !vm.regions.some((r) => r.key === region && (regionTiles(r) > 0 || r.vnets.length > 0)) && vm.global.length === 0;
+  const counts = useMemo(() => categoryCounts(model, region), [model, region]);
+  // Filter banner numbers, scoped to the current region (+ global services)
+  const scope = useMemo(() => {
+    const inScope = (rid: string) => { const r = model.resources.get(rid); return !!r && (region === "all" || r.region === region || r.region === "global"); };
+    let total = 0, shown = 0, ctx = 0;
+    for (const r of model.resources.values()) {
+      if (!inScope(r.id)) continue;
+      total++;
+      // "shown" = selected categories only; context tiles are counted separately, never twice
+      if (view.context.has(r.id)) ctx++;
+      else if (!view.keep || view.keep.has(r.id)) shown++;
+    }
+    const cut = view.crossing.filter((e) => layers.has(e.kind) && (inScope(e.source) || inScope(e.target) || e.source.startsWith("internet:")));
+    const byKind = new Map<ArchEdgeKind, number>();
+    for (const e of cut) byKind.set(e.kind, (byKind.get(e.kind) ?? 0) + 1);
+    return { total, shown, ctx, cut, byKind };
+  }, [model, region, view, layers]);
+
+  const regionLabel = region === "all" ? t("arch.allRegions") : formatAzureRegion(region);
+  const exportCaption = [
+    `${t("nav.item.architecture")} · ${regionLabel} · ${t("arch.export.generated", { time: new Date(graph.generatedAt).toLocaleString(dateLocale(locale)) })}`,
+    view.active
+      ? `${t("arch.filter.title")}: ${[...(cats ?? [])].map((c) => t(`arch.cat.${c}`)).join(", ")} · ${t("arch.filter.banner", { shown: scope.shown, total: scope.total, ctx: scope.ctx, cut: scope.cut.length })}`
+      : t("arch.filter.everything"),
+    `${t("arch.layers")}: ${ARCH_EDGE_KINDS.filter((k) => layers.has(k)).map((k) => t(`arch.layer.${k}`)).join(", ") || "—"}${traffic ? ` · ${t("arch.export.traffic", { m: lookback })}` : ""}${rg ? ` · ${t("arch.rgHighlight")}: ${rg}` : ""}`,
+    `${t("arch.export.basis")}${graph.source === "mock" ? ` · ${t("common.sampleData")}` : ""}`,
+  ];
+  const dimmed = useMemo(() => new Set(rgFocus ? layout.shapes.filter((x) => x.shape !== "box" && !rgFocus.has(x.id)).map((x) => x.id) : []), [rgFocus, layout]);
+  const exp = useDiagramExport({
+    layout, nodes: baseNodes, caption: exportCaption, title: t("nav.item.architecture"), region, filtered: view.active,
+    sample: graph.source === "mock", context: view.context, dimmed, canvasRef,
+    messages: { tooLarge: t("arch.export.tooLarge"), failed: t("arch.export.failed") },
+  });
 
   return (
     <>
@@ -240,8 +315,10 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
           </label>
           <span className={s.searchInfo} aria-live="polite">
             {match && match.q === query ? (match.n ? t("arch.matchN", { i: match.i + 1, n: match.n }) : t("arch.noMatch")) : ""}
+            {searchNote ? ` · ${searchNote}` : ""}
           </span>
         </form>
+        <CategoryFilter model={model} counts={counts} value={cats} onChange={changeCats} />
         <div className={s.toolButtons}>
           <Button onClick={expandAll}>{t("arch.expandAll")}</Button>
           <Button onClick={collapseAll}>{t("arch.collapseAll")}</Button>
@@ -275,11 +352,28 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
                 {flow.overlay?.note || graph.source === "mock" ? <span className={s.warnText}>{t("arch.trafficMock")}</span> : null}
                 {flow.overlay && !flow.loading && trafficEdges.length === 0 ? <span>{t("arch.trafficNone")}</span> : null}
                 {flow.overlay?.unmatchedPairs.length ? <span>{t("arch.trafficUnmatched", { n: flow.overlay.unmatchedPairs.length })}</span> : null}
+                {trafficDropped ? <span>{t("arch.filter.trafficHidden", { n: trafficDropped })}</span> : null}
               </div>
             ) : null}
           </div>
         </details>
+        <div className={s.exportButtons} role="group" aria-label={t("arch.export.title")}>
+          <Button onClick={exp.exportDrawio} disabled={regionHasNothing} title={t("arch.export.drawioHint")}>{t("arch.export.drawio")}</Button>
+          <Button onClick={() => void exp.exportPng()} disabled={regionHasNothing || exp.exporting} title={t("arch.export.pngHint")}>
+            {exp.exporting ? t("arch.export.working") : t("arch.export.png")}
+          </Button>
+        </div>
       </section>
+      <ErrorNotice error={exp.error} />
+      {view.active ? (
+        <Notice tone="info">
+          <span className={s.filterBanner}>
+            <span>{t("arch.filter.banner", { shown: scope.shown, total: scope.total, ctx: scope.ctx, cut: scope.cut.length })}</span>
+            {scope.byKind.size ? <span className={s.iDim}>({[...scope.byKind].map(([k, n]) => `${t(`arch.edge.${k}`)} ${n}`).join(", ")})</span> : null}
+            <button type="button" className={s.linkBtn} onClick={() => changeCats(null)}>{t("arch.filter.clear")}</button>
+          </span>
+        </Notice>
+      ) : null}
 
       <div className={s.summary}>
         <span><b>{totals.regions}</b> {t("arch.sum.regions")}</span>
@@ -296,18 +390,19 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
       </div>
 
       {regionHasNothing ? (
-        <EmptyState title={t("arch.emptyRegion")}>
-          <Button onClick={() => setRegion("all")}>{t("arch.allRegions")}</Button>
+        <EmptyState title={view.active ? t("arch.filter.emptyRegion") : t("arch.emptyRegion")}>
+          {view.active ? <Button onClick={() => changeCats(null)}>{t("arch.filter.clear")}</Button> : <Button onClick={() => setRegion("all")}>{t("arch.allRegions")}</Button>}
         </EmptyState>
       ) : (
         <div className={s.stage}>
           <div className={s.canvasCol}>
-            <div className={s.canvasWrap}>
+            <div className={s.canvasWrap} ref={canvasRef}>
               <DiagramCanvas
                 nodes={baseNodes}
                 edges={edges}
-                focus={focus}
+                focus={exp.exporting ? rgFocus : focus}
                 selectedId={selectedShape?.id ?? null}
+                exporting={exp.exporting}
                 onNodeClick={onNodeClick}
                 onPaneClick={() => setSelectedId(null)}
                 onToggleVnet={toggleVnet}
@@ -318,9 +413,9 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
                 onCentered={onCentered}
               />
             </div>
-            <Legend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
+            <Legend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} showContext={view.active} />
           </div>
-          <Inspector model={model} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} />
+          <Inspector model={model} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} filteredOut={scope.cut} />
         </div>
       )}
     </>

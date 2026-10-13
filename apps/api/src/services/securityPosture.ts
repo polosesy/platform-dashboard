@@ -99,7 +99,10 @@ export function resourceRef(id: string): PostureResourceRef | null {
   const name = parts[parts.length - 1];
   if (!name) return null;
   const type = provIdx > 0 && parts.length - provIdx >= 4 ? parts[parts.length - 2]! : lower[1] === "subscriptions" && parts.length <= 3 ? "subscription" : "resource";
-  return { name: type === "subscription" ? "subscription" : maskGuids(name), type, resourceGroup: rgIdx > 0 ? maskGuids(parts[rgIdx + 1] ?? "") : "" };
+  const ref: PostureResourceRef = { name: type === "subscription" ? "subscription" : maskGuids(name), type, resourceGroup: rgIdx > 0 ? maskGuids(parts[rgIdx + 1] ?? "") : "" };
+  // provider/type[/childType…] — the last segment alone collides (KeyVault vs RecoveryServices "vaults")
+  if (provIdx > 0 && parts.length - provIdx >= 4) ref.armType = [lower[provIdx + 1], ...lower.slice(provIdx + 2).filter((_, i) => i % 2 === 0)].join("/");
+  return ref;
 }
 
 /** Prefer Defender's own ResourceName/ResourceType (e.g. an Entra user for identity findings) over the ID tail. */
@@ -108,7 +111,8 @@ export function sampleRef(s: { id?: string; n?: string; t?: string }): PostureRe
   const name = str(s.n) ?? ref?.name;
   if (!name) return null;
   const type = str(s.t)?.split("/").pop() ?? ref?.type ?? "resource";
-  return { name: type === "subscription" ? "subscription" : maskGuids(name), type, resourceGroup: ref?.resourceGroup ?? "" };
+  const armType = ref?.armType ?? (str(s.t)?.includes("/") ? str(s.t)!.toLowerCase() : undefined);
+  return { name: type === "subscription" ? "subscription" : maskGuids(name), type, resourceGroup: ref?.resourceGroup ?? "", ...(armType && ref?.resourceGroup ? { armType } : {}) };
 }
 
 const SEV_RANK: Record<PostureSeverity, number> = { High: 0, Medium: 1, Low: 2 };

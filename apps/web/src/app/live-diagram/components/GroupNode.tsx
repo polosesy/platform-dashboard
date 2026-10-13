@@ -1,12 +1,14 @@
 "use client";
 
 import { memo } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Handle, Position, type NodeProps, NodeResizer } from "reactflow";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { scopeStyle } from "../utils/designTokens";
 import { formatAzureRegion } from "../utils/regionFormat";
 import type { DiagramIconKind } from "@aud/types";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 export type NsgBadgeInfo = {
   nodeId: string;
@@ -33,6 +35,7 @@ export type GroupNodeData = {
 };
 
 export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<GroupNodeData>) {
+  const { t } = useI18n();
   const { label, icon, subtitle, region, nsgBadges, natGwBadge, onNsgSelect, onNatGwToggle } = data;
   const scope = scopeStyle(icon);
 
@@ -95,7 +98,7 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<G
               className={styles.natGwBadge}
               style={{ marginLeft: "auto" }}
               onClick={(e) => { e.stopPropagation(); onNatGwToggle?.(natGwBadge.nodeId); }}
-              title={`${natGwBadge.label} — 클릭하여 카드 펼치기`}
+              title={`${natGwBadge.label} — ${t("ld.natExpand")}`}
             >
               <img
                 src={getAzureIconUrl("natGateway")}
@@ -121,8 +124,8 @@ export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<G
             right: 8,
             width: 8,
             height: 8,
-            background: "rgba(251, 146, 60, 0.85)",
-            border: "2px solid rgb(251, 146, 60)",
+            background: rgba("egress", 0.85),
+            border: `2px solid ${rgba("egress")}`,
             borderRadius: "50%",
             pointerEvents: "none",
           }}

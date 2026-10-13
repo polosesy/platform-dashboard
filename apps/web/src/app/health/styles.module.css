@@ -25,19 +25,19 @@
 
 .error {
   padding: 10px 12px;
-  border: 1px solid rgba(216, 59, 1, 0.26);
-  background: rgba(216, 59, 1, 0.10);
+  border: 1px solid rgba(var(--danger-rgb), 0.26);
+  background: var(--danger-soft);
   border-radius: var(--radius-md);
-  color: rgba(216, 59, 1, 0.95);
+  color: rgba(var(--danger-rgb), 0.95);
   font-size: 13px;
 }
 
 .note {
   padding: 10px 12px;
-  border: 1px solid rgba(0, 120, 212, 0.22);
-  background: rgba(0, 120, 212, 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.08);
   border-radius: var(--radius-md);
-  color: rgba(0, 120, 212, 0.92);
+  color: rgba(var(--accent-rgb), 0.92);
   font-size: 13px;
 }
 
@@ -53,7 +53,7 @@
   grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   padding: 14px;
   display: grid;
@@ -65,7 +65,7 @@
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -97,7 +97,7 @@
   grid-column: span 4;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   padding: 24px;
   display: flex;
@@ -169,7 +169,7 @@
   grid-column: span 8;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
 }
@@ -197,17 +197,17 @@
   font-size: 11px;
   font-weight: 700;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   transition: background 150ms ease;
 }
 
 .filterBtn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(var(--paper-rgb), 0.95);
 }
 
 .filterActive {
-  background: rgba(20, 21, 23, 0.06);
-  border-color: rgba(20, 21, 23, 0.20);
+  background: rgba(var(--ink-rgb), 0.06);
+  border-color: rgba(var(--ink-rgb), 0.2);
 }
 
 .tableBody {
@@ -222,7 +222,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) 120px auto;
   gap: 10px;
@@ -271,10 +271,10 @@
   letter-spacing: 0.02em;
 }
 
-.stateAvailable { background: rgba(16, 137, 62, 0.10); color: rgba(16, 137, 62, 0.90); }
-.stateDegraded { background: rgba(209, 132, 0, 0.10); color: rgba(209, 132, 0, 0.90); }
-.stateUnavailable { background: rgba(216, 59, 1, 0.10); color: rgba(216, 59, 1, 0.90); }
-.stateUnknown { background: rgba(20, 21, 23, 0.06); color: rgba(20, 21, 23, 0.50); }
+.stateAvailable { background: rgba(var(--ok-rgb), 0.1); color: rgba(var(--ok-rgb), 0.9); }
+.stateDegraded { background: rgba(var(--warning-rgb), 0.1); color: rgba(var(--warning-rgb), 0.9); }
+.stateUnavailable { background: var(--danger-soft); color: rgba(var(--danger-rgb), 0.9); }
+.stateUnknown { background: rgba(var(--ink-rgb), 0.06); color: rgba(var(--ink-rgb), 0.5); }
 
 .resRight {
   display: flex;
@@ -308,7 +308,7 @@
 .resSummary {
   grid-column: 2 / -1;
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.4;
 }
 
@@ -322,7 +322,7 @@
   padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
 }
 
@@ -340,27 +340,27 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
   padding: 6px 10px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(var(--paper-rgb), 0.82);
   min-width: 200px;
   max-width: 340px;
 }
 
 .subSelect:focus {
-  outline: 2px solid rgba(0, 120, 212, 0.40);
+  outline: 2px solid rgba(var(--accent-rgb), 0.4);
   outline-offset: 1px;
 }
 
 .instanceNote {
   font-size: 11px;
-  color: rgba(0, 120, 212, 0.72);
+  color: rgba(var(--accent-rgb), 0.72);
   font-weight: 700;
   margin-left: auto;
-  background: rgba(0, 120, 212, 0.06);
-  border: 1px solid rgba(0, 120, 212, 0.12);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
   padding: 3px 8px;
   border-radius: 999px;
 }
@@ -369,7 +369,7 @@
   padding: 10px 12px;
   color: var(--muted);
   font-size: 13px;
-  border: 1px dashed rgba(20, 21, 23, 0.18);
+  border: 1px dashed rgba(var(--ink-rgb), 0.18);
   border-radius: 14px;
 }
 
@@ -404,8 +404,8 @@
 .spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid rgba(0, 120, 212, 0.12);
-  border-top-color: rgba(0, 120, 212, 0.72);
+  border: 3px solid rgba(var(--accent-rgb), 0.12);
+  border-top-color: rgba(var(--accent-rgb), 0.72);
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
@@ -421,9 +421,9 @@
   border-radius: var(--radius-lg);
   background: linear-gradient(
     90deg,
-    rgba(20, 21, 23, 0.04) 0%,
-    rgba(20, 21, 23, 0.10) 40%,
-    rgba(20, 21, 23, 0.04) 80%
+    rgba(var(--ink-rgb), 0.04) 0%,
+    rgba(var(--ink-rgb), 0.1) 40%,
+    rgba(var(--ink-rgb), 0.04) 80%
   );
   background-size: 800px 100%;
   animation: shimmer 1.8s ease-in-out infinite;
@@ -458,8 +458,8 @@
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border: 1px solid rgba(209, 132, 0, 0.30);
-  background: rgba(209, 132, 0, 0.06);
+  border: 1px solid rgba(var(--warning-rgb), 0.3);
+  background: rgba(var(--warning-rgb), 0.06);
   border-radius: var(--radius-lg);
 }
 
@@ -468,26 +468,26 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: rgba(209, 132, 0, 0.14);
+  background: rgba(var(--warning-rgb), 0.14);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
   font-weight: 900;
-  color: rgba(209, 132, 0, 0.88);
+  color: rgba(var(--warning-rgb), 0.88);
 }
 
 .fallbackNoticeText {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(209, 132, 0, 0.88);
+  color: rgba(var(--warning-rgb), 0.88);
   line-height: 1.4;
 }
 
 .fallbackNoticeHint {
   font-size: 11px;
   font-weight: 500;
-  color: rgba(20, 21, 23, 0.50);
+  color: rgba(var(--ink-rgb), 0.5);
   margin-top: 2px;
 }
 
@@ -499,7 +499,7 @@
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
 }
 
@@ -519,21 +519,21 @@
 }
 
 .tabBtn:hover {
-  background: rgba(20, 21, 23, 0.04);
+  background: rgba(var(--ink-rgb), 0.04);
 }
 
 .tabActive {
-  background: rgba(20, 21, 23, 0.06);
-  color: rgba(20, 21, 23, 0.92);
-  border-color: rgba(20, 21, 23, 0.10);
+  background: rgba(var(--ink-rgb), 0.06);
+  color: rgba(var(--ink-rgb), 0.92);
+  border-color: rgba(var(--ink-rgb), 0.1);
 }
 
 /* ── Global Status — All Good ── */
 
 .allGoodCard {
-  border: 1px solid rgba(16, 137, 62, 0.22);
+  border: 1px solid rgba(var(--ok-rgb), 0.22);
   border-radius: var(--radius-lg);
-  background: rgba(16, 137, 62, 0.05);
+  background: rgba(var(--ok-rgb), 0.05);
   padding: 56px 24px;
   display: flex;
   flex-direction: column;
@@ -545,8 +545,8 @@
   width: 60px;
   height: 60px;
   border-radius: 999px;
-  background: rgba(16, 137, 62, 0.12);
-  color: rgba(16, 137, 62, 0.82);
+  background: rgba(var(--ok-rgb), 0.12);
+  color: rgba(var(--ok-rgb), 0.82);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -558,20 +558,20 @@
 .allGoodTitle {
   font-size: 16px;
   font-weight: 800;
-  color: rgba(16, 137, 62, 0.82);
+  color: rgba(var(--ok-rgb), 0.82);
   letter-spacing: -0.02em;
 }
 
 .allGoodSub {
   font-size: 13px;
-  color: rgba(16, 137, 62, 0.60);
+  color: rgba(var(--ok-rgb), 0.6);
 }
 
 .allGoodLink {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.80);
+  color: rgba(var(--accent-rgb), 0.8);
   text-decoration: none;
 }
 
@@ -589,7 +589,7 @@
 .incidentCard {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   backdrop-filter: blur(12px);
   padding: 16px 18px;
   display: grid;
@@ -613,10 +613,10 @@
   flex: none;
 }
 
-.statusActive { background: rgba(216, 59, 1, 0.10); color: rgba(216, 59, 1, 0.92); }
-.statusInvestigating { background: rgba(209, 132, 0, 0.12); color: rgba(209, 132, 0, 0.92); }
-.statusMitigated { background: rgba(0, 120, 212, 0.10); color: rgba(0, 120, 212, 0.92); }
-.statusResolved { background: rgba(16, 137, 62, 0.10); color: rgba(16, 137, 62, 0.80); }
+.statusActive { background: var(--danger-soft); color: rgba(var(--danger-rgb), 0.92); }
+.statusInvestigating { background: var(--warning-soft); color: rgba(var(--warning-rgb), 0.92); }
+.statusMitigated { background: var(--accent-soft); color: rgba(var(--accent-rgb), 0.92); }
+.statusResolved { background: rgba(var(--ok-rgb), 0.1); color: rgba(var(--ok-rgb), 0.8); }
 
 .incidentDate {
   font-size: 11px;
@@ -633,14 +633,14 @@
 
 .incidentDesc {
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.5;
 }
 
 .incidentLink {
   font-size: 12px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.82);
+  color: rgba(var(--accent-rgb), 0.82);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -670,9 +670,9 @@
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
-  background: rgba(0, 120, 212, 0.07);
-  color: rgba(0, 120, 212, 0.82);
-  border: 1px solid rgba(0, 120, 212, 0.14);
+  background: rgba(var(--accent-rgb), 0.07);
+  color: rgba(var(--accent-rgb), 0.82);
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
 }
 
 .serviceBadge {
@@ -680,9 +680,9 @@
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
-  background: rgba(20, 21, 23, 0.05);
-  color: rgba(20, 21, 23, 0.58);
-  border: 1px solid rgba(20, 21, 23, 0.10);
+  background: rgba(var(--ink-rgb), 0.05);
+  color: rgba(var(--ink-rgb), 0.58);
+  border: 1px solid rgba(var(--ink-rgb), 0.1);
 }
 
 /* ── Event Summary Strip (Tab 3) ── */
@@ -691,7 +691,7 @@
   grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   padding: 14px;
   display: grid;
@@ -710,7 +710,7 @@
 .eventCard {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   backdrop-filter: blur(12px);
   padding: 16px 18px;
   display: grid;
@@ -734,10 +734,10 @@
   flex: none;
 }
 
-.eventServiceIssue { background: rgba(216, 59, 1, 0.10); color: rgba(216, 59, 1, 0.92); }
-.eventMaintenance { background: rgba(0, 120, 212, 0.10); color: rgba(0, 120, 212, 0.92); }
-.eventAdvisory { background: rgba(209, 132, 0, 0.12); color: rgba(209, 132, 0, 0.92); }
-.eventSecurity { background: rgba(112, 48, 160, 0.10); color: rgba(112, 48, 160, 0.88); }
+.eventServiceIssue { background: var(--danger-soft); color: rgba(var(--danger-rgb), 0.92); }
+.eventMaintenance { background: var(--accent-soft); color: rgba(var(--accent-rgb), 0.92); }
+.eventAdvisory { background: var(--warning-soft); color: rgba(var(--warning-rgb), 0.92); }
+.eventSecurity { background: rgba(var(--violet-rgb), 0.10); color: rgba(var(--violet-rgb), 0.88); }
 
 .eventTime {
   font-size: 11px;
@@ -754,7 +754,7 @@
 
 .eventSummary {
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.65);
+  color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.5;
 }
 
@@ -775,11 +775,11 @@
 
 .eventMetaLabel {
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.45);
+  color: var(--subtle);
 }
 
 .eventMetaValue {
-  color: rgba(20, 21, 23, 0.70);
+  color: rgba(var(--ink-rgb), 0.7);
 }
 
 /* ── Event Card — expandable ── */
@@ -812,8 +812,8 @@
 }
 
 .eventCardExpanded {
-  border-color: rgba(0, 120, 212, 0.22);
-  background: rgba(255, 255, 255, 0.90);
+  border-color: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--paper-rgb), 0.9);
 }
 
 .eventSummaryClamp {
@@ -832,17 +832,17 @@
   letter-spacing: 0.03em;
 }
 
-.levelError { background: rgba(216, 59, 1, 0.08); color: rgba(216, 59, 1, 0.88); }
-.levelWarning { background: rgba(209, 132, 0, 0.10); color: rgba(209, 132, 0, 0.88); }
-.levelInfo { background: rgba(20, 21, 23, 0.06); color: rgba(20, 21, 23, 0.52); }
+.levelError { background: rgba(var(--danger-rgb), 0.08); color: rgba(var(--danger-rgb), 0.88); }
+.levelWarning { background: rgba(var(--warning-rgb), 0.1); color: rgba(var(--warning-rgb), 0.88); }
+.levelInfo { background: rgba(var(--ink-rgb), 0.06); color: rgba(var(--ink-rgb), 0.52); }
 
 .resolvedBadge {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
-  background: rgba(16, 137, 62, 0.10);
-  color: rgba(16, 137, 62, 0.80);
+  background: rgba(var(--ok-rgb), 0.1);
+  color: rgba(var(--ok-rgb), 0.8);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -867,8 +867,8 @@
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
-  background: rgba(20, 21, 23, 0.07);
-  color: rgba(20, 21, 23, 0.52);
+  background: rgba(var(--ink-rgb), 0.07);
+  color: rgba(var(--ink-rgb), 0.52);
 }
 
 .expandHint {
@@ -879,7 +879,7 @@
 }
 
 .eventDetail {
-  border-top: 1px solid rgba(20, 21, 23, 0.07);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.07);
   padding-top: 10px;
   display: grid;
   gap: 10px;
@@ -903,18 +903,18 @@
   gap: 4px;
   font-size: 12px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.82);
+  color: rgba(var(--accent-rgb), 0.82);
   text-decoration: none;
   padding: 6px 12px;
-  border: 1px solid rgba(0, 120, 212, 0.20);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 8px;
-  background: rgba(0, 120, 212, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   transition: background 120ms ease;
   width: fit-content;
 }
 
 .eventPortalLink:hover {
-  background: rgba(0, 120, 212, 0.10);
+  background: var(--accent-soft);
   text-decoration: none;
 }
 
@@ -924,7 +924,7 @@
   grid-column: span 12;
   padding: 48px 24px;
   text-align: center;
-  border: 1px dashed rgba(20, 21, 23, 0.14);
+  border: 1px dashed rgba(var(--ink-rgb), 0.14);
   border-radius: var(--radius-lg);
   color: var(--muted);
   font-size: 14px;
@@ -946,7 +946,7 @@
   font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: rgba(20, 21, 23, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
 }
 
 .sectionSub {
@@ -965,9 +965,9 @@
 .regionAffectedBanner {
   padding: 8px 14px;
   border-radius: 10px;
-  background: rgba(216, 59, 1, 0.07);
-  border: 1px solid rgba(216, 59, 1, 0.18);
-  color: rgba(216, 59, 1, 0.88);
+  background: rgba(var(--danger-rgb), 0.07);
+  border: 1px solid rgba(var(--danger-rgb), 0.18);
+  color: rgba(var(--danger-rgb), 0.88);
   font-size: 12px;
   font-weight: 800;
 }
@@ -982,7 +982,7 @@
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
   display: grid;
   gap: 8px;
   transition: box-shadow 120ms ease, border-color 120ms ease;
@@ -992,28 +992,28 @@
 }
 
 .regionCard:hover {
-  box-shadow: 0 2px 8px rgba(20, 21, 23, 0.06);
+  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.06);
 }
 
 .regionCardGood {
-  border-color: rgba(16, 137, 62, 0.20);
-  background: rgba(16, 137, 62, 0.03);
+  border-color: rgba(var(--ok-rgb), 0.2);
+  background: rgba(var(--ok-rgb), 0.03);
 }
 
 .regionCardAffected {
-  border-color: rgba(216, 59, 1, 0.22);
-  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(var(--danger-rgb), 0.22);
+  background: rgba(var(--paper-rgb), 0.82);
 }
 
 .regionCardAffected:hover {
-  box-shadow: 0 2px 12px rgba(216, 59, 1, 0.10);
+  box-shadow: 0 2px 12px var(--danger-soft);
 }
 
 .regionCardExpanded {
   grid-column: 1 / -1;
-  border-color: rgba(0, 120, 212, 0.28);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 16px rgba(0, 120, 212, 0.08);
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: rgba(var(--paper-rgb), 0.92);
+  box-shadow: 0 2px 16px rgba(var(--accent-rgb), 0.08);
 }
 
 .regionCardHeader {
@@ -1032,11 +1032,11 @@
 }
 
 .regionDot[data-state="ok"] {
-  background: rgba(16, 137, 62, 0.70);
+  background: rgba(var(--ok-rgb), 0.7);
 }
 
 .regionDot[data-state="affected"] {
-  background: rgba(216, 59, 1, 0.80);
+  background: rgba(var(--danger-rgb), 0.8);
 }
 
 .regionName {
@@ -1059,13 +1059,13 @@
 }
 
 .regionStatusOk {
-  background: rgba(16, 137, 62, 0.10);
-  color: rgba(16, 137, 62, 0.82);
+  background: rgba(var(--ok-rgb), 0.1);
+  color: rgba(var(--ok-rgb), 0.82);
 }
 
 .regionStatusAffected {
-  background: rgba(216, 59, 1, 0.10);
-  color: rgba(216, 59, 1, 0.88);
+  background: var(--danger-soft);
+  color: rgba(var(--danger-rgb), 0.88);
 }
 
 .regionIssueRow {
@@ -1083,13 +1083,13 @@
 }
 
 .regionIssueChip[data-type="issue"] {
-  background: rgba(216, 59, 1, 0.10);
-  color: rgba(216, 59, 1, 0.88);
+  background: var(--danger-soft);
+  color: rgba(var(--danger-rgb), 0.88);
 }
 
 .regionIssueChip[data-type="maintenance"] {
-  background: rgba(0, 120, 212, 0.10);
-  color: rgba(0, 120, 212, 0.88);
+  background: var(--accent-soft);
+  color: rgba(var(--accent-rgb), 0.88);
 }
 
 .regionServices {
@@ -1100,7 +1100,7 @@
 }
 
 .regionDetailSection {
-  border-top: 1px solid rgba(20, 21, 23, 0.08);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
   padding-top: 10px;
   display: grid;
   gap: 10px;
@@ -1117,8 +1117,8 @@
   gap: 6px;
   padding: 6px 10px;
   border-radius: 10px;
-  background: rgba(20, 21, 23, 0.03);
-  border: 1px solid rgba(20, 21, 23, 0.06);
+  background: rgba(var(--ink-rgb), 0.03);
+  border: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 
 .regionServiceDot {
@@ -1131,7 +1131,7 @@
 .regionServiceName {
   font-size: 12px;
   font-weight: 700;
-  color: rgba(20, 21, 23, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -1150,23 +1150,23 @@
 }
 
 .regionServiceOk {
-  background: rgba(16, 137, 62, 0.10);
-  color: rgba(16, 137, 62, 0.82);
+  background: rgba(var(--ok-rgb), 0.1);
+  color: rgba(var(--ok-rgb), 0.82);
 }
 
 .regionServiceIssue {
-  background: rgba(216, 59, 1, 0.10);
-  color: rgba(216, 59, 1, 0.88);
+  background: var(--danger-soft);
+  color: rgba(var(--danger-rgb), 0.88);
 }
 
 .regionServiceMaintenance {
-  background: rgba(0, 120, 212, 0.10);
-  color: rgba(0, 120, 212, 0.88);
+  background: var(--accent-soft);
+  color: rgba(var(--accent-rgb), 0.88);
 }
 
 .regionServiceAdvisory {
-  background: rgba(209, 132, 0, 0.10);
-  color: rgba(209, 132, 0, 0.88);
+  background: rgba(var(--warning-rgb), 0.1);
+  color: rgba(var(--warning-rgb), 0.88);
 }
 
 .regionEventItem {
@@ -1184,13 +1184,13 @@
 
 .regionEventTitle {
   font-size: 11px;
-  color: rgba(20, 21, 23, 0.70);
+  color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.4;
 }
 
 .regionEventSummary {
   font-size: 10px;
-  color: rgba(20, 21, 23, 0.50);
+  color: rgba(var(--ink-rgb), 0.5);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1232,22 +1232,22 @@
 
 .permissionsBox {
   grid-column: span 12;
-  border: 1px solid rgba(0, 120, 212, 0.20);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: var(--radius-lg);
-  background: rgba(0, 120, 212, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   padding: 14px 16px;
 }
 
 .permissionsTitle {
   font-size: 12px;
   font-weight: 800;
-  color: rgba(0, 120, 212, 0.88);
+  color: rgba(var(--accent-rgb), 0.88);
   margin-bottom: 8px;
 }
 
 .permissionsBody {
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.70);
+  color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.6;
 }
 
@@ -1266,7 +1266,7 @@
 
 .permissionsBody code {
   font-size: 11px;
-  background: rgba(0, 120, 212, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   border-radius: 4px;
   padding: 1px 5px;
   font-family: monospace;
@@ -1280,9 +1280,9 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  background: rgba(112, 48, 160, 0.10);
-  color: rgba(112, 48, 160, 0.82);
-  border: 1px solid rgba(112, 48, 160, 0.16);
+  background: rgba(var(--violet-rgb), 0.10);
+  color: rgba(var(--violet-rgb), 0.82);
+  border: 1px solid rgba(var(--violet-rgb), 0.16);
 }
 
 /* ── Translation toggle row ── */
@@ -1300,7 +1300,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--panel);
 }
 
 .translateToggleBtn {
@@ -1324,13 +1324,13 @@
 }
 
 .translateToggleBtnActive {
-  background: rgba(112, 48, 160, 0.10);
-  color: rgba(112, 48, 160, 0.88);
+  background: rgba(var(--violet-rgb), 0.10);
+  color: rgba(var(--violet-rgb), 0.88);
 }
 
 .translateSpinner {
   font-size: 11px;
-  color: rgba(112, 48, 160, 0.70);
+  color: rgba(var(--violet-rgb), 0.70);
   font-weight: 700;
   animation: pulse 1.2s ease-in-out infinite;
 }
@@ -1342,10 +1342,10 @@
 
 .translateNote {
   font-size: 11px;
-  color: rgba(209, 132, 0, 0.80);
+  color: rgba(var(--warning-rgb), 0.8);
   font-weight: 700;
-  background: rgba(209, 132, 0, 0.08);
-  border: 1px solid rgba(209, 132, 0, 0.16);
+  background: rgba(var(--warning-rgb), 0.08);
+  border: 1px solid rgba(var(--warning-rgb), 0.16);
   border-radius: 8px;
   padding: 4px 10px;
 }
@@ -1359,7 +1359,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.60);
+  background: rgba(var(--paper-rgb), 0.6);
 }
 
 .timestampItem {
@@ -1383,18 +1383,18 @@
 }
 
 .timestampDot[data-kind="start"] {
-  background: rgba(216, 59, 1, 0.80);
-  box-shadow: 0 0 0 3px rgba(216, 59, 1, 0.12);
+  background: rgba(var(--danger-rgb), 0.8);
+  box-shadow: 0 0 0 3px rgba(var(--danger-rgb), 0.12);
 }
 
 .timestampDot[data-kind="end"] {
-  background: rgba(16, 137, 62, 0.80);
-  box-shadow: 0 0 0 3px rgba(16, 137, 62, 0.12);
+  background: rgba(var(--ok-rgb), 0.8);
+  box-shadow: 0 0 0 3px rgba(var(--ok-rgb), 0.12);
 }
 
 .timestampDot[data-kind="update"] {
-  background: rgba(0, 120, 212, 0.80);
-  box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.12);
+  background: rgba(var(--accent-rgb), 0.8);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .timestampLabel {
@@ -1409,7 +1409,7 @@
   font-size: 13px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: rgba(20, 21, 23, 0.85);
+  color: rgba(var(--ink-rgb), 0.85);
   line-height: 1.2;
 }
 

@@ -18,19 +18,20 @@ import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { PageHeader, Tabs } from "@/components/ui";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
+import { rgba } from "@/lib/palette";
 
 // ── Constants ──
 
 type HealthTab = "global" | "instance" | "service";
 
 const STATE_COLORS: Record<ResourceHealthStatus["availabilityState"], string> = {
-  Available: "rgba(16, 137, 62, 0.80)",
-  Degraded: "rgba(209, 132, 0, 0.80)",
-  Unavailable: "rgba(216, 59, 1, 0.80)",
-  Unknown: "rgba(20, 21, 23, 0.30)",
+  Available: rgba("ok", 0.8),
+  Degraded: rgba("warning", 0.8),
+  Unavailable: rgba("danger", 0.8),
+  Unknown: rgba("ink", 0.3),
 };
 
 const STATE_STYLE: Record<ResourceHealthStatus["availabilityState"], string> = {
@@ -55,10 +56,10 @@ const EVENT_TYPE_STYLE: Record<ServiceHealthEventType, string> = {
 };
 
 const EVENT_TYPE_COLORS: Record<ServiceHealthEventType, string> = {
-  ServiceIssue: "rgba(216, 59, 1, 0.82)",
-  PlannedMaintenance: "rgba(0, 120, 212, 0.82)",
-  HealthAdvisory: "rgba(209, 132, 0, 0.82)",
-  SecurityAdvisory: "rgba(112, 48, 160, 0.82)",
+  ServiceIssue: rgba("danger", 0.82),
+  PlannedMaintenance: rgba("accent", 0.82),
+  HealthAdvisory: rgba("warning", 0.82),
+  SecurityAdvisory: rgba("violet", 0.82),
 };
 
 type FilterState = "all" | ResourceHealthStatus["availabilityState"];
@@ -125,22 +126,17 @@ const SERVICE_STATUS_STYLE: Record<string, string> = {
   advisory: styles.regionServiceAdvisory ?? "",
 };
 
-const SERVICE_STATUS_LABEL: Record<string, Record<string, string>> = {
-  ok: { ko: "정상", en: "OK" },
-  issue: { ko: "문제", en: "Issue" },
-  maintenance: { ko: "유지보수", en: "Maintenance" },
-  advisory: { ko: "권고", en: "Advisory" },
-};
+const SERVICE_STATUSES = new Set(["ok", "issue", "maintenance", "advisory"]);
 
 const SERVICE_DOT_COLOR: Record<string, string> = {
-  ok: "rgba(16, 137, 62, 0.70)",
-  issue: "rgba(216, 59, 1, 0.80)",
-  maintenance: "rgba(0, 120, 212, 0.80)",
-  advisory: "rgba(209, 132, 0, 0.80)",
+  ok: rgba("ok", 0.7),
+  issue: rgba("danger", 0.8),
+  maintenance: rgba("accent", 0.8),
+  advisory: rgba("warning", 0.8),
 };
 
 function RegionCard({ region }: { region: RegionHealthStatus }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const isAffected = region.hasActiveIssues;
   const services = useRegionServices(region);
@@ -187,7 +183,7 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
                 <div className={styles.regionServiceDot} style={{ background: SERVICE_DOT_COLOR[worst] }} />
                 <span className={styles.regionServiceName}>{svcName}</span>
                 <span className={`${styles.regionServiceStatus} ${SERVICE_STATUS_STYLE[worst]}`}>
-                  {SERVICE_STATUS_LABEL[worst]?.[locale] ?? worst}
+                  {SERVICE_STATUSES.has(worst) ? t(`health.svc.${worst}`) : worst}
                 </span>
               </div>
               {svcEvents.map((evt) => (
@@ -209,7 +205,7 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
             </div>
           )) : (
             <div className={styles.regionNoEvents}>
-              {locale === "ko" ? "이 리전에 활성 이벤트가 없습니다" : "No active events in this region"}
+              {t("health.regionNoEvents")}
             </div>
           )}
         </div>
@@ -256,7 +252,7 @@ function GlobalStatusPanel({
           <>
             {regionalData.totalAffected > 0 && (
               <div className={styles.regionAffectedBanner}>
-                {regionalData.totalAffected}개 리전에 활성 이슈가 있습니다
+                {t("health.regionsAffected", { n: regionalData.totalAffected })}
               </div>
             )}
             <div className={styles.regionGrid}>
@@ -346,9 +342,9 @@ function GlobalStatusPanel({
 }
 
 const REASON_TYPE_STYLE: Record<string, string> = {
-  Unplanned: "rgba(216, 59, 1, 0.82)",
-  Planned: "rgba(0, 120, 212, 0.82)",
-  UserInitiated: "rgba(20, 21, 23, 0.50)",
+  Unplanned: rgba("danger", 0.82),
+  Planned: rgba("accent", 0.82),
+  UserInitiated: rgba("ink", 0.5),
 };
 
 function InstanceHealthPanel({
@@ -438,8 +434,8 @@ function InstanceHealthPanel({
             <p>{t("health.permissionsNote")}</p>
             <ul>
               <li><code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_CLIENT_SECRET</code></li>
-              <li><code>AZURE_SUBSCRIPTION_IDS</code> — comma-separated subscription IDs</li>
-              <li>RBAC: <strong>Reader</strong> role on each subscription (includes <code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
+              <li><code>AZURE_SUBSCRIPTION_IDS</code> — {t("health.perm.subs")}</li>
+              <li>RBAC: <strong>Reader</strong> {t("health.perm.reader")} (<code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
             </ul>
           </div>
         </div>
@@ -448,10 +444,10 @@ function InstanceHealthPanel({
       {/* Summary strip */}
       <div className={styles.summaryStrip}>
         {([
-          { label: "Available", count: data?.available ?? 0, color: STATE_COLORS.Available },
-          { label: "Degraded", count: data?.degraded ?? 0, color: STATE_COLORS.Degraded },
-          { label: "Unavailable", count: data?.unavailable ?? 0, color: STATE_COLORS.Unavailable },
-          { label: "Unknown", count: data?.unknown ?? 0, color: STATE_COLORS.Unknown },
+          { label: t("health.state.Available"), count: data?.available ?? 0, color: STATE_COLORS.Available },
+          { label: t("health.state.Degraded"), count: data?.degraded ?? 0, color: STATE_COLORS.Degraded },
+          { label: t("health.state.Unavailable"), count: data?.unavailable ?? 0, color: STATE_COLORS.Unavailable },
+          { label: t("health.state.Unknown"), count: data?.unknown ?? 0, color: STATE_COLORS.Unknown },
         ] as const).map((s) => (
           <div key={s.label} className={styles.statCard}>
             <div className={styles.statDot} style={{ background: s.color }} />
@@ -465,7 +461,7 @@ function InstanceHealthPanel({
       <div className={styles.donutCard}>
         <div className={styles.donutWrap}>
           <svg className={styles.donutSvg} width="140" height="140" viewBox="0 0 140 140">
-            <circle fill="none" stroke="rgba(20,21,23,0.06)" strokeWidth="12" cx="70" cy="70" r="58" />
+            <circle fill="none" stroke={rgba("ink", 0.06)} strokeWidth="12" cx="70" cy="70" r="58" />
             {segments.map((seg) => (
               <circle
                 key={seg.state}
@@ -481,7 +477,7 @@ function InstanceHealthPanel({
           </svg>
           <div className={styles.donutCenter}>
             <div className={styles.donutTotal}>{total}</div>
-            <div className={styles.donutLabel}>resources</div>
+            <div className={styles.donutLabel}>{t("health.resources")}</div>
           </div>
         </div>
         <div className={styles.donutTitle}>{t("health.healthDistribution")}</div>
@@ -527,7 +523,7 @@ function InstanceHealthPanel({
                 <div className={styles.resGroup}>{r.resourceGroup}</div>
                 <div className={styles.resRight}>
                   <div className={`${styles.resState} ${STATE_STYLE[r.availabilityState]}`}>
-                    {r.availabilityState}
+                    {["Available", "Degraded", "Unavailable", "Unknown"].includes(r.availabilityState) ? t(`health.state.${r.availabilityState}`) : r.availabilityState}
                   </div>
                   {r.reasonType && r.availabilityState !== "Available" && (
                     <div
@@ -867,7 +863,7 @@ function ServiceStatusPanel({
 // ── Main Page ──
 
 export default function HealthPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [activeTab, setActiveTab] = useState<HealthTab>("global");
   // Tabs load lazily on first visit
   const [visited, setVisited] = useState<ReadonlySet<HealthTab>>(() => new Set<HealthTab>(["global"]));
@@ -920,7 +916,7 @@ export default function HealthPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={<span>{activeGeneratedAt ? `${t("health.generatedAt")}: ${new Date(activeGeneratedAt).toLocaleString()}` : t("health.loading")}</span>}
+        meta={<span>{activeGeneratedAt ? `${t("health.generatedAt")}: ${new Date(activeGeneratedAt).toLocaleString(dateLocale(locale))}` : t("health.loading")}</span>}
         actions={<SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />}
       />
 

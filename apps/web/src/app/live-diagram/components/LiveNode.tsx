@@ -1,6 +1,7 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
+import { useI18n } from "@/lib/i18n";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { HealthStatus, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
 import { nodeColor, defaultTokens } from "../utils/designTokens";
@@ -8,6 +9,7 @@ import { getAzureIconUrl } from "../utils/azureIcons";
 import { D3Sparkline } from "./D3Sparkline";
 import { RESOURCE_KIND_DISPLAY } from "./ResourceDetailPanel";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 export type NsgBadgeInfo = {
   nodeId: string;
@@ -61,12 +63,23 @@ const POWER_STATE_LABEL: Record<string, string> = {
 
 // PowerState → ring visual mapping
 type PowerStateRing = { health: HealthStatus; score: number; color: string; spin: boolean };
+const MAX_METRIC_CHIPS = 2;
+/** Short chip labels so two chips and the trend fit one line; the full name is in the chip tooltip */
+const METRIC_SHORT: Record<string, string> = {
+  cpu: "CPU", memory: "Mem", network: "Net", throughput: "Thru", requests: "Req", errors: "Err",
+  availability: "Avail", transactions: "Txn", storage: "Stor", ru: "RU", rps: "RPS", latency: "Lat",
+  executions: "Exec", dtu: "DTU", dataPath: "Path", connections: "Conn",
+};
+const MAX_SUB_CHIPS = 2;
+
+const HEALTH_RANK: Record<HealthStatus, number> = { unknown: 0, ok: 0, warning: 1, critical: 2 };
+
 const POWER_STATE_RING: Record<string, PowerStateRing> = {
-  running:     { health: "ok",       score: 1,    color: "rgba(16,137,62,0.70)",  spin: true },
-  starting:    { health: "ok",       score: 0.5,  color: "rgba(0,120,212,0.65)",  spin: true },
-  stopping:    { health: "warning",  score: 0.5,  color: "rgba(209,132,0,0.70)",  spin: true },
-  stopped:     { health: "warning",  score: 0.3,  color: "rgba(209,132,0,0.60)",  spin: false },
-  deallocated: { health: "unknown",  score: 0.15, color: "rgba(20,21,23,0.25)",   spin: false },
+  running:     { health: "ok",       score: 1,    color: rgba("ok", 0.7),  spin: true },
+  starting:    { health: "ok",       score: 0.5,  color: rgba("accent", 0.65),  spin: true },
+  stopping:    { health: "warning",  score: 0.5,  color: rgba("warning", 0.7),  spin: true },
+  stopped:     { health: "warning",  score: 0.3,  color: rgba("warning", 0.6),  spin: false },
+  deallocated: { health: "unknown",  score: 0.15, color: rgba("ink", 0.25),   spin: false },
 };
 
 // Azure CAF resource type abbreviations
@@ -83,43 +96,62 @@ const RESOURCE_TYPE_ABBR: Record<string, string> = {
 
 // Architecture role badges — only shown when role provides extra context beyond type
 const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
-  "aks-cluster":      { abbr: "AKS",  label: "AKS Cluster" },
-  "aks-vmss":         { abbr: "Pool", label: "AKS Node Pool (VMSS)" },
-  "aks-ingress":      { abbr: "Ing",  label: "AKS Ingress Controller" },
-  "aks-egress":       { abbr: "Egr",  label: "AKS Egress (Firewall)" },
-  "gateway":          { abbr: "GW",   label: "Application Gateway" },
-  "load-balancer":    { abbr: "LB",   label: "Load Balancer" },
-  "firewall":         { abbr: "FW",   label: "Firewall" },
-  "db":               { abbr: "DB",   label: "Database" },
-  "cache":            { abbr: "Cache", label: "Cache (Redis)" },
-  "private-endpoint": { abbr: "PE",   label: "Private Endpoint" },
-  "messaging":        { abbr: "Msg",  label: "Messaging Service" },
-  "nat-gateway":      { abbr: "NAT",  label: "NAT Gateway (명시적 아웃바운드)" },
+  // label = i18n key
+  "aks-cluster":      { abbr: "AKS",  label: "ld.role.aksCluster" },
+  "aks-vmss":         { abbr: "Pool", label: "ld.role.aksVmss" },
+  "aks-ingress":      { abbr: "Ing",  label: "ld.role.aksIngress" },
+  "aks-egress":       { abbr: "Egr",  label: "ld.role.aksEgress" },
+  "gateway":          { abbr: "GW",   label: "ld.role.gateway" },
+  "load-balancer":    { abbr: "LB",   label: "ld.role.lb" },
+  "firewall":         { abbr: "FW",   label: "ld.role.firewall" },
+  "db":               { abbr: "DB",   label: "ld.role.db" },
+  "cache":            { abbr: "Cache", label: "ld.role.cache" },
+  "private-endpoint": { abbr: "PE",   label: "ld.role.pe" },
+  "messaging":        { abbr: "Msg",  label: "ld.role.messaging" },
+  "nat-gateway":      { abbr: "NAT",  label: "ld.role.nat" },
 };
 
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
+  const { t } = useI18n();
   const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused } = data;
   const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
   const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
 
-  // ── Derive ring visuals from powerState (when available) or health ──
+  // ── Ring visuals: power state, unless the metrics say something worse ──
+  // A "running" power state (often assumed for LB / App Gateway / Firewall) must not paint a node
+  // green while its metric-based health is warning or critical.
   const ringFromPower = powerState ? POWER_STATE_RING[powerState] : undefined;
-  const effectiveHealth: HealthStatus = ringFromPower?.health ?? health;
-  const effectiveScore = ringFromPower?.score ?? healthScore;
-  const isSpinning = ringFromPower?.spin ?? false;
+  const metricWorse = !!ringFromPower && HEALTH_RANK[health] > HEALTH_RANK[ringFromPower.health];
+  const fromPower = ringFromPower && !metricWorse ? ringFromPower : undefined;
+  const effectiveHealth: HealthStatus = fromPower?.health ?? health;
+  const effectiveScore = fromPower?.score ?? healthScore;
+  const isSpinning = fromPower?.spin ?? false;
 
   const colors = nodeColor(effectiveHealth);
-  const ringStroke = ringFromPower?.color ?? colors.ringStroke;
+  const ringStroke = fromPower?.color ?? colors.ringStroke;
+  // Sparkline = metric trend, coloured by the metric-based health (power state says nothing about it)
+  const trendColor = nodeColor(health === "unknown" ? effectiveHealth : health).ringStroke;
   const pulse = defaultTokens.animation.pulseFrequency[effectiveHealth];
-
-  const topMetrics = Object.entries(metrics)
-    .filter(([, v]) => v != null)
-    .slice(0, 3);
 
   // Get first available sparkline
   const primarySparkline = sparklines
     ? Object.values(sparklines).find((s) => s.values.length >= 2)
     : undefined;
+
+  // Fixed card anatomy (the API lays cards out on a fixed height budget — 100 px, +26 with sub-resources):
+  //   header (ring · name · badges) / metric strip (≤ 2 chips | trend slot) / sub-resource strip (one line)
+  // The trend metric's chip comes first and carries the trend colour, so the line has a visible owner.
+  const metricEntries = Object.entries(metrics).filter(([, v]) => v != null);
+  const trendMetric = primarySparkline?.metric;
+  const orderedMetrics = trendMetric
+    ? [...metricEntries.filter(([k]) => k === trendMetric), ...metricEntries.filter(([k]) => k !== trendMetric)]
+    : metricEntries;
+  const topMetrics = orderedMetrics.slice(0, MAX_METRIC_CHIPS);
+  const metricsTitle = orderedMetrics.map(([k, v]) => `${k} ${fmtMetric(v)}`).join(" · ");
+  const subs = subResources ?? [];
+  // Two fit on one line as IP-only chips; three or more collapse to the first one + "+N"
+  const shownSubs = subs.length > MAX_SUB_CHIPS ? subs.slice(0, 1) : subs;
+  const hiddenSubs = subs.slice(shownSubs.length);
 
   return (
     <div
@@ -160,7 +192,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
           <circle
             cx="20" cy="20" r={RING_R}
             fill="none"
-            stroke="rgba(20,21,23,0.06)"
+            stroke={rgba("ink", 0.06)}
             strokeWidth={RING_STROKE}
           />
           {/* Health / PowerState arc */}
@@ -188,18 +220,6 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         </svg>
       </div>
 
-      {/* Sparkline under health ring */}
-      {primarySparkline && (
-        <div className={styles.sparklineWrap}>
-          <D3Sparkline
-            values={primarySparkline.values}
-            width={80}
-            height={22}
-            color={colors.ringStroke}
-          />
-        </div>
-      )}
-
       {/* Node info */}
       <div className={styles.nodeInfo} title={fullAzureName}>
         <div className={styles.nodeLabel} style={{ color: colors.text }}>
@@ -213,7 +233,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
             </span>
           )}
           {archRole && ARCH_ROLE_BADGE[archRole] && ARCH_ROLE_BADGE[archRole]!.abbr !== typeAbbr && (
-            <span className={styles.archRoleBadge} title={ARCH_ROLE_BADGE[archRole]!.label}>
+            <span className={styles.archRoleBadge} title={t(ARCH_ROLE_BADGE[archRole]!.label)}>
               {ARCH_ROLE_BADGE[archRole]!.abbr}
             </span>
           )}
@@ -222,14 +242,14 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
               {POWER_STATE_LABEL[powerState] ?? powerState}
             </span>
           )}
-          {!powerState && health !== "unknown" && (
+          {(!powerState || metricWorse) && health !== "unknown" && (
             <span className={styles.healthStatusBadge} data-health={health}>
               {health === "ok" ? "OK" : health === "warning" ? "Warn" : "Crit"}
             </span>
           )}
           {isUnused && (
-            <span className={styles.unusedBadge} title="리소스에 연결되지 않은 미사용 공용 IP">
-              미사용
+            <span className={styles.unusedBadge} title={t("ld.unusedPipHint")}>
+              {t("ld.unused")}
             </span>
           )}
         </div>
@@ -238,22 +258,34 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         )}
       </div>
 
-      {/* Metric badges */}
-      {topMetrics.length > 0 && (
-        <div className={styles.metricBadges}>
-          {topMetrics.map(([key, val]) => (
-            <div key={key} className={styles.metricBadge}>
-              <span className={styles.metricKey}>{key}</span>
-              <span className={styles.metricVal}>{fmtMetric(val)}</span>
+      {/* Metric strip: chips on the left, the trend always in the same right-hand slot */}
+      {(topMetrics.length > 0 || primarySparkline) && (
+        <div
+          className={styles.metricBadges}
+          data-trend={primarySparkline ? "on" : undefined}
+          style={{ "--trend": trendColor } as CSSProperties}
+          title={metricsTitle}
+        >
+          <div className={styles.metricChips}>
+            {topMetrics.map(([key, val]) => (
+              <div key={key} className={styles.metricBadge} data-trend={key === trendMetric || undefined} title={`${key} ${fmtMetric(val)}`}>
+                <span className={styles.metricKey}>{METRIC_SHORT[key] ?? key}</span>
+                <span className={styles.metricVal}>{fmtMetric(val)}</span>
+              </div>
+            ))}
+          </div>
+          {primarySparkline && (
+            <div className={styles.sparklineWrap} title={primarySparkline.metric}>
+              <D3Sparkline values={primarySparkline.values} width={40} height={20} color={trendColor} />
             </div>
-          ))}
+          )}
         </div>
       )}
 
       {/* Sub-resource chips (NIC bound to VM, Frontend IP in AppGW) */}
-      {subResources && subResources.length > 0 && (
-        <div className={styles.subResourceChips}>
-          {subResources.map((sr) => (
+      {subs.length > 0 && (
+        <div className={styles.subResourceChips} data-compact={subs.length > 1 || undefined}>
+          {shownSubs.map((sr) => (
             <div
               key={sr.id}
               className={styles.subResourceChip}
@@ -271,6 +303,14 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
               )}
             </div>
           ))}
+          {hiddenSubs.length > 0 && (
+            <span
+              className={styles.subResourceMore}
+              title={hiddenSubs.map((sr) => `${sr.label}${sr.endpoint ? `: ${sr.endpoint}` : ""}`).join("\n")}
+            >
+              +{hiddenSubs.length}
+            </span>
+          )}
         </div>
       )}
 
@@ -283,7 +323,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
           className={styles.vmssExpandBtn}
           onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId, aksClusterArmId); }}
         >
-          {vmssExpanded ? "▲ 접기" : "▼ 인스턴스 보기"}
+          {vmssExpanded ? `▲ ${t("ld.collapse")}` : `▼ ${t("ld.showInstances")}`}
         </button>
       )}
     </div>

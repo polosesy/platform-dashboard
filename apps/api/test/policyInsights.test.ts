@@ -210,3 +210,16 @@ test("KBOM: registries, snapshot tag, digest pinning, platform rows", () => {
   assert.equal(k.summary.digestPinned, 1);
   assert.equal(k.platform.find((p) => p.label === "kubelet")!.note, "컨트롤 플레인과 일치");
 });
+
+test("lang: English responses carry no Korean text; Korean stays the default", async () => {
+  const { withLang } = await import("../src/infra/lang.js");
+  const HANGUL = /[가-힣]/;
+  const en = withLang("en", () => buildPolicyInsights({ ...input(FLOWS), policy: withLang("en", () => analyzePolicies(inventory(), CLUSTER)) }));
+  const text = JSON.stringify(en);
+  assert.ok(!HANGUL.test(text), `Korean left in the English response: ${text.match(/.{0,40}[가-힣]+.{0,40}/)?.[0]}`);
+  assert.ok(en.issues.length > 0 && en.factors.length > 0, "fixture produces issues and factors");
+  // Default (no withLang) is Korean, and the language does not leak out of withLang
+  assert.ok(HANGUL.test(JSON.stringify(buildPolicyInsights(input(FLOWS)).factors)));
+  assert.ok(HANGUL.test(JSON.stringify(analyzePolicies(inventory(), CLUSTER).findings)));
+  assert.throws(() => withLang("en", (async () => 1) as unknown as () => number), /synchronous/);
+});

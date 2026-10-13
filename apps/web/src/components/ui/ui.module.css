@@ -422,7 +422,7 @@
 
 .badge_medium {
   background: var(--warning-soft);
-  color: #9a6100;
+  color: var(--warning-strong);
   border-color: rgba(209, 132, 0, 0.28);
 }
 

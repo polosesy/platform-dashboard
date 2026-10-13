@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { WorkloadHealth, ResourceUsage } from "@aud/types";
 import styles from "../styles.module.css";
 import { WorkloadDetailPanel } from "./WorkloadDetailPanel";
@@ -25,6 +26,7 @@ function ResourceGauge({ usage, unit }: { usage: ResourceUsage | null; unit: "cp
 
 // ── Pod mini bar ──
 function PodBar({ pods }: { pods: WorkloadHealth["pods"] }) {
+  const { t } = useI18n();
   const { total, running, pending, failed } = pods;
   if (total === 0) return <span className={styles.podBarLabel}>0</span>;
   const rPct = (running / total) * 100;
@@ -32,9 +34,9 @@ function PodBar({ pods }: { pods: WorkloadHealth["pods"] }) {
   const fPct = (failed / total) * 100;
   return (
     <div className={styles.podBar}>
-      {running > 0 && <div className={styles.podBarSegment + " " + styles.podRunning} style={{ width: `${Math.max(6, rPct)}px` }} title={`Running: ${running}`} />}
-      {pending > 0 && <div className={styles.podBarSegment + " " + styles.podPending} style={{ width: `${Math.max(6, pPct)}px` }} title={`Pending: ${pending}`} />}
-      {failed > 0  && <div className={styles.podBarSegment + " " + styles.podFailed}  style={{ width: `${Math.max(6, fPct)}px` }} title={`Failed: ${failed}`} />}
+      {running > 0 && <div className={styles.podBarSegment + " " + styles.podRunning} style={{ width: `${Math.max(6, rPct)}px` }} title={`${t("ob.running")}: ${running}`} />}
+      {pending > 0 && <div className={styles.podBarSegment + " " + styles.podPending} style={{ width: `${Math.max(6, pPct)}px` }} title={`${t("ob.pending")}: ${pending}`} />}
+      {failed > 0  && <div className={styles.podBarSegment + " " + styles.podFailed}  style={{ width: `${Math.max(6, fPct)}px` }} title={`${t("ob.failed")}: ${failed}`} />}
       <span className={styles.podBarLabel}>{running}/{total}</span>
     </div>
   );
@@ -90,6 +92,7 @@ export function WorkloadsTab({
   selectedKey: string | null;
   clusterId: string;
 }) {
+  const { t } = useI18n();
   const [search, setSearch] = useState("");
   const [nsFilter, setNsFilter] = useState("all");
 
@@ -114,8 +117,8 @@ export function WorkloadsTab({
   if (workloads.length === 0) {
     return (
       <div className={styles.noDataBanner}>
-        <strong>워크로드 없음</strong>
-        Container Insights가 연결되어 있지 않거나 클러스터에 워크로드가 없습니다.
+        <strong>{t("ob.noWorkloads")}</strong>
+        {t("ob.noWorkloadsHint")}
       </div>
     );
   }
@@ -127,7 +130,7 @@ export function WorkloadsTab({
         <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
           <input
             type="text"
-            placeholder="워크로드 이름 검색..."
+            placeholder={t("ob.searchWorkloads")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{
@@ -144,24 +147,24 @@ export function WorkloadsTab({
             }}
           >
             {namespaces.map((ns) => (
-              <option key={ns} value={ns}>{ns === "all" ? "전체 네임스페이스" : ns}</option>
+              <option key={ns} value={ns}>{ns === "all" ? t("hb.allNamespaces") : ns}</option>
             ))}
           </select>
           <span style={{ fontSize: 12, color: "rgba(20,21,23,0.45)", marginLeft: "auto" }}>
-            {filtered.length} / {workloads.length} 워크로드
+            {t("ob.workloadsOf", { n: filtered.length, m: workloads.length })}
           </span>
         </div>
 
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>워크로드</th>
-              <th>네임스페이스</th>
-              <th>파드 상태</th>
+              <th>{t("ins.col.1")}</th>
+              <th>{t("hb.namespace")}</th>
+              <th>{t("ob.podStatus")}</th>
               <th>CPU</th>
-              <th>메모리</th>
-              <th>에러율</th>
-              <th>p95 레이턴시</th>
+              <th>{t("ob.memory")}</th>
+              <th>{t("ob.errorRate")}</th>
+              <th>{t("ob.latency", { p: "p95" })}</th>
             </tr>
           </thead>
           <tbody>

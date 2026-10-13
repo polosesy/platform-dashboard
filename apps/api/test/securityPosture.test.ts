@@ -17,7 +17,8 @@ const SUB = "11111111-2222-3333-4444-555555555555";
 const VM = `/subscriptions/${SUB}/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-01`;
 
 test("resourceRef: name / type / RG, subscription IDs never leak", () => {
-  assert.deepEqual(resourceRef(VM), { name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app" });
+  assert.deepEqual(resourceRef(VM), { name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app", armType: "microsoft.compute/virtualmachines" });
+  assert.equal(resourceRef(`/subscriptions/${SUB}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s`)?.armType, "microsoft.network/virtualnetworks/subnets");
   assert.deepEqual(resourceRef(`/subscriptions/${SUB}`), { name: "subscription", type: "subscription", resourceGroup: "" });
   const ws = resourceRef(`/subscriptions/${SUB}/resourceGroups/DefaultResourceGroup-EUS/providers/Microsoft.OperationalInsights/workspaces/DefaultWorkspace-${SUB}-EUS`);
   assert.equal(ws?.name, "DefaultWorkspace-…5555-EUS");
@@ -28,7 +29,7 @@ test("sampleRef prefers Defender's ResourceName/Type (identity findings)", () =>
   const id = `/subscriptions/${SUB}/providers/Microsoft.Security/pricings/CloudPosture/securityentitydata/${SUB}`;
   assert.deepEqual(sampleRef({ id, n: "jane.doe", t: "microsoft.security/azureiamuser" }), { name: "jane.doe", type: "azureiamuser", resourceGroup: "" });
   assert.deepEqual(sampleRef({ id, n: SUB, t: "microsoft.security/azureiamuser" })?.name, "…5555");
-  assert.deepEqual(sampleRef({ id: VM }), { name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app" });
+  assert.deepEqual(sampleRef({ id: VM }), { name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app", armType: "microsoft.compute/virtualmachines" });
   assert.equal(sampleRef({}), null);
 });
 
@@ -81,7 +82,7 @@ test("mapAlerts: newest first, resource names from ResourceIdentifiers", () => {
     { id: "/x/alerts/2", dn: "New", sev: "High", t: "2026-10-10T00:00:00Z", rids: null },
   ]);
   assert.deepEqual(alerts.map((a) => a.title), ["New", "Old"]);
-  assert.deepEqual(alerts[1]!.resources, [{ name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app" }]);
+  assert.deepEqual(alerts[1]!.resources, [{ name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app", armType: "microsoft.compute/virtualmachines" }]);
   assert.equal(alerts[0]!.id, "2");
 });
 

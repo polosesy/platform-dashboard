@@ -8,7 +8,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { ErrorNotice, PageHeader, SampleDataNotice, Segmented } from "@/components/ui";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { ReservationsPanel } from "./ReservationsPanel";
 
 function fmtCurrency(n: number, currency: string): string {
@@ -27,7 +27,7 @@ function budgetTone(pct: number): "Safe" | "Warn" | "Danger" {
 }
 
 export default function CostPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { subscriptions, subscriptionId, setSubscriptionId, loaded: subsLoaded } = useSubscriptions();
   const [granularity, setGranularity] = useState<"daily" | "monthly">("daily");
 
@@ -55,7 +55,7 @@ export default function CostPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={summary ? <span>{t("common.updated")} {new Date(summary.generatedAt).toLocaleString()}</span> : loading ? <span>{t("common.loading")}</span> : null}
+        meta={summary ? <span>{t("common.updated")} {new Date(summary.generatedAt).toLocaleString(dateLocale(locale))}</span> : loading ? <span>{t("common.loading")}</span> : null}
         actions={
           <>
             <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />

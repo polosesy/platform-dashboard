@@ -1,3 +1,4 @@
+import { withLang, type Lang } from "../infra/lang.js";
 import * as k8s from "@kubernetes/client-node";
 import type { Env } from "../env.js";
 import type { KubernetesPolicyResponse } from "@aud/types";
@@ -158,13 +159,14 @@ export async function collectClusterPolicies(
   env: Env,
   bearerToken: string | undefined,
   clusterId: string,
+  lang: Lang = "ko",
 ): Promise<KubernetesPolicyResponse> {
-  const cacheKey = `${cachePrefix(bearerToken)}:k8s-policies:${clusterId.toLowerCase()}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:k8s-policies:${clusterId.toLowerCase()}:${lang}`;
   const cached = policyCache.get(cacheKey);
   if (cached) return cached;
 
-  const inventory = await collectPolicyInventory(env, bearerToken, clusterId);
-  const result = analyzePolicies(inventory, clusterId);
+  const inventory = await collectPolicyInventory(env, bearerToken, clusterId, lang);
+  const result = withLang(lang, () => analyzePolicies(inventory, clusterId));
   debug(`[k8s-policy] ${clusterId}: ${result.findings.length} findings, score ${result.summary.score}`);
   policyCache.set(cacheKey, result);
   return result;
@@ -178,6 +180,7 @@ export async function collectPolicyInventory(
   env: Env,
   bearerToken: string | undefined,
   clusterId: string,
+  lang: Lang = "ko",
 ): Promise<PolicyInventory> {
   const cacheKey = `${cachePrefix(bearerToken)}:k8s-policy-inventory:${clusterId.toLowerCase()}`;
   const cached = inventoryCache.get(cacheKey);
@@ -242,7 +245,7 @@ export async function collectPolicyInventory(
   ]);
 
   if (!namespaces.ok) {
-    throw new Error("Namespace 목록을 조회할 수 없습니다 — 클러스터 읽기 권한을 확인하세요.");
+    throw new Error(lang === "en" ? "Could not list namespaces — check cluster read permissions." : "Namespace 목록을 조회할 수 없습니다 — 클러스터 읽기 권한을 확인하세요.");
   }
 
   const inventory: PolicyInventory = {
