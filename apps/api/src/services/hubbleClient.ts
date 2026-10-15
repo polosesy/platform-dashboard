@@ -10,6 +10,7 @@ import type { Lang } from "../infra/lang.js";
 // Async code: pick the text directly (L() is only valid inside withLang)
 const pick = (lang: Lang, ko: string, en: string) => (lang === "en" ? en : ko);
 import { loadKubeConfig } from "./kubernetes.js";
+import { assertHubbleExecAllowed } from "./aksAccess.js";
 import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCoverage, type AgentBatch } from "./hubbleMerge.js";
 
 // ──────────────────────────────────────────────────────────────
@@ -23,6 +24,9 @@ import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCover
 // Strategy 2: cilium-agent pod에서 --server 플래그로 relay 연결
 //             (AKS ACNS relay는 mTLS라 hubble CLI로는 실패 — 비 AKS용 폴백)
 // Strategy 3: K8s API proxy를 통한 hubble-relay HTTP 접근
+//
+// 세 방법 모두 노드 수준 접근(권한 있는 파드에 exec, services/proxy)이라 `assertHubbleExecAllowed`
+// (HUBBLE_EXEC_ENABLED + 홈 연결 또는 aks.hubbleExec) 뒤에서만 실행한다 — docs/integrations/azure/aks.md
 // ──────────────────────────────────────────────────────────────
 
 const flowsCache = new CacheManager<HubbleFlowSet>(10, 30_000);
@@ -294,6 +298,7 @@ export async function getHubbleFlows(
     type: opts?.type?.toLowerCase(),
   };
   const limit = opts?.last ?? Math.min(env.HUBBLE_FLOW_LIMIT, 10_000);
+  assertHubbleExecAllowed(env, azureResourceId);
   // Every filter that changes the hubble query must be part of the key
   const cacheKey = `${prefix}:hubble-flows:${azureResourceId}:${filters.ns}:${filters.verdict}:${filters.type ?? ""}:${limit}`;
   const cached = flowsCache.get(cacheKey);
@@ -508,6 +513,7 @@ export async function getHubbleStatus(
 ): Promise<HubbleStatusInfo> {
   const off = { version: "", numFlows: 0, maxFlows: 0, uptimeNs: 0, nodeCount: 0, nodesTotal: 0 };
   if (!env.HUBBLE_ENABLED) return { available: false, ...off, message: "HUBBLE_ENABLED=false" };
+  assertHubbleExecAllowed(env, azureResourceId);
 
   const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:hubble-status:${azureResourceId}:${lang}`;

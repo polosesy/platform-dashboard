@@ -1,0 +1,55 @@
+# Generated from apps/api/src/services/k8sReadSurface.ts — do not edit (npm test checks it)
+# Read-only inventory for the Azure Unified Dashboard: list only — no secrets, configmaps, exec or proxy.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aud-dashboard-reader
+  labels:
+    app.kubernetes.io/part-of: azure-unified-dashboard
+rules:
+  - apiGroups: [""]
+    resources: [endpoints, limitranges, namespaces, nodes, pods, resourcequotas, services]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [daemonsets, deployments, statefulsets]
+    verbs: [list]
+  - apiGroups: [batch]
+    resources: [cronjobs, jobs]
+    verbs: [list]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterrolebindings, clusterroles, rolebindings, roles]
+    verbs: [list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [list]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [list]
+  - apiGroups: [autoscaling.k8s.io]
+    resources: [verticalpodautoscalers]
+    verbs: [list]
+  - apiGroups: [cilium.io]
+    resources: [ciliumclusterwidenetworkpolicies, ciliumnetworkpolicies]
+    verbs: [list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aud-dashboard-reader
+  labels:
+    app.kubernetes.io/part-of: azure-unified-dashboard
+subjects:
+  - kind: User
+    # The connection identity's OBJECT id (service principal / managed identity) — check with `kubectl auth whoami`
+    name: "<CONNECTION_IDENTITY_OBJECT_ID>"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: aud-dashboard-reader
+  apiGroup: rbac.authorization.k8s.io

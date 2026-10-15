@@ -249,6 +249,36 @@ export async function getPrometheusFetcherAuto(env: Env, bearerToken: string | u
   return buildPrometheusFetcher(() => anonymousToken(env, PROMETHEUS_SCOPE));
 }
 
+// ── AKS: an Entra token for the AKS server application — what kubelogin would fetch, with nothing run on the host ──
+
+/** The AKS Entra server application — the same for every cluster (kubelogin `--server-id`) */
+export const AKS_SERVER_APP_ID = "6dae42f8-4368-4678-94ff-3960e28e3630";
+const AKS_SCOPE = `${AKS_SERVER_APP_ID}/.default`;
+
+/** Only a token FOR the AKS server application ever goes to an API server (never an ARM or other token) */
+export function assertAksAudience(token: string): string {
+  let aud: unknown;
+  try { aud = decodeJwt(token).aud; } catch { /* not a JWT: refused below */ }
+  const ok = (Array.isArray(aud) ? aud : [aud]).some((a) => typeof a === "string" && [AKS_SERVER_APP_ID, `api://${AKS_SERVER_APP_ID}`].includes(a.toLowerCase()));
+  if (!ok) throw new HttpError(502, "aks_token_audience", "The Entra token is not for the AKS server application");
+  return token;
+}
+
+/** The cluster's connection mints the token (role checked, shared tokens cached like any scope); anonymous = dev switches */
+export async function aksApiToken(env: Env, bearerToken: string | undefined, clusterArmId: string): Promise<string> {
+  if (!bearerToken) {
+    if (!anonymousSpAllowed(env, env.AUD_ANONYMOUS_K8S)) throw signinRequired();
+    return assertAksAudience(await anonymousToken(env, AKS_SCOPE));
+  }
+  return assertAksAudience(await connectionToken(env, bearerToken, connectionFor(env, subscriptionInPath(clusterArmId)), AKS_SCOPE));
+}
+
+/** The connection that reads a cluster, and the tenant its tokens come from (home for the platform identity and OBO) */
+export function clusterConnection(env: Env, clusterArmId: string): { connection: AzureConnection; tokenTenantId: string } {
+  const c = connectionFor(env, subscriptionInPath(clusterArmId));
+  return { connection: c, tokenTenantId: credentialGroup(env, c).startsWith("sp:") ? c.tenantId : homeConnection(env).tenantId };
+}
+
 // ── Internal helpers ──
 
 /**

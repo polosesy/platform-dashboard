@@ -17,7 +17,8 @@
 | 로그(Traffic Analytics·Container Insights·Private Link 사용 근거) | **Log Analytics Reader** | 작업 영역 (또는 구독) | KQL 쿼리 | `logs` |
 | 보안 개요·권고·위협·규정 준수 | **Security Reader** (Reader로도 대부분) | 구독 | Defender for Cloud | `security` |
 | 비용 관리 | **Cost Management Reader** | 구독 | Cost Management 쿼리·예산 | `cost` |
-| AKS 클러스터·모니터링·Hubble·정책 점검 | **Azure Kubernetes Service Cluster User Role** | 클러스터 | `listClusterUserCredential` (로컬 계정 클러스터) | `aksCredential` |
+| AKS 클러스터·모니터링·정책 점검 | **Azure Kubernetes Service Cluster User Role** | 클러스터 | `listClusterUserCredential` — API 서버 주소·CA (Entra 클러스터에서는 비밀 없음) | `aksCredential` |
+| (클러스터 안) 같은 화면 | Kubernetes **`aud-dashboard-reader`** (list만) | 클러스터 | [aks.md](./aks.md) · [templates/aks](./templates/aks/) | — |
 | NSG 흐름 로그 원본(blob) | **Storage Blob Data Reader** | 흐름 로그 스토리지 계정 | 데이터 평면 읽기 | `flowLogBlobs` |
 | Prometheus 메트릭 | **Monitoring Data Reader** | Azure Monitor 작업 영역 | PromQL | `prometheus` |
 
@@ -25,8 +26,8 @@ Microsoft 기본 제공 역할 정의 ID(템플릿에서 사용): Reader `acdd72
 
 ### 주의
 
-- **AKS 클러스터 사용자 자격 증명**은 Entra 인증·Azure RBAC를 쓰지 않는 클러스터(로컬 계정)에서 **클러스터 관리자와 같은 권한**의 kubeconfig를 줄 수 있습니다. 이 플랫폼은 읽기만 하지만, 이 역할은 꼭 필요한 클러스터에만 부여하세요. Entra 전용 클러스터는 지원하지 않습니다(`501 aad_cluster_unsupported`, kubelogin 실행 안 함).
-- **Hubble**은 Cilium agent Pod에 `exec`해 `hubble observe`(읽기)를 실행합니다 — 노드 수준 접근이라는 점을 검토에 포함하세요.
+- **AKS**: Entra 연동 클러스터는 연결의 자격 증명으로 받은 짧은 Entra 토큰으로 로그인합니다(kubelogin 실행 없음). Entra 연동이 **없는** 클러스터의 kubeconfig는 **클러스터 관리자 인증서**라 기본 거부합니다(`403 aks_local_account_refused`, 연결별 `aks.allowLocalAccount`로만 허용). 프라이빗 클러스터·Tier·네트워크 경로는 [aks.md](./aks.md).
+- **Hubble exec**(Cilium agent Pod 안에서 `hubble observe`)는 노드 수준 접근입니다 — 프로덕션 기본 꺼짐(`HUBBLE_EXEC_ENABLED`), 고객 연결은 `aks.hubbleExec: true`일 때만. 읽기 역할(`aud-dashboard-reader`)에는 들어 있지 않습니다.
 - **Lighthouse**는 일부 역할(예: DataActions가 있는 역할 — Storage Blob Data Reader, Monitoring Data Reader)의 위임을 제한할 수 있습니다. 배포 전에 최신 Microsoft 문서의 "Lighthouse에서 지원되는 역할"을 확인하고, 안 되면 그 기능만 고객 서비스 주체(B)로 연결하세요.
 - 다음 권한이 보이면 연결 점검이 **경고**합니다(차단하지 않음): 모든 작업(`*`), 쓰기·삭제, 역할 할당 쓰기, 클러스터 관리자 자격 증명.
 

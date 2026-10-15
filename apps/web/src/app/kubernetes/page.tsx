@@ -2,16 +2,33 @@
 
 import { useState, useMemo } from "react";
 import styles from "./styles.module.css";
-import type { KubernetesClusterOverview, KubernetesObjectKind } from "@aud/types";
+import type { KubernetesClusterAccess, KubernetesClusterOverview, KubernetesObjectKind } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
-import { ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat, useNoteText } from "@/components/ui";
+import { Badge, ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat, useNoteText } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 
 /** base64url of the cluster's ARM resource ID (path segment for the overview API). */
 function encodeClusterId(id: string): string {
   return btoa(id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** How the platform reaches and signs in to the cluster (docs/integrations/azure/aks.md) */
+function AccessBadges({ access }: { access?: KubernetesClusterAccess }) {
+  const { t } = useI18n();
+  if (!access) return null;
+  return (
+    <>
+      {" "}
+      <Badge tone={access.private ? "info" : "neutral"} title={t(access.private ? "k8s.access.privateHint" : "k8s.access.publicHint")}>
+        {t(access.private ? "k8s.access.private" : "k8s.access.public")}
+      </Badge>{" "}
+      {access.entra
+        ? <Badge tone="success" title={t("k8s.access.entraHint")}>Entra ID</Badge>
+        : <Badge tone="medium" title={t("k8s.access.localHint")}>{t("k8s.access.local")}</Badge>}
+    </>
+  );
 }
 
 const ALL_KINDS: KubernetesObjectKind[] = [
@@ -89,7 +106,7 @@ export default function KubernetesPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={selectedCluster ? <span>{selectedCluster.name} · {selectedCluster.location} · Kubernetes v{selectedCluster.kubernetesVersion}</span> : null}
+        meta={selectedCluster ? <span>{selectedCluster.name} · {selectedCluster.location} · Kubernetes v{selectedCluster.kubernetesVersion}<AccessBadges access={selectedCluster.access} /></span> : null}
         actions={
           <>
             <Select

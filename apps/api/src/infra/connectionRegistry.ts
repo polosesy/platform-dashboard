@@ -36,6 +36,18 @@ const ConnectionSchema = z.object({
   roles: z.array(z.enum(ROLES)).min(1).optional(),
   /** Log Analytics workspaces (customer id GUIDs) read through this connection */
   logAnalyticsWorkspaces: z.array(GUID).default([]),
+  /**
+   * What this connection may do inside AKS clusters (services/aksAccess.ts). Everything off by default:
+   *   allowLocalAccount  read clusters WITHOUT Entra integration (their kubeconfig is a cluster-admin certificate)
+   *   hubbleExec         Hubble flows by exec into cilium-agent (≈ node access) — customer connections only with this
+   *   podLogNamespaces   namespaces whose pod logs may be read from the cluster (kubelet); others → Container Insights.
+   *                      Unset: every namespace for the home connection, none for customer connections
+   */
+  aks: z.object({
+    allowLocalAccount: z.boolean().optional(),
+    hubbleExec: z.boolean().optional(),
+    podLogNamespaces: z.array(z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/, "a namespace name")).optional(),
+  }).strict().optional(),
 }).strict();
 
 const RegistrySchema = z.object({ connections: z.array(ConnectionSchema).min(1) }).strict();

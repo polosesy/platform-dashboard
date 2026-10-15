@@ -5,6 +5,8 @@ import type { KubernetesPolicyResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { debug } from "../infra/logger.js";
 import { loadKubeConfig } from "./kubernetes.js";
+import { k8sError } from "./aksAccess.js";
+import { HttpError } from "../infra/requestParams.js";
 import {
   analyzePolicies,
   type InvCiliumSpec,
@@ -196,6 +198,7 @@ export async function collectPolicyInventory(
   const custom = kc.makeApiClient(k8s.CustomObjectsApi);
 
   const unavailable: string[] = [];
+  let namespaceError: unknown;
   /** List one resource kind; failures are recorded instead of thrown. `missingOk` = 404 means "not installed". */
   async function list<T>(label: string, fn: () => Promise<{ items?: T[] }>, missingOk = false): Promise<{ items: T[]; ok: boolean }> {
     try {
@@ -203,6 +206,7 @@ export async function collectPolicyInventory(
       return { items: r.items ?? [], ok: true };
     } catch (e) {
       const status = statusOf(e);
+      if (label === "Namespace") namespaceError = e;
       if (!(missingOk && status === 404)) {
         unavailable.push(`${label}${status ? ` (HTTP ${status})` : ""}`);
         console.warn(`[k8s-policy] ${label} list failed:`, status ?? (e instanceof Error ? e.message : e));
@@ -245,6 +249,9 @@ export async function collectPolicyInventory(
   ]);
 
   if (!namespaces.ok) {
+    // No Kubernetes role / out of reach → the coded error (the web explains what to bind or where to run)
+    const coded = k8sError(namespaceError);
+    if (coded instanceof HttpError) throw coded;
     throw new Error(lang === "en" ? "Could not list namespaces — check cluster read permissions." : "Namespace 목록을 조회할 수 없습니다 — 클러스터 읽기 권한을 확인하세요.");
   }
 

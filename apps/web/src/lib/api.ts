@@ -45,7 +45,10 @@ export class ApiError extends Error {
 }
 
 /** What the page should ask the user to do for an API error (null = nothing about sign-in) */
-export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection" | "aksCredential";
+export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection" | "aksCredential"
+  // AKS sign-in and reach (API services/aksAccess.ts, docs/integrations/azure/aks.md)
+  | "aksPrivateDns" | "aksUnreachable" | "aksStopped" | "aksLocalAccount" | "aksRbac" | "aksUnauthorized" | "aksCrossTenant"
+  | "aksLegacyEntra" | "aksKubeconfig" | "hubbleExec" | "podLogNamespace";
 
 export function authStateOf(e: unknown): AuthState | null {
   if (!(e instanceof ApiError)) return null;
@@ -65,6 +68,18 @@ export function authStateOfCode(code: string | null | undefined): AuthState | nu
     case "connection_tenant_mismatch": case "connection_failed": case "connection_timeout": return "connection";
     // The Azure connection may read the cluster but not fetch its credentials (listClusterUserCredential/action)
     case "aks_credential_forbidden": return "aksCredential";
+    case "cluster_dns_unresolved": return "aksPrivateDns";
+    case "cluster_unreachable": return "aksUnreachable";
+    case "cluster_stopped": return "aksStopped";
+    case "aks_local_account_refused": return "aksLocalAccount";
+    case "aks_rbac_forbidden": return "aksRbac";
+    case "aks_unauthorized": return "aksUnauthorized";
+    case "aks_aad_cross_tenant_unsupported": return "aksCrossTenant";
+    case "aad_cluster_unsupported": return "aksLegacyEntra";
+    // The kubeconfig did not pass the checks that keep the token on the cluster's own API server
+    case "aks_server_mismatch": case "aks_server_id_mismatch": case "aks_kubeconfig_invalid": case "aks_token_audience": return "aksKubeconfig";
+    case "hubble_exec_disabled": return "hubbleExec";
+    case "pod_log_namespace_denied": return "podLogNamespace";
     default: return null;
   }
 }

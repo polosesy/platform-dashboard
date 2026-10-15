@@ -127,8 +127,25 @@ const EnvSchema = z.object({
   AZURE_PROMETHEUS_ENDPOINT: z.string().optional(),             // Prometheus HTTP API base URL (auto-discovered when unset)
   AZURE_OBSERVABILITY_CACHE_TTL_MS: z.coerce.number().default(60_000),
 
+  // AKS access (services/aksAccess.ts, docs/integrations/azure/aks.md)
+  /**
+   * Clusters without Entra integration hand out a static client certificate that is effectively cluster-admin and
+   * revocable only by rotating the cluster CA. Refused unless this (development only — production refuses it) or the
+   * connection's `aks.allowLocalAccount` allows it.
+   */
+  AUD_AKS_ALLOW_LOCAL_ACCOUNTS: envBool(false),
+  /** Pre-flight DNS + TCP 443 probe of the API server (ms per step) — a private cluster answers fast instead of hanging */
+  AUD_AKS_PROBE_TIMEOUT_MS: z.coerce.number().int().min(200).max(30_000).default(3_000),
+
   // Cilium Hubble
   HUBBLE_ENABLED: envBool(true),
+  /**
+   * Hubble reads flows by exec-ing `hubble observe` in the privileged cilium-agent pods (≈ node access) or through the
+   * API server's service proxy. Unset: on in development, off in production. Even when on, only the home connection
+   * (platform / delegated) or a connection with `aks.hubbleExec: true` may use it.
+   */
+  HUBBLE_EXEC_ENABLED: z.union([z.boolean(), z.string()]).optional()
+    .transform((v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? undefined : typeof v === "boolean" ? v : ["1", "true", "yes", "on"].includes(v.trim().toLowerCase()))),
   HUBBLE_RELAY_NAMESPACE: z.string().default("kube-system"),
   HUBBLE_RELAY_PORT: z.coerce.number().default(80),
   HUBBLE_FLOW_LIMIT: z.coerce.number().default(10_000),
@@ -155,6 +172,9 @@ export function assertSafeEnv(env: Env): Env {
   }
   if (env.NODE_ENV === "production" && env.AUD_DEFAULT_ROLE && env.AUD_DEFAULT_ROLE !== "none") {
     throw new Error("AUD_DEFAULT_ROLE must be none in production — assign the app roles (AUD.Viewer / AUD.Operator / AUD.Admin) instead");
+  }
+  if (env.NODE_ENV === "production" && env.AUD_AKS_ALLOW_LOCAL_ACCOUNTS) {
+    throw new Error("AUD_AKS_ALLOW_LOCAL_ACCOUNTS must be off in production — a local-account kubeconfig is cluster-admin; allow it per connection (aks.allowLocalAccount) after review");
   }
   if (env.AUD_PLATFORM_CERT_PATH && !isAbsolute(env.AUD_PLATFORM_CERT_PATH)) {
     throw new Error("AUD_PLATFORM_CERT_PATH must be an absolute path");

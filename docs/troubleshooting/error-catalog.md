@@ -111,8 +111,8 @@
 
 ### AUTH-009: 501 `aad_cluster_unsupported`
 - **증상**: AKS 화면·Hubble·정책 점검이 501
-- **원인**: Entra 연동 AKS의 kubeconfig는 `kubelogin` exec 플러그인을 요구함. API 호스트에서 외부 프로그램을 실행하지 않음(`sanitizeKubeconfig`)
-- **해결**: 로컬 계정이 켜진 클러스터는 그대로 동작. Entra 전용 클러스터는 사용자별 AKS 토큰 주입(후속 과제)
+- **원인**: **구형** Entra 연동(고객 서버 앱, `aadProfile.managed=false`) 클러스터. AKS 관리형 Entra 클러스터는 이제 연결의 자격 증명으로 받은 Entra 토큰으로 로그인함(`services/aksAccess.ts`, kubelogin 실행 없음)
+- **해결**: AKS 관리형 Entra 연동으로 전환. 그 밖의 AKS 코드(`cluster_dns_unresolved`·`aks_rbac_forbidden`·`aks_local_account_refused` …)는 [aks.md §9](../integrations/azure/aks.md#9-문제-해결)
 
 ### AUTH-010: `subscription_not_allowed` / `tenant_not_allowed`
 - **원인**: 구독이 어떤 연결(`AUD_CONNECTIONS_FILE`, 없으면 `AZURE_SUBSCRIPTION_IDS`)에도 없음 / 토큰의 테넌트가 홈 테넌트가 아님(게스트도 홈 테넌트로 로그인)
@@ -133,7 +133,7 @@
 ### K8S-001: Kubeconfig 획득 실패 (`aks_credential_forbidden`, 403)
 - **에러**: 화면 "이 클러스터의 Azure 연결에 AKS 자격 증명 조회 권한이 없습니다" / API `403 aks_credential_forbidden` (예전: `HTTP 500 … policies_failed … ARM 403: AuthorizationFailed … listClusterUserCredential/action`)
 - **원인**: 클러스터를 읽는 **Azure 연결**의 신원(홈 = aud-api SP, 고객 = 그 연결의 서비스 주체)에 kubeconfig 조회 권한이 없음. `listClusterUserCredential`은 읽기(`*/read`)가 아닌 **액션**이라 Reader로는 안 됨
-- **해결**: 클러스터 범위에 `Azure Kubernetes Service Cluster User Role`(`4abbcc35-e782-43d8-92c5-2d3f1bd2253f`)을 그 연결의 서비스 주체에 할당 → 설정 › Azure 연결 › 점검의 'AKS 자격 증명'으로 확인 (`docs/integrations/azure/permissions.md`). Entra 전용(로컬 계정 비활성) 클러스터는 이 역할로도 정적 자격 증명이 나오지 않아 `501 aad_cluster_unsupported`
+- **해결**: 클러스터 범위에 `Azure Kubernetes Service Cluster User Role`(`4abbcc35-e782-43d8-92c5-2d3f1bd2253f`)을 그 연결의 서비스 주체에 할당 → 설정 › Azure 연결 › 점검의 'AKS 자격 증명'으로 확인 (`docs/integrations/azure/permissions.md`). Entra 클러스터에서는 이 역할로 받는 kubeconfig에 비밀이 없음(서버 주소·CA만 쓰고 로그인은 Entra 토큰). 다음 단계는 Kubernetes 읽기 역할 — 없으면 `403 aks_rbac_forbidden`([aks.md](../integrations/azure/aks.md))
 - **예시**: `az role assignment create --assignee <연결의 appId> --role "Azure Kubernetes Service Cluster User Role" --scope <클러스터 리소스 ID>` (고객 테넌트 관리자가 실행 — 플랫폼은 Azure에 쓰지 않음)
 
 ### K8S-002: Pod exec 타임아웃

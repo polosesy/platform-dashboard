@@ -8,10 +8,23 @@ import type {
   AksNodeCondition,
 } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { anonymousSpAllowed, getArmFetcherAuto, signinRequired } from "../infra/azureClientFactory.js";
+import { aksApiToken, anonymousSpAllowed, clusterConnection, getArmFetcherAuto, signinRequired } from "../infra/azureClientFactory.js";
 import { HttpError, parseSubscriptionIds } from "../infra/requestParams.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
+import {
+  aksClusterProfile,
+  k8sError,
+  planClusterAuth,
+  podLogNamespaceAllowed,
+  probeApiServer,
+  sanitizeKubeconfig,
+  tokenKubeConfig,
+  unreachableError,
+  type AksClusterProfile,
+} from "./aksAccess.js";
+
+export { sanitizeKubeconfig } from "./aksAccess.js";
 
 // ────────────────────────────────────────────
 // Cache
@@ -20,6 +33,8 @@ import { debug } from "../infra/logger.js";
 const clustersCache = new CacheManager<KubernetesClustersResponse>(20, 60_000);
 const overviewCache = new CacheManager<KubernetesClusterOverview>(20, 60_000);
 const kubeconfigCache = new CacheManager<string>(10, 5 * 60_000);
+const profileCache = new CacheManager<AksClusterProfile>(20, 5 * 60_000);
+const probeCache = new CacheManager<"dns" | "tcp" | "ok">(50, 60_000);
 
 // K8s node info: nodeName → { privateIp, nodeImageVersion, conditions }
 export type K8sNodeInfo = {
@@ -69,6 +84,7 @@ export async function listAksClusters(
     const agentPoolProfiles = (props.agentPoolProfiles ?? []) as Array<{ count?: number }>;
     const nodeCount = agentPoolProfiles.reduce((sum, p) => sum + (p.count ?? 0), 0);
     const powerStateObj = (props.powerState ?? {}) as { code?: string };
+    const profile = aksClusterProfile(props);
 
     return {
       id: String(r.id ?? "").toLowerCase(),
@@ -80,6 +96,7 @@ export async function listAksClusters(
       nodeCount,
       powerState: String(powerStateObj.code ?? "unknown"),
       fqdn: String(props.fqdn ?? ""),
+      access: { private: profile.private, entra: profile.entra, localAccounts: profile.localAccounts, azureRbac: profile.azureRbac },
     };
   });
 
@@ -143,31 +160,54 @@ export function kubeconfigError(e: unknown, azureResourceId: string, env: Env): 
     `Assign "Azure Kubernetes Service Cluster User Role" on the cluster to that connection's identity.`);
 }
 
-/** KubeConfig for an AKS cluster (kubeconfig itself is cached for 5 min). */
+/** The cluster's ARM properties that decide sign-in and reach (fresh ARM GET, not Resource Graph — 5 min cache) */
+async function getClusterProfile(env: Env, bearerToken: string | undefined, azureResourceId: string): Promise<AksClusterProfile> {
+  const cacheKey = `${cachePrefix(bearerToken)}:aks-profile:${azureResourceId.toLowerCase()}`;
+  const cached = profileCache.get(cacheKey);
+  if (cached) return cached;
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
+  const mc = await fetcher.fetchJson<{ properties?: Record<string, unknown> }>(`https://management.azure.com${azureResourceId}?api-version=2024-09-01`);
+  const profile = aksClusterProfile(mc.properties);
+  profileCache.set(cacheKey, profile);
+  return profile;
+}
+
+/** DNS + TCP 443 before any list call (60 s cache per caller scope) — out of reach fails fast with a coded error */
+async function assertReachable(env: Env, bearerToken: string | undefined, host: string, profile: AksClusterProfile): Promise<void> {
+  const cacheKey = `${cachePrefix(bearerToken)}:aks-probe:${host}`;
+  let r = probeCache.get(cacheKey);
+  if (!r) {
+    r = (await probeApiServer(host, env.AUD_AKS_PROBE_TIMEOUT_MS)) ?? "ok";
+    probeCache.set(cacheKey, r);
+  }
+  if (r !== "ok") throw unreachableError(r, profile.private);
+}
+
+/**
+ * KubeConfig for an AKS cluster — the one entry point of every Kubernetes feature (docs/integrations/azure/aks.md):
+ * cluster profile (ARM) → kubeconfig (listClusterUserCredential: server + CA) → sign-in plan → reach probe →
+ * Entra token user (Entra clusters) or the sanitized static kubeconfig (local accounts, only when allowed).
+ */
 export async function loadKubeConfig(
   env: Env,
   bearerToken: string | undefined,
   azureResourceId: string,
 ): Promise<k8s.KubeConfig> {
+  if (!bearerToken && !anonymousSpAllowed(env, env.AUD_ANONYMOUS_K8S)) throw signinRequired();
+  const [profile, raw] = await Promise.all([
+    getClusterProfile(env, bearerToken, azureResourceId),
+    getKubeconfig(env, bearerToken, azureResourceId),
+  ]);
   const kc = new k8s.KubeConfig();
-  kc.loadFromString(await getKubeconfig(env, bearerToken, azureResourceId));
-  return sanitizeKubeconfig(kc);
-}
-
-/**
- * Static credentials only: exec plugins (kubelogin …) and auth providers would run programs on the API host
- * with whatever identity it has — they are removed. A cluster that needs them (Entra-integrated AKS) is
- * reported as unsupported instead (later: an Entra token for the AKS server app, per user).
- */
-export function sanitizeKubeconfig(kc: k8s.KubeConfig): k8s.KubeConfig {
-  const users = kc.users.map((u) => ({ ...u, exec: undefined, authProvider: undefined }));
-  const current = kc.getContextObject(kc.getCurrentContext());
-  const user = users.find((u) => u.name === current?.user);
-  const hasStatic = !!user && (!!(user.certData && user.keyData) || !!(user.certFile && user.keyFile) || !!user.token || !!(user.username && user.password));
-  if (!hasStatic) throw new HttpError(501, "aad_cluster_unsupported", "This cluster needs an Entra sign-in plugin (kubelogin); it is not run on the API host");
-  const out = new k8s.KubeConfig();
-  out.loadFromOptions({ clusters: kc.clusters, users, contexts: kc.contexts, currentContext: kc.getCurrentContext() });
-  return out;
+  kc.loadFromString(raw);
+  const { connection, tokenTenantId } = clusterConnection(env, azureResourceId);
+  const plan = planClusterAuth(kc, profile, {
+    allowLocalAccount: connection.aks?.allowLocalAccount === true || env.AUD_AKS_ALLOW_LOCAL_ACCOUNTS,
+    credentialTenantId: tokenTenantId,
+  });
+  await assertReachable(env, bearerToken, plan.host, profile);
+  if (plan.kind === "static") return sanitizeKubeconfig(kc);
+  return tokenKubeConfig(kc, await aksApiToken(env, bearerToken, azureResourceId));
 }
 
 // ────────────────────────────────────────────
@@ -251,6 +291,11 @@ export async function getClusterOverview(
       batchV1.listJobForAllNamespaces(),
       batchV1.listCronJobForAllNamespaces(),
     ]);
+
+  // Every list failed = the cluster was not read (unreachable, no Kubernetes role): an error, not an empty cluster
+  const settled = [nodes, namespaces, pods, services, deployments, statefulSets, daemonSets, ingresses, jobs, cronJobs];
+  const firstFailure = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (firstFailure && settled.every((r) => r.status === "rejected")) throw k8sError(firstFailure.reason);
 
   const objects: KubernetesObject[] = [];
 
@@ -467,7 +512,7 @@ export async function listAllNamespacePods(
   const [podList, nsList] = await Promise.all([
     coreV1.listPodForAllNamespaces(),
     coreV1.listNamespace(),
-  ]);
+  ]).catch((e: unknown) => { throw k8sError(e); });
 
   const pods: K8sPodInfo[] = podList.items
     .filter((p) => {
@@ -512,6 +557,11 @@ export async function readPodLogs(
     previous?: boolean;
   },
 ): Promise<string> {
+  // Logs can carry secrets and personal data: only namespaces the connection allows are read from the kubelet
+  // (the route then falls back to Container Insights, which the customer governs with Log Analytics roles)
+  if (!podLogNamespaceAllowed(env, azureResourceId, namespace)) {
+    throw new HttpError(403, "pod_log_namespace_denied", "Pod logs of this namespace are not read from the cluster for this connection (aks.podLogNamespaces)");
+  }
   const kc = await loadKubeConfig(env, bearerToken, azureResourceId);
   const coreV1 = kc.makeApiClient(k8s.CoreV1Api);
 
@@ -564,7 +614,7 @@ export async function readPodLogs(
       }
     }
 
-    throw err; // 다른 에러는 CI fallback으로
+    throw k8sError(err); // 다른 에러는 CI fallback으로
   }
 }
 

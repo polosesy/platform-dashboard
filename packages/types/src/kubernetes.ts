@@ -8,6 +8,22 @@ export type KubernetesClusterInfo = {
   nodeCount: number;
   powerState: string;
   fqdn: string;
+  /** How the platform can reach and sign in to this cluster (from the cluster's ARM properties) */
+  access?: KubernetesClusterAccess;
+};
+
+/**
+ * private        the API server has no public address — the platform API must run in a network that resolves
+ *                and reaches its private endpoint (docs/integrations/azure/aks.md)
+ * entra          Entra ID integration: the platform signs in with a short-lived Entra token (no kubelogin)
+ * localAccounts  static cluster certificates are enabled (with no Entra integration they are cluster-admin)
+ * azureRbac      Kubernetes authorization through Azure role assignments
+ */
+export type KubernetesClusterAccess = {
+  private: boolean;
+  entra: boolean;
+  localAccounts: boolean;
+  azureRbac: boolean;
 };
 
 export type KubernetesClustersResponse = {

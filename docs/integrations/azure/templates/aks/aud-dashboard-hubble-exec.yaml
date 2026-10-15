@@ -1,0 +1,35 @@
+# Generated from apps/api/src/services/k8sReadSurface.ts — do not edit (npm test checks it)
+# NOT RECOMMENDED for customer clusters: exec into the privileged cilium-agent is node-level access, and
+# Defender for Containers alerts on it. Prefer Hubble metrics (Managed Prometheus) or ACNS flow logs.
+# Needs HUBBLE_EXEC_ENABLED=true (production) and, for a customer connection, aks.hubbleExec: true.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aud-dashboard-hubble-exec
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: azure-unified-dashboard
+rules:
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [services/proxy]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aud-dashboard-hubble-exec
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: azure-unified-dashboard
+subjects:
+  - kind: User
+    # The connection identity's OBJECT id (service principal / managed identity) — check with `kubectl auth whoami`
+    name: "<CONNECTION_IDENTITY_OBJECT_ID>"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: aud-dashboard-hubble-exec
+  apiGroup: rbac.authorization.k8s.io
