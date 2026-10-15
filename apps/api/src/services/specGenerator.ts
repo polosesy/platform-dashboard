@@ -4,6 +4,7 @@ import type {
   ArchitectureEdge,
   GraphNodeKind,
   EdgeKind,
+  InboundExposure,
 } from "@aud/types";
 import type {
   DiagramSpec,
@@ -21,6 +22,7 @@ import type {
   SubResourceKind,
 } from "@aud/types";
 import { inferImplicitEdges } from "./dependencyInference.js";
+import { backendServerKeys } from "./backendMembers.js";
 import ELK from "elkjs";
 import { debug } from "../infra/logger.js";
 
@@ -71,6 +73,10 @@ const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
   serviceBus: "serviceBus",
   eventHub: "eventHub",
   dns: "dns",
+  agc: "agc",
+  vnetGateway: "vnetGateway",
+  bastion: "bastion",
+  paas: "paas",
   unknown: "custom",
 };
 
@@ -97,6 +103,12 @@ const ENOUGH_REQUESTS = (metric: string) => ({ metric, atLeast: 20 });
 /** Memory used % for VMs / scale sets: 100 − "Available Memory Percentage" (platform metric, no agent needed) */
 const MEMORY_FROM_AVAILABLE: MetricBinding = mon("Available Memory Percentage", "avg", { transform: "complement", optional: true });
 const PRIVATE_V4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
+/** A quote inside an Azure Monitor $filter value is doubled */
+const monEsc = (v: string) => v.replace(/'/g, "''");
+const parseJsonList = (v: string | undefined): string[] => {
+  if (!v) return [];
+  try { const x = JSON.parse(v); return Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []; } catch { return []; }
+};
 /** Bytes per minute → bit/s (the unit of edge throughput from flow logs) */
 const PER_MIN_TO_BPS = 8 / 60;
 
@@ -136,11 +148,29 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
     latency: mon("BackendLastByteResponseTime", "avg", { optional: true }),
     health: health(...atLeast("backend", 100, 1), ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
   },
+  // Front Door classic (microsoft.network/frontdoors) — Standard/Premium is frontDoorAfd (effectiveBindings)
   frontDoor: {
     requests: mon("RequestCount", "total"),
     backend: mon("BackendHealthPercentage", "avg"),
     latency: mon("TotalLatency", "avg", { optional: true }),
     health: health(...atLeast("backend", 90, 1)),
+  },
+  // Front Door Standard/Premium (microsoft.cdn/profiles): origin health and 5xx share (frontdoor/monitor-front-door-reference)
+  frontDoorAfd: {
+    requests: mon("RequestCount", "total"),
+    backend: mon("OriginHealthPercentage", "avg", { optional: true }),
+    errorRate: mon("Percentage5XX", "avg", { optional: true }),
+    latency: mon("TotalLatency", "avg", { optional: true }),
+    health: health(...atLeast("backend", 90, 10), ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+  },
+  // Application Gateway for Containers: metrics are emitted only while requests flow
+  // (application-gateway/for-containers/application-gateway-for-containers-metrics)
+  agc: {
+    requests: mon("TotalRequests", "total"),
+    beTimeouts: mon("BackendConnectionTimeouts", "total", { optional: true }),
+    timeoutRate: derived("ratio", "beTimeouts", "requests"),
+    healthyTargets: mon("BackendHealthyTargets", "avg", { optional: true }),
+    health: health(...under("timeoutRate", 1, 5, ENOUGH_REQUESTS("requests")), rule("healthyTargets", ">=", 1, "critical", ENOUGH_REQUESTS("requests"))),
   },
   trafficManager: {
     queries: mon("QpsByEndpoint", "total"),
@@ -153,18 +183,26 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
     health: health(...atLeast("fwHealth", 100, 50), ...under("snat", 80, 95)),
   },
   natGateway: {
-    dataPath: mon("DatapathAvailability", "avg"),
+    // Averaged over 15 minutes: Azure alerts below 90 % over 15 min — shorter grains give false positives (nat-metrics)
+    dataPath: mon("DatapathAvailability", "avg", { window: "PT15M" }),
     snatFail: mon("SNATConnectionCount", "total", { filter: "ConnectionState eq 'Failed'", optional: true }),
     health: health(...atLeast("dataPath", 99, 90), rule("snatFail", "<", 1, "warning")),
   },
   publicIP: {
     bytesIn: mon("ByteCount", "total", { filter: "Direction eq 'In'", optional: true }),
+    bytesOut: mon("ByteCount", "total", { filter: "Direction eq 'Out'", optional: true }),
     ddos: mon("IfUnderDDoSAttack", "max", { optional: true }),
     health: health(rule("ddos", "<", 1, "critical")),
   },
+  // One-hour totals as bytes/minute: a PE idle for the last minute is not "no data" (healthEvidence.ts reads both ways)
   privateEndpoint: {
-    bytesIn: mon("PEBytesIn", "total"),
-    bytesOut: mon("PEBytesOut", "total"),
+    bytesIn: mon("PEBytesIn", "total", { window: "PT1H", scale: 1 / 60 }),
+    bytesOut: mon("PEBytesOut", "total", { window: "PT1H", scale: 1 / 60 }),
+    health: health(),
+  },
+  // Public and private DNS zones: query volume has a one-hour grain (dnszones metrics reference)
+  dns: {
+    queries: mon("QueryVolume", "total", { window: "PT1H", scale: 1 / 60, optional: true }),
     health: health(),
   },
   nic: {
@@ -263,6 +301,7 @@ export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "ico
   const kind = n.resourceKind ?? n.icon;
   if (kind === "publicIP" && n.metadata?.unused === "true") return NOT_MEASURED;
   if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
+  if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return NODE_BINDINGS.frontDoorAfd!;
   return NODE_BINDINGS[kind] ?? n.bindings ?? NOT_MEASURED;
 }
 
@@ -271,29 +310,66 @@ export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "ico
  * - Internet → public LB: the LB's received bytes (ByteCount, Direction In) — may include outbound SNAT replies
  * - Internet → App Gateway with a public frontend: BytesReceived
  * - Private Endpoint → PaaS: PEBytesIn + PEBytesOut on the PE
- * LB / App Gateway → backend lines get none (Azure Monitor has no per-backend bytes); flow logs measure them.
+ * - Internet → App Gateway: BytesReceived of the listeners on the PUBLIC frontend only (private listeners take
+ *   traffic from inside the network) — `Listener eq '…'`
+ * - App Gateway → backend member: response count and connect time by BackendServer ("ip:port") — quality only,
+ *   Azure Monitor has no per-backend bytes, so no particles
+ * - LB → backend member: health-probe availability by BackendIPAddress
  */
 export function edgeBindings(
-  e: Pick<DiagramEdgeSpec, "edgeKind" | "flowType" | "source" | "target">,
-  byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "resourceKind" | "icon" | "subResources" | "metadata">>,
+  e: Pick<DiagramEdgeSpec, "edgeKind" | "flowType" | "source" | "target" | "backend" | "exposure">,
+  byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "resourceKind" | "icon" | "subResources" | "metadata" | "parentId">>,
   /** Load balancers that are also an outbound (SNAT) path — their In bytes may include SNAT replies */
   snatLbs: ReadonlySet<string> = new Set(),
 ): { bindings: Record<string, MetricBinding>; caveats?: string[] } {
   const src = byId.get(e.source), tgt = byId.get(e.target);
   const kindOf = (n?: { resourceKind?: string; icon: string }) => n?.resourceKind ?? n?.icon;
   if (kindOf(src) === "internet" && e.flowType === "ingress" && tgt) {
+    if (kindOf(tgt) === "vm" && e.exposure) return publicIpBindings(e, tgt, byId);
+    // AGC-03 / Front Door: requests (no byte metric → no particles)
+    if (kindOf(tgt) === "agc") return { bindings: { rps: mon("TotalRequests", "total", { scale: 1 / 60, node: "target" }) } };
+    if (kindOf(tgt) === "frontDoor") return { bindings: { rps: mon("RequestCount", "total", { scale: 1 / 60, node: "target" }) } };
     if (kindOf(tgt) === "lb") {
       return {
+        // LB-05: frontend received bytes
         bindings: { throughput: mon("ByteCount", "total", { filter: "Direction eq 'In'", scale: PER_MIN_TO_BPS, node: "target" }) },
         ...(snatLbs.has(e.target) ? { caveats: ["ld.edge.caveat.snat"] } : {}),
       };
     }
     if (kindOf(tgt) === "appGateway") {
+      const listeners = parseJsonList(tgt.metadata?.publicListeners);
+      if (listeners.length) {
+        return {
+          bindings: {
+            throughput: mon("BytesReceived", "total", { filter: listeners.map((l) => `Listener eq '${monEsc(l)}'`).join(" or "), scale: PER_MIN_TO_BPS, node: "target" }),
+            // All listeners: when the public ones report nothing, this tells "the traffic comes in privately"
+            // from "nothing is measured"
+            gatewayTotal: mon("BytesReceived", "total", { scale: PER_MIN_TO_BPS, node: "target" }),
+          },
+          caveats: ["ld.edge.caveat.publicFrontend"],
+        };
+      }
       const hasPrivate = tgt.subResources?.some((s) => s.kind === "frontendIP" && !!s.endpoint && PRIVATE_V4.test(s.endpoint));
       return {
         bindings: { throughput: mon("BytesReceived", "total", { scale: PER_MIN_TO_BPS, node: "target" }) },
         ...(hasPrivate ? { caveats: ["ld.edge.caveat.publicPrivateSum"] } : {}),
       };
+    }
+  }
+  // Backend member quality (AGW-06, LB-02): only with a known member address
+  const addr = e.backend?.address;
+  if (e.edgeKind === "routes" && addr && e.backend?.via !== "vmssModel") {
+    if (kindOf(src) === "appGateway") {
+      const filter = backendServerKeys(addr, e.backend?.ports ?? []).map((k) => `BackendServer eq '${monEsc(k)}'`).join(" or ");
+      return {
+        bindings: {
+          backendRequests: mon("BackendResponseStatus", "total", { filter, optional: true }),
+          backendConnectMs: mon("BackendConnectTime", "avg", { filter, optional: true }),
+        },
+      };
+    }
+    if (kindOf(src) === "lb") {
+      return { bindings: { probe: mon("DipAvailability", "avg", { filter: `BackendIPAddress eq '${monEsc(addr)}'`, optional: true }) } };
     }
   }
   if (e.edgeKind === "privateLink" && kindOf(src) === "privateEndpoint") {
@@ -306,6 +382,36 @@ export function edgeBindings(
     };
   }
   return { bindings: {} };
+}
+
+/**
+ * Internet → VM through its instance-level public IP (PIP-04), read on the public IP resource(s) of the VM card
+ * (`on: "publicIp"`; liveAggregator.measuredResourceIds takes the ids from the card's sub-resources and accepts
+ * public IP ids only). SynCount / ByteCount by Direction — the Port dimension is a single "0" on these addresses.
+ * Particles (throughput) only when the subnet leaves through a NAT gateway: then the VM's own outbound traffic and
+ * its replies use the NAT gateway, and what arrives on the public IP is traffic that started outside
+ * (nat-gateway/nat-gateway-design). Otherwise received bytes include replies to connections the VM opened —
+ * shown as a value, no particles. SYN count is never a status input.
+ */
+function publicIpBindings(
+  e: Pick<DiagramEdgeSpec, "exposure">,
+  vm: Pick<DiagramNodeSpec, "subResources" | "parentId">,
+  byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "metadata">>,
+): { bindings: Record<string, MetricBinding>; caveats?: string[] } {
+  const pips = (vm.subResources ?? []).filter((s) => s.kind === "publicIP" && s.azureResourceId);
+  if (!pips.length) return { bindings: {} }; // nothing to read — the line stays "not measured", never 0
+  const at = { node: "target" as const, on: "publicIp" as const, filter: "Direction eq 'In'", optional: true };
+  const subnet = vm.parentId ? byId.get(vm.parentId) : undefined;
+  const viaNat = subnet?.metadata?.egressVia === "nat" && !e.exposure?.reasons.includes("vnetTagWidened");
+  const bindings: Record<string, MetricBinding> = {
+    synIn: mon("SynCount", "total", at),
+    bytesIn: mon("ByteCount", "total", { ...at, scale: PER_MIN_TO_BPS }),
+  };
+  if (viaNat) bindings.throughput = mon("ByteCount", "total", { ...at, scale: PER_MIN_TO_BPS });
+  const caveats = ["ld.edge.caveat.pipNoPort", "ld.edge.caveat.synAck", "ld.edge.caveat.nsgStage"];
+  if (!viaNat) caveats.push("ld.edge.caveat.pipReplies");
+  if (pips.length > 1) caveats.push("ld.edge.caveat.multiPip");
+  return { bindings, caveats };
 }
 
 /**
@@ -335,11 +441,11 @@ const COMPUTE_KINDS = new Set<string>([
 ]);
 
 const DATA_KINDS = new Set<string>([
-  "sql", "storage", "redis", "cosmosDb", "postgres", "keyVault", "serviceBus", "eventHub",
+  "sql", "storage", "redis", "cosmosDb", "postgres", "keyVault", "serviceBus", "eventHub", "paas",
 ]);
 
 const INGRESS_KINDS = new Set<string>([
-  "appGateway", "lb", "frontDoor", "trafficManager", "firewall",
+  "appGateway", "lb", "frontDoor", "trafficManager", "firewall", "agc",
 ]);
 
 function inferProtocol(dataKind: string): string {
@@ -396,7 +502,8 @@ function subnetTier(childKinds: Set<string>): number {
 // Enriches nodes with archRole / archGroupId / flowHint metadata
 // without changing parentId or containment hierarchy.
 
-type ArchMeta = { archRole: string; archGroupId: string; flowHint: string };
+/** aksNodeId: the AKS cluster graph node an aks-cluster / aks-vmss belongs to (by graph edge, never by name) */
+type ArchMeta = { archRole: string; archGroupId: string; flowHint: string; aksNodeId?: string };
 
 const ARCH_ROLE_MAP: Record<string, { role: string; hint: string }> = {
   appGateway:      { role: "gateway",          hint: "ingress" },
@@ -405,6 +512,10 @@ const ARCH_ROLE_MAP: Record<string, { role: string; hint: string }> = {
   lb:              { role: "load-balancer",     hint: "ingress" },
   firewall:        { role: "firewall",          hint: "egress" },
   natGateway:      { role: "nat-gateway",        hint: "egress" },
+  agc:             { role: "gateway",            hint: "ingress" },
+  vnetGateway:     { role: "gateway",            hint: "egress" },
+  bastion:         { role: "bastion",            hint: "control" },
+  paas:            { role: "storage",            hint: "dependency" },
   waf:             { role: "waf",               hint: "ingress" },
   vm:              { role: "vm",                hint: "east-west" },
   vmss:            { role: "vmss",              hint: "east-west" },
@@ -439,7 +550,7 @@ function detectArchitecturePatterns(
     const groupId = `aks-${clusterName}`;
 
     // Mark AKS cluster itself
-    result.set(aks.id, { archRole: "aks-cluster", archGroupId: groupId, flowHint: "control" });
+    result.set(aks.id, { archRole: "aks-cluster", archGroupId: groupId, flowHint: "control", aksNodeId: aks.id });
 
     // Find connected VMSS (agent pool node pools)
     for (const edge of graph.edges) {
@@ -454,7 +565,7 @@ function detectArchitecturePatterns(
 
       if (otherNode.kind === "vmss") {
         aksVmssIds.add(otherId);
-        result.set(otherId, { archRole: "aks-vmss", archGroupId: groupId, flowHint: "east-west" });
+        result.set(otherId, { archRole: "aks-vmss", archGroupId: groupId, flowHint: "east-west", aksNodeId: aks.id });
       }
     }
 
@@ -733,6 +844,8 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     // frontend is a public IP (its backends decide its VNet later). Guessing a subnet drew the Internet
     // line straight into an unrelated subnet.
     if (node.kind === "frontDoor" || node.kind === "trafficManager") continue;
+    // AGC: only its association places it (AGC-01); gateways / Bastion only their dedicated subnet (CT-07)
+    if (node.kind === "agc" || node.kind === "vnetGateway" || node.kind === "bastion") continue;
     if (node.kind === "lb" && node.endpoint && !isPrivateAddress(node.endpoint)) continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
@@ -1063,10 +1176,24 @@ export async function generateDiagramSpec(
     }
   }
 
-  // ── Build AppGW Frontend IP absorption map ──
+  // ── Frontends of AGW / LB (catalog AGW-01, LB-01): one chip per frontend — public and private both ──
+  type GraphFrontend = { name: string; kind: "public" | "private"; ip?: string };
+  const frontendChips = (node: ArchitectureNode): SubResource[] | undefined => {
+    const list = Array.isArray(node.metadata?.frontends) ? (node.metadata!.frontends as GraphFrontend[]) : [];
+    if (!list.length) return undefined;
+    return list.map((f, i) => ({
+      id: `${node.id}/frontendIP/${i}`,
+      label: f.kind === "public" ? "Public IP" : "Frontend IP",
+      kind: (f.kind === "public" ? "publicIP" : "frontendIP") as SubResourceKind,
+      ...(f.ip ? { endpoint: f.ip } : {}),
+      azureResourceId: node.azureId,
+    }));
+  };
   const appGwFrontendIPs = new Map<string, SubResource[]>();
   for (const node of graph.nodes) {
     if (node.kind !== "appGateway") continue;
+    const chips = frontendChips(node);
+    if (chips) { appGwFrontendIPs.set(node.id, chips); continue; }
     if (!node.endpoint) continue;
     appGwFrontendIPs.set(node.id, [{
       id: `${node.id}/frontendIP/0`,
@@ -1087,6 +1214,8 @@ export async function generateDiagramSpec(
   const lbFrontendIPs = new Map<string, SubResource[]>();
   for (const node of graph.nodes) {
     if (node.kind !== "lb") continue;
+    const chips = frontendChips(node);
+    if (chips) { lbFrontendIPs.set(node.id, chips); continue; }
     if (!node.endpoint) continue;
     const isPublic = !isPrivateIp(node.endpoint);
     lbFrontendIPs.set(node.id, [{
@@ -1309,15 +1438,21 @@ export async function generateDiagramSpec(
           endpoint: nic.endpoint,
           azureResourceId: nic.azureId,
         });
-        // If the NIC has a public IP (resolved in azure.ts), add as a separate sub-resource
+        // The NIC's public IPs (resolved in azure.ts, every ip configuration) as sub-resources. The resource id is
+        // what the Internet → VM line is measured on (PIP-04) — the server reads it back from here, never from input
         const pubIp = typeof nic.metadata?.publicIP === "string" ? nic.metadata.publicIP : undefined;
-        if (pubIp) {
-          subs.push({
-            id: `${idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id)}/publicip`,
+        const pips = Array.isArray(nic.metadata?.publicIPs) ? (nic.metadata.publicIPs as Array<{ id: string }>) : [];
+        const nicShort = idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id);
+        if (pips.length) {
+          pips.forEach((p, i) => subs.push({
+            id: i === 0 ? `${nicShort}/publicip` : `${nicShort}/publicip-${i + 1}`,
             label: "Public IP",
             kind: "publicIP" as SubResourceKind,
-            endpoint: pubIp,
-          });
+            endpoint: i === 0 ? pubIp : undefined,
+            azureResourceId: p.id,
+          }));
+        } else if (pubIp) {
+          subs.push({ id: `${nicShort}/publicip`, label: "Public IP", kind: "publicIP" as SubResourceKind, endpoint: pubIp });
         }
       }
     }
@@ -1655,9 +1790,8 @@ export async function generateDiagramSpec(
         // AKS-VMSS: enrich with nodepool info from parent AKS cluster
         if (child.node.kind === "vmss" && childArchMeta?.archRole === "aks-vmss") {
           // Find the parent AKS cluster and match this VMSS to its agent pool
-          const parentAksId = [...archMetaMap.entries()].find(
-            ([, meta]) => meta.archRole === "aks-cluster" && meta.archGroupId === childArchMeta.archGroupId
-          )?.[0];
+          // The cluster this pool was linked to by its graph edge (two clusters may share a name across RGs)
+          const parentAksId = childArchMeta.aksNodeId;
           if (parentAksId) {
             const parentAksNode = graph.nodes.find((n) => n.id === parentAksId);
             // Pass AKS cluster ARM ID for K8s API calls (IP, conditions, nodeImageVersion)
@@ -2286,7 +2420,8 @@ export async function generateDiagramSpec(
   }).filter((e) => e.source !== e.target); // drop self-loops
 
   // ── Build edges (all non-containment edges between visible nodes) ──
-  const CONTAINMENT_KINDS: Set<EdgeKind> = new Set(["contains"]);
+  // member-of (Flexible VM → scale set) is membership shown as a chip on the VM card, not a line (VMSS-03)
+  const CONTAINMENT_KINDS: Set<EdgeKind> = new Set(["contains", "member-of"]);
   const filteredEdgesNoNetwork = retargetedEdges.filter(
     (e) =>
       !CONTAINMENT_KINDS.has(e.kind) &&
@@ -2381,7 +2516,17 @@ export async function generateDiagramSpec(
     const protocol = edge.metadata?.protocol;
     const diagEdgeKind = toDiagramEdgeKind(edge.kind);
     const ft = resolveFlowType(archMetaMap.get(edge.source), archMetaMap.get(edge.target), diagEdgeKind);
-    return makeEdge(srcId, tgtId, srcKind, label, protocol, diagEdgeKind, undefined, ft);
+    const de = makeEdge(srcId, tgtId, srcKind, label, protocol, diagEdgeKind, undefined, ft);
+    const m = edge.metadata;
+    if (m?.via && m.direction !== "outbound") {
+      const ev = m.evidence === "cfg" || m.evidence === "ipMatch" || m.evidence === "fqdnMatch" ? m.evidence : undefined;
+      de.backend = { via: m.via, ...(m.pool ? { pool: m.pool } : {}), ...(m.address ? { address: m.address } : {}), ...(m.ports?.length ? { ports: m.ports } : {}), ...(ev ? { evidence: ev } : {}) };
+    }
+    // AGC → AKS by "the only cluster in the VNet" (AGC-04 b) is a rule, not configuration: drawn dashed
+    if (m?.rel === "AGC-04" && (m.evidence === "nodeRg" || m.evidence === "sameVnet")) de.rule = m.evidence;
+    // Front Door origin lines: which origin, and how it was matched (EDGE-04..07)
+    if (m?.origin) de.origin = { name: m.origin, group: m.pool ?? "", evidence: m.evidence === "ipMatch" || m.evidence === "fqdnMatch" ? m.evidence : "cfg", ...(m.status ? { status: m.status } : {}) };
+    return de;
   });
 
   // Subnet → NAT GW association edges (collected during node placement, created here)
@@ -2591,20 +2736,96 @@ export async function generateDiagramSpec(
     }
   }
 
+  // ── Gateway / scale-set facts for chips and the panel (strings — the spec is shared JSON) ──
+  {
+    const gByAz = new Map(graph.nodes.filter((g) => g.azureId).map((g) => [g.azureId!.toLowerCase(), g]));
+    const vmssName = new Map<string, string>();
+    for (const e of graph.edges) if (e.kind === "member-of") vmssName.set(e.source, graph.nodes.find((x) => x.id === e.target)?.name ?? "");
+    for (const n of diagramNodes) {
+      const g = n.azureResourceId ? gByAz.get(n.azureResourceId.toLowerCase()) : undefined;
+      if (!g) continue;
+      const meta = g.metadata ?? {};
+      if (n.resourceKind === "lb" || n.resourceKind === "appGateway") {
+        const out: Record<string, string> = {};
+        if (meta.managedBy === "aks") out.managedBy = "aks";
+        if (typeof meta.outboundRules === "number") out.outboundRules = String(meta.outboundRules);
+        if (typeof meta.privateListeners === "number") out.privateListeners = String(meta.privateListeners);
+        const fes = Array.isArray(meta.frontends) ? (meta.frontends as Array<{ name: string; kind: string; ip?: string; listeners: string[]; ruleBound: boolean }>) : [];
+        if (fes.length) out.frontends = JSON.stringify(fes);
+        const pub = fes.filter((f) => f.kind === "public" && f.ruleBound).flatMap((f) => f.listeners);
+        if (pub.length) out.publicListeners = JSON.stringify(pub);
+        if (Array.isArray(meta.unresolvedBackends) && meta.unresolvedBackends.length) out.unresolvedBackends = JSON.stringify(meta.unresolvedBackends);
+        n.metadata = { ...n.metadata, ...out };
+      }
+      // Evidence inputs (healthEvidence.ts): provisioning state, Private Endpoint connection approval states
+      if (typeof meta.provisioningState === "string") n.metadata = { ...n.metadata, provisioningState: meta.provisioningState };
+      if (Array.isArray(meta.connections)) n.metadata = { ...n.metadata, peConnections: JSON.stringify((meta.connections as Array<{ status?: string }>).map((c) => c.status ?? "Unknown")) };
+      if (n.resourceKind === "agc") {
+        n.metadata = {
+          ...n.metadata,
+          agcFrontends: JSON.stringify(meta.frontends ?? []),
+          agcAssociations: JSON.stringify(meta.associations ?? []),
+          ...(typeof meta.clusterCandidates === "number" ? { clusterCandidates: String(meta.clusterCandidates) } : {}),
+          ...(meta.wafPolicyId ? { waf: "true" } : {}),
+        };
+      }
+      if (n.resourceKind === "frontDoor") {
+        const keys = ["tier", "endpoints", "activeRoutes", "origins", "externalOrigins", "ambiguousOrigins", "configUnreadable", "classic"] as const;
+        const out: Record<string, string> = {};
+        for (const k of keys) if (meta[k] != null) out[k] = String(meta[k]);
+        if (Array.isArray(meta.endpointHosts)) out.endpointHosts = JSON.stringify(meta.endpointHosts);
+        if (Array.isArray(meta.originList)) out.originList = JSON.stringify(meta.originList);
+        n.metadata = { ...n.metadata, ...out };
+      }
+      if (n.resourceKind === "vmss") {
+        if (typeof meta.orchestrationMode === "string") n.metadata = { ...n.metadata, orchestrationMode: meta.orchestrationMode };
+        if (typeof meta.capacity === "number") n.metadata = { ...n.metadata, capacity: String(meta.capacity) };
+        if (meta.managedBy === "aks") n.metadata = { ...n.metadata, managedBy: "aks" };
+      }
+      const set = vmssName.get(g.id);
+      if (set != null && (n.resourceKind === "vm" || n.icon === "vm")) n.metadata = { ...n.metadata, scaleSet: set };
+    }
+  }
+
   // ── Inbound: Internet → public entry points (LB / Application Gateway with a public frontend) ──
   // Same rule as /architecture: an entry point whose frontend is a public IP is reachable from the Internet.
   // Internal LBs (private frontend) are not inbound paths.
   const ingressByVnet = new Map<string, string[]>();
   const graphNodeByAzureId = new Map(graph.nodes.filter((g) => g.azureId).map((g) => [g.azureId!.toLowerCase(), g]));
   for (const n of diagramNodes) {
+    // AGC-03: Internet → AGC only through a public frontend; Front Door only with an active route
+    if (n.resourceKind === "agc" || n.resourceKind === "frontDoor") {
+      const g = n.azureResourceId ? graphNodeByAzureId.get(n.azureResourceId.toLowerCase()) : undefined;
+      const open = n.resourceKind === "agc" ? Number(g?.metadata?.publicFrontends ?? 0) > 0 : Number(g?.metadata?.activeRoutes ?? (g?.metadata?.classic ? 1 : 0)) > 0;
+      if (!open) continue;
+      const vnetId = shortIdToVnet.get(n.id) ?? "external";
+      (ingressByVnet.get(vnetId) ?? ingressByVnet.set(vnetId, []).get(vnetId)!).push(n.id);
+      continue;
+    }
     if (n.resourceKind !== "lb" && n.resourceKind !== "appGateway") continue;
     const isPublic = n.subResources?.some((sr) => sr.kind === "publicIP" || (sr.kind === "frontendIP" && !!sr.endpoint && !isPrivateIp(sr.endpoint)));
     if (!isPublic) continue;
     // A public frontend with no load-balancing / NAT rule takes no traffic in (e.g. the AKS "kubernetes" LB used
     // only for outbound) — it is not an inbound path. Unknown rule count keeps the line.
-    const rules = n.azureResourceId ? graphNodeByAzureId.get(n.azureResourceId.toLowerCase())?.metadata?.inboundRules : undefined;
+    const gnode = n.azureResourceId ? graphNodeByAzureId.get(n.azureResourceId.toLowerCase()) : undefined;
+    const rules = gnode?.metadata?.inboundRules;
     if (typeof rules === "number") (n.metadata ??= {}).inboundRules = String(rules);
     if (rules === 0) continue;
+    const vnetId = shortIdToVnet.get(n.id) ?? "external";
+    (ingressByVnet.get(vnetId) ?? ingressByVnet.set(vnetId, []).get(vnetId)!).push(n.id);
+  }
+  // Internet → VM through its own public IP (PIP-04): open / scoped = a configured line, unknown = drawn dashed in
+  // the web (weak evidence, no risk color); closed / noNsg (Standard without an NSG is closed by default) = no line,
+  // the card chip says why. A VM-less NIC has nothing to reach — no line. Uniform VMSS instances have no public IP
+  // resource of their own — not judged here.
+  const vmEntries = new Map<string, InboundExposure>();
+  for (const n of diagramNodes) {
+    if (n.resourceKind !== "vm" || !n.azureResourceId) continue;
+    const ex = graphNodeByAzureId.get(n.azureResourceId.toLowerCase())?.metadata?.inboundExposure as InboundExposure | undefined;
+    if (!ex) continue;
+    n.metadata = { ...n.metadata, pipExposure: JSON.stringify(ex) };
+    if (ex.state !== "open" && ex.state !== "scoped" && ex.state !== "unknown") continue;
+    vmEntries.set(n.id, ex);
     const vnetId = shortIdToVnet.get(n.id) ?? "external";
     (ingressByVnet.get(vnetId) ?? ingressByVnet.set(vnetId, []).get(vnetId)!).push(n.id);
   }
@@ -2620,11 +2841,14 @@ export async function generateDiagramSpec(
       metadata: { direction: "ingress", entryCount: String(entryIds.length), vnetId },
     });
     for (const target of entryIds) {
-      diagramEdges.push(makeEdge(inId, target, "internet", undefined, undefined, "network", undefined, "ingress"));
+      const edge = makeEdge(inId, target, "internet", undefined, undefined, "network", undefined, "ingress");
+      const ex = vmEntries.get(target);
+      if (ex) edge.exposure = ex;
+      diagramEdges.push(edge);
     }
   }
 
-  // ── Subnet outbound path (shown as a chip on the subnet header) ──
+  // ── Subnet outbound path (shown as a chip on the subnet header; catalog SEC-07 default outbound access) ──
   // nat > LB outbound rule (SNAT) > default outbound (on / off) > unknown (property not reported; UDR not read yet)
   const snatSources = new Set(outboundSources.filter((s) => s.label === "LB SNAT").map((s) => s.id));
   for (const sub of diagramNodes) {

@@ -107,9 +107,9 @@ export function mockNetworkSummary(lookbackMinutes: number, table: string, note?
     table,
     totals: { totalBytes: 7_800_000, allowedFlows: 12_420, deniedFlows: 190 },
     topSubnetPairs: [
-      { src: "subnet-app", dest: "subnet-platform", totalBytes: 3_700_000, allowedFlows: 4200, deniedFlows: 14 },
-      { src: "subnet-app", dest: "subnet-data", totalBytes: 2_100_000, allowedFlows: 3100, deniedFlows: 22 },
-      { src: "subnet-platform", dest: "subnet-egress", totalBytes: 1_200_000, allowedFlows: 1600, deniedFlows: 4 },
+      { src: "snet-agw", dest: "snet-aks", totalBytes: 3_700_000, allowedFlows: 4200, deniedFlows: 14 },
+      { src: "snet-aks", dest: "snet-pe", totalBytes: 2_100_000, allowedFlows: 3100, deniedFlows: 22 },
+      { src: "snet-aks", dest: "snet-db", totalBytes: 1_200_000, allowedFlows: 1600, deniedFlows: 4 },
     ],
     topIpPairs: [
       { src: "10.10.1.12", dest: "10.10.2.31", totalBytes: 1_400_000, allowedFlows: 2200, deniedFlows: 2 },

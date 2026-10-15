@@ -1,6 +1,8 @@
 "use client";
 
-import type { DiagramNodeSpec, PlSourceStatus, PlUnresolved, PrivateLinkUsage, PrivateLinkUsageResponse } from "@aud/types";
+import { useState, type ReactNode } from "react";
+import type { DiagramNodeSpec, PlSourceStatus, PrivateLinkUsage, PrivateLinkUsageResponse } from "@aud/types";
+import { groupUnresolved, unresolvedCount, type UnresolvedGroup } from "@/lib/plUsage";
 import { useI18n } from "@/lib/i18n";
 import { formatMetric } from "@/lib/liveMetricFormat";
 import { Notice } from "@/components/ui";
@@ -36,6 +38,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
   onSelectNode?: (id: string) => void;
 }) {
   const { t } = useI18n();
+  const [showAllGroups, setShowAllGroups] = useState(false);
   const ago = useRelativeTime();
   const kind = kindOf(node);
   const byId = new Map(spec.nodes.map((n) => [n.id, n]));
@@ -79,16 +82,51 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
       </span>
     </button>
   );
-  const unresolvedText = (x: PlUnresolved) => {
-    switch (x.reason) {
-      case "nicNoVm": return t("ld.plu.nicNoVm", { name: x.nicName ?? x.ip ?? "" });
-      case "notInDiagram": return t("ld.plu.unattributed", { ip: x.ip ?? "" });
-      case "ambiguous": return t("ld.plu.ambiguous", { count: x.candidates?.length ?? 0 });
+  // One line per reason (grouped), what it means, and how it gets resolved
+  const groupHead = (g: UnresolvedGroup): ReactNode => {
+    switch (g.reason) {
+      case "nicNoVm": return t("ld.plu.nicNoVm", { name: g.nicName ?? "" });
+      case "ambiguous": return (
+        <>
+          {t(g.basis === "identity" ? "ld.plu.group.ambiguousIdentity" : "ld.plu.group.ambiguousSubnet", { count: g.candidates.length })}{" "}
+          {g.candidates.slice(0, 4).map((c, i) => (
+            <span key={c}>{i ? " · " : ""}<button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(c)}>{nameOf(c)}</button></span>
+          ))}
+          {g.candidates.length > 4 ? ` +${g.candidates.length - 4}` : ""}
+        </>
+      );
+      case "notInDiagram": {
+        const p = g.place;
+        if (p?.kind === "otherVnet") return t("ld.plu.place.otherVnet", { vnet: nameOf(p.vnetNodeId), subnet: nameOf(p.subnetNodeId), owner: p.ownerNodeId ? ` (${nameOf(p.ownerNodeId)})` : "" });
+        if (p?.kind === "overlap") return t("ld.plu.place.overlap", { count: p.matches });
+        if (p?.kind === "private") return t("ld.plu.place.private");
+        if (p?.kind === "cgnat") return t("ld.plu.place.cgnat");
+        return t("ld.plu.place.unknown");
+      }
       case "peUnconfirmed": return t("ld.plu.peUnconfirmed");
-      case "denied": return t("ld.plu.denied", { count: x.deniedFlows ?? 0 });
+      case "denied": return t("ld.plu.denied", { count: g.deniedFlows });
       default: return t("ld.plu.noIp");
     }
   };
+  const fixKey = (g: UnresolvedGroup) =>
+    g.reason === "ambiguous" ? (g.basis === "identity" ? "ld.plu.fix.identity" : "ld.plu.fix.subnet")
+      : g.reason === "notInDiagram" ? (g.place?.kind === "otherVnet" ? "ld.plu.fix.otherVnet" : g.place?.kind === "private" ? "ld.plu.fix.private" : "ld.plu.fix.unknown")
+        : g.reason === "peUnconfirmed" ? "ld.plu.fix.peUnconfirmed" : g.reason === "nicNoVm" ? "ld.plu.fix.nicNoVm" : null;
+  const groupRow = (g: UnresolvedGroup) => (
+    <div key={g.key} className={styles.dpTwoLine} data-plu-group={g.reason}>
+      <span className={styles.dpTwoLineMain}>{groupHead(g)}</span>
+      <span className={styles.dpTwoLineSub}>
+        {t("ld.plu.group.stats", { ips: g.ips, requests: g.requests })}{g.lastSeen ? ` · ${ago(g.lastSeen)}` : ""}
+        {fixKey(g) ? ` — ${t(fixKey(g)!)}` : ""}
+      </span>
+      {g.allIps.length ? (
+        <details className={styles.dpDetails}>
+          <summary>{g.sample.join(", ")}{g.allIps.length > g.sample.length ? ` ${t("ld.plu.group.more", { count: g.allIps.length - g.sample.length })}` : ""}</summary>
+          <span className={styles.dpMono}>{g.allIps.join(", ")}</span> <CopyButton value={g.allIps.join("\n")} />
+        </details>
+      ) : null}
+    </div>
+  );
   const sourceLine = (s: PlSourceStatus) => {
     const target = s.targetNodeId ? byId.get(s.targetNodeId) : undefined;
     const vnet = spec.nodes.find((n) => n.icon === "vnet" && n.nodeType === "group" && !n.metadata?.ghostOf);
@@ -127,6 +165,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
   // ── a Private Endpoint or the PaaS behind it: who uses it ──
   const users = usage.usages.filter((u) => (asPe ? u.peNodeId === node.id : u.targetNodeId === node.id));
   const unresolved = usage.unresolved.filter((x) => x.targetNodeId === targetId && (!asPe || !x.peNodeId || x.peNodeId === node.id));
+  const unresolvedGroups = groupUnresolved(unresolved);
   const pub = usage.publicAccess.find((p) => p.targetNodeId === targetId);
   const sources = usage.sources.filter((s) => s.targetNodeId === targetId || s.source === "vnetFlow");
   const looked = sources.some((s) => s.state === "ok" || s.state === "empty");
@@ -143,9 +182,12 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
           {!hasCompute ? ` ${t("ld.plu.empty.noConsumer")}` : ""}
         </div>
       ) : null}
-      {unresolved.length ? (
-        <Group title={t("ld.plu.unresolvedTitle", { count: unresolved.length })}>
-          {unresolved.slice(0, 8).map((x, i) => <div key={i} className={styles.dpLine}>{unresolvedText(x)}{x.lastSeen ? <span className={styles.dpMuted}> · {ago(x.lastSeen)}</span> : null}</div>)}
+      {unresolvedGroups.length ? (
+        <Group title={t("ld.plu.unresolvedTitle", { count: unresolvedCount(unresolved) })}>
+          {unresolvedGroups.slice(0, showAllGroups ? undefined : 5).map(groupRow)}
+          {unresolvedGroups.length > 5 && !showAllGroups ? (
+            <button type="button" className={styles.dpLink} onClick={() => setShowAllGroups(true)}>{t("ld.plu.group.moreGroups", { count: unresolvedGroups.length - 5 })}</button>
+          ) : null}
         </Group>
       ) : null}
       {pub ? <Notice tone="warning">{t("ld.plu.publicPath", { count: pub.requests, ips: pub.distinctIps })}</Notice> : null}

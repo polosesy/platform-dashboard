@@ -125,8 +125,11 @@ export function resolveNodeHealth(
  * Determine edge status from metrics.
  */
 export function resolveEdgeStatus(metrics: LiveEdge["metrics"]): EdgeStatus {
-  const { errorRate, latencyMs, throughputBps } = metrics;
+  const { errorRate, latencyMs, throughputBps, probePct } = metrics;
 
+  // LB health probe to this backend: none answer = down, some fail = degraded
+  if (probePct != null && probePct <= 0) return "down";
+  if (probePct != null && probePct < 100) return "degraded";
   if (errorRate != null && errorRate > 25) return "down";
   if (errorRate != null && errorRate > 5) return "degraded";
   if (latencyMs != null && latencyMs > 2000) return "degraded";

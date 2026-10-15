@@ -8,6 +8,7 @@
 import type {
   PlEndpoint,
   PlEvidence,
+  PlPlace,
   PlPublicAccess,
   PlSourceStatus,
   PlUnresolved,
@@ -52,6 +53,12 @@ export type PluInput = {
   /** PE node id → PEBytesIn + PEBytesOut over the window when measured */
   peBytes: ReadonlyMap<string, number>;
   sources: PlSourceStatus[];
+  /** AKS cluster node id of an AKS node or node-pool scale set (by its cluster ARM id — never by name) */
+  clusterOf?: ReadonlyMap<string, string>;
+  /** Subnets of the diagram outside this scope — to say where an address is, never to draw */
+  outerSubnets?: PluSubnet[];
+  /** Every subnet / VNet prefix of the diagram: an address in them is internal even outside RFC 1918 */
+  knownCidrs?: string[];
 };
 
 export type PluOutput = {
@@ -76,6 +83,16 @@ export function isPrivateV4(ip: string): boolean {
   if (n == null) return false;
   return (n >>> 24) === 10 || (n >>> 20) === ((172 << 4) | 1) || (n >>> 16) === ((192 << 8) | 168);
 }
+/** Carrier-grade NAT space (RFC 6598) — not public, used by some VNets and on-premises networks */
+export function isCgnatV4(ip: string): boolean {
+  const n = ipv4ToInt(ip);
+  return n != null && (n >>> 22) === ((100 << 2) | 1);
+}
+/** Not the public Internet: RFC 1918, 100.64.0.0/10, or a prefix of the diagram's own VNets / subnets */
+export function isInternalV4(ip: string, knownCidrs: readonly string[] = []): boolean {
+  return isPrivateV4(ip) || isCgnatV4(ip) || knownCidrs.some((c) => ipInCidr(ip, c));
+}
+
 export function ipInCidr(ip: string, cidr: string): boolean {
   const [base, bitsRaw] = cidr.split("/");
   const n = ipv4ToInt(ip), b = ipv4ToInt(base ?? "");
@@ -89,24 +106,61 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const maxIso = (a?: string, b?: string) => (!a ? b : !b ? a : a > b ? a : b);
 
 type Resolved =
-  | { ok: true; nodeId: string; attribution: PrivateLinkUsage["attribution"]; identityName?: string }
-  | { ok: false; reason: "nicNoVm" | "notInDiagram" | "ambiguous"; nicName?: string; candidates?: string[] };
+  | { ok: true; nodeId: string; attribution: PrivateLinkUsage["attribution"]; identityName?: string; vnetId?: string; via?: string[] }
+  | { ok: false; reason: "nicNoVm" | "notInDiagram" | "ambiguous"; nicName?: string; candidates?: string[]; basis?: "subnet" | "identity"; place?: PlPlace };
+
+/** The one AKS cluster all ids belong to (a cluster node or its node-pool scale sets), else null */
+export function collapseToCluster(ids: readonly string[], clusterOf: ReadonlyMap<string, string> | undefined): string | null {
+  if (!clusterOf || ids.length < 2) return null;
+  const set = new Set<string>();
+  for (const id of ids) {
+    const c = clusterOf.get(id);
+    if (!c) return null;
+    set.add(c);
+  }
+  return set.size === 1 ? [...set][0]! : null;
+}
+
+/** Where an address outside the scope is: one subnet of another VNet / overlapping VNets / private / CGNAT */
+export function classifyPlace(ip: string, outer: readonly PluSubnet[], clusterOf?: ReadonlyMap<string, string>): PlPlace | undefined {
+  const hits = outer.filter((s) => ipInCidr(ip, s.cidr));
+  const vnets = new Set(hits.map((h) => h.vnetId));
+  if (vnets.size > 1) return { kind: "overlap", matches: vnets.size };
+  if (hits.length) {
+    const h = [...hits].sort((a, b) => cmp(a.nodeId, b.nodeId))[0]!;
+    const owner = h.owners.length === 1 ? h.owners[0] : collapseToCluster(h.owners, clusterOf) ?? undefined;
+    return { kind: "otherVnet", vnetNodeId: h.vnetId, subnetNodeId: h.nodeId, ...(owner ? { ownerNodeId: owner } : {}) };
+  }
+  if (isCgnatV4(ip)) return { kind: "cgnat" };
+  if (isPrivateV4(ip)) return { kind: "private" };
+  return undefined;
+}
 
 /** The one diagram resource behind a source IP (and / or identity), or why there is none */
-export function resolveCaller(input: Pick<PluInput, "callers" | "subnets" | "nics" | "nodeByArmId" | "identities">, ip: string | undefined, oid?: string): Resolved {
+export function resolveCaller(
+  input: Pick<PluInput, "callers" | "subnets" | "nics" | "nodeByArmId" | "identities" | "clusterOf" | "outerSubnets" | "knownCidrs">,
+  ip: string | undefined,
+  oid?: string,
+): Resolved {
   const byIdentity = (): Resolved | null => {
     if (!oid) return null;
     const holders = input.identities.get(oid.toLowerCase()) ?? [];
     const inDiagram = holders.map((h) => ({ h, node: input.nodeByArmId.get(h.armId.toLowerCase()) })).filter((x) => x.node);
     if (inDiagram.length === 1) return { ok: true, nodeId: inDiagram[0]!.node!, attribution: "identity", identityName: inDiagram[0]!.h.name };
-    if (inDiagram.length > 1) return { ok: false, reason: "ambiguous", candidates: inDiagram.map((x) => x.node!).sort(cmp) };
+    if (inDiagram.length > 1) {
+      // The kubelet identity sits on the cluster and on each node-pool scale set — one cluster is one caller
+      const nodes = [...new Set(inDiagram.map((x) => x.node!))].sort(cmp);
+      const cluster = collapseToCluster(nodes, input.clusterOf);
+      if (cluster) return { ok: true, nodeId: cluster, attribution: "identity", identityName: inDiagram[0]!.h.name };
+      return { ok: false, reason: "ambiguous", candidates: nodes, basis: "identity" };
+    }
     return null;
   };
   const identityName = () => {
     const holders = oid ? input.identities.get(oid.toLowerCase()) ?? [] : [];
     return holders.length === 1 ? holders[0]!.name : undefined;
   };
-  if (ip && isPrivateV4(ip)) {
+  if (ip && isInternalV4(ip, input.knownCidrs)) {
     // 1. a NIC IP of a resource on the diagram
     const direct = input.callers.filter((c) => c.ips.includes(ip));
     if (direct.length === 1) return { ok: true, nodeId: direct[0]!.nodeId, attribution: "nic", identityName: identityName() };
@@ -123,16 +177,31 @@ export function resolveCaller(input: Pick<PluInput, "callers" | "subnets" | "nic
     // 3. the subnet's single owner (AKS node pool, VMSS, App Service integration)
     const subnet = input.subnets.filter((s) => ipInCidr(ip, s.cidr));
     const owners = [...new Set(subnet.flatMap((s) => s.owners))].sort(cmp);
-    if (owners.length === 1) return { ok: true, nodeId: owners[0]!, attribution: "subnetOwner", identityName: identityName() };
+    const vnetId = subnet[0]?.vnetId;
+    if (owners.length === 1) return { ok: true, nodeId: owners[0]!, attribution: "subnetOwner", identityName: identityName(), vnetId };
+    // Node pools of one AKS cluster share the subnet: the caller is that cluster (which pool / pod is unknown)
+    const cluster = collapseToCluster(owners, input.clusterOf);
+    if (cluster) return { ok: true, nodeId: cluster, attribution: "aksCluster", identityName: identityName(), vnetId, via: owners };
     const viaIdentity = byIdentity();
+    // An identity result is used only when it names one resource — otherwise the subnet candidates stay the answer
+    if (viaIdentity?.ok) return viaIdentity;
+    if (owners.length > 1) return { ok: false, reason: "ambiguous", candidates: owners, basis: "subnet" };
     if (viaIdentity) return viaIdentity;
-    if (owners.length > 1) return { ok: false, reason: "ambiguous", candidates: owners };
-    return { ok: false, reason: "notInDiagram" };
+    const place = classifyPlace(ip, input.outerSubnets ?? [], input.clusterOf);
+    return { ok: false, reason: "notInDiagram", ...(place ? { place } : {}) };
   }
   return byIdentity() ?? { ok: false, reason: "notInDiagram" };
 }
 
 const GRADE_RANK: Record<PlUsageGrade, number> = { access: 0, flow: 1 };
+
+const failure = (r: Extract<Resolved, { ok: false }>): Pick<PlUnresolved, "reason" | "nicName" | "candidates" | "basis" | "place"> => ({
+  reason: r.reason,
+  ...(r.nicName ? { nicName: r.nicName } : {}),
+  ...(r.candidates ? { candidates: r.candidates } : {}),
+  ...(r.basis ? { basis: r.basis } : {}),
+  ...(r.place ? { place: r.place } : {}),
+});
 
 export function joinPrivateLinkUsage(input: PluInput): PluOutput {
   const usages = new Map<string, PrivateLinkUsage>();
@@ -147,8 +216,9 @@ export function joinPrivateLinkUsage(input: PluInput): PluOutput {
     };
     if (ip && isPrivateV4(ip)) u.callerIp ??= ip;
     if (r.identityName) u.identityName ??= r.identityName;
-    // the strongest way the caller was pinned wins (NIC > subnet owner > identity)
-    if (r.attribution === "nic" || (r.attribution === "subnetOwner" && u.attribution === "identity")) u.attribution = r.attribution;
+    // the strongest way the caller was pinned wins (NIC > subnet owner = AKS cluster > identity)
+    if (r.attribution === "nic" || ((r.attribution === "subnetOwner" || r.attribution === "aksCluster") && u.attribution === "identity")) u.attribution = r.attribution;
+    if (r.via?.length) u.viaNodeIds = [...new Set([...(u.viaNodeIds ?? []), ...r.via])].sort(cmp);
     u.evidence.push(ev);
     if (GRADE_RANK[ev.grade] < GRADE_RANK[u.grade]) u.grade = ev.grade;
     u.lastSeen = maxIso(u.lastSeen, ev.lastSeen);
@@ -157,7 +227,7 @@ export function joinPrivateLinkUsage(input: PluInput): PluOutput {
 
   // ── access logs: the service saw the caller ──
   for (const row of input.access) {
-    if (row.ip && !isPrivateV4(row.ip) && V4.test(row.ip)) {
+    if (row.ip && !isInternalV4(row.ip, input.knownCidrs) && V4.test(row.ip)) {
       // Public path: bypassed the Private Endpoint — counted, IP not listed
       const p = pub.get(row.targetNodeId) ?? { requests: 0, ips: new Set<string>(), names: new Set<string>() };
       p.requests += row.requests ?? row.clients ?? 1;
@@ -174,11 +244,12 @@ export function joinPrivateLinkUsage(input: PluInput): PluOutput {
     }
     const r = resolveCaller(input, row.ip, row.oid);
     if (!r.ok) {
-      unresolved.push({ targetNodeId: row.targetNodeId, ip: row.ip, reason: r.reason, nicName: r.nicName, candidates: r.candidates, requests: row.requests ?? row.clients, lastSeen: row.last });
+      unresolved.push({ targetNodeId: row.targetNodeId, ip: row.ip, ...failure(r), requests: row.requests ?? row.clients, lastSeen: row.last });
       continue;
     }
-    // Which Private Endpoint: the target's PE in the caller's VNet, else in a VNet peered with it — exactly one
-    const vnet = vnetOfCaller.get(r.nodeId) ?? input.callers.find((c) => c.nodeId === r.nodeId)?.vnetId;
+    // Which Private Endpoint: the target's PE in the caller's VNet (the source subnet's when known), else in a VNet
+    // peered with it — exactly one
+    const vnet = r.vnetId ?? vnetOfCaller.get(r.nodeId) ?? input.callers.find((c) => c.nodeId === r.nodeId)?.vnetId;
     const forTarget = input.pes.filter((p) => p.targetNodeId === row.targetNodeId);
     let cands = forTarget.filter((p) => vnet && p.vnetId === vnet);
     if (!cands.length && vnet) cands = forTarget.filter((p) => p.vnetId && input.peerings.get(vnet)?.has(p.vnetId));
@@ -204,7 +275,7 @@ export function joinPrivateLinkUsage(input: PluInput): PluOutput {
     }
     const r = resolveCaller(input, f.srcIp);
     if (!r.ok) {
-      unresolved.push({ targetNodeId: pe.targetNodeId, peNodeId: pe.peNodeId, ip: f.srcIp, reason: r.reason, nicName: r.nicName, candidates: r.candidates, lastSeen: f.last });
+      unresolved.push({ targetNodeId: pe.targetNodeId, peNodeId: pe.peNodeId, ip: f.srcIp, ...failure(r), lastSeen: f.last });
       continue;
     }
     addUsage(r, pe, f.srcIp, {

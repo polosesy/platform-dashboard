@@ -7,13 +7,17 @@ import type { DiagramEdgeSpec, DiagramNodeSpec, EdgeStatus } from "@aud/types";
 import { rgba, type UiColor, type VizColor } from "./palette";
 import { edgeLayer, isInferredEdge, type EdgeLayer } from "./liveScope";
 
-export type LiveEdgeStyleKey = EdgeLayer | "egressDeprecated";
+export type LiveEdgeStyleKey = EdgeLayer | "egressDeprecated" | "ingressUnknown" | "configWeak";
 
 export type LiveEdgeLook = { color: UiColor | VizColor; alpha: number; dash?: string; width: number };
 
 export const LIVE_EDGE_LOOK: Record<LiveEdgeStyleKey, LiveEdgeLook> = {
   config: { color: "ink", alpha: 0.42, width: 1.5 },
+  /** A configuration line drawn from a rule, not a reference (AGC → the only AKS cluster in its VNet, AGC-04 b) */
+  configWeak: { color: "ink", alpha: 0.4, dash: "5 4", width: 1.3 },
   ingress: { color: "accent", alpha: 0.9, width: 2 },
+  /** Internet → VM public IP whose NSG verdict is unknown (PIP-04): weaker evidence, dashed, no risk colour */
+  ingressUnknown: { color: "accent", alpha: 0.7, dash: "5 4", width: 1.6 },
   privateLink: { color: "privateLink", alpha: 0.85, width: 1.6 },
   /** Workload → Private Endpoint seen in logs: same family as Private Link, solid, never dashed (it is observed) */
   privateLinkUsage: { color: "privateLink", alpha: 0.95, width: 1.4 },
@@ -25,7 +29,7 @@ export const LIVE_EDGE_LOOK: Record<LiveEdgeStyleKey, LiveEdgeLook> = {
 };
 
 /** Order of the legend and of the toolbar menu */
-export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "config", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "peering", "publicIp", "inferred"];
+export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "ingressUnknown", "config", "configWeak", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "peering", "publicIp", "inferred"];
 
 export function liveStroke(key: LiveEdgeStyleKey): string {
   const l = LIVE_EDGE_LOOK[key];
@@ -39,6 +43,8 @@ export function isDeprecatedPath(e: Pick<DiagramEdgeSpec, "edgeKind" | "animatio
 
 export function liveEdgeStyleKey(e: DiagramEdgeSpec, byId: ReadonlyMap<string, DiagramNodeSpec>): LiveEdgeStyleKey {
   if (isDeprecatedPath(e)) return "egressDeprecated";
+  if (e.exposure?.state === "unknown") return "ingressUnknown";
+  if (e.rule === "sameVnet") return "configWeak";
   return edgeLayer(e, byId);
 }
 
@@ -78,11 +84,13 @@ export function relationLabel(e: DiagramEdgeSpec, byId: ReadonlyMap<string, Diag
     case "outbound-internet":
       return { key: sk === "natGateway" ? "ld.rel.outNat" : sk === "lb" ? "ld.rel.outSnat" : sk === "subnet" ? "ld.rel.outDefault" : "ld.rel.outPip" };
     case "routes": {
+      if (sk === "frontDoor") return { key: "ld.rel.afdOrigin" };
+      if (sk === "agc") return { key: e.rule === "sameVnet" ? "ld.rel.agcSameVnet" : "ld.rel.agc" };
       const via = sk === "appGateway" ? "App GW" : sk === "lb" ? "LB" : tk === "lb" ? "LB" : sk;
       return e.protocol ? { key: "ld.rel.routesProto", vars: { via, proto: e.protocol } } : { key: "ld.rel.routes", vars: { via } };
     }
   }
-  if (e.flowType === "ingress" && sk === "internet") return { key: "ld.rel.ingress" };
+  if (e.flowType === "ingress" && sk === "internet") return { key: e.exposure ? "ld.rel.ingressPip" : "ld.rel.ingress" };
   if (e.flowType === "control") return { key: "ld.rel.control" };
   return null;
 }
@@ -169,7 +177,7 @@ export function particlePlan(level: ParticleLevel, len: number, lineWidth: numbe
 export function particleTone(styleKey: LiveEdgeStyleKey, status: EdgeStatus, measured: boolean): ParticleTone | null {
   if (measured && status === "down") return null;
   if (measured && status === "degraded") return "warning";
-  if (styleKey === "config" || styleKey === "ingress") return "accent";
+  if (styleKey === "config" || styleKey === "configWeak" || styleKey === "ingress" || styleKey === "ingressUnknown") return "accent";
   if (styleKey === "privateLink") return "privateLink";
   if (styleKey === "egress" || styleKey === "egressDeprecated") return "egress";
   return null;

@@ -15,7 +15,9 @@ docs/
 │   └── multi-tenant-onboarding.md # → integrations/azure 로 이동 (안내만)
 │
 ├── architecture/                 # 아키텍처 및 참조
-│   └── GLOSSARY.md               # 프로젝트 용어집 (Canvas, Badge, Azure, K8s)
+│   ├── GLOSSARY.md               # 프로젝트 용어집 (Canvas, Badge, Azure, K8s)
+│   ├── azure-resource-relationships.md # 리소스 관계 사전 핵심 (입문 7장 + 코드가 쓰는 행)
+│   └── relationships/            # 영역별 관계 사전 6개 + catalog.json (REST API 스펙 리버스 엔지니어링)
 │
 ├── observability/                # Observability 도메인
 │   ├── instrumentation-guide.md  # AKS 메트릭/로그 계측, 수집 경로

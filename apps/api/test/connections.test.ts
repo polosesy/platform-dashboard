@@ -4,11 +4,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { loadEnv } from "../src/env.js";
-import { connectionForSubscription, credentialGroup, getConnections, parseConnections } from "../src/infra/connectionRegistry.js";
+import { connectionForSubscription, credentialGroup, getConnections, parseConnections, connectionsPath } from "../src/infra/connectionRegistry.js";
 import { createCredentialProvider, mapCredentialError, setCredentialProviderForTests } from "../src/infra/connectionCredentials.js";
 import { callerOf, platformRole, accessibleConnections } from "../src/infra/platformAccess.js";
 import { clearConnectionTokens, getArmFetcherAuto, getLogAnalyticsFetcherAuto } from "../src/infra/azureClientFactory.js";
@@ -27,7 +27,7 @@ const WS = "55555555-5555-5555-5555-555555555555";
 const APP = "66666666-6666-6666-6666-666666666666";
 
 const env = (over: Record<string, string> = {}) => loadEnv({ AZURE_AD_TENANT_ID: HOME, AZURE_AD_CLIENT_ID: "c", AZURE_AD_CLIENT_SECRET: "s", AZURE_SUBSCRIPTION_IDS: S1, ...over });
-const home = { key: "home", displayName: "EMRO", tenantId: HOME, mode: "platform", subscriptions: [S1] };
+const home = { key: "home", displayName: "Home", tenantId: HOME, mode: "platform", subscriptions: [S1] };
 const lh = { key: "custa", displayName: "Customer A", tenantId: CUST, mode: "lighthouse", subscriptions: [S2] };
 const sp = { key: "custb", displayName: "Customer B", tenantId: CUST2, mode: "servicePrincipal", subscriptions: [S3], clientId: APP, secretEnv: "AUD_CONN_CUSTB_SECRET", roles: ["operator"], logAnalyticsWorkspaces: [WS] };
 const doc = (...connections: unknown[]) => ({ connections });
@@ -252,4 +252,10 @@ test("authorize: no role → 403 (except /api/me); a forbidden subscription in t
 test("anonymous callers never get a kubeconfig (pod logs, exec) unless both dev switches are on", async () => {
   await assert.rejects(getKubeconfig(env(), undefined, `/subscriptions/${S1}/resourceGroups/r/providers/Microsoft.ContainerService/managedClusters/c`), /Sign in/);
   await assert.rejects(getKubeconfig(env({ AUD_ANONYMOUS_SP: "true" }), undefined, `/subscriptions/${S1}/resourceGroups/r/providers/Microsoft.ContainerService/managedClusters/c`), /Sign in/, "AUD_ANONYMOUS_K8S too");
+});
+
+test("a relative AUD_CONNECTIONS_FILE is read from the repository root (where .env lives), not the API's working directory", () => {
+  const root = resolve(import.meta.dirname, "../../..");
+  assert.equal(connectionsPath("config/connections.example.json"), resolve(root, "config/connections.example.json"));
+  assert.equal(connectionsPath(resolve(root, "x.json")), resolve(root, "x.json"));
 });

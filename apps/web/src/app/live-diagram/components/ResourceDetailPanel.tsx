@@ -30,7 +30,8 @@ import { formatAzureRegion } from "../utils/regionFormat";
 import { cardStatus } from "@/lib/liveStatus";
 import { Spark } from "./Spark";
 import { CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
-import { AksApiEndpoint, AksCluster, AksNodePool, BackendPools, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
+import { gatewayFrontends, unresolvedBackends } from "@/lib/liveBackends";
+import { AgcFacts, AksApiEndpoint, AksCluster, AksNodePool, BackendPools, FrontDoorFacts, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
 import styles from "../styles.module.css";
 
 type ConnectedEdge = {
@@ -143,7 +144,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   const health = liveNode?.health ?? "unknown";
   const powerState = liveNode?.powerState as PowerState | undefined;
   const role = impacts.find((i) => i.sourceNodeId === node.id) ? "source" as const : impacts.some((i) => i.affectedNodeIds.includes(node.id)) ? "affected" as const : undefined;
-  const status = cardStatus(health, powerState, role);
+  const status = cardStatus(health, powerState, role, liveNode?.basis);
   const metrics = liveNode?.metrics ?? {};
   const specBound = Object.entries(node.bindings).filter(([, b]) => b.source !== "composite").map(([k]) => k);
   // Plus metrics the API now reads for the kind (diagram saved before memory was added)
@@ -163,7 +164,10 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
       })()
     : health === "unknown" && bound.length && (metricsState === "signin" || metricsState === "disabled")
       ? t(metricsState === "signin" ? "ld.card.signin" : "ld.card.notCollected")
-      : undefined;
+      // What the state rests on (Resource Health, approvals, traffic both ways — the API's evidence ladder)
+      : liveNode?.reasons?.length
+        ? liveNode.reasons.map((r) => t(r)).join(" · ")
+        : undefined;
 
   const armId = node.azureResourceId;
   const portal = armId && armId.startsWith("/subscriptions/") && !armId.startsWith("/subscriptions/mock/") ? `https://portal.azure.com/#@/resource${armId}` : undefined;
@@ -197,15 +201,20 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   const peerRow = (r: Row) => {
     const p = byId.get(r.peer);
     const pSub = p?.parentId ? byId.get(p.parentId) : undefined;
+    const peerName = p?.resourceKind === "internet" ? t(p.metadata?.direction === "ingress" ? "ld.internetIn" : "ld.internetOut") : nameOf(r.peer);
+    const where = pSub?.icon === "subnet" ? nameOf(pSub.id) : p?.metadata?.ghostOf ? `↗ ${p.metadata.ghostOf}` : "";
     return (
       <button key={r.id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(r.peer)}>
         <span className={styles.dpConnArrow}>{r.arrow}</span>
-        <span className={styles.dpConnRel}>{r.rel}</span>
+        <span className={styles.dpConnRel} title={r.rel}>{r.rel}</span>
+        {/* Name on one line, where it lives under it — long Azure names truncate (full text in the tooltip) */}
         <span className={styles.dpConnPeer}>
-          {p ? <img src={getAzureIconUrl(p.icon)} alt="" width={14} height={14} /> : null}
-          <span>{p?.resourceKind === "internet" ? t(p.metadata?.direction === "ingress" ? "ld.internetIn" : "ld.internetOut") : nameOf(r.peer)}</span>
+          <span className={styles.dpConnName}>
+            {p ? <img src={getAzureIconUrl(p.icon)} alt="" width={14} height={14} /> : null}
+            <span className={styles.dpConnText} title={peerName}>{peerName}</span>
+          </span>
+          {where ? <span className={styles.dpConnWhere} title={where}>{where}</span> : null}
         </span>
-        <span className={styles.dpConnWhere}>{pSub?.icon === "subnet" ? nameOf(pSub.id) : p?.metadata?.ghostOf ? `↗ ${p.metadata.ghostOf}` : ""}</span>
       </button>
     );
   };
@@ -220,6 +229,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   const nics = (node.subResources ?? []).filter((s) => s.kind === "nic");
   const publics = (node.subResources ?? []).filter((s) => s.kind === "publicIP");
   const frontends = (node.subResources ?? []).filter((s) => s.kind === "frontendIP" || s.kind === "publicIP");
+  // Frontends with their listeners, and pool members no resource matched (lib/liveBackends, catalog AGW-01 / AGW-04)
+  const gwFrontends = gatewayFrontends(node.metadata);
+  const unresolved = unresolvedBackends(node.metadata);
   const subnets = spec.nodes.filter((n) => n.icon === "subnet" && n.nodeType === "group");
   const subnetForIp = (ip?: string) => (ip ? subnets.find((s) => inCidr(ip, s.metadata?.prefix ?? s.endpoint)) : undefined);
   const nsgOn = (targetId: string | undefined) => (targetId ? spec.nodes.filter((n) => n.icon === "nsg" && n.metadata?.nsgAttachedTo === targetId) : []);
@@ -387,17 +399,30 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
         {(kind === "lb" || kind === "appGateway") ? (
           <>
             <Section id="frontend" title={t("ld.panel.frontend")}>
-              {frontends.length ? frontends.map((f) => (
+              {gwFrontends.length ? gwFrontends.map((f) => (
+                <KV key={f.name} label={t(`ld.panel.frontend.${f.kind}`)} mono copy={f.ip}>
+                  {`${f.ip ?? t("ld.panel.unknownValue")} · ${f.ruleBound ? t("ld.panel.frontend.listeners", { n: f.listeners.length }) : t("ld.panel.frontend.unused")}`}
+                </KV>
+              )) : frontends.length ? frontends.map((f) => (
                 <KV key={f.id} label={f.endpoint && PRIVATE.test(f.endpoint) ? t("ld.card.internal") : t("ld.card.public")} mono copy={f.endpoint}>{f.endpoint ?? t("ld.panel.unknownValue")}</KV>
               )) : <div className={styles.dpMuted}>{t("ld.panel.unknownValue")}</div>}
               {kind === "appGateway" && frontends.length && frontends.every((f) => f.endpoint && PRIVATE.test(f.endpoint)) ? <div className={styles.dpMuted}>{t("ld.panel.noInternetEntry")}</div> : null}
             </Section>
             <Section id="backend" title={t("detail.backendPool")}>
               <BackendPools pools={backend.pools} loading={backend.loading} failed={backend.failed} />
+              {unresolved.length ? (
+                <Group title={t("ld.chip.unresolvedBackends", { n: unresolved.length })}>
+                  {unresolved.map((u, i) => (
+                    <KV key={`${u.pool}-${u.address}-${i}`} label={u.pool} mono>{`${u.address} — ${t(`ld.backend.reason.${u.reason}`)}`}</KV>
+                  ))}
+                </Group>
+              ) : null}
             </Section>
           </>
         ) : null}
         {kind === "nsg" ? <NsgRules nsg={nsgDetail.nsg} loading={nsgDetail.loading} failed={nsgDetail.failed} /> : null}
+        {kind === "agc" ? <AgcFacts node={node} /> : null}
+        {kind === "frontDoor" ? <FrontDoorFacts node={node} /> : null}
         {kind === "aks" && archRole === "aks-control-plane" ? <AksApiEndpoint node={node} /> : null}
         {kind === "aks" && archRole !== "aks-control-plane" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}

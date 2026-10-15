@@ -51,6 +51,9 @@ export const METRIC_META: Record<string, { label: string; unit: MetricUnit }> = 
   req5xx: { label: "ld.metric.req5xx", unit: "perMin" },
   reqFailed: { label: "ld.metric.reqFailed", unit: "perMin" },
   dbAlive: { label: "ld.metric.dbAlive", unit: "count" },
+  healthyTargets: { label: "ld.metric.healthyTargets", unit: "count" },
+  beTimeouts: { label: "ld.metric.beTimeouts", unit: "perMin" },
+  timeoutRate: { label: "ld.metric.timeoutRate", unit: "%" },
 };
 
 /**
@@ -69,7 +72,10 @@ export const CARD_CELLS: Record<string, readonly string[]> = {
   cosmosDb: ["requests", "ru"], appService: ["requests", "errorRate"], functionApp: ["requests", "errorRate"],
   containerApp: ["requests", "replicas"], serviceBus: ["backlog", "serverErrors"], eventHub: ["inMsgs", "serverErrors"],
   appInsights: ["requests", "errorRate"],
-  nsg: [], nic: [], dns: [], logAnalytics: [],
+  agc: ["requests", "healthyTargets"], dns: ["queries"],
+  // Front Door Standard/Premium binding set (the card kind is frontDoor)
+  frontDoorAfd: ["requests", "backend"],
+  nsg: [], nic: [], logAnalytics: [], vnetGateway: [], bastion: [], paas: [],
 };
 
 export const isPercent = (key: string) => METRIC_META[key]?.unit === "%";

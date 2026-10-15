@@ -47,6 +47,12 @@ type Scope = {
   peerings: Map<string, Set<string>>;
   /** NSGs on the subnets / NICs of the VNet and its peers (flow-log coverage) */
   nsgArmIds: string[];
+  /** AKS node / node-pool scale set → its cluster's node (by the cluster ARM id the generator stored) */
+  clusterOf: Map<string, string>;
+  /** Subnets of other VNets on the diagram: where an out-of-scope address is (never drawn) */
+  outerSubnets: PluSubnet[];
+  /** Every subnet / VNet prefix of the diagram (addresses inside them are internal, RFC 1918 or not) */
+  knownCidrs: string[];
 };
 
 /** Everything the join needs that the diagram already knows (no Azure call) */
@@ -95,16 +101,31 @@ export function scopeFromSpec(spec: DiagramSpec, vnetNodeId: string): Scope | nu
     callers.push({ nodeId: n.id, ips: [...new Set(ips)], vnetId: v });
   }
   const subnets: PluSubnet[] = [];
+  const outerSubnets: PluSubnet[] = [];
+  const knownCidrs: string[] = [];
   for (const s of spec.nodes) {
     if (s.icon !== "subnet" || s.nodeType !== "group") continue;
     const v = vnetOf(s);
     const cidr = s.metadata?.prefix ?? s.endpoint;
-    if (!inScope(v) || !cidr || !cidr.includes("/")) continue;
+    if (!v || !cidr || !cidr.includes("/")) continue;
+    knownCidrs.push(cidr);
     const owners = spec.nodes.filter((c) => c.parentId === s.id && SUBNET_OWNERS.has(kindOf(c))).map((c) => c.id);
-    subnets.push({ nodeId: s.id, vnetId: v!, cidr, owners });
+    (inScope(v) ? subnets : outerSubnets).push({ nodeId: s.id, vnetId: v, cidr, owners });
+  }
+  for (const v of spec.nodes) {
+    const space = v.icon === "vnet" ? v.metadata?.addressSpace ?? v.endpoint : undefined;
+    if (space && space.includes("/")) knownCidrs.push(space);
+  }
+  // AKS cluster of each node-pool scale set (aksClusterArmId) — only when that cluster is on the diagram
+  const clusterOf = new Map<string, string>();
+  for (const n of spec.nodes) {
+    if (kindOf(n) === "aks") clusterOf.set(n.id, n.id);
+    const arm = n.metadata?.archRole === "aks-vmss" ? n.metadata?.aksClusterArmId?.toLowerCase() : undefined;
+    const cluster = arm ? nodeByArmId.get(arm) : undefined;
+    if (cluster) clusterOf.set(n.id, cluster);
   }
   const nsgArmIds = spec.nodes.filter((n) => kindOf(n) === "nsg" && n.azureResourceId && inScope(vnetOf(n))).map((n) => n.azureResourceId!);
-  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds };
+  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)] };
 }
 
 async function graph<T>(arm: ArmFetcher, env: Env, query: string): Promise<T[]> {
@@ -340,6 +361,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
   const input: PluInput = {
     callers: scope.callers, subnets: scope.subnets, pes: scope.pes.map((p) => ({ peNodeId: p.peNodeId, targetNodeId: p.targetNodeId, vnetId: p.vnetId, ...(p.ip ? { ip: p.ip } : {}), ...(p.state ? { state: p.state } : {}) })), nics, nodeByArmId: scope.nodeByArmId,
     identities, peerings: scope.peerings, access, flows, peBytes: new Map(), sources,
+    clusterOf: scope.clusterOf, outerSubnets: scope.outerSubnets, knownCidrs: scope.knownCidrs,
   };
   return { ...joinPrivateLinkUsage(input), sources };
 }

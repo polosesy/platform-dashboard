@@ -166,3 +166,14 @@ export function impactView(impacts: readonly FaultImpact[]): ImpactView {
   }
   return { active: roles.size > 0, roles, edgeIds };
 }
+
+/**
+ * Lines drawn only while one of their ends is hovered or selected: the subnet → NAT association, and a subnet's
+ * default outbound path to the Internet (dashed — the subnet header chip already says it). NAT / LB SNAT →
+ * Internet stay visible. Not layout edges, so hiding them moves nothing.
+ */
+export function isFocusOnlyEdge(e: Pick<DiagramEdgeSpec, "edgeKind" | "animation" | "source">, nodeById: ReadonlyMap<string, DiagramNodeSpec>): boolean {
+  if (e.edgeKind === "natgw-association") return true;
+  const src = nodeById.get(e.source);
+  return e.edgeKind === "outbound-internet" && e.animation === "dash" && (src?.icon === "subnet" || src?.resourceKind === "subnet");
+}

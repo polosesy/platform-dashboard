@@ -130,10 +130,11 @@
 
 ## 4. Kubernetes API
 
-### K8S-001: Kubeconfig 획득 실패
-- **에러**: `Failed to get cluster credentials`
-- **원인**: Service Principal에 AKS `Azure Kubernetes Service Cluster User Role` 미할당
-- **해결**: RBAC 역할 할당 확인 (`az role assignment list`)
+### K8S-001: Kubeconfig 획득 실패 (`aks_credential_forbidden`, 403)
+- **에러**: 화면 "이 클러스터의 Azure 연결에 AKS 자격 증명 조회 권한이 없습니다" / API `403 aks_credential_forbidden` (예전: `HTTP 500 … policies_failed … ARM 403: AuthorizationFailed … listClusterUserCredential/action`)
+- **원인**: 클러스터를 읽는 **Azure 연결**의 신원(홈 = aud-api SP, 고객 = 그 연결의 서비스 주체)에 kubeconfig 조회 권한이 없음. `listClusterUserCredential`은 읽기(`*/read`)가 아닌 **액션**이라 Reader로는 안 됨
+- **해결**: 클러스터 범위에 `Azure Kubernetes Service Cluster User Role`(`4abbcc35-e782-43d8-92c5-2d3f1bd2253f`)을 그 연결의 서비스 주체에 할당 → 설정 › Azure 연결 › 점검의 'AKS 자격 증명'으로 확인 (`docs/integrations/azure/permissions.md`). Entra 전용(로컬 계정 비활성) 클러스터는 이 역할로도 정적 자격 증명이 나오지 않아 `501 aad_cluster_unsupported`
+- **예시**: `az role assignment create --assignee <연결의 appId> --role "Azure Kubernetes Service Cluster User Role" --scope <클러스터 리소스 ID>` (고객 테넌트 관리자가 실행 — 플랫폼은 Azure에 쓰지 않음)
 
 ### K8S-002: Pod exec 타임아웃
 - **에러**: exec 명령이 30초 후 타임아웃

@@ -19,7 +19,7 @@
 // type read from its ID, not drawn.
 // ──────────────────────────────────────────────────────────────
 
-import type { ArchitectureGraph, ArchitectureNode } from "@aud/types";
+import type { ArchitectureGraph, ArchitectureNode, InboundExposure } from "@aud/types";
 import { measure, place, type PackNode } from "./boxPack";
 
 export type ArchEdgeKind = "ingress" | "exposure" | "routes" | "privateLink" | "peering" | "outbound" | "vnetIntegration" | "logging";
@@ -32,20 +32,27 @@ export const PAAS_ORDER: PaasCategory[] = ["app", "data", "security", "messaging
 
 export const internetId = (region: string) => `internet:${region}`;
 
+const EXPOSURE_RANK: Record<InboundExposure["state"], number> = { open: 4, scoped: 3, unknown: 2, noNsg: 1, closed: 0 };
+const mostExposedState = (a: InboundExposure["state"] | undefined, b: InboundExposure["state"]) => (a && EXPOSURE_RANK[a] >= EXPOSURE_RANK[b] ? a : b);
+
 export type ArchResource = {
   id: string;
   node: ArchitectureNode;
-  /** Region key ("koreacentral"); "global" for global services */
+  /** Region key ("koreacentral"); "global" for non-regional services; "unknown" when Azure reported no location */
   region: string;
   subnetId: string | null;
   /** Subnets beyond the one the tile is drawn in (multi-NIC VMs, multi-pool AKS) */
   extraSubnets: string[];
   privateIps: string[];
   publicIps: string[];
+  /** Internet → this host through its own public IP (PIP-04, from the API's NSG verdict); most exposed NIC wins */
+  exposure?: InboundExposure["state"];
   /** NIC-level NSG names */
   nsgs: string[];
   /** AKS: absorbed node-pool scale sets */
   nodePools: string[];
+  /** Flexible-mode scale set: its instance VMs (ordinary VM resources, catalog VMSS-03) */
+  instances: string[];
   nicCount: number;
 };
 
@@ -96,7 +103,13 @@ export type ArchModel = {
 };
 
 const lower = (s: string) => s.toLowerCase();
-const regionKey = (loc: string | undefined) => (loc && loc.trim() ? lower(loc).replace(/\s+/g, "") : "global");
+/**
+ * Region rules (docs/architecture/azure-resource-relationships.md): REG-01 a location is the region box ·
+ * REG-02 "global" only when Azure says so (Front Door, Traffic Manager, DNS zones) · REG-03 no location =
+ * "unknown", never guessed · REG-04 a Private Endpoint line may cross regions
+ */
+export const UNKNOWN_REGION = "unknown";
+const regionKey = (loc: string | undefined) => (loc && loc.trim() ? lower(loc).replace(/\s+/g, "") : UNKNOWN_REGION);
 
 const PAAS_KIND: Partial<Record<string, PaasCategory>> = {
   appService: "app", functionApp: "app",
@@ -107,12 +120,13 @@ const PAAS_KIND: Partial<Record<string, PaasCategory>> = {
   dns: "dns",
 };
 /** Network edge of a region: entry points and egress. */
-const EDGE_KINDS = new Set<string>(["lb", "natGateway", "appGateway", "firewall"]);
+const EDGE_KINDS = new Set<string>(["lb", "natGateway", "appGateway", "firewall", "agc", "vnetGateway", "bastion"]);
 const GLOBAL_KINDS = new Set<string>(["frontDoor", "trafficManager"]);
 const COMPUTE_KINDS = new Set<string>(["vm", "vmss", "aks", "containerApp"]);
 const OMITTED = new Set<string>(["subscription", "resourceGroup"]);
 /** Ingress targets: a public IP on these is an entry point, not a single exposed host. */
-const ENTRY_KINDS = new Set<string>(["lb", "appGateway", "firewall"]);
+// VPN/ER gateway and Bastion: their public IP is the service's own entry (CT-07), not a host's
+const ENTRY_KINDS = new Set<string>(["lb", "appGateway", "firewall", "vnetGateway", "bastion"]);
 
 /** Top-level owner of a child ID (ip configuration, frontend, …) — mirrors apps/api ownerResourceId. */
 function ownerOf(id: string): string {
@@ -172,6 +186,10 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   for (const [id, n] of byId) if (n.kind === "nic") for (const e of outOf(id, "bound-to")) if (kindOf(e.target) === "vm") nicOwner.set(id, e.target);
   const vmssOwner = new Map<string, string>();
   for (const [id, n] of byId) if (n.kind === "aks") for (const e of outOf(id)) if (kindOf(e.target) === "vmss") vmssOwner.set(e.target, id);
+  // Flexible-mode instances: ordinary VMs that name their scale set — drawn inside the scale-set tile (VMSS-03)
+  const flexOwner = new Map<string, string>();
+  for (const [id, n] of byId) if (n.kind === "vm") for (const e of outOf(id, "member-of")) if (kindOf(e.target) === "vmss" && !vmssOwner.has(e.target)) flexOwner.set(id, e.target);
+  const flexMembers = (vmss: string) => [...flexOwner].filter(([, o]) => o === vmss).map(([vm]) => vm).sort();
 
   // ── tiles ──
   const resources = new Map<string, ArchResource>();
@@ -179,7 +197,8 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     if (OMITTED.has(n.kind)) { account(id, "omitted"); continue; }
     if (n.kind === "vnet" || n.kind === "subnet" || n.kind === "nic" || n.kind === "nsg" || n.kind === "publicIP") continue;
     if (n.kind === "vmss" && vmssOwner.has(id)) continue;
-    const r: ArchResource = { id, node: n, region: regionKey(n.location), subnetId: null, extraSubnets: [], privateIps: [], publicIps: [], nsgs: [], nodePools: [], nicCount: 0 };
+    if (n.kind === "vm" && flexOwner.has(id)) continue;
+    const r: ArchResource = { id, node: n, region: regionKey(n.location), subnetId: null, extraSubnets: [], privateIps: [], publicIps: [], nsgs: [], nodePools: [], instances: [], nicCount: 0 };
     resources.set(id, r);
     account(id, "tile");
     let subs: string[] = [];
@@ -201,8 +220,25 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
         r.nodePools.push(byId.get(vmss)!.name);
         subs.push(...subnetsOf(vmss, ["network", "connects"]));
       }
-    } else if (["vmss", "lb", "appGateway", "firewall", "privateEndpoint", "containerApp"].includes(n.kind)) {
+    } else if (["vmss", "lb", "appGateway", "firewall", "privateEndpoint", "containerApp", "agc", "vnetGateway", "bastion"].includes(n.kind)) {
       subs = subnetsOf(id, ["network", "connects", "attached-to"]);
+      if (n.kind === "vmss") {
+        // Flexible: the instances' NICs place the tile when the scale-set model names no subnet
+        for (const vm of flexMembers(id)) {
+          r.instances.push(byId.get(vm)!.name);
+          for (const e of inOf(vm, "bound-to")) {
+            if (kindOf(e.source) !== "nic") continue;
+            r.nicCount++;
+            subs.push(...subnetsOf(e.source, ["attached-to"]));
+            const ip = ipOf(byId.get(e.source));
+            if (ip) r.privateIps.push(ip);
+          }
+        }
+      }
+    } else if (n.kind === "postgres" || n.kind === "redis") {
+      // VNet-injected only through an explicit subnet relation (PAAS-02 delegated subnet, PAAS-04 Redis injection);
+      // service-endpoint rules are not placement
+      subs = subnetsOf(id, ["network"]);
     }
     subs = [...new Set(subs)];
     if (subs.length) {
@@ -215,13 +251,21 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     if (n.kind === "privateEndpoint") { const ip = ipOf(n); if (ip) r.privateIps.push(ip); }
   }
   for (const [vmss, owner] of vmssOwner) account(vmss, "absorbed", owner);
+  for (const [vm, set] of flexOwner) account(vm, resources.has(set) ? "absorbed" : "omitted", resources.has(set) ? set : undefined);
+  /** The tile that draws a VM: itself, or its Flexible scale set */
+  const vmTile = (vm: string | undefined): string | undefined => {
+    if (!vm) return undefined;
+    if (resources.has(vm)) return vm;
+    const set = flexOwner.get(vm);
+    return set && resources.has(set) ? set : undefined;
+  };
 
   // NICs: into their VM; otherwise counted on their subnet (never re-classified by name)
   const nicSubnet = new Map<string, string>();
   for (const [id, n] of byId) {
     if (n.kind !== "nic") continue;
-    const owner = nicOwner.get(id);
-    if (owner && resources.has(owner)) { account(id, "absorbed", owner); continue; }
+    const owner = vmTile(nicOwner.get(id));
+    if (owner) { account(id, "absorbed", owner); continue; }
     const sub = subnetsOf(id, ["attached-to"])[0];
     if (sub) { subnets.get(sub)!.otherNics++; nicSubnet.set(id, sub); account(id, "absorbed", sub); }
     else account(id, "counted");
@@ -237,8 +281,8 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     for (const e of outOf(id, "network")) {
       const sub = subnets.get(e.target);
       if (sub) { pushUnique(sub.nsgs, n.name); into ??= e.target; continue; }
-      const vm = nicOwner.get(e.target);
-      if (vm && resources.has(vm)) { pushUnique(resources.get(vm)!.nsgs, n.name); into ??= vm; continue; }
+      const vm = vmTile(nicOwner.get(e.target));
+      if (vm) { pushUnique(resources.get(vm)!.nsgs, n.name); into ??= vm; continue; }
       const viaNic = nicSubnet.get(e.target);
       if (viaNic) { pushUnique(subnets.get(viaNic)!.nsgs, n.name); into ??= viaNic; }
     }
@@ -260,12 +304,14 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   const shownAs = (id: string): string | null => {
     if (resources.has(id)) return id;
     const k = kindOf(id);
-    if (k === "nic") { const vm = nicOwner.get(id); return vm && resources.has(vm) ? vm : null; }
+    if (k === "nic") return vmTile(nicOwner.get(id)) ?? null;
+    if (k === "vm") return vmTile(id) ?? null;
     if (k === "vmss") { const aks = vmssOwner.get(id); return aks && resources.has(aks) ? aks : null; }
     return null;
   };
 
-  // Public IPs → owner badge; Internet → owner line (entry points = ingress, hosts = exposure)
+  // Public IPs → owner badge; Internet → owner line (entry points = ingress, hosts = exposure) — PIP-01;
+  // a public IP with no owner is listed for cleanup — PIP-03
   for (const [id, n] of byId) {
     if (n.kind !== "publicIP") continue;
     const k = regionKey(n.location);
@@ -285,8 +331,15 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       if (ip && !r.publicIps.includes(ip)) r.publicIps.push(ip);
       account(id, "absorbed", owner);
       const ok = r.node.kind;
-      // A NAT Gateway public IP is egress-only, not an inbound path
-      if (ok !== "natGateway") addEdge(ENTRY_KINDS.has(ok) ? "ingress" : "exposure", internetId(r.region), owner);
+      // A NAT Gateway public IP is egress-only; an entry point no inbound rule uses (outbound-only LB, App Gateway
+      // with only private listeners) is not an inbound path either (catalog LB-04, AGW-02)
+      const noInbound = ENTRY_KINDS.has(ok) && r.node.metadata?.inboundRules === 0;
+      // A host's own public IP (PIP-04): the line only when the NSGs let the Internet in — closed / noNsg (Standard
+      // without an NSG is closed by default) keep the badge, no line; no verdict (older API, sample) keeps the line
+      const verdict = (byId.get(ownerId)?.metadata?.inboundExposure as InboundExposure | undefined)?.state;
+      if (!ENTRY_KINDS.has(ok) && verdict) r.exposure = mostExposedState(r.exposure, verdict);
+      const closed = !ENTRY_KINDS.has(ok) && (verdict === "closed" || verdict === "noNsg");
+      if (ok !== "natGateway" && !noInbound && !closed) addEdge(ENTRY_KINDS.has(ok) ? "ingress" : "exposure", internetId(r.region), owner);
       continue;
     }
     const viaNic = nicSubnet.get(ownerId);
@@ -300,12 +353,18 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     account(id, "counted");
   }
 
+  // AGC-03: Internet → Application Gateway for Containers only through a public frontend
+  for (const r of resources.values()) {
+    if (r.node.kind === "agc" && Number(r.node.metadata?.publicFrontends ?? 0) > 0) addEdge("ingress", internetId(r.region), r.id);
+  }
+
   // Configuration lines
   for (const { kind, s, t } of edgesIn) {
     const sk = kindOf(s), tk = kindOf(t);
-    if (kind === "routes" && (sk === "lb" || sk === "appGateway")) {
+    // LB / AGW → backend, AGC → AKS (AGC-04), Front Door → origin resource (EDGE-04..06, crosses regions)
+    if (kind === "routes" && (sk === "lb" || sk === "appGateway" || sk === "agc" || sk === "frontDoor")) {
       const target = shownAs(t);
-      if (target) addEdge("routes", s, target);
+      if (target && resources.has(s)) addEdge("routes", s, target);
     } else if (kind === "routes" && tk === "lb" && (sk === "vmss" || sk === "vm")) {
       // Outbound SNAT rule (scale set → LB) — same pair as the inbound rule, one line
       const source = shownAs(s);
@@ -345,6 +404,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     const reg = region(r.region);
     if (EDGE_KINDS.has(k)) reg.edge.push(r.id);
     else if (COMPUTE_KINDS.has(k)) reg.outside.push(r.id);
+    // PaaS outside VNets (SQL logical server PAAS-05, public-access PostgreSQL PAAS-03): the region's PaaS lane
     else reg.paas[PAAS_KIND[k] ?? "other"].push(r.id);
   }
   for (const k of cleanup.keys()) if (k !== "global") region(k);
@@ -372,8 +432,9 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     reg.unresolvedPublicIps.sort(byItem);
     reg.unusedNsgs.sort(byItem);
   }
-  for (const r of resources.values()) { r.privateIps.sort(); r.publicIps.sort(); r.nsgs.sort(); r.nodePools.sort(); }
-  regionList.sort((a, b) => regionTiles(b) - regionTiles(a) || a.key.localeCompare(b.key));
+  for (const r of resources.values()) { r.privateIps.sort(); r.publicIps.sort(); r.nsgs.sort(); r.nodePools.sort(); r.instances.sort(); }
+  // "Region unknown" last
+  regionList.sort((a, b) => Number(a.key === UNKNOWN_REGION) - Number(b.key === UNKNOWN_REGION) || regionTiles(b) - regionTiles(a) || a.key.localeCompare(b.key));
   global.sort(byName);
   edges.sort((a, b) => a.id.localeCompare(b.id));
 

@@ -223,6 +223,31 @@ export const mockDiagramSpec: DiagramSpec = {
         },
       ] as SubResource[],
     },
+    // ── Jump VM with its own public IP (PIP-04 sample: NIC NSG allows 22 and 443 from any Internet address) ──
+    {
+      id: "vm-jump",
+      label: "vm-jump-01",
+      icon: "vm",
+      resourceKind: "vm",
+      parentId: "app-subnet",
+      azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Compute/virtualMachines/vm-jump-01",
+      position: { x: SUBNET_PAD, y: SUBNET_HEAD + 140 },
+      bindings: {},
+      subResources: [
+        { id: "nic-jump", label: "nic-jump-01", kind: "nic", endpoint: "10.0.1.30", azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/networkInterfaces/nic-jump-01" },
+        { id: "nic-jump/publicip", label: "Public IP", kind: "publicIP", endpoint: "203.0.113.10", azureResourceId: "/subscriptions/mock/resourceGroups/rg-prod/providers/Microsoft.Network/publicIPAddresses/pip-jump-01" },
+      ] as SubResource[],
+      metadata: { pipExposure: '{"state":"open","ports":["22","443"],"sources":"any","rangeCount":0,"nsgs":["nic"],"reasons":[],"basis":"cfg"}' },
+    },
+    {
+      id: "internet-in-prod-vnet",
+      label: "Internet",
+      icon: "internet",
+      resourceKind: "internet",
+      position: { x: 0, y: 0 },
+      bindings: {},
+      metadata: { direction: "ingress", entryCount: "1", vnetId: "prod-vnet" },
+    },
     // ── Private Endpoints (inside app-subnet) ──
     {
       id: "pe-sql",
@@ -310,6 +335,17 @@ export const mockDiagramSpec: DiagramSpec = {
     },
   ],
   edges: [
+    {
+      id: "internet->vm-jump",
+      source: "internet-in-prod-vnet",
+      target: "vm-jump",
+      edgeKind: "network",
+      flowType: "ingress",
+      exposure: { state: "open", ports: ["22", "443"], sources: "any", rangeCount: 0, nsgs: ["nic"], reasons: [], basis: "cfg" },
+      caveats: ["ld.edge.caveat.pipNoPort", "ld.edge.caveat.synAck", "ld.edge.caveat.nsgStage", "ld.edge.caveat.pipReplies"],
+      bindings: {},
+      animation: "flow",
+    },
     {
       id: "appgw->aks",
       source: "appgw",
@@ -484,6 +520,14 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
       powerState: "running" as PowerState,
     },
     {
+      id: "vm-jump",
+      health: "ok",
+      healthScore: 0.9,
+      metrics: {},
+      activeAlertIds: [],
+      powerState: "running" as PowerState,
+    },
+    {
       id: "pe-sql",
       health: "ok",
       healthScore: 0.95,
@@ -547,6 +591,15 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
   const appgwFuncThroughput = rand(500_000, 4_000_000);
 
   const edges: LiveEdge[] = [
+    {
+      // No NAT gateway on the sample subnet: received bytes may hold replies, so no particles (throughput unset)
+      id: "internet->vm-jump",
+      status: "normal",
+      metrics: { synInPerMin: rand(4, 40), bytesInBps: rand(2_000, 40_000) },
+      trafficLevel: "none",
+      activeAlertIds: [],
+      metricsSource: "measured",
+    },
     {
       id: "appgw->aks",
       status: "normal",

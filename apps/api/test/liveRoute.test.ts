@@ -9,7 +9,7 @@ const L = ((layoutNs as unknown as { default?: typeof layoutNs }).default ?? lay
 const R = ((routeNs as unknown as { default?: typeof routeNs }).default ?? routeNs) as typeof routeNs;
 const { liveLayout, LIVE } = L;
 
-// ── synthetic diagrams shaped like the real hub (infosec) and QA VNets — names only, no real IDs ──
+// ── synthetic diagrams shaped like the real hub (demo) and QA VNets — names only, no real IDs ──
 
 const node = (id: string, extra: Partial<DiagramNodeSpec> = {}): DiagramNodeSpec => ({ id, label: id, icon: "vm", resourceKind: "vm", bindings: {}, ...extra });
 const group = (id: string, icon: "vnet" | "subnet", parentId?: string): DiagramNodeSpec => node(id, { icon, nodeType: "group", parentId, resourceKind: icon });

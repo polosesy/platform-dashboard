@@ -1,6 +1,7 @@
 // VNet traffic page — tabs, ranges and the "management port open to the Internet" rule. Pure; tested from
 // apps/api/test/networkQueries.test.ts.
 import type { NetTalkerRow } from "@aud/types";
+import { RISK_PORTS } from "../../lib/riskPorts";
 
 export const NET_TABS = ["overview", "talkers", "blocked", "internet", "coverage"] as const;
 export type NetTab = (typeof NET_TABS)[number];
@@ -15,7 +16,7 @@ export const RANGES = [
 ] as const;
 export const TOPS = [10, 20, 50] as const;
 
-/** Remote administration / database ports that should never be reachable from the Internet */
-export const MGMT_PORTS = [22, 3389, 445, 1433, 3306, 5432, 5985, 5986];
+/** Remote administration / data-store ports that should never be reachable from the Internet (lib/riskPorts.ts) */
+export const MGMT_PORTS: readonly number[] = [...RISK_PORTS.critical, ...RISK_PORTS.high];
 
 export const isRiskyPort = (row: NetTalkerRow) => (row.publicInAllowed ?? 0) > 0 && row.port != null && MGMT_PORTS.includes(row.port);

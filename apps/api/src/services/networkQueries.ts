@@ -7,9 +7,11 @@
 // Columns the probe could not confirm are read with column_ifexists (a missing column → empty, not an error).
 import type { NetBlockedRow, NetDir, NetInternetRow, NetOverview, NetTalkerDim, NetTalkerRow } from "@aud/types";
 import { kqlString, maskGuids } from "../infra/requestParams.js";
+import { RISK_PORTS } from "./riskPorts.js";
 
 export const RANGES = [60, 360, 1440, 10080] as const;
-export const MGMT_PORTS = [22, 3389, 445, 1433, 3306, 5432, 5985, 5986];
+/** Remote administration and data-store ports (critical + high of riskPorts.ts) */
+export const MGMT_PORTS = [...RISK_PORTS.critical, ...RISK_PORTS.high];
 
 export const snapRange = (minutes: number) => ((RANGES as readonly number[]).includes(minutes) ? minutes : 1440);
 export const binMinutes = (range: number) => (range <= 360 ? 10 : range <= 1440 ? 60 : 360);

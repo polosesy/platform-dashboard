@@ -6,6 +6,8 @@
 // Layer 3: Azure runtime bindings (aggregator resolves)
 // ═══════════════════════════════════════════════════════════════════
 
+import type { InboundExposure } from "./architecture.js";
+
 // ────────────────────────────────────────────
 // 1. Diagram Spec (저장 단위, 정적 정의)
 // ────────────────────────────────────────────
@@ -105,6 +107,24 @@ export type DiagramEdgeSpec = {
   /** i18n keys of what the measured value may include or miss (shown in the edge panel) */
   caveats?: string[];
   flowType?: DiagramFlowType;   // network flow semantics (ingress/egress/east-west/control/dependency)
+  /** LB / App Gateway → backend member: how the pool names it (catalog AGW-03..05, LB-02/03, VMSS-04) */
+  backend?: {
+    via: "nic" | "ip" | "fqdn" | "vmssModel";
+    pool?: string;
+    /** Member address — the BackendServer / BackendIPAddress metric dimension */
+    address?: string;
+    /** AGW backend ports (BackendServer = "ip:port") */
+    ports?: number[];
+    /** cfg = configuration reference · ipMatch / fqdnMatch = current holder of the address */
+    evidence?: "cfg" | "ipMatch" | "fqdnMatch";
+  };
+  /** AGC → AKS (AGC-04): nodeRg = the AGC sits in that cluster's node resource group · sameVnet = the only
+   *  cluster in the association's VNet (a rule — drawn dashed) */
+  rule?: "nodeRg" | "sameVnet";
+  /** Front Door → origin resource (EDGE-04..07): the origin, its group and how it was matched */
+  origin?: { name: string; group: string; evidence: "cfg" | "ipMatch" | "fqdnMatch"; status?: string };
+  /** Internet → VM through an instance-level public IP: the NSG verdict the line is drawn from (PIP-04) */
+  exposure?: InboundExposure;
   bindings: Record<string, MetricBinding>;
   animation: EdgeAnimationKind;
   alerts?: AlertCondition[];
@@ -142,6 +162,11 @@ export type MetricBinding = {
   scale?: number;
   /** Edges only: which end's Azure resource is queried (default: the source) */
   node?: "source" | "target";
+  /** Read one bucket over this window instead of the latest 1-minute value (activity over an hour, NAT data path
+   *  averaged over 15 minutes as Azure recommends) */
+  window?: "PT15M" | "PT1H";
+  /** Edges only: read the queried VM's instance-level public IP(s) instead of the node itself (server-derived) */
+  on?: "publicIp";
   /**
    * `source: "derived"`: from two other bindings of the node. share = a/(a+b)×100, ratio = a/b×100, sum = a+b;
    * null when an operand is missing or the denominator is under `minDenominator` (default 1)
@@ -285,6 +310,15 @@ export type LiveNode = {
   sparkline?: number[];  // last N metric values for mini chart
   sparklines?: Record<string, SparklineData>;
   powerState?: PowerState;
+  /**
+   * What the card's state rests on (services/healthEvidence.ts). `health` stays the risk axis; this says why it is
+   * ok / unknown: metric = quality rules · resourceHealth = Azure Resource Health Available · observed = traffic seen
+   * both ways in the window (inferred normal — not counted as ok) · configured = provisioned and approved, nothing
+   * observed · notApplicable = Azure defines no state for it (NSG) · none = no evidence
+   */
+  basis?: "metric" | "resourceHealth" | "observed" | "configured" | "notApplicable" | "none";
+  /** i18n keys of the evidence (ld.ev.*) shown in the panel */
+  reasons?: string[];
 };
 
 export type LiveEdge = {
@@ -295,6 +329,18 @@ export type LiveEdge = {
     latencyMs?: number;
     errorRate?: number;
     requestsPerSec?: number;
+    /** AGW → backend member: responses per minute (BackendResponseStatus by BackendServer) */
+    responsesPerMin?: number;
+    /** AGW → backend member: TCP connect time (BackendConnectTime) */
+    connectMs?: number;
+    /** LB → backend member: health-probe availability % (DipAvailability by BackendIPAddress) */
+    probePct?: number;
+    /** Internet → AGW: bytes received on ALL listeners (bit/s) — context for the public-listener value */
+    gatewayTotalBps?: number;
+    /** Internet → VM public IP: inbound SYN packets per minute (SynCount, Direction In) — not a status input */
+    synInPerMin?: number;
+    /** Internet → VM public IP: bytes received (bit/s). Drives particles only when replies cannot be in it */
+    bytesInBps?: number;
   };
   trafficLevel: EdgeTrafficLevel;
   activeAlertIds: string[];
@@ -349,6 +395,7 @@ export type DiagramIconKind =
   | "functionApp" | "appService" | "serviceBus" | "eventHub"
   | "publicIP"
   | "natGateway"
+  | "agc" | "vnetGateway" | "bastion" | "paas"
   | "internet"
   | "custom";
 
@@ -567,6 +614,10 @@ export type AksVmssInstance = {
   nodePoolName?: string;           // Parent node pool name
   nodeImageVersion?: string;       // From K8s label or parent pool
   conditions?: AksNodeCondition[]; // K8s node conditions (Ready, MemoryPressure, etc.)
+  /** Where the conditions come from: the Kubernetes API, or — when the cluster's credentials cannot be fetched —
+   *  the AKS platform metric kube_node_status_condition (Ready only, read permission) or Container Insights
+   *  (KubeNodeInventory.Status) */
+  conditionsSource?: "kubernetes" | "platformMetric" | "containerInsights";
 };
 
 /** 노출면 — Ingress / Egress flow path */
@@ -642,8 +693,11 @@ export type PrivateLinkUsage = {
   targetNodeId: string;
   /** RFC 1918 address of the caller (never a public IP) */
   callerIp?: string;
-  /** How the caller was found: its NIC IP, the only compute in the source subnet, or its managed identity */
-  attribution: "nic" | "subnetOwner" | "identity";
+  /** How the caller was found: its NIC IP, the only compute in the source subnet, all candidates being node pools
+   *  of one AKS cluster (aksCluster — the pool and pod are unknown), or its managed identity */
+  attribution: "nic" | "subnetOwner" | "aksCluster" | "identity";
+  /** aksCluster: the node pools that share the source subnet */
+  viaNodeIds?: string[];
   /** Resource name owning the managed identity — never an object ID */
   identityName?: string;
   grade: PlUsageGrade;
@@ -666,10 +720,25 @@ export type PlUnresolved = {
   reason: "nicNoVm" | "notInDiagram" | "ambiguous" | "peUnconfirmed" | "denied" | "noIp";
   nicName?: string;
   candidates?: string[];
+  /** ambiguous: the candidates share the source subnet, or share a managed identity */
+  basis?: "subnet" | "identity";
+  /** notInDiagram: where the address is, when that is known (never a guessed resource) */
+  place?: PlPlace;
   requests?: number;
   deniedFlows?: number;
   lastSeen?: string;
 };
+
+/**
+ * Where an address outside the diagram's scope lives: a subnet of another VNet in the subscription graph (with its
+ * owner when exactly one), several overlapping VNets, private space no known subnet holds (on-premises / an
+ * unconnected subscription), or carrier-grade NAT space (100.64.0.0/10)
+ */
+export type PlPlace =
+  | { kind: "otherVnet"; vnetNodeId: string; subnetNodeId: string; ownerNodeId?: string }
+  | { kind: "overlap"; matches: number }
+  | { kind: "private" }
+  | { kind: "cgnat" };
 
 /** Calls over the public path (bypassing the Private Endpoint) — counted, IPs not listed */
 export type PlPublicAccess = { targetNodeId: string; requests: number; distinctIps: number; identityNames?: string[]; lastSeen?: string };

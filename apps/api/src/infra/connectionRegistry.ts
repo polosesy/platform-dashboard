@@ -10,8 +10,9 @@
 //   delegated         each signed-in user's own Azure permissions (OBO) — opt-in; a request never falls back to another mode
 //
 // The file holds IDs, names and references only. Unknown keys (clientSecret, password …) and PEM text are refused.
-import { readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { ConnectionMode, PlatformRole } from "@aud/types";
 import type { Env } from "../env.js";
@@ -110,7 +111,7 @@ export function getConnections(env: Env): AzureConnection[] {
   const file = env.AUD_CONNECTIONS_FILE ?? env.AUD_TENANTS_FILE;
   let list: AzureConnection[];
   if (file) {
-    const path = isAbsolute(file) ? file : resolve(process.cwd(), file);
+    const path = connectionsPath(file);
     list = parseConnections(JSON.parse(readFileSync(path, "utf8")), env);
   } else {
     list = [{
@@ -120,6 +121,20 @@ export function getConnections(env: Env): AzureConnection[] {
   }
   memo.set(env, list);
   return list;
+}
+
+/**
+ * A relative AUD_CONNECTIONS_FILE is relative to the repository root — where the .env that names it lives
+ * (src/index.ts loads ../../../.env; the API's working directory is apps/api in workspace mode). The working
+ * directory is still tried for older setups.
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+export function connectionsPath(file: string): string {
+  if (isAbsolute(file)) return file;
+  const fromRoot = resolve(REPO_ROOT, file);
+  if (existsSync(fromRoot)) return fromRoot;
+  const fromCwd = resolve(process.cwd(), file);
+  return existsSync(fromCwd) ? fromCwd : fromRoot;
 }
 
 export function homeConnection(env: Env): AzureConnection {

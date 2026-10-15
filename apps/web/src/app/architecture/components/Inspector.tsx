@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { ArchitectureNode } from "@aud/types";
 import { internetId, locationPath, type ArchDrawEdge, type ArchEdge, type ArchModel, type ArchPlaced } from "@/lib/archModel";
-import { formatAzureRegion } from "@/app/live-diagram/utils/regionFormat";
+import { regionName } from "../utils/toFlow";
 import { useI18n } from "@/lib/i18n";
 import s from "../styles.module.css";
 
@@ -22,6 +22,8 @@ type Props = {
   shownAt: Map<string, string>;
   /** Lines cut by the category filter (one end shown, one hidden) */
   filteredOut?: ArchEdge[];
+  /** Resource types in the subscriptions that the diagram does not draw (count only) */
+  undrawn?: Array<{ type: string; count: number }>;
 };
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
@@ -35,7 +37,7 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 
 const portalUrl = (azureId?: string) => (azureId ? `https://portal.azure.com/#@/resource${azureId}` : null);
 
-export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [] }: Props) {
+export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [], undrawn = [] }: Props) {
   const { t } = useI18n();
   const kind = (k: string) => {
     const v = t(`arch.kind.${k}`);
@@ -51,6 +53,15 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
     return (
       <aside className={s.inspector} aria-label={t("arch.select")}>
         <p className={s.iEmpty}>{t("arch.select")}</p>
+        {undrawn.length ? (
+          <>
+            <h2 className={s.iTitle}>{t("arch.undrawn.title")}</h2>
+            <p className={s.iHint}>{t("arch.undrawn.hint", { types: undrawn.length, count: undrawn.reduce((n, x) => n + x.count, 0) })}</p>
+            <ul className={s.iList}>
+              {undrawn.slice(0, 20).map((x) => <li key={x.type}><span>{x.type.replace(/^microsoft\./, "")}</span> <span>{x.count}</span></li>)}
+            </ul>
+          </>
+        ) : null}
       </aside>
     );
   }
@@ -72,7 +83,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
               {items.map((x, i) => (
                 <li key={`${x.name}-${i}`}>
                   <span className={s.mono}>{x.name}</span>
-                  <span className={s.iDim}>{formatAzureRegion(x.region)}{x.detail ? ` · ${x.detail}` : ""}</span>
+                  <span className={s.iDim}>{regionName(x.region, t)}{x.detail ? ` · ${x.detail}` : ""}</span>
                 </li>
               ))}
             </ul>
@@ -190,7 +201,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
     const reg = sh.type === "region" ? model.regions.find((r) => `region:${r.key}` === sh.id) : undefined;
     return (
       <aside className={s.inspector}>
-        <h2 className={s.iTitle}>{reg ? formatAzureRegion(reg.key) : t(`arch.${sh.type === "group" ? "paas" : "lane"}.${sh.label}`)}</h2>
+        <h2 className={s.iTitle}>{reg ? regionName(reg.key, t) : t(`arch.${sh.type === "group" ? "paas" : "lane"}.${sh.label}`)}</h2>
         {reg ? (
           <dl className={s.iRows}>
             <Row k={t("arch.sum.vnets")}>{reg.vnets.length}</Row>
@@ -219,7 +230,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
       <p className={s.iKind}>{kind(node.kind)}</p>
       <dl className={s.iRows}>
         {node.resourceGroup ? <Row k={t("arch.i.rg")}>{node.resourceGroup}</Row> : null}
-        {path ? <Row k={t("arch.i.region")}>{path.region === "global" ? t("arch.lane.global") : formatAzureRegion(path.region)}</Row> : null}
+        {path ? <Row k={t("arch.i.region")}>{regionName(path.region, t)}</Row> : null}
         {path?.vnet ? (
           <Row k={t("arch.i.path")}>
             {path.vnet.name}{path.subnet ? ` › ${path.subnet.name}` : ""}

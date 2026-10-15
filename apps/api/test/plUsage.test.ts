@@ -49,3 +49,19 @@ test("chips: used / unknown on PEs, users and public access on the PaaS; disconn
   assert.ok(P.anySourceOn(resp));
   assert.ok(!P.anySourceOn({ ...resp, sources: [{ source: "vnetFlow", state: "disabled", reason: "noFlowLog" }] }));
 });
+
+test("unidentified callers fold into groups: distinct IPs, deterministic order, chip count = panel count", () => {
+  const P = ((pluNs as unknown as { default?: typeof pluNs }).default ?? pluNs) as typeof pluNs;
+  const rows = [
+    { targetNodeId: "kv", ip: "10.0.9.11", reason: "ambiguous" as const, basis: "subnet" as const, candidates: ["b", "a"], requests: 3 },
+    { targetNodeId: "kv", ip: "10.0.9.10", reason: "ambiguous" as const, basis: "subnet" as const, candidates: ["a", "b"], requests: 9 },
+    { targetNodeId: "kv", ip: "10.0.9.10", reason: "ambiguous" as const, basis: "subnet" as const, candidates: ["a", "b"], requests: 1 },
+    { targetNodeId: "kv", ip: "10.150.0.5", reason: "notInDiagram" as const, place: { kind: "otherVnet" as const, vnetNodeId: "hub", subnetNodeId: "fw" } },
+    { targetNodeId: "kv", reason: "noIp" as const, requests: 4 },
+  ];
+  const g = P.groupUnresolved(rows);
+  assert.deepEqual(g.map((x) => [x.reason, x.ips, x.requests]), [["ambiguous", 2, 13], ["noIp", 1, 4], ["notInDiagram", 1, 0]]);
+  assert.deepEqual(g[0]!.sample, ["10.0.9.10", "10.0.9.11"], "most requests first");
+  assert.deepEqual(P.groupUnresolved([...rows].reverse()).map((x) => x.key), g.map((x) => x.key), "order of rows does not matter");
+  assert.equal(P.unresolvedCount(rows), 4);
+});

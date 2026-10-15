@@ -1,6 +1,7 @@
 import type { Env } from "../env.js";
 import type {
   DiagramSpec,
+  DiagramNodeSpec,
   LiveDiagramSnapshot,
   LiveNode,
   LiveEdge,
@@ -13,8 +14,16 @@ import type {
   LiveSourceState,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix, cachePrefix, principalKey } from "../infra/cacheManager.js";
+import { debug } from "../infra/logger.js";
 import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector.js";
 import { normalizeSpecBindings } from "./specGenerator.js";
+import { resolveEvidence } from "./healthEvidence.js";
+import { collectResourceHealth, type RhState } from "./resourceHealthCollector.js";
+
+const parseList = (v: string | undefined): string[] | undefined => {
+  if (!v) return undefined;
+  try { const x = JSON.parse(v); return Array.isArray(x) ? x.map(String) : undefined; } catch { return undefined; }
+};
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector.js";
 import { collectDiagramAlerts } from "./alertsCollector.js";
 import { collectAlertRules } from "./alertRulesCollector.js";
@@ -96,6 +105,18 @@ export function listDiagramSpecs(owner: string = PUBLIC_OWNER): Array<{ id: stri
 // Snapshot Assembly
 // ────────────────────────────────────────────
 
+/**
+ * A snapshot answers within this budget (the web proxy and the page poll must not wait on one slow Azure call):
+ * whatever has not arrived is left unmeasured this round and fills in from the collectors' caches on the next poll.
+ */
+const SNAPSHOT_BUDGET_MS = 20_000;
+const withBudget = <T,>(p: Promise<T>, fallback: T): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((r) => { timer = setTimeout(() => { p.catch(() => undefined); r(fallback); }, SNAPSHOT_BUDGET_MS); });
+  return Promise.race([p.finally(() => timer && clearTimeout(timer)), late]);
+};
+const emptyTraffic = (): TrafficFlowResult => ({ traffic: new Map(), nsgFlows: new Map(), dependencies: new Map(), connectionMonitor: new Map() });
+
 export async function buildLiveSnapshot(
   env: Env,
   bearerToken: string | undefined,
@@ -117,129 +138,99 @@ export async function buildLiveSnapshot(
   const azureEnabled = env.AZURE_LIVE_DIAGRAM_ENABLED || diagramId.startsWith("auto-");
   const hasBearerToken = bearerToken != null;
 
-  // ── Collect node metrics from Azure Monitor ──
-  let nodeMetricsMap = new Map<string, Record<string, number | null>>();
+  // The sources are independent: they run at the same time (a snapshot used to wait for each in turn and took
+  // longer than the web proxy allows on large VNets). Each keeps its own failure handling.
+  const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
   let resolvedBindings = 0;
   let failedBindings = 0;
   // Per-source state, so the page can say why something is empty (sign in / not configured / failed)
   let metricsState: LiveSourceState = !azureEnabled ? "disabled" : !hasBearerToken ? "signin" : "ok";
+  let alertsState: LiveSourceState = !azureEnabled ? "disabled" : !hasBearerToken ? "signin" : "ok";
+  const live = azureEnabled && hasBearerToken;
 
-  if (azureEnabled && hasBearerToken) {
-    const resources = spec.nodes
-      .filter((n) => n.azureResourceId)
-      .map((n) => ({
-        azureResourceId: n.azureResourceId!,
-        bindings: n.bindings,
-      }));
-
+  // ── Node metrics (Azure Monitor) ──
+  const nodeMetricsTask = (async () => {
+    if (!live) return new Map<string, Record<string, number | null>>();
+    const resources = spec.nodes.filter((n) => n.azureResourceId).map((n) => ({ azureResourceId: n.azureResourceId!, bindings: n.bindings }));
     try {
-      nodeMetricsMap = await collectBatchMetrics(env, bearerToken!, resources);
-      resolvedBindings = [...nodeMetricsMap.values()].reduce(
-        (sum, m) => sum + Object.values(m).filter((v) => v != null).length,
-        0,
-      );
+      const m = await collectBatchMetrics(env, bearerToken!, resources, SNAPSHOT_BUDGET_MS);
+      resolvedBindings += [...m.values()].reduce((sum, x) => sum + Object.values(x).filter((v) => v != null).length, 0);
+      return m;
     } catch {
       failedBindings = resources.length;
       metricsState = "failed";
+      return new Map<string, Record<string, number | null>>();
     }
-  }
+  })();
 
-  // ── Collect edge metrics (monitor-source bindings) ──
-  const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
-  let edgeMonitorMetrics = new Map<string, Record<string, number | null>>();
-
-  if (azureEnabled && hasBearerToken) {
-    // The queried end: `node: "target"` on a binding (Internet → public LB reads the LB), the source otherwise
-    const queried = (e: (typeof spec.edges)[number]) => nodeById.get(Object.values(e.bindings).some((b) => b.node === "target") ? e.target : e.source);
+  // ── Edge metrics (monitor-source bindings) ──
+  const edgeMetricsTask = (async () => {
+    if (!live) return new Map<string, Record<string, number | null>>();
     const edgeItems = spec.edges
-      .filter((e) => queried(e)?.azureResourceId && Object.values(e.bindings).some((b) => b.source === "monitor"))
-      .map((e) => ({ edge: e, node: queried(e)! }));
-
-    if (edgeItems.length > 0) {
-      try {
-        edgeMonitorMetrics = await collectBatchEdgeMetrics(env, bearerToken!, edgeItems);
-        resolvedBindings += [...edgeMonitorMetrics.values()].reduce(
-          (sum, m) => sum + Object.values(m).filter((v) => v != null).length,
-          0,
-        );
-      } catch {
-        // Non-critical
-      }
+      .filter((e) => Object.values(e.bindings).some((b) => b.source === "monitor"))
+      .map((e) => ({ edge: e, ...measuredResources(e, nodeById) }))
+      .filter((x): x is { edge: (typeof spec.edges)[number]; node: DiagramNodeSpec; resourceIds: string[] } => !!x.node && x.resourceIds.length > 0);
+    if (!edgeItems.length) return new Map<string, Record<string, number | null>>();
+    try {
+      const m = await collectBatchEdgeMetrics(env, bearerToken!, edgeItems, SNAPSHOT_BUDGET_MS);
+      resolvedBindings += [...m.values()].reduce((sum, x) => sum + Object.values(x).filter((v) => v != null).length, 0);
+      return m;
+    } catch {
+      return new Map<string, Record<string, number | null>>(); // Non-critical
     }
-  }
+  })();
 
-  // ── Collect App Insights metrics for edges ──
-  const appInsightsEdgeMetrics = new Map<string, Record<string, number | null>>();
+  // ── App Insights metrics for edges ──
+  const appInsightsTask = (async () => {
+    const out = new Map<string, Record<string, number | null>>();
+    if (!live) return out;
+    const appInsightsEdges = spec.edges.filter((e) => Object.values(e.bindings).some((b) => b.source === "appInsights"));
+    const results = await Promise.allSettled(appInsightsEdges.map(async (edge) => {
+      const aiResourceId = resolveAppInsightsResourceId(env, nodeById.get(edge.source)?.azureResourceId);
+      if (!aiResourceId) return { edgeId: edge.id, metrics: {} as Record<string, number | null> };
+      return { edgeId: edge.id, metrics: await collectAppInsightsMetrics(env, bearerToken!, aiResourceId, edge.bindings) };
+    }));
+    for (const r of results) if (r.status === "fulfilled") out.set(r.value.edgeId, r.value.metrics);
+    return out;
+  })();
 
-  if (azureEnabled && hasBearerToken) {
-    const appInsightsEdges = spec.edges.filter((e) =>
-      Object.values(e.bindings).some((b) => b.source === "appInsights"),
-    );
-
-    if (appInsightsEdges.length > 0) {
-      const results = await Promise.allSettled(
-        appInsightsEdges.map(async (edge) => {
-          const srcNode = nodeById.get(edge.source);
-          const aiResourceId = resolveAppInsightsResourceId(env, srcNode?.azureResourceId);
-          if (!aiResourceId) return { edgeId: edge.id, metrics: {} as Record<string, number | null> };
-
-          const metrics = await collectAppInsightsMetrics(
-            env, bearerToken!, aiResourceId, edge.bindings,
-          );
-          return { edgeId: edge.id, metrics };
-        }),
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          appInsightsEdgeMetrics.set(result.value.edgeId, result.value.metrics);
-        }
-      }
-    }
-  }
-
-  // ── Collect Azure Monitor Alerts ──
-  let liveAlerts: LiveAlert[] = [];
-  let alertRules: AlertRuleInfo[] = [];
-  let alertsState: LiveSourceState = !azureEnabled ? "disabled" : !hasBearerToken ? "signin" : "ok";
-
-  if (azureEnabled && hasBearerToken) {
+  // ── Azure Monitor alerts and alert rules ──
+  const alertsTask = (async (): Promise<LiveAlert[]> => {
+    if (!live) return [];
     const edgeMap = new Map(spec.edges.map((e) => [e.id, { source: e.source, target: e.target }]));
-    try {
-      liveAlerts = await collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap);
-    } catch {
-      alertsState = "failed";
-    }
-    try {
-      alertRules = await collectAlertRules(env, bearerToken!, spec.nodes);
-    } catch {
-      // Non-critical
-    }
-  }
+    try { return await withBudget(collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap), [] as LiveAlert[]); } catch { alertsState = "failed"; return []; }
+  })();
+  const alertRulesTask = (async (): Promise<AlertRuleInfo[]> => {
+    if (!live) return [];
+    try { return await withBudget(collectAlertRules(env, bearerToken!, spec.nodes), [] as AlertRuleInfo[]); } catch { return []; } // Non-critical
+  })();
 
-  // ── Collect PowerState for compute resources ──
-  let powerStateMap = new Map<string, PowerState>();
+  // ── Power state for compute resources ──
+  // No default: a power state that was not collected stays unknown (LB / App Gateway / PaaS have none,
+  // and an assumed "running" painted cards green without evidence)
+  const powerTask = (async () => {
+    if (!azureEnabled) return new Map<string, PowerState>();
+    // SP fallback when no bearer token — collectBatchPowerStates handles undefined
+    const computeNodes = spec.nodes.filter((n) => n.azureResourceId && n.resourceKind).map((n) => ({ azureResourceId: n.azureResourceId!, resourceKind: n.resourceKind! }));
+    if (!computeNodes.length) return new Map<string, PowerState>();
+    try { return await collectBatchPowerStates(env, bearerToken, computeNodes, SNAPSHOT_BUDGET_MS); } catch { return new Map<string, PowerState>(); }
+  })();
 
-  if (azureEnabled) {
-    // Use SP fallback when no bearer token — collectBatchPowerStates handles undefined
-    const computeNodes = spec.nodes
-      .filter((n) => n.azureResourceId && n.resourceKind)
-      .map((n) => ({ azureResourceId: n.azureResourceId!, resourceKind: n.resourceKind! }));
-    if (computeNodes.length > 0) {
-      try {
-        powerStateMap = await collectBatchPowerStates(env, bearerToken, computeNodes);
-      } catch {
-        // Non-critical
-      }
-    }
+  // ── Traffic flow data (multi-source; these collectors use SP fallback — no bearer token required) ──
+  const trafficTask = withBudget(collectAllTrafficSources(env, bearerToken, spec, azureEnabled), emptyTraffic());
 
-    // No default: a power state that was not collected stays unknown (LB / App Gateway / PaaS have none,
-    // and an assumed "running" painted cards green without evidence)
-  }
+  // ── Resource Health for the supported kinds (one Resource Graph query; failures leave the map empty) ──
+  const rhTask = live
+    ? withBudget(collectResourceHealth(env, bearerToken, spec.nodes.map((n) => n.azureResourceId ?? "").filter(Boolean)), new Map<string, RhState>())
+    : Promise.resolve(new Map<string, RhState>());
 
-  // ── Collect Traffic Flow Data (multi-source) ──
-  // These collectors use SP fallback — no bearer token required.
-  const trafficFlowData = await collectAllTrafficSources(env, bearerToken, spec, azureEnabled);
+  const t0 = Date.now();
+  const timed = <T,>(name: string, p: Promise<T>) => p.finally(() => debug(`[live] ${diagramId} ${name} ${Date.now() - t0}ms`));
+  const [nodeMetricsMap, edgeMonitorMetrics, appInsightsEdgeMetrics, liveAlerts, alertRules, powerStateMap, trafficFlowData, rhMap] =
+    await Promise.all([
+      timed("metrics", nodeMetricsTask), timed("edgeMetrics", edgeMetricsTask), timed("appInsights", appInsightsTask),
+      timed("alerts", alertsTask), timed("alertRules", alertRulesTask), timed("power", powerTask), timed("traffic", trafficTask), timed("resourceHealth", rhTask),
+    ]);
 
   // ── Build alert lookup for node/edge activeAlertIds ──
   const nodeAlertIds = new Map<string, string[]>();
@@ -266,7 +257,20 @@ export async function buildLiveSnapshot(
     // VM availability is judged only while the VM is meant to run (a stopped VM is "unavailable" by design)
     const running = powerStateMap.get(nodeSpec.azureResourceId ?? "") === "running";
     const forHealth = !running && "vmAvail" in metrics ? Object.fromEntries(Object.entries(metrics).filter(([k]) => k !== "vmAvail")) : metrics;
-    const { health, score } = resolveNodeHealth(forHealth, nodeSpec.bindings);
+    const judged0 = resolveNodeHealth(forHealth, nodeSpec.bindings);
+    // Evidence ladder: why the card is ok / unknown (Resource Health, approvals, traffic both ways — healthEvidence.ts)
+    const ev = resolveEvidence({
+      kind: nodeSpec.resourceKind ?? nodeSpec.icon,
+      health: judged0.health,
+      judged: judged0.health !== "unknown",
+      metrics,
+      provisioningState: nodeSpec.metadata?.provisioningState,
+      peConnections: parseList(nodeSpec.metadata?.peConnections),
+      rh: rhMap.get((nodeSpec.azureResourceId ?? "").toLowerCase()),
+      unused: nodeSpec.metadata?.unused === "true",
+    });
+    const health = ev.health;
+    const score = health === judged0.health ? judged0.score : health === "critical" ? 0.2 : health === "warning" ? 0.55 : health === "ok" ? 1 : 0.5;
 
     // ── Sparkline ring buffers: one series per (node, metric) so different metrics never mix ──
     // Every measured metric keeps its own trend (card: CPU and memory, panel: each metric row)
@@ -309,6 +313,8 @@ export async function buildLiveSnapshot(
         : undefined,
       sparklines: Object.keys(sparklines).length > 0 ? sparklines : undefined,
       powerState,
+      basis: ev.basis,
+      ...(ev.reasons.length ? { reasons: ev.reasons } : {}),
     };
   });
 
@@ -326,6 +332,12 @@ export async function buildLiveSnapshot(
       latencyMs: toNumber(merged.latency),
       errorRate: toNumber(merged.errorRate),
       requestsPerSec: toNumber(merged.rps ?? merged.requestsPerSec),
+      responsesPerMin: toNumber(merged.backendRequests),
+      connectMs: toNumber(merged.backendConnectMs),
+      probePct: toNumber(merged.probe),
+      gatewayTotalBps: toNumber(merged.gatewayTotal),
+      synInPerMin: toNumber(merged.synIn),
+      bytesInBps: toNumber(merged.bytesIn),
     };
 
     // Merge traffic flow data (Traffic Analytics / NSG Flow Logs)
@@ -527,6 +539,31 @@ function findPrimaryMetricName(metrics: Record<string, number | null>): string |
 // ────────────────────────────────────────────
 // Fault Impact Detection
 // ────────────────────────────────────────────
+
+const PUBLIC_IP_ID = /^\/subscriptions\/([^/]+)\/resourcegroups\/[^/]+\/providers\/microsoft\.network\/publicipaddresses\/[^/]+$/i;
+const subscriptionOf = (id: string | undefined) => /^\/subscriptions\/([^/]+)\//i.exec(id ?? "")?.[1]?.toLowerCase();
+
+/**
+ * What a line's monitor bindings read: the queried end (`node: "target"` → the target, else the source) and its
+ * Azure resource — or, with `on: "publicIp"`, the public IP sub-resources of that card. Those ids come from the
+ * stored spec, so only public IP ids in the card's own subscription are accepted (a saved spec cannot point the
+ * reader at an arbitrary resource; the fetcher still checks the connection and role).
+ */
+export function measuredResources(
+  e: DiagramSpec["edges"][number],
+  nodeById: ReadonlyMap<string, DiagramNodeSpec>,
+): { node?: DiagramNodeSpec; resourceIds: string[] } {
+  const bindings = Object.values(e.bindings);
+  const node = nodeById.get(bindings.some((b) => b.node === "target") ? e.target : e.source);
+  if (!node?.azureResourceId) return { node, resourceIds: [] };
+  if (!bindings.some((b) => b.on === "publicIp")) return { node, resourceIds: [node.azureResourceId] };
+  const sub = subscriptionOf(node.azureResourceId);
+  const ids = (node.subResources ?? [])
+    .filter((sr) => sr.kind === "publicIP" && sr.azureResourceId)
+    .map((sr) => sr.azureResourceId!.toLowerCase())
+    .filter((id) => PUBLIC_IP_ID.test(id) && subscriptionOf(id) === sub);
+  return { node, resourceIds: [...new Set(ids)] };
+}
 
 /** Configured links an impact may travel along. Guessed (inferred), Internet and NAT-association links never carry it. */
 const IMPACT_EDGE_KINDS = new Set(["network", "routes", "privateLink", "peering"]);

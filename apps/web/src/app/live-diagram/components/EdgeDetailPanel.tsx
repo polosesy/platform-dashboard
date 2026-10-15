@@ -10,10 +10,12 @@ import type {
   FlowSummary,
   DiagramEdgeSpec,
   LiveEdge,
+  PowerState,
 } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import { formatBitsPerSec } from "@/lib/format";
 import { isInferredEdge } from "@/lib/liveScope";
+import { exposurePorts, exposureSources } from "@/lib/livePip";
 import { Notice } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
 import styles from "../styles.module.css";
@@ -26,6 +28,8 @@ type EdgeDetailPanelProps = {
   liveEdge?: LiveEdge;
   /** Example diagram — the detail values are samples, not this edge's traffic */
   sample?: boolean;
+  /** Power state of the line's target (Internet → VM: a deallocated VM receives nothing — 0 is expected) */
+  targetPower?: PowerState;
   onClose: () => void;
 };
 
@@ -202,12 +206,74 @@ function PortSummary({ summary }: { summary: FlowSummary }) {
   );
 }
 
+/**
+ * Internet → VM through its own public IP (catalog PIP-04): the NSG verdict (configuration) and what the public IP
+ * measured. Ports come from the NSG only — the public IP metrics carry no usable port dimension.
+ */
+function PipExposureRows({ exposure, metrics, targetPower, t }: { exposure: NonNullable<DiagramEdgeSpec["exposure"]>; metrics?: LiveEdge["metrics"]; targetPower?: PowerState; t: TFn }) {
+  const src = exposureSources(exposure);
+  const stopped = targetPower === "deallocated" || targetPower === "stopped";
+  return (
+    <>
+      <div className={styles.essentialsRow} data-testid="edge-exposure">
+        <span className={styles.essentialsLabel}>{t("ld.pip.exposure")}</span>
+        <span className={styles.essentialsValue}>
+          {[
+            t(`ld.pip.state.${exposure.state}`),
+            exposure.nsgs.length ? `NSG: ${exposure.nsgs.map((n) => t(`ld.pip.nsg.${n}`)).join(" → ")}` : null,
+            ...exposure.reasons.map((r) => t(`ld.pip.reason.${r}`)),
+          ].filter(Boolean).join(" · ")}
+        </span>
+      </div>
+      {exposure.ports.length ? (
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>{t("ld.pip.ports")}</span>
+          <span className={styles.essentialsValue}>
+            {exposurePorts(exposure).map((p, i) => (
+              <span key={p.spec}>
+                {i ? ", " : ""}
+                <span style={p.tier === "critical" || p.tier === "high" ? { color: "var(--warning)", fontWeight: 600 } : undefined} title={p.tier ? t(`ld.pip.tier.${p.tier}`) : undefined}>{p.spec === "*" ? t("ld.pip.allPorts") : p.spec}</span>
+              </span>
+            ))}
+          </span>
+        </div>
+      ) : null}
+      <div className={styles.essentialsRow}>
+        <span className={styles.essentialsLabel}>{t("ld.pip.sources")}</span>
+        <span className={styles.essentialsValue}>{t(src.key, src.vars)}</span>
+      </div>
+      {metrics?.synInPerMin != null && (
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>{t("ld.edge.metric.synIn")}</span>
+          <span className={styles.essentialsValue}>{t("ld.edge.perMin", { n: Math.round(metrics.synInPerMin) })}</span>
+        </div>
+      )}
+      {metrics?.bytesInBps != null && (
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>{t("ld.edge.metric.bytesIn")}</span>
+          <span className={styles.essentialsValue}>
+            {formatBitsPerSec(metrics.bytesInBps)}
+            {metrics.throughputBps == null ? ` — ${t("ld.edge.noParticles")}` : ""}
+          </span>
+        </div>
+      )}
+      {stopped && (
+        <div className={styles.essentialsRow}>
+          <span className={styles.essentialsLabel}>{t("ld.pip.power")}</span>
+          <span className={styles.essentialsValue}>{t("ld.pip.stopped")}</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function EdgeDetailPanel({
   detail,
   loading,
   edgeSpec,
   liveEdge,
   sample,
+  targetPower,
   onClose,
 }: EdgeDetailPanelProps) {
   const { t } = useI18n();
@@ -222,7 +288,7 @@ export function EdgeDetailPanel({
   const edgeKind = detail?.edgeKind ?? edgeSpec?.edgeKind;
 
   // Measured values only: live edge metrics when a real source reported them, sample detail only on the example
-  const metrics = measured ? liveEdge?.metrics : isMock ? detail?.liveMetrics : undefined;
+  const metrics: LiveEdge["metrics"] | undefined = measured ? liveEdge?.metrics : isMock ? detail?.liveMetrics : undefined;
   const status = measured ? (liveEdge?.status ?? "idle") : "idle";
 
   const STATUS_COLORS: Record<string, string> = {
@@ -332,6 +398,44 @@ export function EdgeDetailPanel({
                     <span className={styles.essentialsValue}>{metrics.errorRate.toFixed(1)}%</span>
                   </div>
                 )}
+                {metrics?.responsesPerMin != null && (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.metric.backendRequests")}</span>
+                    <span className={styles.essentialsValue}>{t("ld.edge.perMin", { n: Math.round(metrics.responsesPerMin) })}</span>
+                  </div>
+                )}
+                {metrics?.connectMs != null && (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.metric.backendConnectMs")}</span>
+                    <span className={styles.essentialsValue}>{metrics.connectMs < 1 ? "< 1 ms" : `${Math.round(metrics.connectMs)} ms`}</span>
+                  </div>
+                )}
+                {metrics?.probePct != null && (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.metric.probe")}</span>
+                    <span className={styles.essentialsValue}>{`${Math.round(metrics.probePct)}%`}</span>
+                  </div>
+                )}
+                {metrics?.gatewayTotalBps != null && (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.metric.gatewayTotal")}</span>
+                    <span className={styles.essentialsValue}>
+                      {formatBitsPerSec(metrics.gatewayTotalBps)}
+                      {metrics.throughputBps == null && metrics.gatewayTotalBps > 0 ? ` — ${t("ld.edge.privateOnly")}` : ""}
+                    </span>
+                  </div>
+                )}
+                {edgeSpec?.exposure ? (
+                  <PipExposureRows exposure={edgeSpec.exposure} metrics={metrics} targetPower={targetPower} t={t} />
+                ) : null}
+                {edgeSpec?.backend ? (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.edge.member")}</span>
+                    <span className={styles.essentialsValue}>
+                      {[edgeSpec.backend.pool, edgeSpec.backend.address ? `${edgeSpec.backend.address}${edgeSpec.backend.ports?.length ? `:${edgeSpec.backend.ports.join(",")}` : ""}` : null, t(`ld.edge.evidence.${edgeSpec.backend.evidence === "ipMatch" || edgeSpec.backend.evidence === "fqdnMatch" ? edgeSpec.backend.evidence : edgeSpec.backend.via === "vmssModel" ? "vmssModel" : "cfg"}`)].filter(Boolean).join(" · ")}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </Section>
 

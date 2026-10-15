@@ -26,6 +26,11 @@ const apiUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000")
 
 const nextConfig: NextConfig = {
   env: publicEnv,
+  experimental: {
+    // The /api rewrite proxy drops a request after 30 s by default ("ECONNRESET"): generating a live diagram for a
+    // large subscription reads the whole topology first, so allow it longer (the API keeps snapshots within 20 s)
+    proxyTimeout: 120_000,
+  },
   async rewrites() {
     return [
       {

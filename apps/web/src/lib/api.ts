@@ -45,7 +45,7 @@ export class ApiError extends Error {
 }
 
 /** What the page should ask the user to do for an API error (null = nothing about sign-in) */
-export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection";
+export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection" | "aksCredential";
 
 export function authStateOf(e: unknown): AuthState | null {
   if (!(e instanceof ApiError)) return null;
@@ -63,6 +63,8 @@ export function authStateOfCode(code: string | null | undefined): AuthState | nu
     case "no_platform_role": return "norole";
     case "connection_not_consented": case "connection_credential_invalid": case "connection_unconfigured":
     case "connection_tenant_mismatch": case "connection_failed": case "connection_timeout": return "connection";
+    // The Azure connection may read the cluster but not fetch its credentials (listClusterUserCredential/action)
+    case "aks_credential_forbidden": return "aksCredential";
     default: return null;
   }
 }

@@ -1,0 +1,39 @@
+{
+  "overrides": [
+    {
+      "type": "microsoft.network/privateendpoints",
+      "path": "privateLinkServiceConnections[].privateLinkServiceId",
+      "targets": ["*"],
+      "reason": "The spec lists only privateLinkServices, but a Private Endpoint connects to any Private Link resource (Key Vault, Storage, SQL, Web, Redis, Recovery Services, …) — confirmed in a real tenant",
+      "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview#private-link-resource"
+    },
+    {
+      "type": "microsoft.network/privateendpoints",
+      "path": "manualPrivateLinkServiceConnections[].privateLinkServiceId",
+      "targets": ["*"],
+      "reason": "Same as privateLinkServiceConnections (manual approval flow)",
+      "source": "https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview"
+    },
+    {
+      "type": "microsoft.network/loadbalancers",
+      "path": "backendAddressPools[].backendIPConfigurations[]",
+      "targets": ["microsoft.compute/virtualmachinescalesets/virtualmachines/networkinterfaces/ipconfigurations"],
+      "reason": "Uniform scale-set instance NIC ip configurations are children of the scale set, not top-level NICs",
+      "source": "https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/virtual-machine-scale-sets-networking"
+    },
+    {
+      "type": "microsoft.network/loadbalancers",
+      "path": "backendAddressPools[].loadBalancerBackendAddresses[].networkInterfaceIPConfiguration",
+      "targets": ["microsoft.compute/virtualmachinescalesets/virtualmachines/networkinterfaces/ipconfigurations"],
+      "reason": "Same as backendIPConfigurations",
+      "source": "https://learn.microsoft.com/en-us/azure/load-balancer/backend-pool-management"
+    },
+    {
+      "type": "microsoft.compute/virtualmachines",
+      "path": "storageProfile.imageReference",
+      "targets": ["microsoft.compute/images"],
+      "reason": "imageReference.id may name a managed image as well as a gallery image version",
+      "source": "https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/create-or-update#imagereference"
+    }
+  ]
+}

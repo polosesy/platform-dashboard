@@ -194,3 +194,17 @@ test("static: credentials are constructed only in connectionCredentials.ts / obo
     }
   }
 });
+
+test("a connection that may read a cluster but not fetch its credentials gets a clear 403, not a 500", async () => {
+  const { kubeconfigError } = await import("../src/services/kubernetes.js");
+  const { loadEnv } = await import("../src/env.js");
+  const env = loadEnv({ AZURE_AD_TENANT_ID: "00000000-0000-0000-0000-000000000001", AZURE_SUBSCRIPTION_IDS: "00000000-0000-0000-0000-0000000000aa" });
+  const id = "/subscriptions/00000000-0000-0000-0000-0000000000aa/resourcegroups/rg/providers/microsoft.containerservice/managedclusters/aks";
+  const denied = new Error("ARM 403: AuthorizationFailed: The client '…' does not have authorization to perform action 'microsoft.containerservice/managedclusters/listClusterUserCredential/action' over …");
+  const mapped = kubeconfigError(denied, id, env) as HttpError;
+  assert.equal(mapped.status, 403);
+  assert.equal(mapped.code, "aks_credential_forbidden");
+  assert.match(mapped.message, /Azure Kubernetes Service Cluster User Role/);
+  const other = new Error("ARM 500: InternalServerError");
+  assert.equal(kubeconfigError(other, id, env), other, "other failures pass through unchanged");
+});

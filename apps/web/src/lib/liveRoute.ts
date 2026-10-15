@@ -64,7 +64,7 @@ export function routeEdges(layout: LiveLayout, edges: readonly DiagramEdgeSpec[]
     const sourceHandle: HandleId = backward ? "s-l" : "s-r";
     const targetHandle: HandleId = backward ? "t-r" : "t-l";
     const toRightLane = (!!tLane && tLane !== "ingress") || (!!sLane && sLane !== "ingress");
-    if (toRightLane || CURVED_KINDS.has(e.edgeKind ?? "") || (!forward && !backward)) {
+    if (toRightLane || CURVED_KINDS.has(e.edgeKind ?? "") || !!e.exposure || (!forward && !backward)) {
       out.set(e.id, { kind: "bezier", sourceHandle, targetHandle });
       continue;
     }

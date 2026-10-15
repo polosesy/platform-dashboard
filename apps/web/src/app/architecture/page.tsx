@@ -18,7 +18,7 @@ import { formatBytes } from "@/lib/format";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
-import { formatAzureRegion } from "@/app/live-diagram/utils/regionFormat";
+import { regionName } from "./utils/toFlow";
 import type { ArchNodeData } from "./components/ArchNodes";
 import { DiagramCanvas } from "./components/DiagramCanvas";
 import { Inspector, type InspectorTarget } from "./components/Inspector";
@@ -274,7 +274,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     return { total, shown, ctx, cut, byKind };
   }, [model, region, view, layers]);
 
-  const regionLabel = region === "all" ? t("arch.allRegions") : formatAzureRegion(region);
+  const regionLabel = region === "all" ? t("arch.allRegions") : regionName(region, t);
   const exportCaption = [
     `${t("nav.item.architecture")} · ${regionLabel} · ${t("arch.export.generated", { time: new Date(graph.generatedAt).toLocaleString(dateLocale(locale)) })}`,
     view.active
@@ -298,7 +298,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
           value={region}
           onChange={setRegion}
           options={[
-            ...model.regions.map((r) => ({ value: r.key, label: `${formatAzureRegion(r.key)} · ${t("arch.tilesN", { n: regionTiles(r) })}` })),
+            ...model.regions.map((r) => ({ value: r.key, label: `${regionName(r.key, t)} · ${t("arch.tilesN", { n: regionTiles(r) })}` })),
             { value: "all", label: t("arch.allRegions") },
           ]}
         />
@@ -415,7 +415,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
             </div>
             <Legend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} showContext={view.active} />
           </div>
-          <Inspector model={model} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} filteredOut={scope.cut} />
+          <Inspector model={model} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} filteredOut={scope.cut} undrawn={graph.undrawnTypes} />
         </div>
       )}
     </>

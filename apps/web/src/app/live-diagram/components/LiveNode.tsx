@@ -1,9 +1,10 @@
 "use client";
 
 import { memo, type CSSProperties } from "react";
+import type { GatewayFacts } from "@/lib/liveBackends";
 import { useI18n } from "@/lib/i18n";
 import type { NodeProps } from "reactflow";
-import type { HealthRule, HealthStatus, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import type { HealthRule, HealthStatus, InboundExposure, LiveNode as LiveNodeState, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
 import { cardStatus } from "@/lib/liveStatus";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { HiddenHandles } from "./HiddenHandles";
@@ -11,6 +12,7 @@ import { Spark } from "./Spark";
 import { FullNameTag } from "./NameParts";
 import type { NamePart } from "@/lib/liveNames";
 import type { UsageChip } from "@/lib/plUsage";
+import { pipChip } from "@/lib/livePip";
 import { cardCells, cellTone, compactPercent, isUsagePair, metricCells, METRIC_META, sparkDomain, USAGE_DEFAULT_THRESHOLD, type MetricCell } from "@/lib/liveMetricFormat";
 import { middleEllipsis } from "@/lib/liveNames";
 import { maskGuids } from "@/lib/mask";
@@ -55,6 +57,8 @@ export type LiveNodeData = {
   resourceKind?: string;
   azureResourceId?: string;
   powerState?: PowerState;
+  /** What the status rests on (API evidence ladder) — observed / configured / notApplicable change the pill */
+  basis?: LiveNodeState["basis"];
   archRole?: string;
   archGroupId?: string;
   nsgBadge?: NsgBadgeInfo;
@@ -67,6 +71,14 @@ export type LiveNodeData = {
   ghostOf?: string;
   /** Fault impact role: the failing resource, or one configured hop away from it */
   impact?: "source" | "affected";
+  /** LB / App Gateway: unresolved pool members, created by AKS, outbound only (lib/liveBackends) */
+  gateway?: GatewayFacts;
+  /** Flexible-mode VM: the scale set it belongs to (catalog VMSS-03) */
+  scaleSet?: string;
+  /** Generic PaaS card: its ARM type */
+  armType?: string;
+  /** VM: the NSG verdict on its own public IP (catalog PIP-04, lib/livePip) */
+  pipExposure?: InboundExposure;
 };
 
 /** Kind as the card's second line names it (product names / CAF abbreviations — not translated) */
@@ -79,6 +91,13 @@ const KIND_ABBR: Record<string, string> = {
   firewall: "Firewall", natGateway: "NAT GW", appInsights: "App Insights", logAnalytics: "Log Analytics",
   nic: "NIC", nsg: "NSG", dns: "DNS", privateEndpoint: "PE", publicIP: "Public IP",
   serviceBus: "Service Bus", eventHub: "Event Hubs",
+  agc: "AGC", vnetGateway: "VNet GW", bastion: "Bastion",
+};
+
+/** Generic PaaS card: the product from the ARM type (product names, not translated) */
+const PAAS_ABBR: Record<string, string> = {
+  "microsoft.containerregistry/registries": "Container Registry", "microsoft.cognitiveservices/accounts": "AI Services",
+  "microsoft.cache/redisenterprise": "Redis Enterprise", "microsoft.documentdb/mongoclusters": "Cosmos DB (Mongo vCore)",
 };
 
 const PRIVATE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
@@ -88,6 +107,7 @@ type TFn = (key: string, vars?: Record<string, string | number>) => string;
 /** Second line: what it is and where it answers (private IP, frontend kind), from configuration only */
 function describe(d: LiveNodeData, t: TFn): string {
   const kind = d.resourceKind ?? d.icon;
+  if (kind === "paas") return PAAS_ABBR[d.armType ?? ""] ?? "PaaS";
   const abbr = KIND_ABBR[kind] ?? kind;
   const subs = d.subResources ?? [];
   const nics = subs.filter((s) => s.kind === "nic");
@@ -124,7 +144,7 @@ const textW = (s: string, ko: number, other: number) => [...s].reduce((w, ch) =>
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
   const { t } = useI18n();
   const { label, icon, health, metrics, hasAlert, sparklines, subResources, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused, ghostOf, impact } = data;
-  const status = cardStatus(health, powerState, impact);
+  const status = cardStatus(health, powerState, impact, data.basis);
   const name = data.shortName || label;
   const original = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
   const fullName = maskGuids(original);
@@ -195,7 +215,11 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
       </button>
     ) });
   }
-  if (publicIp && kind !== "lb" && kind !== "natGateway") chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone="public" title={publicIp}>⊕ {t("ld.card.public")}</span> });
+  if (data.pipExposure) {
+    // What the Internet may do with this VM's own public IP — from the NSG verdict, never from traffic
+    const c = pipChip(data.pipExposure, publicIp);
+    chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone={c.tone} title={c.title}>⊕ {t(c.key, c.vars)}</span> });
+  } else if (publicIp && kind !== "lb" && kind !== "natGateway") chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone="public" title={publicIp}>⊕ {t("ld.card.public")}</span> });
   if (nsgBadge) {
     chips.push({ key: "nsg", el: (
       <button type="button" className={styles.cardChip} title={nsgBadge.label} onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsgBadge.nodeId); }}>NSG</button>
@@ -203,6 +227,12 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
   }
   if (ghostOf) chips.push({ key: "ghost", el: <span className={styles.cardChip} title={t("ld.ghostHint", { vnet: ghostOf })}>↗ {middleEllipsis(ghostOf, 12)}</span> });
   if (isUnused) chips.push({ key: "unused", el: <span className={styles.cardChip} title={t("ld.unusedPipHint")}>{t("ld.unused")}</span> });
+  // Gateways: members the pool names but no resource could be matched to — said, never guessed
+  const gw = data.gateway;
+  if (gw?.unresolved) chips.push({ key: "unres", el: <span className={styles.cardChip} data-tone="public" title={t("ld.chip.unresolvedBackends.hint")}>{t("ld.chip.unresolvedBackends", { n: gw.unresolved })}</span> });
+  if (gw?.outboundOnly) chips.push({ key: "outOnly", el: <span className={styles.cardChip} title={t("ld.chip.outboundOnly.hint")}>{t("ld.chip.outboundOnly")}</span> });
+  if (gw?.aksManaged) chips.push({ key: "aks", el: <span className={styles.cardChip} title={t("ld.chip.aksManaged.hint")}>{t("ld.chip.aksManaged")}</span> });
+  if (data.scaleSet != null) chips.push({ key: "vmss", el: <span className={styles.cardChip} title={t("ld.chip.scaleSet.hint", { name: data.scaleSet })}>{t("ld.chip.scaleSet", { name: middleEllipsis(data.scaleSet, 12) })}</span> });
 
   const line3 = !cellKeys.length
     ? <div className={styles.cardRelation}>{data.relation ?? t(kind === "vmss" ? "ld.card.vmssNoMetrics" : "ld.card.noMetrics")}</div>
@@ -263,7 +293,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         <div className={styles.cardRow1}>
           <img src={getAzureIconUrl(icon)} alt="" width={18} height={18} />
           <span className={styles.cardName}>{middleEllipsis(name, 18)}</span>
-          <span className={styles.cardPill} data-tone={status.tone}>{status.glyph} {t(status.key)}</span>
+          {status.glyph ? <span className={styles.cardPill} data-tone={status.tone}>{status.glyph} {t(status.key)}</span> : null}
         </div>
         <div className={styles.cardRow2}>
           <span className={styles.cardDesc}>{describe(data, t)}</span>

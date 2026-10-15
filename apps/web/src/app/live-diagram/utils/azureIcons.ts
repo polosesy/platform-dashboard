@@ -33,6 +33,11 @@ const ICON_FILE: Record<DiagramIconKind, string> = {
   eventHub: "event-hub",
   publicIP: "public-ip",
   natGateway: "nat-gateway",
+  // Drawn for this app (no official asset in the repo): AGC, Bastion, VPN/ER gateway, generic PaaS
+  agc: "agc",
+  vnetGateway: "vpn-gateway",
+  bastion: "bastion",
+  paas: "paas",
   internet: "custom",  // InternetNode uses inline SVG — no asset needed
   custom: "custom",
 };

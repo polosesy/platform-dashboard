@@ -88,7 +88,7 @@ az deployment sub create --location koreacentral \
 ```json
 {
   "connections": [
-    { "key": "home", "displayName": "EMRO", "tenantId": "<HOME_TENANT_ID>", "mode": "platform", "subscriptions": [] },
+    { "key": "home", "displayName": "Home", "tenantId": "<HOME_TENANT_ID>", "mode": "platform", "subscriptions": [] },
     { "key": "custa", "displayName": "Customer A", "tenantId": "<CUSTOMER_A_TENANT_ID>", "mode": "lighthouse",
       "subscriptions": ["<CUSTOMER_A_SUBSCRIPTION_ID>"] },
     { "key": "custb", "displayName": "Customer B", "tenantId": "<CUSTOMER_B_TENANT_ID>", "mode": "servicePrincipal",
@@ -106,7 +106,7 @@ az deployment sub create --location koreacentral \
 | `roles` | 아니요 | 이 연결을 쓸 수 있는 플랫폼 역할(기본 전부). 관리자는 항상 포함 |
 | `logAnalyticsWorkspaces` | 아니요 | 이 연결로 쿼리할 작업 영역(customer ID). 목록에 없는 작업 영역은 홈 연결이 읽음 |
 
-`.env`: `AUD_CONNECTIONS_FILE=config/connections.json` → API 재시작. 시작 로그에 `[auth] … Azure connections: home:platform, custa:lighthouse, custb:servicePrincipal`이 나옵니다. 예전 `AUD_TENANTS_FILE`(`tenants` + `access`)도 그대로 읽힙니다.
+`.env`: `AUD_CONNECTIONS_FILE=config/connections.json`(상대 경로는 저장소 루트 — `.env`가 있는 곳 — 기준) → API 재시작. 시작 로그에 `[auth] … Azure connections: home:platform, custa:lighthouse, custb:servicePrincipal`이 나옵니다. 예전 `AUD_TENANTS_FILE`(`tenants` + `access`)도 그대로 읽힙니다.
 
 ## 5. 설정 — 수동 (Portal)
 

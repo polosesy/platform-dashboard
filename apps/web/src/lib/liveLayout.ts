@@ -67,6 +67,8 @@ export type PlaceMeta = {
   /** Middle of the gap between the Internet terminal and the public LB column inside the inbound lane */
   laneInnerGapX?: number;
   cardClass: Map<string, CardClass>;
+  /** Subnet id → its right-linked cards (step 3), reordered to their targets' height after the lanes are placed */
+  rSlots: Map<string, string[]>;
   /** Lane membership of nodes outside the VNets */
   laneOf: Map<string, LaneKind>;
   /** Every drawn subnet box (banded or not) */
@@ -161,6 +163,9 @@ export function subnetTier(subnet: DiagramNodeSpec, cards: DiagramNodeSpec[]): n
 /** Lines that say how traffic or dependencies flow between places (associations and guesses do not) */
 export function isLayoutEdge(e: DiagramEdgeSpec): boolean {
   if (isInferredEdge(e)) return false;
+  // Internet → VM through its own public IP: drawn only — otherwise every subnet with such a VM becomes an entry
+  // (layer 0) and the bands reorder
+  if (e.exposure) return false;
   return e.edgeKind !== "natgw-association" && e.edgeKind !== "outbound-internet" && e.edgeKind !== "peering";
 }
 
@@ -247,7 +252,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   };
   const layoutEdges = [...spec.edges].filter(isLayoutEdge).sort((a, b) => cmp(a.id, b.id));
 
-  const meta: PlaceMeta = { subnet: new Map(), corridorX: new Map(), ingressGapX: 0, cardClass: new Map(), laneOf, subnetIds: new Set(), terminals: new Set() };
+  const meta: PlaceMeta = { subnet: new Map(), corridorX: new Map(), ingressGapX: 0, cardClass: new Map(), laneOf, subnetIds: new Set(), terminals: new Set(), rSlots: new Map() };
   const bandLayerIds = new Map<number, string[]>(); // band → layer column wrap ids in order
   let bandSeq = 0;
 
@@ -418,16 +423,24 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
         const R = rest.filter((c) => meta.cardClass.get(c.id) === "R");
         const N = rest.filter((c) => meta.cardClass.get(c.id) === "N" || meta.cardClass.get(c.id) === "LR");
         const r = Math.max(L.length, R.length, Math.ceil(rest.length / cols));
+        const grid: Array<Array<DiagramNodeSpec | null>> = [];
         for (let i = 0; i < r; i++) {
           const slots: Array<DiagramNodeSpec | null> = Array.from({ length: cols }, () => null);
           if (L[i]) slots[0] = L[i]!;
           if (R[i]) slots[cols - 1] = R[i]!;
           for (let c = 0; c < cols; c++) if (!slots[c] && N.length) slots[c] = N.shift()!;
-          let last = -1;
-          slots.forEach((x, c) => { if (x) last = c; });
-          if (last < 0) continue;
-          rows.push(slots.slice(0, last + 1).map((x, c) => (x ? sizeLeaf(x) : spacer(`${s.id}:${i}:${c}`))));
+          if (slots.some(Boolean)) grid.push(slots);
         }
+        // A column no row uses is dropped: seven right-linked Private Endpoints are one column, not
+        // [empty, empty, PE] rows that left two thirds of the subnet blank. Right-linked cards stay last.
+        const keep = Array.from({ length: cols }, (_, c) => grid.some((row) => row[c]));
+        grid.forEach((slots, i) => {
+          const kept = slots.filter((_, c) => keep[c]);
+          let last = -1;
+          kept.forEach((x, c) => { if (x) last = c; });
+          rows.push(kept.slice(0, last + 1).map((x, c) => (x ? sizeLeaf(x) : spacer(`${s.id}:${i}:${c}`))));
+        });
+        if (R.length > 1) meta.rSlots.set(s.id, R.map((c) => c.id));
       }
       const rowBoxes = rows.map((row, i) => wrap(`row:${s.id}:${i}`, "row", row, LIVE.GAP));
       return box({ id: s.id, kind: "subnet" }, rowBoxes, { head: LIVE.SUBNET_HEAD, dir: "col", maxW: Infinity, minW: LIVE.CARD_W + 2 * LIVE.PAD });
@@ -543,7 +556,11 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       ], { head: LIVE.LANE_HEAD, maxW: Infinity, gap: LIVE.INGRESS_INNER_GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD })
     : null;
   const paasGroups = PAAS_ORDER
-    .map((cat) => lane("paas", `ld.lane.paas.${cat}`, laneMembers.paas.filter((n) => archCategoryOf(kindOf(n)) === cat), 2, cat))
+    .map((cat) => {
+      const members = laneMembers.paas.filter((n) => archCategoryOf(kindOf(n)) === cat);
+      // One column up to six: lines into a second column crossed the cards of the first
+      return lane("paas", `ld.lane.paas.${cat}`, members, members.length > 6 ? 2 : 1, cat);
+    })
     .filter((x): x is PackNode<Shape> => !!x);
   const right = [
     // Outbound reads left to right: NAT Gateways, then the Internet terminal (lines stay short and straight)
@@ -637,6 +654,27 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       const target = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : null;
       return { p, target, move: (dy: number) => shiftTree(p.shape.id, dy) };
     }), 24, -Infinity);
+  }
+  orderToTargets();
+
+  /**
+   * Right-linked cards of a subnet (Private Endpoints → PaaS lane) take their slots in the vertical order of what
+   * they link to outside the subnet, so their lines do not cross. Only the slots move (same size), lanes stay;
+   * ties by id — deterministic.
+   */
+  function orderToTargets() {
+    for (const [subnetId, ids] of [...meta.rSlots].sort(([a], [b]) => cmp(a, b))) {
+      const cards = ids.map((id) => at.get(id)).filter((p): p is Placed<Shape> => !!p);
+      if (cards.length < 2 || cards.some((c) => c.w !== cards[0]!.w || c.h !== cards[0]!.h)) continue;
+      const own = new Set(ids);
+      const key = (p: Placed<Shape>) => {
+        const nb = neighbours(p.shape.id, (o) => !own.has(o) && at.has(o) && !within(at.get(o)!, subnetId));
+        return nb.length ? mean(nb.map((id) => cy(at.get(id)!))) : Infinity;
+      };
+      const slots = cards.map((c) => ({ x: c.x, y: c.y })).sort((a, b) => a.y - b.y || a.x - b.x);
+      const ordered = [...cards].sort((a, b) => key(a) - key(b) || cmp(a.shape.id, b.shape.id));
+      ordered.forEach((c, i) => { c.x = slots[i]!.x; c.y = slots[i]!.y; });
+    }
   }
 
   // ── Absolute → relative to the drawn parent ──

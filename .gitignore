@@ -13,3 +13,5 @@ config/tenants.json
 # Diagrams of real environments (subscription / resource IDs) — kept local only (scripts/gp.sh adds everything)
 docs/nexsrm-infra-diagram.md
 docs/resource-inventory-diagram.md
+# Local read-only probes against real tenants (print tenant facts) — never committed
+apps/api/.probe/

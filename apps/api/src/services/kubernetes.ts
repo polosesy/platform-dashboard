@@ -10,6 +10,7 @@ import type {
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { anonymousSpAllowed, getArmFetcherAuto, signinRequired } from "../infra/azureClientFactory.js";
 import { HttpError, parseSubscriptionIds } from "../infra/requestParams.js";
+import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
 
 // ────────────────────────────────────────────
@@ -108,10 +109,15 @@ export async function getKubeconfig(
 
   const fetcher = await getArmFetcherAuto(env, bearerToken);
 
-  const data = await fetcher.postJson<{ kubeconfigs?: Array<{ name?: string; value?: string }> }>(
-    `https://management.azure.com${azureResourceId}/listClusterUserCredential?api-version=2024-09-01`,
-    {},
-  );
+  let data: { kubeconfigs?: Array<{ name?: string; value?: string }> };
+  try {
+    data = await fetcher.postJson<{ kubeconfigs?: Array<{ name?: string; value?: string }> }>(
+      `https://management.azure.com${azureResourceId}/listClusterUserCredential?api-version=2024-09-01`,
+      {},
+    );
+  } catch (e) {
+    throw kubeconfigError(e, azureResourceId, env);
+  }
 
   const b64 = data.kubeconfigs?.[0]?.value;
   if (!b64) throw new Error("No kubeconfig returned from ARM");
@@ -119,6 +125,22 @@ export async function getKubeconfig(
   const kubeconfig = Buffer.from(b64, "base64").toString("utf-8");
   kubeconfigCache.set(cacheKey, kubeconfig);
   return kubeconfig;
+}
+
+/**
+ * Fetching a kubeconfig is an action (listClusterUserCredential/action), not a read: a connection with Reader
+ * (or only read actions) gets ARM 403 AuthorizationFailed. Say so — with the connection and the role that grants it —
+ * instead of a 500 carrying Azure's text. Role: "Azure Kubernetes Service Cluster User Role" on the cluster
+ * (https://learn.microsoft.com/azure/aks/control-kubeconfig-access). Exported for tests.
+ */
+export function kubeconfigError(e: unknown, azureResourceId: string, env: Env): unknown {
+  const msg = String((e as Error)?.message ?? e);
+  if (!/ARM 403\b/.test(msg) || !/AuthorizationFailed/i.test(msg) || !/listClusterUserCredential/i.test(msg)) return e;
+  const sub = /^\/subscriptions\/([^/]+)/i.exec(azureResourceId)?.[1] ?? "";
+  const conn = connectionForSubscription(env, sub)?.key ?? "?";
+  return new HttpError(403, "aks_credential_forbidden",
+    `Azure connection "${conn}" may not fetch this cluster's credentials (listClusterUserCredential/action). ` +
+    `Assign "Azure Kubernetes Service Cluster User Role" on the cluster to that connection's identity.`);
 }
 
 /** KubeConfig for an AKS cluster (kubeconfig itself is cached for 5 min). */

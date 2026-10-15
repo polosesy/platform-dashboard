@@ -1,6 +1,6 @@
 // Short resource names for the live diagram — pure (tested in apps/api/test/liveCard.test.ts).
 //
-// Azure names repeat their VNet's words (vm-infosec-ngf-a-poc-eus-001 inside vnet-infosec-poc-eus-001).
+// Azure names repeat their VNet's words (vm-demo-ngf-a-poc-eus-001 inside vnet-demo-poc-eus-001).
 // Inside that VNet the card only needs what is left ("ngf-a"); the full name stays in tooltips, search and
 // the detail panel.
 

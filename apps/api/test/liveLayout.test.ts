@@ -150,7 +150,7 @@ test("every line style is a distinct (colour, dash) pair; the legend lists exact
 test("dashes only mark weaker evidence", () => {
   for (const k of St.LIVE_STYLE_ORDER) {
     const dashed = !!St.LIVE_EDGE_LOOK[k].dash;
-    assert.equal(dashed, k === "inferred" || k === "egressDeprecated", k);
+    assert.equal(dashed, k === "inferred" || k === "egressDeprecated" || k === "ingressUnknown" || k === "configWeak", k);
   }
 });
 
@@ -240,4 +240,50 @@ test("detached NSGs placed in a subnet by resource-group guess join the unused l
   const lane = lay.lanes.find((l) => l.lane === "unused")!;
   const members = ["pip-unused", "nsg-detached", "nsg-guessed"].map((id) => lay.abs.get(id)!);
   for (const m of members) assert.ok(m.x >= lane.x && m.y >= lane.y && m.x + m.w <= lane.x + lane.w && m.y + m.h <= lane.y + lane.h);
+});
+
+// ── a Private Endpoint subnet: seven PEs → seven PaaS targets (snet-pep shape from a real tenant) ──
+function pepSpec(order: number[] = [0, 1, 2, 3, 4, 5, 6]): DiagramSpec {
+  const kinds = ["keyVault", "storage", "redis", "postgres", "cosmosDb", "serviceBus", "eventHub"];
+  const nodes: DiagramNodeSpec[] = [group("vnet", "vnet"), group("snet-aks", "subnet", "vnet"), group("snet-pep", "subnet", "vnet")];
+  nodes.push(node("aks", { icon: "aks", resourceKind: "aks", parentId: "snet-aks" }));
+  const edges: DiagramEdgeSpec[] = [];
+  for (const i of order) {
+    nodes.push(node(`pe-${i}`, { icon: "privateEndpoint", resourceKind: "privateEndpoint", parentId: "snet-pep" }));
+    nodes.push(node(`paas-${i}`, { icon: kinds[i] as DiagramNodeSpec["icon"], resourceKind: kinds[i] }));
+    edges.push(edge(`pl-${i}`, `pe-${i}`, `paas-${i}`, { edgeKind: "privateLink" }));
+  }
+  nodes.push(node("inet-out", { icon: "internet", resourceKind: "internet", metadata: { direction: "egress" } }));
+  edges.push(edge("dflt", "snet-pep", "inet-out", { edgeKind: "outbound-internet", animation: "dash" }));
+  return { version: "1", id: "pep", name: "pep", createdAt: "", updatedAt: "", groups: [], settings: { refreshIntervalSec: 30, defaultTimeRange: "1h", layout: "manual" }, nodes, edges };
+}
+
+test("a PE subnet is one column wide (no empty columns) and its PEs follow their targets' order — no crossings", () => {
+  for (const order of [[0, 1, 2, 3, 4, 5, 6], [6, 2, 4, 0, 5, 1, 3]]) {
+    const lay = liveLayout(pepSpec(order));
+    const pes = [...lay.items.values()].filter((b) => b.parent && b.id.startsWith("pe-"));
+    assert.equal(new Set(pes.map((b) => b.x)).size, 1, "one column");
+    const sub = lay.items.get("snet-pep")!;
+    assert.ok(sub.w <= LIVE.CARD_W + 2 * LIVE.PAD + 1, `subnet width ${sub.w}`);
+    const ys = (prefix: string) => [0, 1, 2, 3, 4, 5, 6].map((i) => { const a = lay.abs.get(`${prefix}-${i}`)!; return a.y + a.h / 2; });
+    const pe = ys("pe"), paas = ys("paas");
+    for (let a = 0; a < 7; a++) for (let b = a + 1; b < 7; b++) assert.ok((pe[a]! - pe[b]!) * (paas[a]! - paas[b]!) >= 0, `pl-${a} and pl-${b} cross`);
+  }
+  // a PaaS lane with up to six members is one column
+  const lanes = liveLayout(pepSpec()).lanes.filter((l) => l.kind === "lane");
+  for (const l of lanes) {
+    const members = [...liveLayout(pepSpec()).items.values()].filter((b) => b.parent === l.id);
+    if (members.length && members.length <= 6) assert.equal(new Set(members.map((m) => m.x)).size, 1, l.id);
+  }
+});
+
+test("default outbound and NAT association lines are focus-only; NAT → Internet stays", async () => {
+  const S = await import("../../web/src/lib/liveScope.ts");
+  const Sc = ((S as unknown as { default?: typeof S }).default ?? S) as typeof S;
+  const spec = pepSpec();
+  const byId = new Map(spec.nodes.map((n) => [n.id, n]));
+  byId.set("nat", node("nat", { icon: "natGateway", resourceKind: "natGateway" }));
+  assert.equal(Sc.isFocusOnlyEdge(spec.edges.find((e) => e.id === "dflt")!, byId), true);
+  assert.equal(Sc.isFocusOnlyEdge(edge("a", "snet-pep", "nat", { edgeKind: "natgw-association" }), byId), true);
+  assert.equal(Sc.isFocusOnlyEdge(edge("b", "nat", "inet-out", { edgeKind: "outbound-internet" }), byId), false);
 });

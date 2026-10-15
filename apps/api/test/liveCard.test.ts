@@ -14,13 +14,13 @@ const ST = ((styleNs as unknown as { default?: typeof styleNs }).default ?? styl
 // ── short names (B-10): the VNet's own words are dropped, collisions keep the type prefix ──
 
 test("short names inside a VNet", () => {
-  const V = "vnet-infosec-poc-eus-001";
+  const V = "vnet-demo-poc-eus-001";
   const cards = [
-    { id: "a", label: "vm-infosec-ngf-a-poc-eus-001", kind: "vm" },
-    { id: "b", label: "lb-ips-infosec-poc-eus-001", kind: "lb" },
-    { id: "c", label: "lbi-ips-infosec-poc-eus-001", kind: "lb" },
-    { id: "d", label: "vmss-infosec-web-infosec-poc-eus-001", kind: "vmss" },
-    { id: "e", label: "vmss-infosec-web-infosec-poc-eus-00_9cd5ec7e", kind: "vm" },
+    { id: "a", label: "vm-demo-ngf-a-poc-eus-001", kind: "vm" },
+    { id: "b", label: "lb-ips-demo-poc-eus-001", kind: "lb" },
+    { id: "c", label: "lbi-ips-demo-poc-eus-001", kind: "lb" },
+    { id: "d", label: "vmss-demo-web-demo-poc-eus-001", kind: "vmss" },
+    { id: "e", label: "vmss-demo-web-demo-poc-eus-00_9cd5ec7e", kind: "vm" },
   ];
   const m = N.shortNames(cards, () => V);
   assert.equal(m.get("a"), "ngf-a");
@@ -28,12 +28,12 @@ test("short names inside a VNet", () => {
   assert.equal(m.get("c"), "lbi-ips");
   assert.equal(m.get("d"), "web");
   assert.equal(m.get("e"), "web-9cd5ec7e");
-  assert.equal(N.shortNames([{ id: "q", label: "krc-srm-qa-aillm-linux-vm06", kind: "vm" }], () => "emro-srm-qa-krc-01-vnet").get("q"), "aillm-linux-vm06");
+  assert.equal(N.shortNames([{ id: "q", label: "krc-app-qa-web-linux-vm06", kind: "vm" }], () => "acme-app-qa-krc-01-vnet").get("q"), "web-linux-vm06");
   // no duplicates in a view
   const values = [...m.values()];
   assert.equal(new Set(values).size, values.length);
   // nothing left → the full name
-  assert.equal(N.shortNames([{ id: "z", label: "infosec-poc", kind: "vm" }], () => V).get("z"), "infosec-poc");
+  assert.equal(N.shortNames([{ id: "z", label: "demo-poc", kind: "vm" }], () => V).get("z"), "demo-poc");
 });
 
 test("middle ellipsis keeps the distinguishing end", () => {
@@ -95,24 +95,24 @@ test("status: nothing assumed, red only for a fault, running alone is not health
 // ── full-name tag: the short name's words inside the full name ──
 
 test("name parts mark the words the short name keeps", () => {
-  const V = "vnet-infosec-poc-eus-001";
+  const V = "vnet-demo-poc-eus-001";
   const m = N.shortNamesWithParts([
-    { id: "a", label: "vm-ngf-a-infosec-poc-eus-001", kind: "vm" },
-    { id: "v", label: "vmss-infosec-web-infosec-poc-eus-00_9cd5ec7e", kind: "vm" },
-    { id: "x", label: "lb-web-infosec-poc-eus-001", kind: "lb" },
-    { id: "y", label: "lbi-web-infosec-poc-eus-001", kind: "lb" },
+    { id: "a", label: "vm-ngf-a-demo-poc-eus-001", kind: "vm" },
+    { id: "v", label: "vmss-demo-web-demo-poc-eus-00_9cd5ec7e", kind: "vm" },
+    { id: "x", label: "lb-web-demo-poc-eus-001", kind: "lb" },
+    { id: "y", label: "lbi-web-demo-poc-eus-001", kind: "lb" },
   ], () => V);
   const kept = (id: string) => m.get(id)!.parts.filter((p) => p.kept).map((p) => p.text).join("");
   assert.equal(kept("a"), "ngf-a", "CAF prefix and VNet words dropped, the separator between kept words kept");
-  assert.equal(m.get("a")!.parts.map((p) => p.text).join(""), "vm-ngf-a-infosec-poc-eus-001", "parts rebuild the full name");
+  assert.equal(m.get("a")!.parts.map((p) => p.text).join(""), "vm-ngf-a-demo-poc-eus-001", "parts rebuild the full name");
   assert.ok(!m.get("v")!.parts.some((p) => p.text === "00" && p.kept), "a truncated VNet word is dropped");
   for (const id of ["a", "v", "x", "y"]) assert.equal(N.partsText(m.get(id)!.parts), m.get(id)!.text, "parts give the same short name");
-  assert.deepEqual([...N.shortNames([{ id: "a", label: "vm-ngf-a-infosec-poc-eus-001", kind: "vm" }], () => V)], [["a", "ngf-a"]]);
+  assert.deepEqual([...N.shortNames([{ id: "a", label: "vm-ngf-a-demo-poc-eus-001", kind: "vm" }], () => V)], [["a", "ngf-a"]]);
 });
 
 test("a name that falls back to the full name keeps every part", () => {
-  const m = N.shortNamesWithParts([{ id: "a", label: "infosec-poc", kind: "vm" }], () => "vnet-infosec-poc");
-  assert.equal(m.get("a")!.text, "infosec-poc");
+  const m = N.shortNamesWithParts([{ id: "a", label: "demo-poc", kind: "vm" }], () => "vnet-demo-poc");
+  assert.equal(m.get("a")!.text, "demo-poc");
   assert.ok(m.get("a")!.parts.every((p) => p.kept));
 });
 
@@ -175,7 +175,8 @@ test("CARD_CELLS and NODE_BINDINGS agree, and tones follow the leveled rules", (
     for (const k of cells) assert.ok(M.METRIC_META[k], `${k} has a label and unit`);
   }
   for (const kind of Object.keys(NB)) assert.ok(M.CARD_CELLS[kind], `${kind} has card cells`);
-  for (const k of ["nsg", "nic", "dns", "logAnalytics"]) assert.deepEqual(M.CARD_CELLS[k], [], `${k}: no metric row`);
+  for (const k of ["nsg", "nic", "logAnalytics", "vnetGateway", "bastion", "paas"]) assert.deepEqual(M.CARD_CELLS[k], [], `${k}: no metric row`);
+  assert.deepEqual(M.CARD_CELLS.dns, ["queries"], "DNS zones: query volume over an hour (activity, not health)");
   assert.ok(M.isUsagePair(M.CARD_CELLS.redis!) && M.isUsagePair(M.CARD_CELLS.postgres!) && M.isUsagePair(M.CARD_CELLS.vm!));
   assert.ok(!M.isUsagePair(M.CARD_CELLS.appGateway!) && !M.isUsagePair(M.CARD_CELLS.lb!));
   assert.deepEqual(M.sparkDomain("dataPath", [99, 100]), [95, 100]);

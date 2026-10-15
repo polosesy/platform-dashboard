@@ -73,6 +73,36 @@ function monitorAggParam(agg: MetricAggregation): string {
 type MetricSeries = ReadonlyArray<readonly [string, MonitorTimeseriesValue[]]>;
 
 /**
+ * A dimension filter ("Listener eq 'a' or Listener eq 'b'", "BackendServer eq 'ip:80' or …") returns one series
+ * per value: buckets at the same time are added (total / count) or averaged over the series that have a value
+ * (average / min / max). One series is returned as is. Exported for tests.
+ */
+export function mergeSeries(series: ReadonlyArray<{ data?: MonitorTimeseriesValue[] }>): MonitorTimeseriesValue[] {
+  if (series.length <= 1) return series[0]?.data ?? [];
+  const byTime = new Map<string, { total?: number; count?: number; avg: number[]; min: number[]; max: number[] }>();
+  for (const s of series) {
+    for (const b of s.data ?? []) {
+      const k = b.timeStamp;
+      const m = byTime.get(k) ?? { avg: [], min: [], max: [] };
+      if (b.total != null) m.total = (m.total ?? 0) + b.total;
+      if (b.count != null) m.count = (m.count ?? 0) + b.count;
+      if (b.average != null) m.avg.push(b.average);
+      if (b.minimum != null) m.min.push(b.minimum);
+      if (b.maximum != null) m.max.push(b.maximum);
+      byTime.set(k, m);
+    }
+  }
+  return [...byTime.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([timeStamp, m]) => ({
+    timeStamp,
+    ...(m.total != null ? { total: m.total } : {}),
+    ...(m.count != null ? { count: m.count } : {}),
+    ...(m.avg.length ? { average: m.avg.reduce((x, y) => x + y, 0) / m.avg.length } : {}),
+    ...(m.min.length ? { minimum: Math.min(...m.min) } : {}),
+    ...(m.max.length ? { maximum: Math.max(...m.max) } : {}),
+  }));
+}
+
+/**
  * Runs one metrics query for all bindings and reads each value. An unknown metric name fails the whole Azure
  * Monitor request, so when that happens the required metrics are asked again on their own and every optional
  * one separately: a resource without "Available Memory Percentage" still shows its CPU. Only a 400 (rejected
@@ -146,10 +176,16 @@ export async function queryResourceMetrics(
 ): Promise<Record<string, number | null>> {
   const skip = unsupportedMetrics.get(azureResourceId);
   const monitor = Object.entries(bindings).filter(([, b]) => b.source === "monitor" && b.metric && !(b.optional && skip?.has(rejectedKey(b))));
+  // One request per (dimension filter, window). A window binding reads one bucket over the whole window (PE bytes
+  // over an hour, NAT data path averaged over 15 minutes) — an empty series stays null, a reported 0 stays 0
   const groups = new Map<string, Array<[string, MetricBinding]>>();
-  for (const entry of monitor) (groups.get(entry[1].filter ?? "") ?? groups.set(entry[1].filter ?? "", []).get(entry[1].filter ?? "")!).push(entry);
+  const groupKey = (b: MetricBinding) => `${b.filter ?? ""}|${b.window ?? ""}`;
+  for (const entry of monitor) (groups.get(groupKey(entry[1])) ?? groups.set(groupKey(entry[1]), []).get(groupKey(entry[1]))!).push(entry);
   const values: Record<string, number | null> = {};
-  for (const [filter, list] of groups) {
+  // The groups of one resource are separate requests: send them together
+  await Promise.all([...groups.values()].map(async (list) => {
+    const filter = list[0]![1].filter ?? "";
+    const window = list[0]![1].window;
     const query = async (part: Array<[string, MetricBinding]>) => {
       const metricNames = [...new Set(part.map(([, b]) => b.metric!))];
       const aggregations = [...new Set(part.map(([, b]) => monitorAggParam(b.aggregation ?? "avg")))];
@@ -158,19 +194,19 @@ export async function queryResourceMetrics(
         `/providers/microsoft.insights/metrics` +
         `?api-version=2024-02-01` +
         `&metricnames=${metricNames.map(encodeURIComponent).join(",")}` +
-        `&timespan=PT5M` +
-        `&interval=PT1M` +
+        `&timespan=${window ?? "PT5M"}` +
+        `&interval=${window ?? "PT1M"}` +
         `&aggregation=${aggregations.join(",")}` +
         (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
       const resp = await fetcher.fetchJson<MonitorMetricsResponse>(url);
-      return (resp.value ?? []).map((mv) => [mv.name.value, mv.timeseries?.[0]?.data ?? []] as const);
+      return (resp.value ?? []).map((mv) => [mv.name.value, mergeSeries(mv.timeseries ?? [])] as const);
     };
     Object.assign(values, await queryMetricsTolerant(list, query, (metric) => {
       const set = unsupportedMetrics.get(azureResourceId) ?? new Set<string>();
       set.add(`${metric}|${filter}`);
       unsupportedMetrics.set(azureResourceId, set);
     }));
-  }
+  }));
   return applyDerived(bindings, values);
 }
 
@@ -197,14 +233,31 @@ export async function collectResourceMetrics(
 }
 
 /**
+ * All workers done, or the deadline — whichever comes first. At the deadline the caller gets a copy of what has
+ * arrived (the rest stays "not measured" this round); unfinished requests keep running and fill the caches for
+ * the next poll, so a large VNet fills in instead of timing out. Exported for tests.
+ */
+export async function untilDeadline<T>(all: Promise<unknown>, results: Map<string, T>, deadlineMs?: number): Promise<Map<string, T>> {
+  if (!deadlineMs) { await all; return results; }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((r) => { timer = setTimeout(() => r("late"), deadlineMs); });
+  const done = await Promise.race([all.then(() => "done" as const), late]);
+  if (timer) clearTimeout(timer);
+  if (done === "late") { all.catch(() => undefined); return new Map(results); }
+  return results;
+}
+
+/**
  * Batch collect metrics for multiple resources (parallel with concurrency limit).
  */
 export async function collectBatchMetrics(
   env: Env,
   bearerToken: string,
   resources: Array<{ azureResourceId: string; bindings: Record<string, MetricBinding> }>,
+  /** Resolve with what has arrived by then; requests still running finish into the per-resource cache */
+  deadlineMs?: number,
 ): Promise<Map<string, Record<string, number | null>>> {
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 10;
   const results = new Map<string, Record<string, number | null>>();
   const queue = [...resources];
 
@@ -221,8 +274,7 @@ export async function collectBatchMetrics(
     }
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-  return results;
+  return untilDeadline(Promise.all(Array.from({ length: CONCURRENCY }, () => worker())), results, deadlineMs);
 }
 
 // ────────────────────────────────────────────
@@ -243,19 +295,35 @@ export async function collectEdgeMonitorMetrics(
   bearerToken: string,
   edge: DiagramEdgeSpec,
   node: DiagramNodeSpec,
+  /** Resources to read instead of the node (a VM's public IPs, `on: "publicIp"`) — values are summed */
+  resourceIds?: string[],
 ): Promise<Record<string, number | null>> {
-  const resourceId = node.azureResourceId;
-  if (!resourceId || !Object.values(edge.bindings).some((b) => b.source === "monitor")) return {};
+  const ids = resourceIds ?? (node.azureResourceId ? [node.azureResourceId] : []);
+  if (!ids.length || !Object.values(edge.bindings).some((b) => b.source === "monitor")) return {};
 
   const prefix = bearerKeyPrefix(bearerToken);
-  const cacheKey = `${prefix}:edgemetrics:${edge.id}:${resourceId}`;
+  const cacheKey = `${prefix}:edgemetrics:${edge.id}:${ids.join(",")}`;
   const cached = edgeMetricCache.get(cacheKey);
   if (cached) return cached;
 
   const fetcher = await getArmFetcher(env, bearerToken);
-  const result = await queryResourceMetrics(fetcher, resourceId, edge.bindings);
+  const parts = await Promise.all(ids.map((id) => queryResourceMetrics(fetcher, id, edge.bindings)));
+  const result = sumMetricRecords(parts);
   edgeMetricCache.set(cacheKey, result);
   return result;
+}
+
+/** Key-wise sum of several resources' values; null only when no resource reported the key */
+export function sumMetricRecords(parts: Array<Record<string, number | null>>): Record<string, number | null> {
+  if (parts.length === 1) return parts[0]!;
+  const out: Record<string, number | null> = {};
+  for (const p of parts) {
+    for (const [k, v] of Object.entries(p)) {
+      if (v == null) { if (!(k in out)) out[k] = null; continue; }
+      out[k] = (out[k] ?? 0) + v;
+    }
+  }
+  return out;
 }
 
 /**
@@ -264,9 +332,10 @@ export async function collectEdgeMonitorMetrics(
 export async function collectBatchEdgeMetrics(
   env: Env,
   bearerToken: string,
-  items: Array<{ edge: DiagramEdgeSpec; node: DiagramNodeSpec }>,
+  items: Array<{ edge: DiagramEdgeSpec; node: DiagramNodeSpec; resourceIds?: string[] }>,
+  deadlineMs?: number,
 ): Promise<Map<string, Record<string, number | null>>> {
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 10;
   const results = new Map<string, Record<string, number | null>>();
   const queue = [...items];
 
@@ -275,7 +344,7 @@ export async function collectBatchEdgeMetrics(
       const item = queue.shift();
       if (!item) break;
       try {
-        const metrics = await collectEdgeMonitorMetrics(env, bearerToken, item.edge, item.node);
+        const metrics = await collectEdgeMonitorMetrics(env, bearerToken, item.edge, item.node, item.resourceIds);
         results.set(item.edge.id, metrics);
       } catch {
         results.set(item.edge.id, {});
@@ -283,8 +352,7 @@ export async function collectBatchEdgeMetrics(
     }
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-  return results;
+  return untilDeadline(Promise.all(Array.from({ length: CONCURRENCY }, () => worker())), results, deadlineMs);
 }
 
 // ────────────────────────────────────────────
@@ -442,8 +510,9 @@ export async function collectBatchPowerStates(
   env: Env,
   bearerToken: string | undefined,
   nodes: Array<{ azureResourceId: string; resourceKind: string }>,
+  deadlineMs?: number,
 ): Promise<Map<string, PowerState>> {
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 10;
   const targets = nodes.filter(
     (n) => n.azureResourceId && POWER_STATE_RESOURCE_KINDS.has(n.resourceKind),
   );
@@ -464,6 +533,5 @@ export async function collectBatchPowerStates(
     }
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-  return results;
+  return untilDeadline(Promise.all(Array.from({ length: CONCURRENCY }, () => worker())), results, deadlineMs);
 }

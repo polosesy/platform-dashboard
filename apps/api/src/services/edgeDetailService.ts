@@ -22,6 +22,7 @@ import { diagramOwner, getDiagramSpec } from "./liveAggregator.js";
 import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
 import { fetchAksNodeInfoMap } from "./kubernetes.js";
+import { collectNodeHealth } from "./containerInsightsCollector.js";
 import { debug } from "../infra/logger.js";
 
 // ──────────────────────────────────────────────
@@ -97,7 +98,25 @@ interface ArmNsgRule {
     destinationPortRange?: string;
     sourceAddressPrefix?: string;
     destinationAddressPrefix?: string;
+    sourcePortRanges?: string[];
+    destinationPortRanges?: string[];
+    sourceAddressPrefixes?: string[];
+    destinationAddressPrefixes?: string[];
+    sourceApplicationSecurityGroups?: Array<{ id?: string }>;
+    destinationApplicationSecurityGroups?: Array<{ id?: string }>;
   };
+}
+
+/**
+ * One NSG rule field for display: the single value, else the plural list, else the application security groups.
+ * "*" only when the rule really says any — a rule narrowed by a list or an ASG must not read as "any".
+ */
+function ruleField(single: string | undefined, many: string[] | undefined, asgs?: Array<{ id?: string }>): string {
+  if (single) return single;
+  if (many?.length) return many.join(", ");
+  const names = (asgs ?? []).map((a) => a.id?.split("/").pop()).filter(Boolean);
+  if (names.length) return `ASG: ${names.join(", ")}`;
+  return "*";
 }
 
 export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, nsgId: string): Promise<NsgInfo | undefined> {
@@ -115,10 +134,10 @@ export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, ns
       direction: (r.properties?.direction as "Inbound" | "Outbound") ?? "Inbound",
       access: (r.properties?.access as "Allow" | "Deny") ?? "Deny",
       protocol: r.properties?.protocol ?? "*",
-      sourcePortRange: r.properties?.sourcePortRange ?? "*",
-      destinationPortRange: r.properties?.destinationPortRange ?? "*",
-      sourceAddressPrefix: r.properties?.sourceAddressPrefix ?? "*",
-      destinationAddressPrefix: r.properties?.destinationAddressPrefix ?? "*",
+      sourcePortRange: ruleField(r.properties?.sourcePortRange, r.properties?.sourcePortRanges),
+      destinationPortRange: ruleField(r.properties?.destinationPortRange, r.properties?.destinationPortRanges),
+      sourceAddressPrefix: ruleField(r.properties?.sourceAddressPrefix, r.properties?.sourceAddressPrefixes, r.properties?.sourceApplicationSecurityGroups),
+      destinationAddressPrefix: ruleField(r.properties?.destinationAddressPrefix, r.properties?.destinationAddressPrefixes, r.properties?.destinationApplicationSecurityGroups),
     }));
     return { name: data.name ?? nsgId.split("/").pop() ?? "nsg", resourceId: nsgId, effectiveRules };
   } catch {
@@ -615,6 +634,19 @@ export async function fetchVmssInstances(
         : Promise.resolve(null),
     ]);
     const instances = ((data?.value ?? []) as Array<Record<string, unknown>>).slice(0, 50);
+    // No Kubernetes API (credentials refused, Entra-only cluster): the node's Ready state is still reported by
+    // the AKS platform metric kube_node_status_condition (Monitor read only), else by Container Insights
+    // (KubeNodeInventory.Status, when the cluster sends logs)
+    let readySource: "platformMetric" | "containerInsights" | undefined;
+    let ciReady: Map<string, string> | null = null;
+    if (!k8sNodes && aksClusterArmId) {
+      ciReady = await nodeReadyFromMetric(arm, aksClusterArmId).catch(() => null);
+      if (ciReady?.size) readySource = "platformMetric";
+      else {
+        ciReady = await collectNodeHealth(env, bearerToken, aksClusterArmId).then((r) => new Map(r.nodes.map((n) => [n.name.toLowerCase(), n.status]))).catch(() => null);
+        if (ciReady?.size) readySource = "containerInsights";
+      }
+    }
 
     // Build instanceId → privateIp map from ARM NIC API (fallback when K8s unavailable)
     const instanceIpMap = new Map<string, string>();
@@ -645,6 +677,11 @@ export async function fetchVmssInstances(
 
       // Prefer K8s node data (accurate IP, nodeImageVersion, real conditions) over ARM
       const k8sNode = k8sNodes?.[computerName];
+      const ci = ciReady?.get(computerName.toLowerCase());
+      // Metric "Unknown" = the kubelet stopped reporting (a real state); Container Insights "Unknown" = no row
+      const ciConditions = ci && !(ci === "Unknown" && readySource === "containerInsights")
+        ? [{ type: "Ready", status: ci === "Ready" ? "True" as const : ci === "NotReady" ? "False" as const : "Unknown" as const }]
+        : undefined;
 
       return {
         instanceId,
@@ -654,7 +691,8 @@ export async function fetchVmssInstances(
         privateIp: k8sNode?.privateIp || instanceIpMap.get(instanceId) || undefined,
         nodePoolName,
         nodeImageVersion: k8sNode?.nodeImageVersion,
-        conditions: k8sNode?.conditions,
+        conditions: k8sNode?.conditions ?? ciConditions,
+        ...(k8sNode?.conditions ? { conditionsSource: "kubernetes" as const } : ciConditions && readySource ? { conditionsSource: readySource } : {}),
       };
     });
 
@@ -664,6 +702,30 @@ export async function fetchVmssInstances(
     debug("vmss-instances", "failed", err instanceof Error ? err.message : String(err));
     throw err;
   }
+}
+
+/**
+ * Node name (lower-case) → "Ready" | "NotReady" | "Unknown" from the AKS platform metric kube_node_status_condition
+ * (dimensions condition, status2, node; the current state's series is 1). Exported for tests via parseNodeReady.
+ */
+async function nodeReadyFromMetric(arm: { fetchJson<T>(url: string): Promise<T> }, clusterId: string): Promise<Map<string, string>> {
+  const f = encodeURIComponent("condition eq 'Ready' and status2 eq '*' and node eq '*'");
+  const m = await arm.fetchJson<{ value?: Array<{ timeseries?: Array<{ metadatavalues?: Array<{ name: { value: string }; value: string }>; data?: Array<{ average?: number }> }> }> }>(
+    `https://management.azure.com${clusterId}/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=kube_node_status_condition&aggregation=Average&interval=PT1M&timespan=PT10M&top=500&$filter=${f}`,
+  );
+  return parseNodeReady(m.value?.[0]?.timeseries ?? []);
+}
+
+export function parseNodeReady(series: Array<{ metadatavalues?: Array<{ name: { value: string }; value: string }>; data?: Array<{ average?: number }> }>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const ts of series) {
+    const md = Object.fromEntries((ts.metadatavalues ?? []).map((x) => [x.name.value.toLowerCase(), x.value]));
+    const last = (ts.data ?? []).map((d) => d.average).filter((v): v is number => v != null).at(-1);
+    if (!md.node || last == null || last < 1) continue;
+    const state = String(md.status2 ?? "");
+    if (state === "Ready" || state === "NotReady" || state === "Unknown") out.set(String(md.node).toLowerCase(), state);
+  }
+  return out;
 }
 
 function mockVmssInstances(vmssResourceId: string): AksVmssInstance[] {

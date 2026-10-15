@@ -812,6 +812,7 @@ export default function LiveDiagramPage() {
                 edgeSpec={filteredSpec.edges.find((e) => e.id === selectedEdgeId) ?? null}
                 liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}
                 sample={isSample}
+                targetPower={snapshot?.nodes.find((n) => n.id === filteredSpec.edges.find((e) => e.id === selectedEdgeId)?.target)?.powerState}
                 onClose={() => handleEdgeSelect(null)}
               />
             ) : (selectedNodeId || selectedVmssInstance) ? (

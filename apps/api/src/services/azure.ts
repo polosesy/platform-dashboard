@@ -6,11 +6,17 @@ import {
   callerSubscriptions,
   connectionCredentialGroups,
   getAnonymousSPCredential,
+  getArmFetcherAuto,
   signinRequired,
 } from "../infra/azureClientFactory.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
-import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "@aud/types";
+import { relEdge } from "./relationships.js";
+import { buildAddressIndex, parseFrontends, parsePools, resolveMember, type AddressEntry, type Frontend } from "./backendMembers.js";
+import { internetInboundExposure, mostExposed, routesWidenVnetTag, type NsgInput } from "./nsgExposure.js";
+import { agcFacts, resolveAgcCluster, type AgcChildRow } from "./agc.js";
+import { fetchFrontDoorConfig, resolveAfdOrigins } from "./frontDoorConfig.js";
+import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind, InboundExposure } from "@aud/types";
 
 type AzureResourceRow = {
   id: string;
@@ -21,6 +27,7 @@ type AzureResourceRow = {
   resourceGroup?: string;
   subscriptionId?: string;
   tags?: Record<string, string>;
+  sku?: { name?: string; capacity?: number };
   properties?: unknown;
 };
 
@@ -63,6 +70,12 @@ function createResourceGraphClient(env: Env, bearerToken: string | undefined, on
   return { groups, subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
 }
 
+/** Private Link targets without a kind of their own — drawn as a generic PaaS card so PL-01 lines have an end */
+const PE_PAAS_TYPES = new Set([
+  "microsoft.containerregistry/registries", "microsoft.cognitiveservices/accounts", "microsoft.cache/redisenterprise",
+  "microsoft.documentdb/mongoclusters",
+]);
+
 function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind {
   const t = (type ?? "").toLowerCase();
   if (t === "microsoft.network/virtualnetworks") return "vnet";
@@ -92,6 +105,12 @@ function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind
   if (t === "microsoft.network/dnszones" || t === "microsoft.network/privatednszones") return "dns";
   if (t === "microsoft.network/publicipaddresses") return "publicIP";
   if (t === "microsoft.network/natgateways") return "natGateway";
+  if (t === "microsoft.servicenetworking/trafficcontrollers") return "agc";
+  if (t === "microsoft.network/virtualnetworkgateways") return "vnetGateway";
+  if (t === "microsoft.network/bastionhosts") return "bastion";
+  // Front Door Standard/Premium; other CDN SKUs are skipped when the node is built
+  if (t === "microsoft.cdn/profiles") return "frontDoor";
+  if (PE_PAAS_TYPES.has(t)) return "paas";
   if (t === "microsoft.web/sites") {
     const k = (resourceKind ?? "").toLowerCase();
     return k.includes("functionapp") ? "functionApp" : "appService";
@@ -369,61 +388,8 @@ function getSubnetIdsFromLoadBalancerProps(properties: unknown): string[] {
   return [...new Set(ids)];
 }
 
-/** Returns true when the LB has outbound rules — AKS default outboundType=loadBalancer adds SNAT rules. */
-function hasLbOutboundRules(properties: unknown): boolean {
-  if (!properties || typeof properties !== "object") return false;
-  const rules = (properties as { outboundRules?: unknown }).outboundRules;
-  return Array.isArray(rules) && rules.length > 0;
-}
 
-function getBackendNicIdsFromLoadBalancerProps(properties: unknown): string[] {
-  if (!properties || typeof properties !== "object") return [];
-  const pools = (properties as { backendAddressPools?: unknown }).backendAddressPools;
-  if (!Array.isArray(pools)) return [];
 
-  const ipConfigs: unknown[] = [];
-  for (const p of pools) {
-    if (!p || typeof p !== "object") continue;
-    const obj = p as Record<string, unknown>;
-    // ARM API: .properties.backendIPConfigurations  |  RG flattened: .backendIPConfigurations
-    const cfgs = (obj.properties as { backendIPConfigurations?: unknown } | undefined)?.backendIPConfigurations
-      ?? obj.backendIPConfigurations;
-    if (Array.isArray(cfgs)) ipConfigs.push(...cfgs);
-  }
-
-  const nicIds = ipConfigs
-    .map((x) => safeId((x as { id?: unknown }).id))
-    .filter((x): x is string => Boolean(x))
-    .map((id) => {
-      const idx = id.indexOf("/ipconfigurations/");
-      return idx > 0 ? id.slice(0, idx) : id;
-    });
-  return [...new Set(nicIds)];
-}
-
-function getBackendNicIdsFromAppGatewayProps(properties: unknown): string[] {
-  if (!properties || typeof properties !== "object") return [];
-  const pools = (properties as { backendAddressPools?: unknown }).backendAddressPools;
-  if (!Array.isArray(pools)) return [];
-
-  const ipConfigs: unknown[] = [];
-  for (const p of pools) {
-    if (!p || typeof p !== "object") continue;
-    const obj = p as Record<string, unknown>;
-    const cfgs = (obj.properties as { backendIPConfigurations?: unknown } | undefined)?.backendIPConfigurations
-      ?? obj.backendIPConfigurations;
-    if (Array.isArray(cfgs)) ipConfigs.push(...cfgs);
-  }
-
-  const nicIds = ipConfigs
-    .map((x) => safeId((x as { id?: unknown }).id))
-    .filter((x): x is string => Boolean(x))
-    .map((id) => {
-      const idx = id.indexOf("/ipconfigurations/");
-      return idx > 0 ? id.slice(0, idx) : id;
-    });
-  return [...new Set(nicIds)];
-}
 
 function getPrivateLinkTargetIdsFromPrivateEndpointProps(properties: unknown): string[] {
   if (!properties || typeof properties !== "object") return [];
@@ -543,6 +509,14 @@ function deepScanForSubnetId(
 }
 
 /** Every page of a query, across the bundle's credential groups */
+/**
+ * One Resource Graph query over the caller's subscriptions (or `only` of them), split by credential and merged —
+ * for collectors outside the topology (Resource Health). Throws when the caller has no subscription.
+ */
+export async function queryResourceGraph<T>(env: Env, bearerToken: string | undefined, query: string, only?: string[]): Promise<T[]> {
+  return resourceGraphQueryAll<T>(createResourceGraphClient(env, bearerToken, only), query);
+}
+
 async function resourceGraphQueryAll<T>(bundle: RGClientBundle, query: string): Promise<T[]> {
   const parts = await Promise.all(bundle.groups.map((g) => resourceGraphQueryOne<T>(g.client, g.subscriptions, query, bundle.pageSize)));
   return parts.flat();
@@ -612,20 +586,44 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     "'microsoft.servicebus/namespaces'," +
     "'microsoft.eventhub/namespaces'," +
     "'microsoft.network/publicipaddresses'," +
-    "'microsoft.network/natgateways'" +
-    ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
+    "'microsoft.network/natgateways'," +
+    "'microsoft.servicenetworking/trafficcontrollers'," +
+    "'microsoft.network/virtualnetworkgateways'," +
+    "'microsoft.network/bastionhosts'," +
+    "'microsoft.cdn/profiles'," +
+    [...PE_PAAS_TYPES].map((t) => `'${t}'`).join(",") +
+    ") | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, sku, properties";
 
   // Query 4: Diagnostic Settings (separate resource type)
   const diagQuery =
     "resources | where type =~ 'microsoft.insights/diagnosticsettings'" +
     " | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
-  const [subRows, rgRows, resRows, diagRows] = await Promise.all([
+  // Inputs of the public-IP exposure verdict only (not graph nodes): subnet route tables (a route outside private
+  // space widens the VirtualNetwork tag) and Virtual Network Managers (security admin rules run before NSGs)
+  const exposureQuery =
+    "resources | where type in~ ('microsoft.network/routetables','microsoft.network/networkmanagers')" +
+    " | project id, type, properties";
+
+  // AGC child resources (AGC-02): folded into the traffic controller, not nodes
+  const agcChildQuery =
+    "resources | where type in~ ('microsoft.servicenetworking/trafficcontrollers/associations'," +
+    "'microsoft.servicenetworking/trafficcontrollers/frontends','microsoft.servicenetworking/trafficcontrollers/securitypolicies')" +
+    " | project id, type, properties";
+  // Every type in the subscriptions, to list what no diagram draws
+  const typeCountQuery = "resources | summarize count = count() by type = tolower(type)";
+
+  const [subRows, rgRows, resRows, diagRows, exposureRows, agcRows, typeRows] = await Promise.all([
     resourceGraphQueryAll<AzureSubscriptionRow>(bundle, subsQuery),
     resourceGraphQueryAll<AzureResourceGroupRow>(bundle, rgQuery),
     resourceGraphQueryAll<AzureResourceRow>(bundle, resQuery),
     resourceGraphQueryAll<AzureResourceRow>(bundle, diagQuery).catch(() => [] as AzureResourceRow[]),
+    resourceGraphQueryAll<AzureResourceRow>(bundle, exposureQuery).catch(() => null),
+    resourceGraphQueryAll<AgcChildRow>(bundle, agcChildQuery).catch(() => [] as AgcChildRow[]),
+    resourceGraphQueryAll<{ type: string; count: number }>(bundle, typeCountQuery).catch(() => [] as Array<{ type: string; count: number }>),
   ]);
+  for (const r of agcRows) if (r.id) r.id = r.id.toLowerCase();
+  const agcByController = agcFacts(agcRows);
 
   // Normalize Azure resource IDs to lowercase — Azure resource IDs are
   // case-insensitive but different API responses may use different casing
@@ -667,12 +665,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       health: "unknown"
     });
     if (rg.subscriptionId) {
-      edges.push({
-        id: `e:sub->rg:${rg.subscriptionId}:${rg.id}`,
-        source: `sub:${rg.subscriptionId}`,
-        target: rg.id,
-        kind: "contains"
-      });
+      edges.push(relEdge("HIER-01", `e:sub->rg:${rg.subscriptionId}:${rg.id}`, `sub:${rg.subscriptionId}`, rg.id));
     }
   }
 
@@ -706,8 +699,35 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
 
     const kind = mapKind(r.type, r.kind);
+    const rtype = (r.type ?? "").toLowerCase();
+    const skuName = safeString((r.sku as { name?: unknown } | undefined)?.name);
+    if (rtype === "microsoft.cdn/profiles" && !/azurefrontdoor$/i.test(skuName ?? "")) continue; // a CDN profile, not Front Door
     const endpoint = extractEndpoint(r.type, r.name, r.properties);
     const nodeMetadata: Record<string, unknown> = {};
+    const rprops = (r.properties ?? {}) as Record<string, unknown>;
+    // Provisioning state: the configuration fact the health evidence ladder starts from (healthEvidence.ts)
+    const prov = safeString(rprops.provisioningState);
+    if (prov) nodeMetadata.provisioningState = prov;
+    if (kind === "frontDoor") {
+      if (rtype === "microsoft.cdn/profiles") nodeMetadata.tier = skuName;
+      else nodeMetadata.classic = true; // retires 2027-03-31
+    }
+    if (kind === "paas") nodeMetadata.armType = rtype;
+    if (kind === "vnetGateway") {
+      const gt = safeString(rprops.gatewayType);
+      if (gt) nodeMetadata.gatewayType = gt;
+    }
+    // Private Endpoint: every connection's approval state (only Approved carries traffic — private-endpoint-overview)
+    if (kind === "privateEndpoint") {
+      const conns = [...safePropArray(rprops, "privateLinkServiceConnections"), ...safePropArray(rprops, "manualPrivateLinkServiceConnections")];
+      nodeMetadata.connections = conns.map((c) => {
+        const cp = ((c as Record<string, unknown>).properties ?? c) as Record<string, unknown>;
+        return {
+          targetId: safeString(cp.privateLinkServiceId)?.toLowerCase(),
+          status: safeString((cp.privateLinkServiceConnectionState as { status?: unknown } | undefined)?.status) ?? "Unknown",
+        };
+      });
+    }
 
     // Public IP — mark as absorbed (attached) or unused (not attached), and record the owner
     // (NIC / LB / App Gateway via its ip configuration, or a NAT Gateway)
@@ -803,10 +823,33 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
 
     // Inbound rule count — backend-pool membership alone (e.g. the AKS outbound SNAT pool) is not an inbound path.
     // Left unset when the properties do not list rules, so callers can tell "0" from "unknown".
+    // AGW: only listeners on a PUBLIC frontend that a routing rule uses count (catalog AGW-01, AGW-02) — private
+    // listeners take traffic from inside the network, not from the Internet.
     if (kind === "lb" || kind === "appGateway") {
       const props = (r.properties ?? {}) as Record<string, unknown>;
-      const lists = (kind === "lb" ? ["loadBalancingRules", "inboundNatRules", "inboundNatPools"] : ["httpListeners"]).map((k) => props[k]);
-      if (lists.some(Array.isArray)) nodeMetadata.inboundRules = lists.reduce<number>((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+      const frontends: Frontend[] = parseFrontends(kind, props, (id) => safeString(publicIpById.get(id)?.ipAddress));
+      if (frontends.length) nodeMetadata.frontends = frontends;
+      if (kind === "lb") {
+        const lists = ["loadBalancingRules", "inboundNatRules", "inboundNatPools"].map((k) => props[k]);
+        if (lists.some(Array.isArray)) nodeMetadata.inboundRules = lists.reduce<number>((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+        if (Array.isArray(props.outboundRules)) nodeMetadata.outboundRules = props.outboundRules.length;
+        // Created by AKS (cloud provider) — the tag or the cluster's node resource group, never the name (AKS-03)
+        if ((r.tags && r.tags["aks-managed-cluster-name"]) || (r.resourceGroup && aksNodeRgToId.has(r.resourceGroup.toLowerCase()))) nodeMetadata.managedBy = "aks";
+      } else if (Array.isArray(props.httpListeners) || Array.isArray(props.listeners)) {
+        const ruleBound = frontends.filter((f) => f.ruleBound);
+        nodeMetadata.inboundRules = ruleBound.filter((f) => f.kind === "public").reduce((n, f) => n + f.listeners.length, 0);
+        nodeMetadata.privateListeners = ruleBound.filter((f) => f.kind === "private").reduce((n, f) => n + f.listeners.length, 0);
+      }
+    }
+    // Scale set: orchestration mode (Uniform instances are child resources, Flexible instances are ordinary VMs),
+    // capacity, and whether AKS owns it (VMSS-01/03, AKS-02)
+    if (kind === "vmss") {
+      const props = (r.properties ?? {}) as Record<string, unknown>;
+      const mode = safeString(props.orchestrationMode);
+      if (mode) nodeMetadata.orchestrationMode = mode;
+      const cap = r.sku?.capacity;
+      if (typeof cap === "number") nodeMetadata.capacity = cap;
+      if (r.resourceGroup && aksNodeRgToId.has(r.resourceGroup.toLowerCase())) nodeMetadata.managedBy = "aks";
     }
 
     nodes.push({
@@ -825,12 +868,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (r.subscriptionId && r.resourceGroup) {
       const rg = rgId(r.subscriptionId, r.resourceGroup);
       if (rgById.has(rg)) {
-        edges.push({
-          id: `e:rg->res:${rg}:${r.id}`,
-          source: rg,
-          target: r.id,
-          kind: "contains"
-        });
+        edges.push(relEdge("HIER-02", `e:rg->res:${rg}:${r.id}`, rg, r.id));
       }
     }
   }
@@ -857,23 +895,86 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   // Resource Graph may return ipConfigurations in two formats:
   //   ARM format:      ipConfigurations[].properties.publicIPAddress.id
   //   RG flat format:  ipConfigurations[].publicIPAddress.id
+  // Every ip configuration is read (a secondary one may hold the public IP). PIP-01: the NIC ip configuration names
+  // the public IP; PIP-04: whether the Internet may connect through it — subnet NSG then NIC NSG (nsgExposure.ts).
+  const cfgProp = (cfg: Record<string, unknown>, key: string): unknown =>
+    (cfg.properties as Record<string, unknown> | undefined)?.[key] ?? cfg[key];
+  const nsgById = new Map<string, NsgInput>();
+  const subnetNet = new Map<string, { nsg: string | null; routeTable: string | null }>();
+  for (const r of resRows) {
+    const t = (r.type ?? "").toLowerCase();
+    if (t === "microsoft.network/networksecuritygroups" && r.id) nsgById.set(r.id, (r.properties ?? {}) as NsgInput);
+    const subnets = t === "microsoft.network/virtualnetworks" ? safePropArray(r.properties, "subnets")
+      : t === "microsoft.network/virtualnetworks/subnets" ? [{ id: r.id, properties: r.properties }] : [];
+    for (const sn of subnets as Array<Record<string, unknown>>) {
+      const id = safeId(sn.id);
+      if (!id) continue;
+      subnetNet.set(id, {
+        nsg: safeId((cfgProp(sn, "networkSecurityGroup") as { id?: unknown } | undefined)?.id) ?? null,
+        routeTable: safeId((cfgProp(sn, "routeTable") as { id?: unknown } | undefined)?.id) ?? null,
+      });
+    }
+  }
+  const widenedRouteTables = new Set<string>();
+  for (const r of exposureRows ?? []) {
+    if ((r.type ?? "").toLowerCase() === "microsoft.network/routetables" && r.id && routesWidenVnetTag(safePropArray(r.properties, "routes"))) {
+      widenedRouteTables.add(r.id.toLowerCase());
+    }
+  }
+  const avnmPresent = (exposureRows ?? []).some((r) => (r.type ?? "").toLowerCase() === "microsoft.network/networkmanagers");
+  const pipSku = new Map<string, string>();
+  for (const r of resRows) {
+    if ((r.type ?? "").toLowerCase() !== "microsoft.network/publicipaddresses" || !r.id) continue;
+    const sku = safeString((r.sku as { name?: unknown } | undefined)?.name);
+    if (sku) pipSku.set(r.id.toLowerCase(), sku);
+  }
+  /** NSG document, null = none associated, undefined = associated but not readable */
+  const nsgDoc = (id: string | null | undefined): NsgInput => (id == null ? null : nsgById.get(id) ?? undefined);
+  const vmExposures = new Map<string, InboundExposure[]>();
+
   for (const node of nodes) {
     if (node.kind !== "nic") continue;
     const r = nicById.get(node.id);
     if (!r) continue;
-    const ipCfgs = ((r.properties as Record<string, unknown>)?.ipConfigurations ?? []) as Array<Record<string, unknown>>;
-    const firstCfg = ipCfgs[0];
-    if (!firstCfg) continue;
-    // Try ARM format first, then Resource Graph flattened format
-    const nested = (firstCfg.properties as { publicIPAddress?: { id?: string } } | undefined)?.publicIPAddress?.id;
-    const flat = (firstCfg.publicIPAddress as { id?: string } | undefined)?.id;
-    const pubRef = (nested ?? flat)?.toLowerCase();
+    const props = (r.properties ?? {}) as Record<string, unknown>;
+    const ipCfgs = (props.ipConfigurations ?? []) as Array<Record<string, unknown>>;
+    const nicNsgId = safeId((props.networkSecurityGroup as { id?: unknown } | undefined)?.id) ?? null;
+    const publicIPs: Array<{ id: string; sku?: string }> = [];
+    const exposures: InboundExposure[] = [];
+    for (const cfg of ipCfgs) {
+      const pubRef = safeId((cfgProp(cfg, "publicIPAddress") as { id?: unknown } | undefined)?.id);
+      if (!pubRef) continue;
+      publicIPs.push({ id: pubRef, ...(pipSku.has(pubRef) ? { sku: pipSku.get(pubRef) } : {}) });
+      const subnetId = safeId((cfgProp(cfg, "subnet") as { id?: unknown } | undefined)?.id);
+      const sn = subnetId ? subnetNet.get(subnetId) : undefined;
+      const asgs = cfgProp(cfg, "applicationSecurityGroups");
+      exposures.push(internetInboundExposure(sn ? nsgDoc(sn.nsg) : undefined, nsgDoc(nicNsgId), {
+        privateIp: safeString(cfgProp(cfg, "privateIPAddress")),
+        asgIds: (Array.isArray(asgs) ? asgs : []).map((x) => safeId((x as { id?: unknown }).id)).filter((x): x is string => !!x),
+        pipSku: pipSku.get(pubRef),
+        vnetTagWidened: !!(sn?.routeTable && widenedRouteTables.has(sn.routeTable)),
+        // Route tables / managers could not be read: the verdict cannot rule them out
+        avnmPresent: avnmPresent || exposureRows === null,
+      }));
+    }
+    const pubRef = publicIPs[0]?.id;
     if (!pubRef) continue;
     const pubIp = safeString(publicIpById.get(pubRef)?.ipAddress);
+    const exposure = mostExposed(exposures);
     // Always record the ARM ID reference so specGenerator can absorb this NIC into the PIP card.
     // pubIp may be absent for dynamic/unallocated PIPs — that's fine, we still need the link.
-    node.metadata = { ...node.metadata, publicIPAzureId: pubRef, ...(pubIp ? { publicIP: pubIp } : {}) };
-    debug(`[azure] NIC "${node.name}" → PIP ref=${pubRef.split("/").pop()} ip=${pubIp || "(unallocated)"} format=${nested ? "arm" : "flat"}`);
+    node.metadata = {
+      ...node.metadata, publicIPAzureId: pubRef, publicIPs, ...(pubIp ? { publicIP: pubIp } : {}),
+      ...(exposure ? { inboundExposure: exposure } : {}),
+    };
+    const vmId = safeId((props.virtualMachine as { id?: unknown } | undefined)?.id);
+    if (vmId && exposure) (vmExposures.get(vmId) ?? vmExposures.set(vmId, []).get(vmId)!).push(exposure);
+    debug(`[azure] NIC "${node.name}" → PIP ref=${pubRef.split("/").pop()} ip=${pubIp || "(unallocated)"} exposure=${exposure?.state ?? "-"}`);
+  }
+  for (const node of nodes) {
+    const list = node.kind === "vm" ? vmExposures.get(node.id) : undefined;
+    const e = list ? mostExposed(list) : undefined;
+    if (e) node.metadata = { ...node.metadata, inboundExposure: e };
   }
 
   // NAT Gateway: resolve actual public IP from publicIpById, then create subnet→natGateway edges
@@ -898,24 +999,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     for (const sub of attachedSubnets) {
       const subnetId = safeId(sub.id);
       if (!subnetId) continue;
-      edges.push({
-        id: `e:subnet->natgw:${subnetId}:${node.id}`,
-        source: subnetId,
-        target: node.id,
-        kind: "network",
-      });
+      edges.push(relEdge("EDGE-01", `e:subnet->natgw:${subnetId}:${node.id}`, subnetId, node.id));
     }
 
     // Create natGateway → publicIP edges (pip becomes sub-resource in diagram)
     for (const pip of pips) {
       const pipId = safeId(pip.id);
       if (!pipId) continue;
-      edges.push({
-        id: `e:natgw->pip:${node.id}:${pipId}`,
-        source: node.id,
-        target: pipId,
-        kind: "network",
-      });
+      edges.push(relEdge("PIP-02", `e:natgw->pip:${node.id}:${pipId}`, node.id, pipId));
     }
   }
 
@@ -974,12 +1065,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const edgeId = `e:vnet->subnet:${r.id}:${subId}`;
       if (!edgeIdSet.has(edgeId)) {
         edgeIdSet.add(edgeId);
-        edges.push({
-          id: edgeId,
-          source: r.id,
-          target: subId,
-          kind: "contains",
-        });
+        edges.push(relEdge("CT-01", edgeId, r.id, subId));
       }
 
       // Extract NIC→Subnet bindings from subnet ipConfigurations
@@ -1008,12 +1094,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         const nicEdgeId = `e:subnet->nic:${subId}:${nicId}`;
         if (!edgeIdSet.has(nicEdgeId)) {
           edgeIdSet.add(nicEdgeId);
-          edges.push({
-            id: nicEdgeId,
-            source: subId,
-            target: nicId,
-            kind: "attached-to",
-          });
+          edges.push(relEdge("CT-02", nicEdgeId, subId, nicId));
         }
       }
     }
@@ -1031,12 +1112,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const edgeId = `e:vnet->subnet:${parentVnetId}:${r.id}`;
     if (!edgeIdSet.has(edgeId)) {
       edgeIdSet.add(edgeId);
-      edges.push({
-        id: edgeId,
-        source: parentVnetId,
-        target: r.id,
-        kind: "contains",
-      });
+      edges.push(relEdge("CT-01", edgeId, parentVnetId, r.id));
     }
   }
 
@@ -1071,12 +1147,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const nicEdgeId = `e:subnet->nic:${subnetId}:${nic.id}`;
       if (!edgeIdSet.has(nicEdgeId)) {
         edgeIdSet.add(nicEdgeId);
-        edges.push({
-          id: nicEdgeId,
-          source: subnetId,
-          target: nic.id,
-          kind: "attached-to",
-        });
+        edges.push(relEdge("CT-02", nicEdgeId, subnetId, nic.id));
         nicSubnetEdgeCount++;
         // Check if the subnet node actually exists in graph
         const subnetExists = nodes.some(n => n.id === subnetId);
@@ -1089,6 +1160,180 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   }
   debug(`[azure] NIC→Subnet edges: ${nicSubnetEdgeCount} created, ${nicSubnetMissCount} missing subnet ref`);
 
+  // ── Who holds an address: NIC / PE / LB frontend private IPs (with their VNet), public IPs (their owner), and
+  // App Service / Container App host names — for backend-pool members named by IP or FQDN (AGW-04/05, LB-03)
+  const vnetOfSubnet = (subnetId: string | undefined) => (subnetId && subnetId.includes("/subnets/") ? subnetId.slice(0, subnetId.indexOf("/subnets/")).toLowerCase() : undefined);
+  const addressEntries: AddressEntry[] = [];
+  const nicPrimaryIp = new Map<string, string>();
+  for (const nic of nicById.values()) {
+    const np = (nic.properties ?? {}) as Record<string, unknown>;
+    const pe = safeId((np.privateEndpoint as { id?: unknown } | undefined)?.id);
+    for (const c of safePropArray(np, "ipConfigurations")) {
+      const cp = ((c as Record<string, unknown>).properties ?? c) as Record<string, unknown>;
+      const ip = safeString(cp.privateIPAddress);
+      if (!ip) continue;
+      if (!nicPrimaryIp.has(nic.id)) nicPrimaryIp.set(nic.id, ip);
+      const vnetId = vnetOfSubnet(safeId((cp.subnet as { id?: unknown } | undefined)?.id));
+      addressEntries.push(pe && resourceById.has(pe) ? { address: ip, targetId: pe, vnetId, source: "pe" } : { address: ip, targetId: nic.id, vnetId, source: "nic" });
+    }
+  }
+  for (const r of resRows) {
+    if (!r.id) continue;
+    const t = (r.type ?? "").toLowerCase();
+    const rp = (r.properties ?? {}) as Record<string, unknown>;
+    if (t === "microsoft.network/loadbalancers") {
+      for (const fe of safePropArray(rp, "frontendIPConfigurations")) {
+        const fp = ((fe as Record<string, unknown>).properties ?? fe) as Record<string, unknown>;
+        const ip = safeString(fp.privateIPAddress);
+        if (ip) addressEntries.push({ address: ip, targetId: r.id, vnetId: vnetOfSubnet(safeId((fp.subnet as { id?: unknown } | undefined)?.id)), source: "lbFrontend" });
+      }
+    } else if (t === "microsoft.network/publicipaddresses") {
+      const ip = safeString(rp.ipAddress);
+      const owner = safeId((rp.ipConfiguration as { id?: unknown } | undefined)?.id);
+      const ownerId = owner ? ownerResourceId(owner) : undefined;
+      if (ip && ownerId) addressEntries.push({ address: ip, targetId: ownerId, source: "pip" });
+      const fqdn = safeString((rp.dnsSettings as { fqdn?: unknown } | undefined)?.fqdn);
+      if (fqdn && ownerId) addressEntries.push({ address: fqdn.toLowerCase(), targetId: ownerId, source: "pipFqdn" });
+    } else if (t === "microsoft.servicenetworking/trafficcontrollers") {
+      for (const fe of agcByController.get(r.id)?.frontends ?? []) if (fe.fqdn) addressEntries.push({ address: fe.fqdn, targetId: r.id, source: "agcFrontend" });
+    } else if (t === "microsoft.web/sites") {
+      const names = new Set([safeString(rp.defaultHostName), ...((Array.isArray(rp.hostNames) ? rp.hostNames : []) as unknown[]).map(safeString)].filter((x): x is string => !!x));
+      for (const n of names) addressEntries.push({ address: n.toLowerCase(), targetId: r.id, source: "site" });
+    } else if (t === "microsoft.app/containerapps") {
+      const fqdn = safeString((rp.configuration as { ingress?: { fqdn?: unknown } } | undefined)?.ingress?.fqdn);
+      if (fqdn) addressEntries.push({ address: fqdn.toLowerCase(), targetId: r.id, source: "containerApp" });
+    }
+  }
+  const addressIndex = buildAddressIndex(addressEntries);
+  const knownIds = new Set(resourceById.keys());
+
+  // ── CT-07: VPN/ER gateway and Bastion in their dedicated subnet (their public IPs fold in by PIP-01) ──
+  for (const r of resRows) {
+    const t = (r.type ?? "").toLowerCase();
+    if (!r.id || (t !== "microsoft.network/virtualnetworkgateways" && t !== "microsoft.network/bastionhosts")) continue;
+    const sn = safePropArray(r.properties, "ipConfigurations")
+      .map((c) => safeId((((c as Record<string, unknown>).properties ?? c) as { subnet?: { id?: unknown } }).subnet?.id))
+      .find((x): x is string => !!x);
+    if (sn && resourceById.has(sn)) edges.push(relEdge("CT-07", `e:subnet->gw:${sn}:${r.id}`, sn, r.id));
+  }
+
+  // ── Application Gateway for Containers: children folded in (AGC-02), delegated subnet (AGC-01), cluster (AGC-04) ──
+  const clusterFacts = resRows
+    .filter((r) => r.id && (r.type ?? "").toLowerCase() === "microsoft.containerservice/managedclusters")
+    .map((r) => ({
+      id: r.id,
+      nodeResourceGroup: safeString((r.properties as Record<string, unknown> | undefined)?.nodeResourceGroup),
+      vnetIds: new Set(safePropArray(r.properties, "agentPoolProfiles").map((ap) => vnetOfSubnet(safeString((ap as { vnetSubnetID?: unknown }).vnetSubnetID)?.toLowerCase())).filter((x): x is string => !!x)),
+    }));
+  for (const n of nodes) {
+    if (n.kind !== "agc") continue;
+    const f = agcByController.get(n.id) ?? { associations: [], frontends: [] };
+    const publicFrontends = f.frontends.filter((fe) => fe.public && (!fe.state || fe.state === "Succeeded")).length;
+    n.metadata = {
+      ...n.metadata, associations: f.associations, frontends: f.frontends, publicFrontends,
+      ...(f.wafPolicyId ? { wafPolicyId: f.wafPolicyId } : {}),
+    };
+    if (!n.endpoint) n.endpoint = f.frontends.find((fe) => fe.fqdn)?.fqdn;
+    const vnetIds = new Set<string>();
+    for (const a of f.associations) {
+      if (!a.subnetId) continue;
+      const v = vnetOfSubnet(a.subnetId);
+      if (v) vnetIds.add(v);
+      if (resourceById.has(a.subnetId)) edges.push(relEdge("AGC-01", `e:subnet->agc:${a.subnetId}:${n.id}`, a.subnetId, n.id));
+    }
+    const cluster = resolveAgcCluster({ resourceGroup: n.resourceGroup ?? "", vnetIds }, clusterFacts);
+    if ("targetId" in cluster) edges.push(relEdge("AGC-04", `e:agc->aks:${n.id}:${cluster.targetId}`, n.id, cluster.targetId, { evidence: cluster.evidence, direction: "inbound" }));
+    else n.metadata = { ...n.metadata, clusterCandidates: cluster.candidates };
+  }
+
+  // ── Front Door Standard/Premium: routes and origins (ARM children), origins → resources: EDGE-07 Private Link,
+  // EDGE-06 azureOrigin, EDGE-05 public IP owner, EDGE-04 host name (frontDoorConfig.ts resolveAfdOrigins) ──
+  const nodeName = (id: string) => nodes.find((n) => n.id === id)?.name ?? id.split("/").pop() ?? id;
+  const afdProfiles = nodes.filter((n) => n.kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.id));
+  if (afdProfiles.length) {
+    const vmOfNic = (id: string) => safeId(((nicById.get(id)?.properties ?? {}) as { virtualMachine?: { id?: unknown } }).virtualMachine?.id) ?? id;
+    const fetcher = await getArmFetcherAuto(env, bearerToken).catch(() => null);
+    const key = bearerToken ? cachePrefix(bearerToken) : "anon";
+    await Promise.all(afdProfiles.map(async (fd) => {
+      try {
+        if (!fetcher) throw new Error("no fetcher");
+        const cfg = await fetchFrontDoorConfig(fetcher, fd.azureId ?? fd.id, key);
+        const res = resolveAfdOrigins(cfg, addressIndex, knownIds, vmOfNic);
+        for (const l of res.links) {
+          edges.push(relEdge(l.rel, `e:afd->origin:${fd.id}:${l.group}:${l.origin}:${l.targetId}`, fd.id, l.targetId, { evidence: l.evidence, pool: l.group, origin: l.origin, direction: "inbound", ...(l.status ? { status: l.status } : {}) }));
+        }
+        fd.metadata = {
+          ...fd.metadata, endpoints: cfg.endpoints.length, activeRoutes: cfg.routes.filter((r) => r.enabled).length,
+          origins: cfg.origins.length, externalOrigins: res.external, ambiguousOrigins: res.ambiguous,
+          endpointHosts: cfg.endpoints.filter((e) => e.enabled).map((e) => e.hostName).slice(0, 10),
+          // Every origin by name for the panel: its group, host, state and the resource it was matched to (if any)
+          originList: cfg.origins.slice(0, 100).map((o) => {
+            const link = res.links.find((l) => l.origin === o.name && l.group === o.group);
+            const used = cfg.routes.some((r) => r.enabled && r.originGroup === o.group);
+            return {
+              name: o.name, group: o.group, host: o.hostName,
+              state: !o.enabled ? "disabled" : !used ? "unrouted" : link ? "linked" : "external",
+              ...(link ? { target: nodeName(link.targetId), rel: link.rel } : {}),
+            };
+          }),
+        };
+      } catch (e) {
+        fd.metadata = { ...fd.metadata, configUnreadable: true };
+        debug(`[afd] config of ${fd.name} not read: ${String(e).slice(0, 120)}`);
+      }
+    }));
+  }
+  // VNets a gateway's private backends may sit in: its own and the peers in state Connected (AGW-04)
+  const connectedPeers = new Map<string, Set<string>>();
+  for (const r of resRows) {
+    if (!r.id || (r.type ?? "").toLowerCase() !== "microsoft.network/virtualnetworks") continue;
+    for (const pe of safePropArray(r.properties, "virtualNetworkPeerings")) {
+      if ((safePropString(pe, "properties", "peeringState") ?? "").toLowerCase() !== "connected") continue;
+      const remote = safePropString(pe, "properties", "remoteVirtualNetwork", "id")?.toLowerCase();
+      if (!remote) continue;
+      (connectedPeers.get(r.id) ?? connectedPeers.set(r.id, new Set()).get(r.id)!).add(remote);
+    }
+  }
+  const scopeOf = (subnetIds: string[]) => {
+    const out = new Set<string>();
+    for (const sid of subnetIds) {
+      const v = vnetOfSubnet(sid);
+      if (!v) continue;
+      out.add(v);
+      for (const peer of connectedPeers.get(v) ?? []) out.add(peer);
+    }
+    return out;
+  };
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  type Unresolved = { pool: string; address: string; reason: string };
+  const noteUnresolved = (gwId: string, u: Unresolved) => {
+    const n = nodeById.get(gwId);
+    if (!n) return;
+    const list = ((n.metadata ??= {}).unresolvedBackends ?? []) as Unresolved[];
+    list.push(u);
+    n.metadata.unresolvedBackends = list;
+  };
+  // Pool members → edges; one edge per (gateway, pool, target), a NIC reference wins over an address match
+  const backendEdges = new Map<string, ArchitectureEdge>();
+  /** `${gateway}|${pool lowercase}` → rules sending traffic IN to the pool (0 = none; absent = unknown) */
+  const poolInbound = new Map<string, number>();
+  const addBackend = (gwKind: "appGateway" | "lb", gwId: string, pool: string, ports: number[], member: Parameters<typeof resolveMember>[0], scope: Set<string>) => {
+    const res = resolveMember(member, scope, addressIndex, knownIds);
+    if ("unresolved" in res) {
+      noteUnresolved(gwId, { pool, address: member.address ?? member.ref?.split("/").pop() ?? "", reason: res.unresolved });
+      return;
+    }
+    const rel = gwKind === "appGateway" ? (member.via === "nic" ? "AGW-03" : member.via === "ip" ? "AGW-04" : "AGW-05") : (member.via === "nic" ? "LB-02" : "LB-03");
+    const key = `${gwId}|${pool}|${res.targetId}`;
+    const prev = backendEdges.get(key);
+    if (prev && prev.metadata?.via === "nic") return;
+    const address = member.address ?? (member.ref ? nicPrimaryIp.get(member.ref) : undefined);
+    backendEdges.set(key, relEdge(rel, `e:be:${gwId}:${pool}:${res.targetId}`, gwId, res.targetId, {
+      via: member.via, pool, evidence: res.evidence, direction: "inbound",
+      ...(address ? { address } : {}), ...(ports.length ? { ports } : {}), ...(gwKind === "lb" ? { protocol: "TCP" } : {}),
+    }));
+  };
+
   let nicVmEdgeCount = 0;
   for (const r of resRows) {
     if (!r.id) continue;
@@ -1100,122 +1345,91 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           debug(`[azure] VM "${r.name}" references NIC "${nicId.split("/").pop()}" but NIC not in graph`);
           continue;
         }
-        edges.push({
-          id: `e:nic->vm:${nicId}:${r.id}`,
-          source: nicId,
-          target: r.id,
-          kind: "bound-to"
-        });
+        edges.push(relEdge("CT-03", `e:nic->vm:${nicId}:${r.id}`, nicId, r.id));
         nicVmEdgeCount++;
         debug(`[azure] NIC→VM: "${nicId.split("/").pop()}" → VM "${r.name}"`);
       }
       if (nicIds.length === 0) {
         debug(`[azure] VM "${r.name}" has NO NIC references in properties`);
       }
+      // Flexible orchestration: the instance is an ordinary VM that names its scale set (VMSS-03)
+      const scaleSet = safeId(((r.properties ?? {}) as { virtualMachineScaleSet?: { id?: unknown } }).virtualMachineScaleSet?.id);
+      if (scaleSet && resourceById.has(scaleSet)) edges.push(relEdge("VMSS-03", `e:vm->vmss:${r.id}:${scaleSet}`, r.id, scaleSet));
     }
     if (t === "microsoft.containerservice/managedclusters") {
       for (const subnetId of getSubnetIdsFromAksProps(r.properties)) {
-        edges.push({
-          id: `e:subnet->aks:${subnetId}:${r.id}`,
-          source: subnetId,
-          target: r.id,
-          kind: "connects"
-        });
+        edges.push(relEdge("AKS-01", `e:subnet->aks:${subnetId}:${r.id}`, subnetId, r.id));
       }
     }
     if (t === "microsoft.compute/virtualmachinescalesets") {
       for (const subnetId of getSubnetIdsFromVmssProps(r.properties)) {
-        edges.push({
-          id: `e:subnet->vmss:${subnetId}:${r.id}`,
-          source: subnetId,
-          target: r.id,
-          kind: "network"
-        });
+        edges.push(relEdge("VMSS-02", `e:subnet->vmss:${subnetId}:${r.id}`, subnetId, r.id));
+      }
+      // Uniform: the scale-set MODEL references LB / AGW pools — instances not yet upgraded to the model may be
+      // missing from the pool, so this is weaker than the pool's own member list (VMSS-04). Flexible: membership
+      // is on each instance NIC, read from the pool (LB-02 / AGW-03).
+      const vp = (r.properties ?? {}) as Record<string, unknown>;
+      if (safeString(vp.orchestrationMode)?.toLowerCase() !== "flexible") {
+        const nicCfgs = safePropArray((vp.virtualMachineProfile as Record<string, unknown> | undefined)?.networkProfile, "networkInterfaceConfigurations");
+        for (const nc of nicCfgs) {
+          const ncp = ((nc as Record<string, unknown>).properties ?? nc) as Record<string, unknown>;
+          for (const ic of safePropArray(ncp, "ipConfigurations")) {
+            const icp = ((ic as Record<string, unknown>).properties ?? ic) as Record<string, unknown>;
+            for (const k of ["loadBalancerBackendAddressPools", "applicationGatewayBackendAddressPools"]) {
+              for (const pool of safePropArray(icp, k)) {
+                const poolId = safeId((pool as { id?: unknown }).id);
+                const gw = poolId ? ownerResourceId(poolId) : undefined;
+                if (!gw || !resourceById.has(gw)) continue;
+                const poolName = poolId!.split("/").pop() ?? "";
+                const key = `${gw}|${poolName}|${r.id}`;
+                if (!backendEdges.has(key)) backendEdges.set(key, relEdge("VMSS-04", `e:be:${gw}:${poolName}:${r.id}`, gw, r.id, { via: "vmssModel", pool: poolName, evidence: "cfg", direction: "inbound" }));
+              }
+            }
+          }
+        }
       }
       // AKS → VMSS ownership: VMSS in the AKS nodeResourceGroup (MC_*) belongs to the cluster
       const aksOwner = r.resourceGroup ? aksNodeRgToId.get(r.resourceGroup.toLowerCase()) : undefined;
       if (aksOwner) {
-        edges.push({
-          id: `e:aks->vmss:${aksOwner}:${r.id}`,
-          source: aksOwner,
-          target: r.id,
-          kind: "connects"
-        });
+        edges.push(relEdge("AKS-02", `e:aks->vmss:${aksOwner}:${r.id}`, aksOwner, r.id));
       }
     }
     if (t === "microsoft.network/applicationgateways") {
-      for (const subnetId of getSubnetIdsFromAppGatewayProps(r.properties)) {
-        edges.push({
-          id: `e:subnet->appgw:${subnetId}:${r.id}`,
-          source: subnetId,
-          target: r.id,
-          kind: "connects"
-        });
+      const gwSubnets = getSubnetIdsFromAppGatewayProps(r.properties);
+      for (const subnetId of gwSubnets) {
+        edges.push(relEdge("CT-04", `e:subnet->appgw:${subnetId}:${r.id}`, subnetId, r.id));
       }
-
-      for (const nicId of getBackendNicIdsFromAppGatewayProps(r.properties)) {
-        if (!nicById.has(nicId)) continue;
-        edges.push({
-          id: `e:appgw->nic:${r.id}:${nicId}`,
-          source: r.id,
-          target: nicId,
-          kind: "routes"
-        });
+      // Backend pools: NIC references, IP addresses and FQDNs (AGW-03/04/05); only pools a rule uses carry traffic
+      const scope = scopeOf(gwSubnets);
+      for (const pool of parsePools("appGateway", r.properties)) {
+        poolInbound.set(`${r.id}|${pool.name.toLowerCase()}`, pool.inboundRuleRefs ?? 0);
+        if (pool.inboundRuleRefs === 0) continue;
+        for (const m of pool.members) addBackend("appGateway", r.id, pool.name, pool.ports, m, scope);
       }
     }
     if (t === "microsoft.network/loadbalancers") {
-      for (const subnetId of getSubnetIdsFromLoadBalancerProps(r.properties)) {
-        edges.push({
-          id: `e:subnet->lb:${subnetId}:${r.id}`,
-          source: subnetId,
-          target: r.id,
-          kind: "connects"
-        });
+      const lbSubnets = getSubnetIdsFromLoadBalancerProps(r.properties);
+      for (const subnetId of lbSubnets) {
+        edges.push(relEdge("CT-05", `e:subnet->lb:${subnetId}:${r.id}`, subnetId, r.id));
       }
-
-      const lbBackendNicIds = getBackendNicIdsFromLoadBalancerProps(r.properties);
-      const lbVmssTargets = new Set<string>();
-      for (const nicId of lbBackendNicIds) {
-        if (nicById.has(nicId)) {
-          edges.push({
-            id: `e:lb->nic:${r.id}:${nicId}`,
-            source: r.id,
-            target: nicId,
-            kind: "routes"
-          });
-        } else {
-          // AKS VMSS instance NIC: extract VMSS resource ID
-          const vmssMatch = nicId.match(/(\/subscriptions\/.*?\/providers\/microsoft\.compute\/virtualmachinescalesets\/[^/]+)/i);
-          if (vmssMatch) lbVmssTargets.add(vmssMatch[1].toLowerCase());
-        }
-      }
-      // Create LB → VMSS edges for AKS-managed load balancers
-      for (const vmssIdLower of lbVmssTargets) {
-        // Case-insensitive lookup in resourceById
-        let vmssId: string | undefined;
-        for (const [id] of resourceById) {
-          if (id.toLowerCase() === vmssIdLower) { vmssId = id; break; }
-        }
-        if (vmssId) {
-          // Inbound: LB → VMSS (Service LoadBalancer traffic)
-          edges.push({
-            id: `e:lb->vmss:${r.id}:${vmssId}`,
-            source: r.id,
-            target: vmssId,
-            kind: "routes",
-            metadata: { protocol: "TCP" },
-          });
-          // Outbound SNAT: VMSS → LB (AKS default outboundType=loadBalancer)
-          // AKS nodes use the public LB for outbound internet traffic via SNAT rules
-          const hasOutboundRules = hasLbOutboundRules(r.properties);
-          if (hasOutboundRules) {
-            edges.push({
-              id: `e:vmss->lb:snat:${vmssId}:${r.id}`,
-              source: vmssId,
-              target: r.id,
-              kind: "routes",
-              metadata: { protocol: "SNAT" },
-            });
+      // Pools: inbound lines only for pools a load-balancing / inbound NAT rule uses (LB-04) — the AKS "kubernetes"
+      // pool used only by an outbound rule is not an inbound path. SNAT (backend → LB) only for NIC-based pools with
+      // an outbound rule (LB-06; IP-based pools use default outbound access).
+      const lbScope = scopeOf(lbSubnets);
+      const lbInbound = nodeById.get(r.id)?.metadata?.inboundRules;
+      const snatSeen = new Set<string>();
+      for (const pool of parsePools("lb", r.properties)) {
+        // Resource Graph omits empty rule arrays: an unknown pool count falls back to the LB's own (0 → none)
+        const inbound = pool.inboundRuleRefs ?? (lbInbound === 0 ? 0 : null);
+        if (inbound != null) poolInbound.set(`${r.id}|${pool.name.toLowerCase()}`, inbound);
+        if (inbound !== 0) for (const m of pool.members) addBackend("lb", r.id, pool.name, [], m, lbScope);
+        if ((pool.outboundRuleRefs ?? 0) > 0) {
+          for (const m of pool.members) {
+            if (m.via !== "nic") continue;
+            const res = resolveMember(m, lbScope, addressIndex, knownIds);
+            if ("unresolved" in res || snatSeen.has(`${res.targetId}|${pool.name}`)) continue;
+            snatSeen.add(`${res.targetId}|${pool.name}`);
+            edges.push(relEdge("LB-06", `e:snat:${res.targetId}:${r.id}:${pool.name}`, res.targetId, r.id, { protocol: "SNAT", pool: pool.name, via: "nic", evidence: "cfg", direction: "outbound" }));
           }
         }
       }
@@ -1223,27 +1437,19 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t === "microsoft.network/privateendpoints") {
       const subnetId = getSubnetIdFromPrivateEndpointProps(r.properties);
       if (subnetId) {
-        edges.push({
-          id: `e:subnet->pe:${subnetId}:${r.id}`,
-          source: subnetId,
-          target: r.id,
-          kind: "network"
-        });
+        edges.push(relEdge("CT-06", `e:subnet->pe:${subnetId}:${r.id}`, subnetId, r.id));
       }
 
       for (const targetId of getPrivateLinkTargetIdsFromPrivateEndpointProps(r.properties)) {
         if (!resourceById.has(targetId)) continue;
-        edges.push({
-          id: `e:pe->target:${r.id}:${targetId}`,
-          source: r.id,
-          target: targetId,
-          kind: "privateLink"
-        });
+        edges.push(relEdge("PL-01", `e:pe->target:${r.id}:${targetId}`, r.id, targetId));
       }
     }
   }
 
   debug(`[azure] NIC→VM edges: ${nicVmEdgeCount} created`);
+  // A scale-set model reference to a pool no rule uses is not an inbound path either (VMSS-04 + LB-04)
+  edges.push(...[...backendEdges.values()].filter((e) => !(e.metadata?.via === "vmssModel" && poolInbound.get(`${e.source}|${(e.metadata.pool ?? "").toLowerCase()}`) === 0)));
 
   // ── New relationship parsers ──
 
@@ -1261,13 +1467,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           const edgeId = `e:peering:${r.id}:${remoteId}`;
           // Only add one direction (lower ID → higher ID) to avoid duplicates
           if (r.id < remoteId) {
-            edges.push({
-              id: edgeId,
-              source: r.id,
-              target: remoteId,
-              kind: "peering",
-              metadata: { peeringState: peerState },
-            });
+            edges.push(relEdge("EDGE-02", edgeId, r.id, remoteId, { peeringState: peerState }));
           }
         }
       }
@@ -1277,13 +1477,19 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (t === "microsoft.web/sites") {
       const vnetSubnetId = safePropString(r.properties, "virtualNetworkSubnetId")?.toLowerCase();
       if (vnetSubnetId && resourceById.has(vnetSubnetId)) {
-        edges.push({
-          id: `e:site->subnet:${r.id}:${vnetSubnetId}`,
-          source: vnetSubnetId,
-          target: r.id,
-          kind: "network",
-        });
+        edges.push(relEdge("PAAS-01", `e:site->subnet:${r.id}:${vnetSubnetId}`, vnetSubnetId, r.id));
       }
+    }
+
+    // PaaS inside a subnet only through an explicit placement property (not service-endpoint rules):
+    // PostgreSQL / MySQL Flexible private access = a delegated subnet (PAAS-02), Redis Premium injection (PAAS-04)
+    if (t === "microsoft.dbforpostgresql/flexibleservers" || t === "microsoft.dbformysql/flexibleservers") {
+      const sid = safePropString(r.properties, "network", "delegatedSubnetResourceId")?.toLowerCase();
+      if (sid && resourceById.has(sid)) edges.push(relEdge("PAAS-02", `e:subnet->flex:${sid}:${r.id}`, sid, r.id));
+    }
+    if (t === "microsoft.cache/redis") {
+      const sid = safePropString(r.properties, "subnetId")?.toLowerCase();
+      if (sid && resourceById.has(sid)) edges.push(relEdge("PAAS-04", `e:subnet->redis:${sid}:${r.id}`, sid, r.id));
     }
 
     // 15–16. NSG → Subnet / NIC associations
@@ -1292,24 +1498,14 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       for (const s of nsgSubnets) {
         const subnetRef = safeId(typeof s === "object" && s !== null ? (s as Record<string, unknown>).id : undefined);
         if (subnetRef && resourceById.has(subnetRef)) {
-          edges.push({
-            id: `e:nsg->subnet:${r.id}:${subnetRef}`,
-            source: r.id,
-            target: subnetRef,
-            kind: "network",
-          });
+          edges.push(relEdge("SEC-01", `e:nsg->subnet:${r.id}:${subnetRef}`, r.id, subnetRef));
         }
       }
       const nsgNics = safePropArray(r.properties, "networkInterfaces");
       for (const n of nsgNics) {
         const nicRef = safeId(typeof n === "object" && n !== null ? (n as Record<string, unknown>).id : undefined);
         if (nicRef && nicById.has(nicRef)) {
-          edges.push({
-            id: `e:nsg->nic:${r.id}:${nicRef}`,
-            source: r.id,
-            target: nicRef,
-            kind: "network",
-          });
+          edges.push(relEdge("SEC-01", `e:nsg->nic:${r.id}:${nicRef}`, r.id, nicRef));
         }
       }
     }
@@ -1319,12 +1515,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const workspaceId = (safePropString(r.properties, "WorkspaceResourceId")
         ?? safePropString(r.properties, "workspaceResourceId"))?.toLowerCase();
       if (workspaceId && resourceById.has(workspaceId)) {
-        edges.push({
-          id: `e:ai->la:${r.id}:${workspaceId}`,
-          source: r.id,
-          target: workspaceId,
-          kind: "logging",
-        });
+        edges.push(relEdge("LOG-02", `e:ai->la:${r.id}:${workspaceId}`, r.id, workspaceId));
       }
     }
   }
@@ -1343,22 +1534,10 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (sourceResourceId && resourceById.has(sourceResourceId)) {
       if (workspaceId && resourceById.has(workspaceId)) {
         const category = safePropString(ds.properties, "logs", "0", "category") ?? "Logs";
-        edges.push({
-          id: `e:diag->la:${sourceResourceId}:${workspaceId}:${ds.name}`,
-          source: sourceResourceId,
-          target: workspaceId,
-          kind: "logging",
-          metadata: { diagnosticCategory: category },
-        });
+        edges.push(relEdge("LOG-01", `e:diag->la:${sourceResourceId}:${workspaceId}:${ds.name}`, sourceResourceId, workspaceId, { diagnosticCategory: category }));
       }
       if (storageId && resourceById.has(storageId)) {
-        edges.push({
-          id: `e:diag->sa:${sourceResourceId}:${storageId}:${ds.name}`,
-          source: sourceResourceId,
-          target: storageId,
-          kind: "logging",
-          metadata: { diagnosticCategory: "Archive" },
-        });
+        edges.push(relEdge("LOG-01", `e:diag->sa:${sourceResourceId}:${storageId}:${ds.name}`, sourceResourceId, storageId, { diagnosticCategory: "Archive" }));
       }
     }
   }
@@ -1479,7 +1658,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const eid = `e:vnet->subnet-disc:${parentVnetId}:${subId}`;
     if (!edgeIdSet.has(eid)) {
       edgeIdSet.add(eid);
-      edges.push({ id: eid, source: parentVnetId, target: subId, kind: "contains" });
+      edges.push(relEdge("CT-01", eid, parentVnetId, subId));
       containsCreated++;
     }
   }
@@ -1499,7 +1678,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     const eid = `e:subnet->nic-disc:${subnetId}:${nic.id}`;
     if (!edgeIdSet.has(eid)) {
       edgeIdSet.add(eid);
-      edges.push({ id: eid, source: subnetId, target: nic.id, kind: "attached-to" });
+      edges.push(relEdge("CT-02", eid, subnetId, nic.id));
       nicEdgesCreated++;
     }
   }
@@ -1532,7 +1711,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       const edgeId = `e:subnet->res-generic:${subnetRef}:${r.id}`;
       if (!edgeIdSet.has(edgeId)) {
         edgeIdSet.add(edgeId);
-        edges.push({ id: edgeId, source: subnetRef, target: r.id, kind: "network" });
+        edges.push(relEdge("CT-09", edgeId, subnetRef, r.id));
         genericSubnetEdges++;
       }
     }
@@ -1563,8 +1742,19 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   ).length;
   debug(`[azure] Containment edges: ${vnetToSubnet} vnet→subnet, ${subnetToResource} subnet→resource`);
 
+  // Types no diagram draws (count only): absorbed children and the types read above are drawn
+  const DRAWN = new Set([
+    ...[...resQuery.matchAll(/'(microsoft\.[^']+)'/g)].map((m) => m[1]!),
+    ...PE_PAAS_TYPES,
+    "microsoft.servicenetworking/trafficcontrollers/associations", "microsoft.servicenetworking/trafficcontrollers/frontends",
+    "microsoft.servicenetworking/trafficcontrollers/securitypolicies", "microsoft.cdn/profiles/afdendpoints",
+    "microsoft.insights/diagnosticsettings",
+  ]);
+  const undrawnTypes = typeRows.filter((t) => t.type && !DRAWN.has(t.type)).sort((a, b) => b.count - a.count);
+
   return {
     generatedAt: new Date().toISOString(),
+    undrawnTypes,
     nodes,
     edges
   };

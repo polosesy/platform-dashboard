@@ -34,7 +34,9 @@ import { shortNamesWithParts } from "@/lib/liveNames";
 import { usageThresholds } from "@/lib/liveMetricFormat";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { disconnectedPes, usageChips, usageEdges } from "@/lib/plUsage";
-import { edgeLayer, impactView, isDirectedEdge, type EdgeLayer } from "@/lib/liveScope";
+import { edgeLayer, impactView, isDirectedEdge, isFocusOnlyEdge, type EdgeLayer } from "@/lib/liveScope";
+import { gatewayFacts, withBackendValue } from "@/lib/liveBackends";
+import { pipExposure } from "@/lib/livePip";
 import { PARTICLE_TONE_VAR, clipLabel, legendKeys, liveEdgeStyleKey, liveStroke, mergeReversePairs, relationLabel, type ParticleTone } from "@/lib/liveStyle";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type EgressInfo, type GroupNodeData, type PeeringInfo } from "./GroupNode";
@@ -269,9 +271,10 @@ function LiveCanvasInner({
     setNodes((prev: FlowNode[]) => {
       const vmssNode = prev.find((n: FlowNode) => n.id === vmssNodeId);
       if (!vmssNode) return prev;
-      const INST_W = 200;
-      const INST_H = 54;
-      const INST_GAP = 6;
+      // Same width as a resource card; lower (no metric row) — styles .cardInstance
+      const INST_W = LIVE.CARD_W;
+      const INST_H = 58;
+      const INST_GAP = 8;
       const vmssW = vmssNode.width ?? LIVE.CARD_W;
       const vmssH = vmssNode.height ?? LIVE.CARD_H;
       const instX = Math.round((vmssW - INST_W) / 2);
@@ -292,6 +295,7 @@ function LiveCanvasInner({
           nodePoolName: inst.nodePoolName,
           nodeImageVersion: inst.nodeImageVersion,
           conditions: inst.conditions,
+          conditionsSource: inst.conditionsSource,
           parentVmssId: vmssNodeId,
           onSelect: onVmssInstanceSelectRef.current,
         },
@@ -428,6 +432,7 @@ function LiveCanvasInner({
         resourceKind: n.resourceKind,
         azureResourceId: n.azureResourceId,
         powerState: live?.powerState,
+        basis: live?.basis,
         archRole: n.metadata?.archRole,
         archGroupId: n.metadata?.archGroupId,
         nsgBadge: firstNsg ? { nodeId: firstNsg.nodeId, label: firstNsg.label, icon: firstNsg.icon as LiveNodeData["icon"], azureResourceId: firstNsg.azureResourceId } : undefined,
@@ -437,6 +442,10 @@ function LiveCanvasInner({
         onVmssExpand: n.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
         isUnused: n.metadata?.unused === "true",
         ghostOf: n.metadata?.ghostOf,
+        gateway: gatewayFacts(n.metadata),
+        scaleSet: n.metadata?.scaleSet,
+        pipExposure: pipExposure(n.metadata) ?? undefined,
+        armType: n.metadata?.armType,
         shortName: names.get(n.id),
         nameParts: nameInfo.get(n.id)?.parts,
         focused: n.id === selectedRef.current,
@@ -502,6 +511,7 @@ function LiveCanvasInner({
           hasAlert: (live.activeAlertIds?.length ?? 0) > 0,
           sparklines: live.sparklines,
           powerState: live.powerState,
+          basis: live.basis,
           metricsState: snapshot.coverage?.sources.metrics,
         };
         // Skip update only if nothing the card shows changed — metric values and the trend included
@@ -509,6 +519,7 @@ function LiveCanvasInner({
           prev_.health === next.health &&
           prev_.healthScore === next.healthScore &&
           prev_.powerState === next.powerState &&
+          prev_.basis === next.basis &&
           prev_.hasAlert === next.hasAlert &&
           prev_.metricsState === next.metricsState &&
           sameMetrics(prev_.metrics, next.metrics) &&
@@ -543,16 +554,17 @@ function LiveCanvasInner({
   }, [hoveredNodeId, hoverFocus, connectedNodeIds, impactActive, impactRoles, setNodes, layout]);
 
   // ── Edges: layer filter, one line per relationship, arrowheads for directed kinds, labels on hover ──
+  // Lines of the chosen layers between drawn nodes — the legend counts these (a focus-only line keeps its key)
+  const layerEdgeSpecs = useMemo(
+    () => allEdges.filter((e) => renderedIds.has(e.source) && renderedIds.has(e.target) && layers.has(edgeLayer(e, nodeById))),
+    [allEdges, renderedIds, layers, nodeById],
+  );
   const visibleEdgeSpecs = useMemo(() => {
     const focus = new Set([hoveredNodeId, hoveredGroupId, selectedNodeId].filter(Boolean) as string[]);
-    return allEdges.filter((e) => {
-      if (!renderedIds.has(e.source) || !renderedIds.has(e.target)) return false;
-      if (!layers.has(edgeLayer(e, nodeById))) return false;
-      // Subnet → NAT association: only while the subnet or the NAT is hovered / selected (the chip says it otherwise)
-      if (e.edgeKind === "natgw-association") return focus.has(e.source) || focus.has(e.target);
-      return true;
-    });
-  }, [allEdges, renderedIds, layers, nodeById, hoveredNodeId, hoveredGroupId, selectedNodeId]);
+    // Subnet → NAT association and a subnet's default outbound: only while an end is hovered / selected
+    // (the subnet header chip says it otherwise) — lib/liveScope isFocusOnlyEdge
+    return layerEdgeSpecs.filter((e) => !isFocusOnlyEdge(e, nodeById) || focus.has(e.source) || focus.has(e.target));
+  }, [layerEdgeSpecs, nodeById, hoveredNodeId, hoveredGroupId, selectedNodeId]);
 
   const merged = useMemo(() => {
     const { drop, both } = mergeReversePairs(visibleEdgeSpecs);
@@ -591,7 +603,7 @@ function LiveCanvasInner({
           styleKey,
           status: live?.status ?? "normal",
           trafficLevel: live?.trafficLevel ?? "none",
-          label: cut ? t("ld.plu.disconnected") : rel ? clipLabel(t(rel.key, rel.vars)) : undefined,
+          label: cut ? t("ld.plu.disconnected") : rel ? clipLabel(withBackendValue(t(rel.key, rel.vars), live?.metrics, t)) : undefined,
           disconnected: cut,
           isHighlighted: hoveredNodeId ? connectedEdgeIds.has(e.id) : false,
           isDimmed: hoveredNodeId && hoverFocus ? !connectedEdgeIds.has(e.id) : false,
@@ -640,7 +652,7 @@ function LiveCanvasInner({
     if (wrapRef.current) wrapRef.current.dataset.lod = next;
   }, []);
 
-  const legendLines = useMemo(() => legendKeys(visibleEdgeSpecs, nodeById), [visibleEdgeSpecs, nodeById]);
+  const legendLines = useMemo(() => legendKeys(layerEdgeSpecs, nodeById), [layerEdgeSpecs, nodeById]);
   const hasGhost = useMemo(() => spec.nodes.some((n) => n.metadata?.ghostOf), [spec.nodes]);
 
   // ── Hover handlers ──
@@ -695,7 +707,7 @@ function LiveCanvasInner({
               if (FRAME_TYPES.has(n.type ?? "")) return rgba("ink", 0.05);
               // Same status the card shows (lib: cardStatus — unknown and "running only" stay grey)
               const d = n.data as LiveNodeData | undefined;
-              return cardStatus(d?.health ?? "unknown", d?.powerState, d?.impact).color;
+              return cardStatus(d?.health ?? "unknown", d?.powerState, d?.impact, d?.basis).color;
             }}
             maskColor={rgba("canvas", 0.85)}
             style={{ borderRadius: 12, border: `1px solid ${rgba("ink", 0.1)}` }}

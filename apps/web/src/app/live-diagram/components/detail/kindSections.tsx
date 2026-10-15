@@ -256,3 +256,78 @@ export function AksNodePool({ node, instances, loading, failed }: { node: Diagra
 }
 
 export { CopyButton };
+
+const groupBy = <T,>(xs: T[], key: (x: T) => string) => {
+  const m = new Map<string, T[]>();
+  for (const x of xs) (m.get(key(x)) ?? m.set(key(x), []).get(key(x))!).push(x);
+  return m;
+};
+
+const parseArr = <T,>(v: string | undefined): T[] => {
+  if (!v) return [];
+  try { const x = JSON.parse(v); return Array.isArray(x) ? (x as T[]) : []; } catch { return []; }
+};
+
+/** Application Gateway for Containers (catalog AGC-01..05): frontends, the delegated subnet association, the cluster */
+export function AgcFacts({ node }: { node: DiagramNodeSpec }) {
+  const { t } = useI18n();
+  const m = node.metadata ?? {};
+  const frontends = parseArr<{ name: string; fqdn?: string; public: boolean; state?: string }>(m.agcFrontends);
+  const assoc = parseArr<{ name: string; subnetId?: string; state?: string }>(m.agcAssociations);
+  return (
+    <Section id="agc" title={t("ld.agc.title")}>
+      <Group title={t("ld.agc.frontends", { n: frontends.length })}>
+        {frontends.length ? frontends.map((f) => (
+          <KV key={f.name} label={f.name} mono copy={f.fqdn}>
+            {[f.fqdn, t(f.public ? "ld.agc.public" : "ld.agc.private"), f.state && f.state !== "Succeeded" ? f.state : null].filter(Boolean).join(" · ")}
+          </KV>
+        )) : <div className={styles.dpMuted}>{t("ld.agc.noFrontend")}</div>}
+      </Group>
+      <Group title={t("ld.agc.association")}>
+        {assoc.length ? assoc.map((a) => (
+          <KV key={a.name} label={a.name}>{[a.subnetId?.split("/").pop(), a.state].filter(Boolean).join(" · ")}</KV>
+        )) : <div className={styles.dpMuted}>{t("ld.agc.noAssociation")}</div>}
+      </Group>
+      {m.clusterCandidates != null ? <div className={styles.dpMuted}>{t(m.clusterCandidates === "0" ? "ld.agc.noCluster" : "ld.agc.candidates", { n: m.clusterCandidates })}</div> : null}
+      {m.waf === "true" ? <KV label="WAF">{t("ld.agc.waf")}</KV> : null}
+    </Section>
+  );
+}
+
+/** Front Door Standard/Premium (EDGE-04..07): routes and origins read from ARM; origins matched only when exactly one */
+export function FrontDoorFacts({ node }: { node: DiagramNodeSpec }) {
+  const { t } = useI18n();
+  const m = node.metadata ?? {};
+  const hosts = parseArr<string>(m.endpointHosts);
+  const origins = parseArr<{ name: string; group: string; host: string; state: "linked" | "external" | "unrouted" | "disabled"; target?: string }>(m.originList);
+  return (
+    <Section id="afd" title={t("ld.afd.title")}>
+      {m.classic === "true" ? <Notice tone="warning">{t("ld.afd.classic")}</Notice> : null}
+      {m.tier ? <KV label={t("ld.afd.tier")}>{m.tier.replace(/_AzureFrontDoor$/, "")}</KV> : null}
+      {m.configUnreadable === "true" ? <FetchFailed what={t("ld.afd.config")} /> : null}
+      {m.endpoints ? <KV label={t("ld.afd.endpoints")}>{m.endpoints}</KV> : null}
+      {hosts.map((h) => <KV key={h} label="" mono copy={h}>{h}</KV>)}
+      {m.activeRoutes ? <KV label={t("ld.afd.routes")}>{m.activeRoutes}</KV> : null}
+      {origins.length ? (
+        <KV label={t("ld.afd.origins")}>
+          {t("ld.afd.originCounts", {
+            n: origins.length,
+            linked: origins.filter((o) => o.state === "linked").length,
+            ext: origins.filter((o) => o.state === "external").length,
+            unrouted: origins.filter((o) => o.state === "unrouted" || o.state === "disabled").length,
+          })}
+          {m.ambiguousOrigins && m.ambiguousOrigins !== "0" ? ` · ${t("ld.afd.ambiguous", { n: m.ambiguousOrigins })}` : ""}
+        </KV>
+      ) : m.origins ? <KV label={t("ld.afd.origins")}>{t("ld.afd.originSplit", { n: m.origins, ext: m.externalOrigins ?? "0", amb: m.ambiguousOrigins ?? "0" })}</KV> : null}
+      {[...groupBy(origins, (o) => o.group)].map(([group, list]) => (
+        <Group key={group} title={t("ld.afd.group", { name: group, n: list.length })}>
+          {list.map((o) => (
+            <KV key={`${o.group}/${o.name}`} label={o.name} mono copy={o.host}>
+              {[o.host, o.target ? `→ ${o.target}` : null, t(`ld.afd.origin.${o.state}`)].filter(Boolean).join(" · ")}
+            </KV>
+          ))}
+        </Group>
+      ))}
+    </Section>
+  );
+}

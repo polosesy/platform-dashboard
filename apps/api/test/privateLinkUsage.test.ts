@@ -179,3 +179,54 @@ test("a PE with two lines to the same service is one endpoint", () => {
   };
   assert.equal(scopeFromSpec(spec, "vnet")!.pes.length, 1);
 });
+
+// ── unidentified callers: one AKS cluster's pools, places outside the scope, internal ranges ──
+test("node pools of ONE AKS cluster sharing the subnet → the cluster (aksCluster, pools listed); mixed stays ambiguous", () => {
+  const i = base();
+  i.subnets[0]!.owners = ["pool-sys", "pool-user"];
+  i.clusterOf = new Map([["aks", "aks"], ["pool-sys", "aks"], ["pool-user", "aks"]]);
+  i.access = [{ targetNodeId: "kv", source: "kvAudit", ip: "10.0.9.10", requests: 5, last: "2026-10-14T05:00:00.000Z" }];
+  let out = joinPrivateLinkUsage(i);
+  assert.deepEqual(out.usages.map((u) => [u.callerNodeId, u.attribution, u.peNodeId, u.viaNodeIds]), [["aks", "aksCluster", "pe-kv", ["pool-sys", "pool-user"]]]);
+  // a plain scale set in the same subnet, or a second cluster → no line
+  i.subnets[0]!.owners = ["pool-sys", "vmss-plain"];
+  out = joinPrivateLinkUsage(i);
+  assert.deepEqual(out.unresolved.map((x) => [x.reason, x.basis]), [["ambiguous", "subnet"]]);
+  i.clusterOf = new Map([["pool-sys", "aks"], ["pool-b", "aks-b"]]);
+  i.subnets[0]!.owners = ["pool-sys", "pool-b"];
+  assert.equal(joinPrivateLinkUsage(i).usages.length, 0);
+});
+
+test("a shared identity is reported as such; subnet candidates are not replaced by identity holders", () => {
+  const i = base();
+  i.subnets[0]!.owners = ["aks", "vmss-2"];
+  i.access = [{ targetNodeId: "kv", source: "kvAudit", ip: "10.0.9.10", oid: "oid-shared", requests: 1 }];
+  let out = joinPrivateLinkUsage(i);
+  assert.deepEqual(out.unresolved.map((x) => [x.reason, x.basis, x.candidates]), [["ambiguous", "subnet", ["aks", "vmss-2"]]]);
+  i.access = [{ targetNodeId: "kv", source: "kvAudit", oid: "oid-shared", requests: 1 }];
+  out = joinPrivateLinkUsage(i);
+  assert.deepEqual(out.unresolved.map((x) => [x.reason, x.basis]), [["ambiguous", "identity"]]);
+});
+
+test("addresses outside the scope: another VNet's subnet is named, overlap is not, private / CGNAT are classed — never drawn", () => {
+  const i = base();
+  i.outerSubnets = [
+    { nodeId: "snet-hub-fw", vnetId: "hub", cidr: "10.150.254.0/26", owners: ["fw"] },
+    { nodeId: "snet-x", vnetId: "x1", cidr: "10.200.0.0/24", owners: [] },
+    { nodeId: "snet-y", vnetId: "x2", cidr: "10.200.0.0/24", owners: [] },
+  ];
+  i.access = [
+    { targetNodeId: "kv", source: "kvAudit", ip: "10.150.254.5", requests: 1 },
+    { targetNodeId: "kv", source: "kvAudit", ip: "10.200.0.9", requests: 1 },
+    { targetNodeId: "kv", source: "kvAudit", ip: "172.16.4.4", requests: 1 },
+    { targetNodeId: "kv", source: "kvAudit", ip: "100.64.1.1", requests: 1 },
+  ];
+  const out = joinPrivateLinkUsage(i);
+  assert.equal(out.usages.length, 0);
+  assert.equal(out.publicAccess.length, 0, "100.64/10 is not the public Internet");
+  const place = (ip: string) => out.unresolved.find((u) => u.ip === ip)?.place;
+  assert.deepEqual(place("10.150.254.5"), { kind: "otherVnet", vnetNodeId: "hub", subnetNodeId: "snet-hub-fw", ownerNodeId: "fw" });
+  assert.deepEqual(place("10.200.0.9"), { kind: "overlap", matches: 2 });
+  assert.deepEqual(place("172.16.4.4"), { kind: "private" });
+  assert.deepEqual(place("100.64.1.1"), { kind: "cgnat" });
+});

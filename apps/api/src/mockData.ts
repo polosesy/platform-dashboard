@@ -1,4 +1,5 @@
 import type { ArchitectureGraph } from "@aud/types";
+import { relEdge } from "./services/relationships.js";
 import type {
   CostSummary, CostTrendResponse, BudgetsResponse,
   SecureScoreSummary, SecurityAlertsResponse, SecurityPostureResponse,
@@ -8,72 +9,83 @@ import type {
   RegionalStatusResponse,
 } from "@aud/types";
 
+// ---------- Architecture example (signed-out view) ----------
+// Shaped like the real graph (ARM ids under the all-zero sample subscription, so assertArmResourceId answers
+// signin_required) and placed by the catalog's rules (docs/architecture/azure-resource-relationships.md):
+// regional services carry their region; only Front Door and DNS zones are non-regional ("global").
+//   VNet › snet-agw (Application Gateway, public + private frontend) › snet-aks (AKS + its internal LB)
+//         › snet-pe (Private Endpoint → SQL) › snet-db (PostgreSQL Flexible, delegated subnet)
+//   region PaaS lane: SQL logical server, Key Vault · global: Front Door, private DNS zone
+const SAMPLE_SUB = "00000000-0000-0000-0000-000000000000";
+const SAMPLE_RG = `/subscriptions/${SAMPLE_SUB}/resourcegroups/rg-sample`;
+const SAMPLE_NODE_RG = `/subscriptions/${SAMPLE_SUB}/resourcegroups/mc_rg-sample_aks-sample_koreacentral`;
+const arm = (rg: string, type: string, name: string) => `${rg}/providers/${type}/${name}`;
+const VNET = arm(SAMPLE_RG, "microsoft.network/virtualnetworks", "vnet-sample");
+const SNET = (name: string) => `${VNET}/subnets/${name}`;
+const AGW = arm(SAMPLE_RG, "microsoft.network/applicationgateways", "agw-sample");
+const PIP_AGW = arm(SAMPLE_RG, "microsoft.network/publicipaddresses", "pip-agw-sample");
+const AKS = arm(SAMPLE_RG, "microsoft.containerservice/managedclusters", "aks-sample");
+const AKS_VMSS = arm(SAMPLE_NODE_RG, "microsoft.compute/virtualmachinescalesets", "aks-nodepool1-vmss");
+const AKS_ILB = arm(SAMPLE_NODE_RG, "microsoft.network/loadbalancers", "kubernetes-internal");
+const SQL = arm(SAMPLE_RG, "microsoft.sql/servers", "sql-orders");
+const PE_SQL = arm(SAMPLE_RG, "microsoft.network/privateendpoints", "pe-sql-orders");
+const PG = arm(SAMPLE_RG, "microsoft.dbforpostgresql/flexibleservers", "pg-orders");
+const KV = arm(SAMPLE_RG, "microsoft.keyvault/vaults", "kv-sample");
+const FD = arm(SAMPLE_RG, "microsoft.cdn/profiles", "fd-sample");
+const DNS = arm(SAMPLE_RG, "microsoft.network/privatednszones", "privatelink.database.windows.net");
+const LOC = "koreacentral";
+
 export const mockArchitectureGraph: ArchitectureGraph = {
   generatedAt: new Date().toISOString(),
   nodes: [
+    { id: `sub:${SAMPLE_SUB}`, kind: "subscription", name: "sample-subscription", health: "unknown" },
+    { id: SAMPLE_RG, kind: "resourceGroup", name: "rg-sample", azureId: SAMPLE_RG, location: LOC, health: "unknown" },
+    { id: VNET, kind: "vnet", name: "vnet-sample", azureId: VNET, location: LOC, endpoint: "10.20.0.0/16", resourceGroup: "rg-sample", health: "ok" },
+    { id: SNET("snet-agw"), kind: "subnet", name: "snet-agw", azureId: SNET("snet-agw"), location: LOC, endpoint: "10.20.0.0/24", resourceGroup: "rg-sample" },
+    { id: SNET("snet-aks"), kind: "subnet", name: "snet-aks", azureId: SNET("snet-aks"), location: LOC, endpoint: "10.20.1.0/24", resourceGroup: "rg-sample" },
+    { id: SNET("snet-pe"), kind: "subnet", name: "snet-pe", azureId: SNET("snet-pe"), location: LOC, endpoint: "10.20.2.0/24", resourceGroup: "rg-sample" },
+    { id: SNET("snet-db"), kind: "subnet", name: "snet-db", azureId: SNET("snet-db"), location: LOC, endpoint: "10.20.3.0/24", resourceGroup: "rg-sample", metadata: { delegations: ["Microsoft.DBforPostgreSQL/flexibleServers"] } },
     {
-      id: "sub:prod",
-      kind: "subscription",
-      name: "prod-subscription",
-      health: "ok"
+      id: AGW, kind: "appGateway", name: "agw-sample", azureId: AGW, location: LOC, endpoint: "10.20.0.10", resourceGroup: "rg-sample", health: "ok",
+      metrics: { p99LatencyMs: 240, rps: 85 },
+      metadata: {
+        inboundRules: 1, privateListeners: 0,
+        frontends: [
+          { name: "fe-public", kind: "public", ip: "203.0.113.20", publicIpId: PIP_AGW, listeners: ["listener-https"], ruleBound: true },
+          { name: "fe-private", kind: "private", ip: "10.20.0.10", listeners: [], ruleBound: false },
+        ],
+      },
     },
+    { id: PIP_AGW, kind: "publicIP", name: "pip-agw-sample", azureId: PIP_AGW, location: LOC, endpoint: "203.0.113.20", resourceGroup: "rg-sample", metadata: { absorbed: true, attachedTo: AGW } },
     {
-      id: "rg:core",
-      kind: "resourceGroup",
-      name: "rg-core",
-      health: "ok"
+      id: AKS, kind: "aks", name: "aks-sample", azureId: AKS, location: LOC, resourceGroup: "rg-sample", health: "warning",
+      metrics: { cpuUtil: 62, podRestarts: 3 },
+      metadata: { nodeResourceGroup: "MC_rg-sample_aks-sample_koreacentral", agentPoolProfiles: [{ name: "nodepool1", mode: "System", count: 3, vnetSubnetId: SNET("snet-aks") }] },
     },
-    {
-      id: "vnet:core",
-      kind: "vnet",
-      name: "vnet-core",
-      location: "koreacentral",
-      health: "ok"
-    },
-    {
-      id: "subnet:app",
-      kind: "subnet",
-      name: "subnet-app",
-      health: "ok"
-    },
-    {
-      id: "aks:platform",
-      kind: "aks",
-      name: "aks-platform",
-      health: "warning",
-      metrics: {
-        cpuUtil: 62,
-        podRestarts: 3
-      }
-    },
-    {
-      id: "appgw:edge",
-      kind: "appGateway",
-      name: "appgw-edge",
-      health: "ok",
-      metrics: {
-        p99LatencyMs: 240,
-        rps: 85
-      }
-    },
-    {
-      id: "sql:orders",
-      kind: "sql",
-      name: "sql-orders",
-      health: "ok",
-      metrics: {
-        dtus: 38
-      }
-    }
+    { id: AKS_VMSS, kind: "vmss", name: "aks-nodepool1-vmss", azureId: AKS_VMSS, location: LOC, resourceGroup: "MC_rg-sample_aks-sample_koreacentral", metadata: { orchestrationMode: "Uniform", capacity: 3, managedBy: "aks" } },
+    { id: AKS_ILB, kind: "lb", name: "kubernetes-internal", azureId: AKS_ILB, location: LOC, endpoint: "10.20.1.100", resourceGroup: "MC_rg-sample_aks-sample_koreacentral", metadata: { inboundRules: 1, managedBy: "aks" } },
+    { id: SQL, kind: "sql", name: "sql-orders", azureId: SQL, location: LOC, resourceGroup: "rg-sample", health: "ok", metrics: { dtus: 38 } },
+    { id: PE_SQL, kind: "privateEndpoint", name: "pe-sql-orders", azureId: PE_SQL, location: LOC, endpoint: "10.20.2.4", resourceGroup: "rg-sample" },
+    { id: PG, kind: "postgres", name: "pg-orders", azureId: PG, location: LOC, resourceGroup: "rg-sample", health: "ok" },
+    { id: KV, kind: "keyVault", name: "kv-sample", azureId: KV, location: LOC, resourceGroup: "rg-sample" },
+    { id: FD, kind: "frontDoor", name: "fd-sample", azureId: FD, location: "global", resourceGroup: "rg-sample" },
+    { id: DNS, kind: "dns", name: "privatelink.database.windows.net", azureId: DNS, location: "global", resourceGroup: "rg-sample" },
   ],
   edges: [
-    { id: "e1", source: "sub:prod", target: "rg:core", kind: "contains" },
-    { id: "e2", source: "rg:core", target: "vnet:core", kind: "contains" },
-    { id: "e3", source: "vnet:core", target: "subnet:app", kind: "contains" },
-    { id: "e4", source: "subnet:app", target: "aks:platform", kind: "contains" },
-    { id: "e5", source: "subnet:app", target: "appgw:edge", kind: "contains" },
-    { id: "e6", source: "aks:platform", target: "sql:orders", kind: "connects" }
-  ]
+    relEdge("HIER-01", "e:sample:sub-rg", `sub:${SAMPLE_SUB}`, SAMPLE_RG),
+    ...[VNET, AGW, PIP_AGW, AKS, SQL, PE_SQL, PG, KV, FD, DNS].map((id, i) => relEdge("HIER-02", `e:sample:rg-${i}`, SAMPLE_RG, id)),
+    ...["snet-agw", "snet-aks", "snet-pe", "snet-db"].map((s) => relEdge("CT-01", `e:sample:vnet-${s}`, VNET, SNET(s))),
+    relEdge("CT-04", "e:sample:agw-subnet", SNET("snet-agw"), AGW),
+    relEdge("AKS-01", "e:sample:aks-subnet", SNET("snet-aks"), AKS),
+    relEdge("AKS-02", "e:sample:aks-vmss", AKS, AKS_VMSS),
+    relEdge("CT-05", "e:sample:ilb-subnet", SNET("snet-aks"), AKS_ILB),
+    // App Gateway backend pool names the AKS internal LB by IP (AGW-04); the LB serves the node pool (LB-02)
+    relEdge("AGW-04", "e:sample:agw-ilb", AGW, AKS_ILB, { via: "ip", pool: "pool-aks", address: "10.20.1.100", ports: [80], evidence: "ipMatch", direction: "inbound" }),
+    relEdge("LB-02", "e:sample:ilb-vmss", AKS_ILB, AKS_VMSS, { via: "nic", pool: "kubernetes", evidence: "cfg", direction: "inbound", protocol: "TCP" }),
+    relEdge("CT-06", "e:sample:pe-subnet", SNET("snet-pe"), PE_SQL),
+    relEdge("PL-01", "e:sample:pe-sql", PE_SQL, SQL),
+    relEdge("PAAS-02", "e:sample:pg-subnet", SNET("snet-db"), PG),
+  ],
 };
 
 // ---------- Cost Mock Data ----------

@@ -12,7 +12,8 @@ export const EDGE_STYLE = Object.fromEntries(
   (Object.keys(EDGE_LOOK) as Array<keyof typeof EDGE_LOOK>).map((k) => [k, { stroke: strokeOf(k), dash: EDGE_LOOK[k].dash, width: EDGE_LOOK[k].width, arrow: EDGE_LOOK[k].arrow }]),
 ) as Record<ArchEdgeKind | "traffic", { stroke: string; dash?: string; width: number; arrow: boolean }>;
 
-const regionName = (k: string, t: T) => (k === "global" ? t("arch.lane.global") : formatAzureRegion(k));
+/** Region box title: "global" and "unknown" (no location reported, catalog REG-03) have names of their own */
+export const regionName = (k: string, t: T) => (k === "global" ? t("arch.lane.global") : k === "unknown" ? t("arch.region.unknown") : formatAzureRegion(k));
 
 /** Category-filter facts needed to label the filtered view honestly */
 export type FilterMarks = {
@@ -119,10 +120,16 @@ function tileData(model: ArchModel, sh: Exclude<ArchPlaced, { shape: "box" }>, t
     return { shape: sh, title: r.node.name, sub: `${kindLabel(k)} · ${t("arch.inRegion", { region: regionName(r.region, t) })}`, icon: getAzureIconUrl(k), badges: [], ariaLabel: r.node.name };
   }
   const badges: ArchBadge[] = [];
-  if (r.publicIps.length) badges.push({ text: r.publicIps.length > 1 ? t("arch.pipN", { n: r.publicIps.length }) : `${t("arch.i.publicIp")} ${r.publicIps[0]}`, tone: "danger", title: r.publicIps.join(", ") });
+  if (r.publicIps.length) {
+    // Tone follows the NSG verdict (PIP-04): open = danger, scoped = warn, closed / no NSG = muted, unknown = info
+    const tone: ArchBadge["tone"] = !r.exposure || r.exposure === "open" ? "danger" : r.exposure === "scoped" ? "warn" : r.exposure === "unknown" ? "info" : "muted";
+    const state = r.exposure ? ` · ${t(`arch.exposure.${r.exposure}`)}` : "";
+    badges.push({ text: r.publicIps.length > 1 ? t("arch.pipN", { n: r.publicIps.length }) : `${t("arch.i.publicIp")} ${r.publicIps[0]}`, tone, title: r.publicIps.join(", ") + state });
+  }
   if (r.nsgs.length) badges.push({ text: r.nsgs.length > 1 ? `NSG ${r.nsgs.length}` : "NSG", tone: "info", title: r.nsgs.join(", ") });
   if (r.nicCount > 1) badges.push({ text: t("arch.nicN", { n: r.nicCount }), tone: "muted" });
   if (r.nodePools.length) badges.push({ text: t("arch.poolsN", { n: r.nodePools.length }), tone: "muted", title: r.nodePools.join(", ") });
+  if (r.instances.length) badges.push({ text: t("arch.badge.instances", { n: r.instances.length }), tone: "muted", title: r.instances.join(", ") });
   if (r.extraSubnets.length) badges.push({ text: t("arch.moreSubnets", { n: r.extraSubnets.length }), tone: "muted" });
   const context = marks.context.has(r.id);
   const endpoint = r.node.endpoint && r.node.endpoint.length < 48 && !r.publicIps.includes(r.node.endpoint) ? r.node.endpoint : undefined;

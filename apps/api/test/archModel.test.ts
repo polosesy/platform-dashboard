@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode } from "@aud/types";
 // Pure web module (no React) — the web package is CommonJS-typed, so read the namespace
 import * as ns from "../../web/src/lib/archModel.ts";
+import { mockArchitectureGraph } from "../src/mockData.js";
 
 const m = ((ns as unknown as { default?: typeof ns }).default ?? ns) as typeof ns;
 const { buildArchModel, layoutArch, initialCollapsed, defaultRegion, internetId, searchArch, labelWidth, ARCH } = m;
@@ -331,4 +332,71 @@ test("filter: in 'all' view the filtered model does not start fully collapsed", 
   const v = filterArchModel(model, cat("compute"));
   assert.equal(initialCollapsed(v.model, "all", 24, true).size, 0);
   assert.equal(initialCollapsed(model, "all").size, 2, "unfiltered all-regions view still collapses every VNet");
+});
+
+// ── catalog REG / VMSS-03 / LB-04 rules (docs/architecture/azure-resource-relationships.md) ──
+
+
+test("example graph: regional services in their region, only Front Door and DNS zones global, PaaS by network mode", () => {
+  const model = buildArchModel(mockArchitectureGraph);
+  const kinds = (ids: string[]) => ids.map((i) => model.resources.get(i)!.node.kind).sort();
+  assert.deepEqual(kinds(model.global), ["dns", "frontDoor"]);
+  assert.equal(model.regions.length, 1);
+  const reg = model.regions[0]!;
+  assert.equal(reg.key, "koreacentral");
+  const subnetOf = (name: string) => model.resources.get([...model.resources.keys()].find((k) => model.resources.get(k)!.node.name === name)!)!.subnetId?.split("/").pop();
+  assert.equal(subnetOf("agw-sample"), "snet-agw");
+  assert.equal(subnetOf("aks-sample"), "snet-aks");
+  assert.equal(subnetOf("kubernetes-internal"), "snet-aks");
+  assert.equal(subnetOf("pe-sql-orders"), "snet-pe");
+  assert.equal(subnetOf("pg-orders"), "snet-db", "PostgreSQL Flexible private access sits in its delegated subnet (PAAS-02)");
+  assert.deepEqual(reg.paas.data.map((i) => model.resources.get(i)!.node.name), ["sql-orders"], "SQL logical server in the region's PaaS lane (PAAS-05)");
+  assert.deepEqual(reg.paas.security.map((i) => model.resources.get(i)!.node.name), ["kv-sample"]);
+  const kinds2 = model.edges.map((e) => e.kind).sort();
+  assert.ok(kinds2.includes("ingress"), "Internet → App Gateway public frontend");
+  assert.ok(kinds2.includes("privateLink") && kinds2.includes("routes"));
+  assert.equal(model.accounting.size, mockArchitectureGraph.nodes.length, "every example node accounted once");
+});
+
+test("no location → region unknown (never global); location 'global' → global box", () => {
+  const graph: ArchitectureGraph = { generatedAt: "", nodes: [
+    { id: KV, kind: "keyVault", name: "kv-noloc" },
+    { id: FD, kind: "frontDoor", name: "fd", location: "global" },
+    { id: ODD, kind: "storage", name: "st", location: "global" },
+  ], edges: [] };
+  const model = buildArchModel(graph);
+  assert.deepEqual(model.regions.map((r) => r.key), ["unknown"]);
+  assert.deepEqual(model.regions[0]!.paas.security, [KV]);
+  assert.deepEqual([...model.global].sort(), [FD, ODD].sort());
+});
+
+test("Flexible scale set: instance VMs are absorbed into the scale-set tile; their NIC places it; lines land on it", () => {
+  const FLEX = rid("rg1", "microsoft.compute/virtualmachinescalesets", "vmss-web");
+  const graph: ArchitectureGraph = { generatedAt: "", nodes: [
+    { id: VNET_A, kind: "vnet", name: "vnet-a", location: "koreacentral" },
+    { id: A1, kind: "subnet", name: "a1", location: "koreacentral" },
+    { id: FLEX, kind: "vmss", name: "vmss-web", location: "koreacentral", metadata: { orchestrationMode: "Flexible" } },
+    { id: vmId("vmss-web_1"), kind: "vm", name: "vmss-web_1", location: "koreacentral" },
+    { id: nicId("vmss-web-nic"), kind: "nic", name: "vmss-web-nic", endpoint: "10.0.1.4", location: "koreacentral" },
+    { id: APPGW, kind: "appGateway", name: "agw", location: "koreacentral" },
+    { id: LB_PUB, kind: "lb", name: "kubernetes", location: "koreacentral", metadata: { inboundRules: 0 } },
+    { id: pipId("pip-k"), kind: "publicIP", name: "pip-k", endpoint: "203.0.113.30", location: "koreacentral", metadata: { attachedTo: LB_PUB } },
+  ], edges: [
+    { id: "1", kind: "contains", source: VNET_A, target: A1 },
+    { id: "2", kind: "attached-to", source: A1, target: nicId("vmss-web-nic") },
+    { id: "3", kind: "bound-to", source: nicId("vmss-web-nic"), target: vmId("vmss-web_1") },
+    { id: "4", kind: "member-of", source: vmId("vmss-web_1"), target: FLEX },
+    { id: "5", kind: "routes", source: APPGW, target: nicId("vmss-web-nic") },
+  ] };
+  const model = buildArchModel(graph);
+  const tile = model.resources.get(FLEX)!;
+  assert.equal(tile.subnetId, A1, "placed by the instance NIC");
+  assert.deepEqual(tile.instances, ["vmss-web_1"]);
+  assert.deepEqual(tile.privateIps, ["10.0.1.4"]);
+  assert.ok(!model.resources.has(vmId("vmss-web_1")), "no separate VM tile");
+  assert.equal(model.accounting.get(vmId("vmss-web_1"))?.into, FLEX);
+  assert.equal(model.accounting.get(nicId("vmss-web-nic"))?.into, FLEX);
+  assert.ok(model.edges.some((e) => e.kind === "routes" && e.source === APPGW && e.target === FLEX), "AGW → instance lands on the scale set");
+  assert.ok(!model.edges.some((e) => e.kind === "ingress" && e.target === LB_PUB), "an LB with no inbound rule is not an Internet entry (LB-04)");
+  assert.equal(model.accounting.get(pipId("pip-k"))?.into, LB_PUB, "its public IP is still shown on it");
 });
