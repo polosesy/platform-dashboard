@@ -8,6 +8,7 @@ import { useId, useRef, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { activeNavItem } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
+import { authStateOfCode } from "@/lib/api";
 import s from "./ui.module.css";
 
 const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(" ");
@@ -114,19 +115,25 @@ export function Select({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  /** `group`: options with a group are shown under it (<optgroup>), in first-seen group order */
+  options: { value: string; label: string; group?: string }[];
   disabled?: boolean;
   placeholder?: string;
   hideLabel?: boolean;
 }) {
+  const groups = [...new Set(options.map((o) => o.group).filter((g): g is string => !!g))];
+  const opt = (o: { value: string; label: string }) => <option key={o.value} value={o.value}>{o.label}</option>;
   return (
     <label className={s.field}>
       <span className={s.fieldLabel} hidden={hideLabel}>{label}</span>
       <select className={s.select} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || options.length === 0} aria-label={hideLabel ? label : undefined}>
         {options.length === 0 ? <option value="">{placeholder ?? "-"}</option> : null}
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
+        {groups.length
+          ? <>
+              {options.filter((o) => !o.group).map(opt)}
+              {groups.map((g) => <optgroup key={g} label={g}>{options.filter((o) => o.group === g).map(opt)}</optgroup>)}
+            </>
+          : options.map(opt)}
       </select>
     </label>
   );
@@ -170,10 +177,11 @@ export function Button({
   );
 }
 
-export function Toggle({ checked, onChange, children, title }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; title?: string }) {
+/** On/off switch. When `disabled`, `title` should say why (e.g. no measured data). */
+export function Toggle({ checked, onChange, children, title, disabled }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; title?: string; disabled?: boolean }) {
   return (
-    <label className={s.toggle} title={title}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <label className={s.toggle} title={title} data-disabled={disabled || undefined}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {children}
     </label>
   );
@@ -199,9 +207,25 @@ export function ErrorNotice({ error }: { error: string | null | undefined }) {
 }
 
 /** Shown whenever a response is sample (mock) data, so it is never mistaken for live data. */
+/** A response note for people: "signin_required" (anonymous → sample data) becomes the sign-in hint */
+export function useNoteText() {
+  const { t } = useI18n();
+  return (note: string | null | undefined) => {
+    if (note === "signin_required") return t("auth.signinForReal");
+    const state = authStateOfCode(note);
+    return state ? t(`auth.state.${state}`) : note ?? undefined;
+  };
+}
+
 export function SampleDataNotice({ note }: { note?: string | null }) {
   const { t } = useI18n();
   if (!note) return null;
+  if (note === "signin_required") {
+    return <Notice tone="info" title={t("common.sampleData")}>{t("auth.signinForReal")}</Notice>;
+  }
+  // An auth / connection code (consent_required, connection_failed …) reads as a sentence in the app's language
+  const state = authStateOfCode(note);
+  if (state) return <Notice tone="warning" title={t("common.partialData")}>{t(`auth.state.${state}`)}</Notice>;
   const mock = /mock/i.test(note);
   return (
     <Notice tone="warning" title={mock ? t("common.sampleData") : t("common.partialData")}>

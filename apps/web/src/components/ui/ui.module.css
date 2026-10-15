@@ -317,6 +317,11 @@
   accent-color: var(--accent);
 }
 
+.toggle[data-disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* ── Notices ── */
 .notice {
   display: flex;

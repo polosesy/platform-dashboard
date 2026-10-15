@@ -2,26 +2,31 @@
 
 import "reactflow/dist/style.css";
 
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import type { LiveAlert, VisualizationMode, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureTenantOption, AzureTenantsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition } from "@aud/types";
-import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
+import type { LiveAlert, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureConnectionOption, AzureConnectionsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition, PrivateLinkUsageResponse } from "@aud/types";
+import { useApiQuery } from "@/lib/useApiQuery";
+import { apiBaseUrl, apiUrl, authStateOf, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n } from "@/lib/i18n";
+import { DEFAULT_EDGE_LAYERS, EDGE_LAYERS, edgeLayer, isInferredEdge, scopeCoverage, scopeImpacts, scopeSpec, type EdgeLayer } from "@/lib/liveScope";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
 import { useLiveSnapshot, type UpdateMode } from "./hooks/useLiveSnapshot";
 import { LiveCanvas } from "./components/LiveCanvas";
 import { AlertSidebar } from "./components/AlertSidebar";
-import { FaultTimeline } from "./components/FaultTimeline";
 import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
 import { EdgeDetailPanel } from "./components/EdgeDetailPanel";
 import { formatAzureRegion } from "./utils/regionFormat";
+import { LIVE_EDGE_LOOK, liveStroke, type LiveEdgeStyleKey } from "@/lib/liveStyle";
 import styles from "./styles.module.css";
-import { Button, PageHeader, Segmented, Select } from "@/components/ui";
+import { Button, EmptyState, Notice, PageHeader, Select, Toggle } from "@/components/ui";
 
-const Canvas3D = lazy(() =>
-  import("./components/three/Canvas3D").then((m) => ({ default: m.Canvas3D })),
-);
-
+/** Built-in example diagram (sample resources and values) */
+const SAMPLE_DIAGRAM_ID = "prod-infra";
+/** Hover focus on/off, remembered per browser */
+const FOCUS_KEY = "aud.liveDiagram.hoverFocus";
+/** Last diagram generated from Azure, restored on the next visit */
+const LAST_DIAGRAM_KEY = "aud.liveDiagram.last";
 
 // ── Multi-select dropdown (Region / VNet filter) ──
 type MultiSelectDropdownProps = {
@@ -114,6 +119,73 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
   );
 }
 
+// ── "연결선 ▾" layer menu: one checkbox per edge layer, with its count and a line swatch ──
+
+/** Line style shown as the swatch of each layer (the canvas and legend use the same table) */
+const LAYER_SWATCH: Record<EdgeLayer, LiveEdgeStyleKey> = {
+  config: "config",
+  privateLink: "privateLink",
+  privateLinkUsage: "privateLinkUsage",
+  ingress: "ingress",
+  egress: "egress",
+  peering: "peering",
+  publicIp: "publicIp",
+  inferred: "inferred",
+};
+
+function LayerMenu({ layers, counts, onChange }: { layers: ReadonlySet<EdgeLayer>; counts: Record<EdgeLayer, number>; onChange: (next: Set<EdgeLayer>) => void }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const shown = EDGE_LAYERS.filter((l) => layers.has(l)).reduce((n, l) => n + counts[l], 0);
+  const total = EDGE_LAYERS.reduce((n, l) => n + counts[l], 0);
+
+  return (
+    <div style={{ position: "relative" }} ref={wrapRef}>
+      <button type="button" className={styles.multiSelectBtn} aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="layer-menu">
+        <span className={styles.multiSelectBtnLabel}>{t("ld.layer.menu")}</span>
+        <span className={styles.multiSelectBtnCount}>{shown}/{total}</span>
+        <span style={{ opacity: 0.5, fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className={styles.multiSelectDropdown}>
+          {EDGE_LAYERS.map((layer) => {
+            const look = LIVE_EDGE_LOOK[LAYER_SWATCH[layer]];
+            return (
+              <label key={layer} className={styles.multiSelectOption} title={t(`ld.layer.${layer}.hint`)} data-layer={layer}>
+                <input
+                  type="checkbox"
+                  checked={layers.has(layer)}
+                  onChange={() => {
+                    const next = new Set(layers);
+                    if (next.has(layer)) next.delete(layer);
+                    else next.add(layer);
+                    onChange(next);
+                  }}
+                />
+                <svg width={22} height={8} aria-hidden="true" className={styles.layerSwatch}>
+                  <line x1={1} y1={4} x2={21} y2={4} stroke={liveStroke(LAYER_SWATCH[layer])} strokeWidth={Math.min(look.width + 0.4, 2.4)} strokeDasharray={look.dash} />
+                </svg>
+                <span className={styles.multiSelectOptionLabel}>{t(`ld.layer.${layer}`)}</span>
+                <span className={styles.multiSelectOptionBadge}>{counts[layer]}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function buildConnectedEdges(
   spec: DiagramSpec,
   snapshot: LiveDiagramSnapshot | null,
@@ -143,12 +215,29 @@ function buildConnectedEdges(
   return result;
 }
 
+function readLastDiagram(): string {
+  try {
+    return window.localStorage.getItem(LAST_DIAGRAM_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLastDiagram(id: string | null) {
+  try {
+    if (id) window.localStorage.setItem(LAST_DIAGRAM_KEY, id);
+    else window.localStorage.removeItem(LAST_DIAGRAM_KEY);
+  } catch {
+    /* storage unavailable — the page still works, it just starts empty next time */
+  }
+}
+
 export default function LiveDiagramPage() {
   const { t, locale } = useI18n();
   const getApiToken = useApiToken();
-  const [diagramId, setDiagramId] = useState("prod-infra");
+  // "" until the user generates a diagram (or the last generated one is restored) — never sample data by default
+  const [diagramId, setDiagramId] = useState("");
   const [mode, setMode] = useState<UpdateMode>("polling");
-  const [vizMode, setVizMode] = useState<VisualizationMode>("2d-animated");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [edgeDetail, setEdgeDetail] = useState<EdgeNetworkDetail | null>(null);
@@ -157,6 +246,11 @@ export default function LiveDiagramPage() {
   const [selectedVmssInstance, setSelectedVmssInstance] = useState<{
     computerName: string; powerState: string; provisioningState?: string; privateIp?: string; nodePoolName?: string; nodeImageVersion?: string; conditions?: AksNodeCondition[]; parentVmssId: string; label: string;
   } | null>(null);
+
+  useEffect(() => {
+    const last = readLastDiagram();
+    if (last) setDiagramId(last);
+  }, []);
 
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
@@ -175,15 +269,24 @@ export default function LiveDiagramPage() {
     if (edgeId) setSelectedNodeId(null);
   }, []);
 
-  // Overlay toggles
-  const [showNetworkFlow, setShowNetworkFlow] = useState(true);
-  const [showParticles, setShowParticles] = useState(true);
-  const [showFaultRipple, setShowFaultRipple] = useState(true);
-  const [showHeatmap, setShowHeatmap] = useState(false);
-  const [showTimeline, setShowTimeline] = useState(false);
+  // Toolbar: edge layers, measured traffic, fault impact
+  const [layers, setLayers] = useState<Set<EdgeLayer>>(() => new Set(DEFAULT_EDGE_LAYERS));
+  const [trafficOn, setTrafficOn] = useState(false);
+  const [impactOn, setImpactOn] = useState(true);
+  // Hover focus (dim what is not linked) — remembered per browser; off keeps the whole picture visible
+  const [hoverFocus, setHoverFocusState] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(FOCUS_KEY) === "0") setHoverFocusState(false);
+    } catch { /* storage unavailable — default on */ }
+  }, []);
+  const setHoverFocus = useCallback((on: boolean) => {
+    setHoverFocusState(on);
+    try { window.localStorage.setItem(FOCUS_KEY, on ? "1" : "0"); } catch { /* not remembered */ }
+  }, []);
 
-  // Tenant & Subscription context
-  const [tenants, setTenants] = useState<AzureTenantOption[]>([]);
+  // Connection & Subscription context (a connection = one customer tenant the platform reads)
+  const [tenants, setTenants] = useState<AzureConnectionOption[]>([]);
   const [tenantId, setTenantId] = useState("");
   const [subscriptions, setSubscriptions] = useState<AzureSubscriptionOption[]>([]);
   const [subscriptionId, setSubscriptionId] = useState("");
@@ -200,22 +303,22 @@ export default function LiveDiagramPage() {
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // Fetch tenants on mount
+  // Fetch connections on mount
   useEffect(() => {
     let cancelled = false;
     getApiToken()
       .catch(() => null)
       .then((token) =>
-        fetchJsonWithBearer<AzureTenantsResponse>(
-          `${apiBaseUrl()}/api/azure/tenants`,
+        fetchJsonWithBearer<AzureConnectionsResponse>(
+          `${apiBaseUrl()}/api/azure/connections`,
           token,
         ),
       )
       .then((resp) => {
         if (cancelled) return;
-        const list = resp.tenants ?? [];
+        const list = resp.connections ?? [];
         setTenants(list);
-        setTenantId((prev) => prev || list[0]?.tenantId || "");
+        setTenantId((prev) => prev || list[0]?.key || "");
       })
       .catch(() => {
         if (cancelled) return;
@@ -231,7 +334,8 @@ export default function LiveDiagramPage() {
       .catch(() => null)
       .then((token) =>
         fetchJsonWithBearer<AzureSubscriptionsResponse>(
-          `${apiBaseUrl()}/api/azure/subscriptions`,
+          // The subscriptions of the chosen connection (registry key)
+          apiUrl("/api/azure/subscriptions", { connection: tenantId || undefined }),
           token,
         ),
       )
@@ -239,7 +343,8 @@ export default function LiveDiagramPage() {
         if (cancelled) return;
         const subs = resp.subscriptions ?? [];
         setSubscriptions(subs);
-        setSubscriptionId((prev) => prev || subs[0]?.subscriptionId || "");
+        // keep the choice only if it belongs to the chosen tenant
+        setSubscriptionId((prev) => (subs.some((s) => s.subscriptionId === prev) ? prev : subs[0]?.subscriptionId || ""));
       })
       .catch(() => {
         if (cancelled) return;
@@ -263,16 +368,28 @@ export default function LiveDiagramPage() {
       );
       if (resp.ok && resp.diagram?.id) {
         setDiagramId(resp.diagram.id);
+        writeLastDiagram(resp.diagram.id);
       }
     } catch (e: unknown) {
-      setGenerateError(e instanceof Error ? e.message : "Generation failed");
+      const auth = authStateOf(e);
+      setGenerateError(auth ? t(`auth.state.${auth}`) : e instanceof Error ? e.message : "Generation failed");
     } finally {
       setGenerating(false);
     }
-  }, [getApiToken, subscriptionId]);
+  }, [getApiToken, subscriptionId, t]);
 
   const { spec, error: specError, loading: specLoading } = useDiagramSpec(diagramId);
   const { snapshot, error: snapError, connected, refresh } = useLiveSnapshot(diagramId, mode);
+
+  // A restored diagram the API no longer holds (it keeps generated diagrams in memory) → back to the empty state
+  useEffect(() => {
+    if (specError && diagramId && diagramId !== SAMPLE_DIAGRAM_ID && /404|not found/i.test(specError)) {
+      writeLastDiagram(null);
+      setDiagramId("");
+    }
+  }, [specError, diagramId]);
+
+  const isSample = diagramId === SAMPLE_DIAGRAM_ID || snapshot?.dataSource === "mock";
 
   // ── VNet / Region option extraction ──
   const vnetOptions = useMemo(() => {
@@ -323,103 +440,21 @@ export default function LiveDiagramPage() {
       if (count > maxCount) { maxCount = count; primaryId = vnet.id; }
     }
     setSelectedVnets(new Set([primaryId]));
-   
+
   }, [spec]); // Re-run only when spec object changes (new Generate)
 
-  // ── Filtered spec (VNet + Region — multi-select) ──
-  const filteredSpec = useMemo(() => {
-    if (!spec) return spec;
-    if (selectedVnets.size === 0 && selectedRegions.size === 0) return spec;
-
-    // Build set of visible node IDs
-    let visibleNodeIds: Set<string>;
-
-    if (selectedVnets.size > 0) {
-      // Include all selected VNets and their descendants (union)
-      visibleNodeIds = new Set<string>();
-      for (const vnetId of selectedVnets) {
-        visibleNodeIds.add(vnetId);
-        // BFS: find all descendants via parentId
-        const queue = [vnetId];
-        while (queue.length > 0) {
-          const parentId = queue.shift()!;
-          for (const n of spec.nodes) {
-            if (n.parentId === parentId && !visibleNodeIds.has(n.id)) {
-              visibleNodeIds.add(n.id);
-              queue.push(n.id);
-            }
-          }
-        }
-      }
-      // Also include external resources connected via edges from visible nodes
-      for (const edge of spec.edges) {
-        if (visibleNodeIds.has(edge.source) && !visibleNodeIds.has(edge.target)) {
-          visibleNodeIds.add(edge.target);
-        }
-        if (visibleNodeIds.has(edge.target) && !visibleNodeIds.has(edge.source)) {
-          visibleNodeIds.add(edge.source);
-        }
-      }
-    } else {
-      visibleNodeIds = new Set(spec.nodes.map((n) => n.id));
-    }
-
-    // Region filter: further restrict (union of all selected regions)
-    if (selectedRegions.size > 0) {
-      const regionNodeIds = new Set(
-        spec.nodes.filter((n) => n.location && selectedRegions.has(n.location)).map((n) => n.id),
-      );
-      // Walk parent chain upward for each matching node
-      for (const n of spec.nodes) {
-        if (regionNodeIds.has(n.id)) {
-          let cur = n;
-          while (cur.parentId) {
-            regionNodeIds.add(cur.parentId);
-            const parent = spec.nodes.find((p) => p.id === cur.parentId);
-            if (!parent) break;
-            cur = parent;
-          }
-        }
-      }
-      // Include child groups that contain region-matching nodes
-      for (const n of spec.nodes) {
-        if (n.nodeType === "group" && !regionNodeIds.has(n.id)) {
-          const hasChild = spec.nodes.some((c) => c.parentId === n.id && regionNodeIds.has(c.id));
-          if (hasChild) regionNodeIds.add(n.id);
-        }
-      }
-      // Intersect with VNet filter
-      visibleNodeIds = new Set([...visibleNodeIds].filter((id) => regionNodeIds.has(id)));
-    }
-
-    // Ensure all parent chains are fully included
-    for (const n of spec.nodes) {
-      if (visibleNodeIds.has(n.id) && n.parentId) {
-        let cur = n;
-        while (cur.parentId && !visibleNodeIds.has(cur.parentId)) {
-          const parent = spec.nodes.find((p) => p.id === cur.parentId);
-          if (!parent) break;
-          visibleNodeIds.add(parent.id);
-          cur = parent;
-        }
-      }
-    }
-
-    const filteredNodes = spec.nodes
-      .filter((n) => visibleNodeIds.has(n.id))
-      .map((n) => {
-        if (n.parentId && !visibleNodeIds.has(n.parentId)) {
-          return { ...n, parentId: undefined };
-        }
-        return n;
-      });
-
-    const filteredEdges = spec.edges.filter(
-      (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target),
-    );
-
-    return { ...spec, nodes: filteredNodes, edges: filteredEdges };
-  }, [spec, selectedVnets, selectedRegions]);
+  // ── Scope: selected VNets / regions, widened once along configured links (lib/liveScope) ──
+  // Guessed links widen it only while the "추정 의존성" layer is on; the menu counts always include them.
+  const showGuesses = layers.has("inferred");
+  const scopeWithGuesses = useMemo(
+    () => (spec ? scopeSpec(spec, selectedVnets, selectedRegions, { includeInferred: true }) : spec),
+    [spec, selectedVnets, selectedRegions],
+  );
+  const scopeConfigured = useMemo(
+    () => (spec ? scopeSpec(spec, selectedVnets, selectedRegions) : spec),
+    [spec, selectedVnets, selectedRegions],
+  );
+  const filteredSpec = showGuesses ? scopeWithGuesses : scopeConfigured;
 
   // Reset selected node when filter changes (node may no longer be visible)
   useEffect(() => {
@@ -464,16 +499,64 @@ export default function LiveDiagramPage() {
     [regionOptions],
   );
 
-  const isFiltered = selectedVnets.size > 0 || selectedRegions.size > 0;
-
   const handleAlertClick = useCallback((alert: LiveAlert) => {
     const nodeId = alert.affectedNodeIds[0];
     if (nodeId) handleNodeSelect(nodeId);
   }, [handleNodeSelect]);
 
   const error = specError || snapError;
-  const faultCount = snapshot?.faultImpacts?.length ?? 0;
-  const alertCount = snapshot?.alerts.length ?? 0;
+
+  // ── Who uses each Private Endpoint (access / flow logs) — one VNet in view, when its layer is on or a panel is
+  // open; refreshed every 5 min. The response is tagged with its VNet so a switch never shows another VNet's use.
+  const vnetInView = useMemo(() => {
+    const v = filteredSpec?.nodes.filter((n) => n.icon === "vnet" && n.nodeType === "group" && !n.metadata?.ghostOf) ?? [];
+    return v.length === 1 ? v[0]!.id : null;
+  }, [filteredSpec]);
+  const [pluTick, setPluTick] = useState(0);
+  useEffect(() => {
+    const h = setInterval(() => setPluTick((n) => n + 1), 5 * 60_000);
+    return () => clearInterval(h);
+  }, []);
+  const wantUsage = !!spec && !!vnetInView && (layers.has("privateLinkUsage") || !!selectedNodeId);
+  const usageQuery = useApiQuery<{ vnet: string; data: PrivateLinkUsageResponse }>(
+    wantUsage ? `plu|${spec!.id}|${vnetInView}|${pluTick}` : null,
+    async (token) => ({ vnet: vnetInView!, data: await fetchJsonWithBearer<PrivateLinkUsageResponse>(apiUrl("/api/live/private-link-usage", { diagramId: spec!.id, vnet: vnetInView! }), token) }),
+    { tokenOptional: true },
+  );
+  const usage = wantUsage && usageQuery.data?.vnet === vnetInView ? usageQuery.data.data : null;
+
+  // ── What is in view: counts, coverage, impacts ──
+  const visibleIds = useMemo(() => new Set(filteredSpec?.nodes.map((n) => n.id) ?? []), [filteredSpec]);
+  const nodeLabelById = useMemo(() => new Map(spec?.nodes.map((n) => [n.id, n.label]) ?? []), [spec]);
+  const nodeLabel = useCallback((id: string) => nodeLabelById.get(id) ?? id, [nodeLabelById]);
+  const coverage = useMemo(() => (filteredSpec ? scopeCoverage(filteredSpec, snapshot) : null), [filteredSpec, snapshot]);
+  const layerCounts = useMemo(() => {
+    const counts = Object.fromEntries(EDGE_LAYERS.map((l) => [l, 0])) as Record<EdgeLayer, number>;
+    if (!scopeConfigured || !scopeWithGuesses) return counts;
+    const byId = new Map(scopeConfigured.nodes.map((n) => [n.id, n]));
+    for (const e of scopeConfigured.edges) counts[edgeLayer(e, byId)]++;
+    // Guesses reach nodes the configured view does not have — count them in the wider scope
+    counts.inferred = scopeWithGuesses.edges.filter((e) => isInferredEdge(e)).length;
+    counts.privateLinkUsage = usage?.usages.length ?? 0;
+    return counts;
+  }, [scopeConfigured, scopeWithGuesses, usage]);
+  // One list for the toolbar count, the canvas and the panels (an impact outside this view never dims it)
+  const visibleImpacts = useMemo(() => scopeImpacts(snapshot?.faultImpacts, visibleIds), [snapshot?.faultImpacts, visibleIds]);
+  const shownImpacts = useMemo(() => (impactOn ? visibleImpacts : []), [impactOn, visibleImpacts]);
+  const visibleAlerts = useMemo(
+    () => (snapshot?.alerts ?? []).filter((a) => a.affectedNodeIds.length === 0 || a.affectedNodeIds.some((id) => visibleIds.has(id))),
+    [snapshot?.alerts, visibleIds],
+  );
+  const resourceCount = filteredSpec?.nodes.filter((n) => n.nodeType !== "group").length ?? 0;
+  const sources = snapshot?.coverage?.sources;
+  const coverageTitle = sources
+    ? [
+        `${t("ld.coverage.metrics")}: ${t(`ld.coverage.state.${sources.metrics}`)}`,
+        `${t("ld.coverage.traffic")}: ${t(`ld.coverage.state.${sources.traffic}`)}`,
+        `${t("live.alerts")}: ${t(`ld.coverage.state.${sources.alerts}`)}`,
+      ].join("\n")
+    : undefined;
+  const hasMeasuredTraffic = (coverage?.edgesWithTraffic ?? 0) > 0;
 
   // Build connected edges for the selected node's detail panel
   const connectedEdges = useMemo(() => {
@@ -508,22 +591,20 @@ export default function LiveDiagramPage() {
     <div className={styles.page}>
       <PageHeader
         meta={
-          <>
-            <span className={styles.statusDot} style={{ background: connected ? "var(--success)" : "var(--danger)" }} aria-hidden="true" />
-            <span>{connected ? t("live.connected") : t("live.disconnected")}</span>
-            <span>· {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}</span>
-            {snapshot ? <span>· {t("live.updated")} {new Date(snapshot.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : null}
-            <span>· {t("live.scopeHint")}</span>
-          </>
+          diagramId ? (
+            <>
+              <span className={styles.statusDot} style={{ background: connected ? "var(--success)" : "var(--danger)" }} aria-hidden="true" />
+              <span>{connected ? t("live.connected") : t("live.disconnected")}</span>
+              <span>· {spec ? spec.name : specLoading ? t("live.loading") : t("live.noDiagram")}</span>
+              {snapshot ? <span>· {t("live.updated")} {new Date(snapshot.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : null}
+              <span>· <Link href="/architecture">{t("live.scopeHint")}</Link></span>
+            </>
+          ) : (
+            <span><Link href="/architecture">{t("live.scopeHint")}</Link></span>
+          )
         }
         actions={
           <>
-            <Segmented
-              label={t("live.vizMode")}
-              value={vizMode}
-              onChange={setVizMode}
-              items={(["2d", "2d-animated", "3d"] as VisualizationMode[]).map((m) => ({ id: m, label: t(`viz.${m}`) }))}
-            />
             <Select
               label={t("live.updateMode")}
               hideLabel
@@ -531,7 +612,7 @@ export default function LiveDiagramPage() {
               onChange={(v) => setMode(v as UpdateMode)}
               options={[{ value: "polling", label: t("live.polling") }, { value: "sse", label: t("live.sse") }]}
             />
-            <Button onClick={refresh}>{t("live.refresh")}</Button>
+            <Button onClick={refresh} disabled={!diagramId}>{t("live.refresh")}</Button>
           </>
         }
       />
@@ -549,8 +630,8 @@ export default function LiveDiagramPage() {
           >
             {tenants.length === 0 ? <option value="">{t("live.selectTenant")}</option> : null}
             {tenants.map((tn) => (
-              <option key={tn.tenantId} value={tn.tenantId}>
-                {tn.displayName && tn.displayName !== tn.tenantId ? tn.displayName : `${tn.tenantId.slice(0, 8)}…`}
+              <option key={tn.key} value={tn.key}>
+                {tn.displayName}
               </option>
             ))}
           </select>
@@ -613,14 +694,29 @@ export default function LiveDiagramPage() {
         )}
       </div>
 
+      {isSample && diagramId && (
+        <Notice tone="warning" title={t("common.sampleData")}>{t("ld.sample.hint")}</Notice>
+      )}
+
       {(error || generateError) && (
         <div className={styles.error}>{error || generateError}</div>
       )}
 
-      {/* Overlay controls + Topology stats */}
-      <div className={styles.controlBar}>
-        {/* Resource search */}
-        {filteredSpec && (
+      {!diagramId && (
+        <EmptyState title={t("ld.empty.title")}>
+          <p className={styles.emptyHint}>{t("ld.empty.hint")}</p>
+          <div className={styles.emptyActions}>
+            <Button onClick={handleGenerate} disabled={generating}>
+              {generating ? t("live.generating") : t("live.generateFromAzure")}
+            </Button>
+            <Button onClick={() => setDiagramId(SAMPLE_DIAGRAM_ID)}>{t("ld.empty.sample")}</Button>
+          </div>
+        </EmptyState>
+      )}
+
+      {/* Toolbar: search · coverage · layers · traffic · impact */}
+      {filteredSpec && (
+        <div className={styles.controlBar}>
           <div className={styles.resourceSearch} ref={searchRef}>
             <input
               className={styles.resourceSearchInput}
@@ -648,112 +744,66 @@ export default function LiveDiagramPage() {
               </div>
             )}
           </div>
-        )}
-        <div className={styles.statsBar}>
-          {snapshot?.topology && (
-            <>
-              <div className={styles.stat}>
-                {t("live.nodes")} <span className={styles.statVal}>{snapshot.topology.nodeCount}</span>
-              </div>
-              <div className={styles.stat}>
-                {t("live.edges")} <span className={styles.statVal}>{snapshot.topology.edgeCount}</span>
-              </div>
-              <div className={styles.stat}>
-                {t("live.bindings")} <span className={styles.statVal}>{snapshot.topology.resolvedBindings}</span>
-              </div>
-              <div className={styles.stat}>
-                {t("live.alerts")} <span className={styles.statVal}>{alertCount}</span>
-              </div>
-              {faultCount > 0 && (
-                <div className={`${styles.stat} ${styles.statFault}`}>
-                  {t("live.faults")} <span className={styles.statVal}>{faultCount}</span>
-                </div>
-              )}
-            </>
-          )}
-        </div>
 
-        {vizMode !== "3d" && (
-          <div className={styles.overlayToggles}>
-            <label className={styles.overlayToggle}>
-              <input
-                type="checkbox"
-                checked={showNetworkFlow}
-                onChange={(e) => setShowNetworkFlow(e.target.checked)}
-              />
-              <span>{t("live.networkFlow")}</span>
-            </label>
-            <label className={styles.overlayToggle}>
-              <input
-                type="checkbox"
-                checked={showParticles}
-                onChange={(e) => setShowParticles(e.target.checked)}
-              />
-              <span>{t("live.particles")}</span>
-            </label>
-            <label className={styles.overlayToggle}>
-              <input
-                type="checkbox"
-                checked={showFaultRipple}
-                onChange={(e) => setShowFaultRipple(e.target.checked)}
-              />
-              <span>{t("live.faultRipple")}</span>
-            </label>
-            <label className={styles.overlayToggle}>
-              <input
-                type="checkbox"
-                checked={showHeatmap}
-                onChange={(e) => setShowHeatmap(e.target.checked)}
-              />
-              <span>{t("live.heatmap")}</span>
-            </label>
-            <label className={styles.overlayToggle}>
-              <input
-                type="checkbox"
-                checked={showTimeline}
-                onChange={(e) => setShowTimeline(e.target.checked)}
-              />
-              <span>{t("live.timeline")}</span>
-            </label>
+          <div className={styles.statsBar} title={coverageTitle} data-testid="coverage">
+            <div className={styles.stat}>
+              {t("ld.coverage.resources")} <span className={styles.statVal}>{resourceCount}</span>
+            </div>
+            <div className={styles.stat}>
+              {t("ld.coverage.metrics")} <span className={styles.statVal}>{coverage?.nodesWithMetrics ?? 0}/{coverage?.nodesWithBindings ?? 0}</span>
+            </div>
+            <div className={styles.stat}>
+              {t("ld.coverage.traffic")} <span className={styles.statVal}>{coverage?.edgesWithTraffic ?? 0}/{coverage?.configuredEdges ?? 0}</span>
+            </div>
+            <div className={styles.stat}>
+              {t("live.alerts")} <span className={styles.statVal}>{visibleAlerts.length}</span>
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className={styles.overlayToggles}>
+            <LayerMenu layers={layers} counts={layerCounts} onChange={setLayers} />
+            <Toggle checked={hoverFocus} onChange={setHoverFocus} title={t("ld.focus.hint")}>
+              {t("ld.focus.label")}
+            </Toggle>
+            <Toggle
+              checked={trafficOn && hasMeasuredTraffic}
+              onChange={setTrafficOn}
+              disabled={!hasMeasuredTraffic}
+              title={hasMeasuredTraffic ? t("ld.traffic.hint") : t("ld.traffic.none")}
+            >
+              {t("ld.traffic.label")}
+            </Toggle>
+            <Toggle
+              checked={impactOn && visibleImpacts.length > 0}
+              onChange={setImpactOn}
+              disabled={visibleImpacts.length === 0}
+              title={visibleImpacts.length > 0 ? t("ld.impact.hint") : t("ld.impact.none")}
+            >
+              {t("ld.impact.label", { n: visibleImpacts.length })}
+            </Toggle>
+          </div>
+        </div>
+      )}
 
       {/* Canvas + Sidebars */}
       {filteredSpec && (
         <div className={styles.canvasGrid}>
-          {vizMode === "3d" ? (
-            <Suspense
-              fallback={
-                <div className={styles.canvasWrap}>
-                  <div className={styles.loadingCenter}>{t("live.loading3d")}</div>
-                </div>
-              }
-            >
-              <Canvas3D
-                spec={filteredSpec}
-                snapshot={snapshot}
-                onNodeSelect={handleNodeSelect}
-              />
-            </Suspense>
-          ) : (
-            <LiveCanvas
-              spec={filteredSpec}
-              snapshot={snapshot}
-              onNodeSelect={handleNodeSelect}
-              onEdgeSelect={handleEdgeSelect}
-              vizMode={vizMode}
-              showNetworkFlow={showNetworkFlow}
-              showParticles={showParticles}
-              showFaultRipple={showFaultRipple}
-              showHeatmap={showHeatmap}
-              isFiltered={isFiltered}
-              focusNodeId={focusNodeId}
-              onVmssInstanceSelect={handleVmssInstanceSelect}
-            />
-          )}
+          <LiveCanvas
+            spec={filteredSpec}
+            snapshot={snapshot}
+            onNodeSelect={handleNodeSelect}
+            onEdgeSelect={handleEdgeSelect}
+            layers={layers}
+            trafficOn={trafficOn && hasMeasuredTraffic}
+            impacts={shownImpacts}
+            usage={usage}
+            hoverFocus={hoverFocus}
+            selectedNodeId={selectedNodeId}
+            focusNodeId={focusNodeId}
+            onVmssInstanceSelect={handleVmssInstanceSelect}
+          />
 
-          {/* Right sidebar: edge detail, node detail, alerts, or timeline */}
+          {/* Right sidebar: edge detail, node detail, or alerts (list / timeline) */}
           <div className={styles.sidebarStack}>
             {selectedEdgeId ? (
               <EdgeDetailPanel
@@ -761,6 +811,7 @@ export default function LiveDiagramPage() {
                 loading={edgeDetailLoading}
                 edgeSpec={filteredSpec.edges.find((e) => e.id === selectedEdgeId) ?? null}
                 liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}
+                sample={isSample}
                 onClose={() => handleEdgeSelect(null)}
               />
             ) : (selectedNodeId || selectedVmssInstance) ? (
@@ -770,18 +821,26 @@ export default function LiveDiagramPage() {
                 alerts={selectedNodeId ? (snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
                 alertRules={selectedNodeId ? (snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
                 connectedEdges={selectedNodeId ? connectedEdges : []}
+                spec={filteredSpec}
+                impacts={shownImpacts}
+                alertCount={visibleAlerts.length}
+                generatedAt={snapshot?.generatedAt}
+                metricsState={snapshot?.coverage?.sources.metrics}
+                showInferred={layers.has("inferred")}
+                usage={usage}
+                usageLoading={wantUsage && usageQuery.loading && !usage}
+                onSelectNode={(id) => { handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
+                onBack={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
                 onClose={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
                 vmssInstance={selectedVmssInstance}
               />
-            ) : showTimeline && alertCount > 0 ? (
-              <FaultTimeline
-                alerts={snapshot?.alerts ?? []}
-                onAlertClick={handleAlertClick}
-              />
             ) : (
               <AlertSidebar
-                alerts={snapshot?.alerts ?? []}
+                alerts={visibleAlerts}
                 onAlertClick={handleAlertClick}
+                impacts={shownImpacts}
+                nodeLabel={nodeLabel}
+                onNodeClick={(id) => { handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
               />
             )}
           </div>

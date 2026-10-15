@@ -18,10 +18,11 @@ import type {
   AksExposureResource,
   AksVmssInstance,
 } from "@aud/types";
-import { getDiagramSpec } from "./liveAggregator.js";
+import { diagramOwner, getDiagramSpec } from "./liveAggregator.js";
 import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
 import { fetchAksNodeInfoMap } from "./kubernetes.js";
+import { debug } from "../infra/logger.js";
 
 // ──────────────────────────────────────────────
 // Cache: 30 seconds per bearer+edge combination
@@ -341,7 +342,7 @@ export async function fetchEdgeNetworkDetail(
   const cached = edgeDetailCache.get(cacheKey);
   if (cached) return cached;
 
-  const spec = getDiagramSpec(diagramId);
+  const spec = getDiagramSpec(diagramId, diagramOwner(bearerToken));
   if (!spec) throw new Error(`Diagram not found: ${diagramId}`);
 
   const edgeSpec = spec.edges.find((e) => e.id === edgeId);
@@ -354,8 +355,9 @@ export async function fetchEdgeNetworkDetail(
     throw new Error(`Edge nodes not found: ${edgeSpec.source} → ${edgeSpec.target}`);
   }
 
-  // Mock mode
-  if (!env.AZURE_LIVE_DIAGRAM_ENABLED) {
+  // Sample mode — only the built-in example diagram. A diagram generated from Azure never gets
+  // sample flows or throughput, even when AZURE_LIVE_DIAGRAM_ENABLED is off.
+  if (!env.AZURE_LIVE_DIAGRAM_ENABLED && !diagramId.startsWith("auto-")) {
     const result = generateMockEdgeDetail(edgeSpec, sourceNode, targetNode);
     edgeDetailCache.set(cacheKey, result);
     return result;
@@ -401,6 +403,7 @@ export async function fetchEdgeNetworkDetail(
     outboundFlows: [],
     inboundSummary: { flowCount: 0, totalBytesBps: 0, topPorts: [], externalSourceCount: 0 },
     outboundSummary: { flowCount: 0, totalBytesBps: 0, topPorts: [], externalSourceCount: 0 },
+    flowsCollected: false,
   };
 
   edgeDetailCache.set(cacheKey, result);
@@ -462,6 +465,12 @@ interface ArmAgwResponse {
   };
 }
 
+/** Resources of the built-in example diagram. Only these ever get sample detail — a real resource whose
+ *  lookup fails reports the failure instead of showing invented pools, instances or cluster settings. */
+function isSampleResource(resourceId: string): boolean {
+  return resourceId.startsWith("/subscriptions/mock/");
+}
+
 function mockBackendPools(resourceKind: string): BackendPoolInfo[] {
   if (resourceKind === "lb") {
     return [
@@ -502,75 +511,69 @@ export async function fetchBackendPoolInfo(
   const cached = backendPoolCache.get(cacheKey);
   if (cached) return cached;
 
-  if (!env.AZURE_LIVE_DIAGRAM_ENABLED) {
+  if (isSampleResource(resourceId)) {
     const result = mockBackendPools(resourceKind);
     backendPoolCache.set(cacheKey, result);
     return result;
   }
 
-  try {
-    const fetcher = await getArmFetcherAuto(env, bearerToken);
-    const url = `https://management.azure.com${resourceId}?api-version=2024-05-01`;
+  const fetcher = await getArmFetcherAuto(env, bearerToken);
+  const url = `https://management.azure.com${resourceId}?api-version=2024-05-01`;
 
-    if (resourceKind === "lb") {
-      const data = await fetcher.fetchJson<ArmLbResponse>(url);
-      const pools = data.properties?.backendAddressPools ?? [];
-      const firstProbe = data.properties?.probes?.[0];
-      const probe = firstProbe ? {
-        name: firstProbe.name ?? "probe",
-        protocol: firstProbe.properties?.protocol ?? "Http",
-        port: firstProbe.properties?.port ?? 80,
-        path: firstProbe.properties?.requestPath,
-        intervalSec: firstProbe.properties?.intervalInSeconds ?? 15,
-        unhealthyThreshold: firstProbe.properties?.numberOfProbes ?? 2,
-      } : undefined;
-
-      const result: BackendPoolInfo[] = pools.map((pool) => {
-        const members: BackendPoolMember[] = (pool.properties?.loadBalancerBackendAddresses ?? []).map((addr) => ({
-          name: addr.name ?? "member",
-          ipAddress: addr.properties?.ipAddress,
-          state: "Unknown" as const,
-          kind: "ip" as const,
-        }));
-        const rules = (pool.properties?.loadBalancingRules ?? [])
-          .map((r) => r.id?.split("/").pop())
-          .filter((r): r is string => !!r);
-        return { name: pool.name ?? "pool", resourceId: pool.id, loadBalancingRules: rules, members, probe };
-      });
-      backendPoolCache.set(cacheKey, result);
-      return result;
-    }
-
-    // appGateway
-    const data = await fetcher.fetchJson<ArmAgwResponse>(url);
+  if (resourceKind === "lb") {
+    const data = await fetcher.fetchJson<ArmLbResponse>(url);
     const pools = data.properties?.backendAddressPools ?? [];
     const firstProbe = data.properties?.probes?.[0];
     const probe = firstProbe ? {
       name: firstProbe.name ?? "probe",
       protocol: firstProbe.properties?.protocol ?? "Http",
       port: firstProbe.properties?.port ?? 80,
-      path: firstProbe.properties?.path,
-      intervalSec: firstProbe.properties?.interval ?? 30,
-      unhealthyThreshold: firstProbe.properties?.unhealthyThreshold ?? 3,
+      path: firstProbe.properties?.requestPath,
+      intervalSec: firstProbe.properties?.intervalInSeconds ?? 15,
+      unhealthyThreshold: firstProbe.properties?.numberOfProbes ?? 2,
     } : undefined;
 
     const result: BackendPoolInfo[] = pools.map((pool) => {
-      const members: BackendPoolMember[] = (pool.properties?.backendAddresses ?? []).map((addr, i) => ({
-        name: addr.fqdn ?? addr.ipAddress ?? `member-${i}`,
-        ipAddress: addr.ipAddress,
-        fqdn: addr.fqdn,
+      const members: BackendPoolMember[] = (pool.properties?.loadBalancerBackendAddresses ?? []).map((addr) => ({
+        name: addr.name ?? "member",
+        ipAddress: addr.properties?.ipAddress,
         state: "Unknown" as const,
-        kind: addr.fqdn ? "fqdn" as const : "ip" as const,
+        kind: "ip" as const,
       }));
-      return { name: pool.name ?? "pool", resourceId: pool.id, members, probe };
+      const rules = (pool.properties?.loadBalancingRules ?? [])
+        .map((r) => r.id?.split("/").pop())
+        .filter((r): r is string => !!r);
+      return { name: pool.name ?? "pool", resourceId: pool.id, loadBalancingRules: rules, members, probe };
     });
     backendPoolCache.set(cacheKey, result);
     return result;
-  } catch {
-    const result = mockBackendPools(resourceKind);
-    backendPoolCache.set(cacheKey, result);
-    return result;
   }
+
+  // appGateway
+  const data = await fetcher.fetchJson<ArmAgwResponse>(url);
+  const pools = data.properties?.backendAddressPools ?? [];
+  const firstProbe = data.properties?.probes?.[0];
+  const probe = firstProbe ? {
+    name: firstProbe.name ?? "probe",
+    protocol: firstProbe.properties?.protocol ?? "Http",
+    port: firstProbe.properties?.port ?? 80,
+    path: firstProbe.properties?.path,
+    intervalSec: firstProbe.properties?.interval ?? 30,
+    unhealthyThreshold: firstProbe.properties?.unhealthyThreshold ?? 3,
+  } : undefined;
+
+  const result: BackendPoolInfo[] = pools.map((pool) => {
+    const members: BackendPoolMember[] = (pool.properties?.backendAddresses ?? []).map((addr, i) => ({
+      name: addr.fqdn ?? addr.ipAddress ?? `member-${i}`,
+      ipAddress: addr.ipAddress,
+      fqdn: addr.fqdn,
+      state: "Unknown" as const,
+      kind: addr.fqdn ? "fqdn" as const : "ip" as const,
+    }));
+    return { name: pool.name ?? "pool", resourceId: pool.id, members, probe };
+  });
+  backendPoolCache.set(cacheKey, result);
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -594,6 +597,7 @@ export async function fetchVmssInstances(
   const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}vmss-inst:${vmssResourceId}`;
   const cached = vmssInstanceCache.get(cacheKey);
   if (cached) return cached;
+  if (isSampleResource(vmssResourceId)) return mockVmssInstances(vmssResourceId);
 
   try {
     const arm = await getArmFetcherAuto(env, bearerToken);
@@ -657,11 +661,8 @@ export async function fetchVmssInstances(
     vmssInstanceCache.set(cacheKey, result);
     return result;
   } catch (err) {
-    console.error(`[vmss-instances] Failed for ${vmssResourceId}:`, err);
-    // Return mock instances
-    const result = mockVmssInstances(vmssResourceId);
-    vmssInstanceCache.set(cacheKey, result);
-    return result;
+    debug("vmss-instances", "failed", err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 
@@ -688,6 +689,7 @@ export async function fetchAksPlaneDetail(
   const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}aks-plane:${resourceId}`;
   const cached = aksPlaneCache.get(cacheKey);
   if (cached) return cached;
+  if (isSampleResource(resourceId)) return mockAksPlaneDetail(resourceId);
 
   try {
     const arm = await getArmFetcherAuto(env, bearerToken);
@@ -826,7 +828,7 @@ export async function fetchAksPlaneDetail(
     const lbSku = String(netProfile.loadBalancerSku ?? "standard");
 
     // Ingress: detect LB or AppGW from the diagram spec if available
-    const diagramSpec = getDiagramSpec(`auto-${subscriptionId.slice(0, 8)}`);
+    const diagramSpec = getDiagramSpec(`auto-${subscriptionId.slice(0, 8)}`, diagramOwner(bearerToken));
     if (diagramSpec) {
       const aksArchGroupPrefix = `aks-${clusterName.toLowerCase().replace(/[^a-z0-9-]/g, "")}`;
       const ingressResources: AksExposureResource[] = [];
@@ -919,11 +921,8 @@ export async function fetchAksPlaneDetail(
     aksPlaneCache.set(cacheKey, result);
     return result;
   } catch (err) {
-    console.error(`[aks-plane-detail] Failed for ${resourceId}:`, err);
-    // Return mock/minimal data
-    const result = mockAksPlaneDetail(resourceId);
-    aksPlaneCache.set(cacheKey, result);
-    return result;
+    debug("aks-plane-detail", "failed", err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 

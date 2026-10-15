@@ -72,7 +72,9 @@ export function registerHealthRoutes(router: Router, env: Env) {
     }
 
     try {
-      const translations = await translateTexts(env, texts, to, from);
+      // The Translator key is billed: anonymous callers get the built-in translations (sample events) only
+    const signedIn = !!req.auth?.bearerToken || env.AUD_ANONYMOUS_SP;
+    const translations = await translateTexts(signedIn ? env : { ...env, AZURE_TRANSLATOR_KEY: undefined }, texts, to, from);
       if (res.writableEnded) return;
       res.json(translations ? { translations, from, to } : { error: "not_configured", translations: null });
     } catch (e: unknown) {

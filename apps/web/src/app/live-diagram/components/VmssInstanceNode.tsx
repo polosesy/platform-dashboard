@@ -2,7 +2,8 @@
 
 import { memo } from "react";
 import { useI18n } from "@/lib/i18n";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { type NodeProps } from "reactflow";
+import { HiddenHandles } from "./HiddenHandles";
 import type { AksNodeCondition } from "@aud/types";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import styles from "../styles.module.css";
@@ -50,7 +51,7 @@ export const VmssInstanceNode = memo(function VmssInstanceNode({
       data-state={powerState}
       onClick={() => onSelect?.(data)}
     >
-      <Handle type="target" position={Position.Left} className={styles.handle} style={{ opacity: 0 }} />
+      <HiddenHandles />
 
       {/* Health ring — mirrors LiveNode ring pattern exactly */}
       <div className={styles.vmssInstRing}>
@@ -92,8 +93,6 @@ export const VmssInstanceNode = memo(function VmssInstanceNode({
           )}
         </div>
       </div>
-
-      <Handle type="source" position={Position.Right} className={styles.handle} style={{ opacity: 0 }} />
     </div>
   );
 });

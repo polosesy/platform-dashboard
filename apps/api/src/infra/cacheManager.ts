@@ -1,3 +1,4 @@
+import { decodeJwt } from "jose";
 import { createHash } from "node:crypto";
 
 type CacheEntry<T> = {
@@ -66,7 +67,39 @@ export function bearerKeyPrefix(bearerToken: string): string {
   return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
 }
 
-/** Cache key prefix for a request — per-user when a bearer token is present, shared "sp" otherwise. */
+const userKeys = new Map<string, string>();
+
+let scopeResolver: ((bearerToken: string) => string | null) | null = null;
+
+/**
+ * Installed at boot by platformAccess: the set of Azure connections a token's role reaches (`c:home,cust-a`) — users
+ * who read through the same platform credentials see the same data and may share entries. null = per user.
+ */
+export function setCacheScopeResolver(fn: ((bearerToken: string) => string | null) | null): void {
+  scopeResolver = fn;
+}
+
+/**
+ * Cache key prefix for a request: `c:{connection keys}` when the caller reads only through platform credentials
+ * (shared by everyone with the same access), else `u:{tid}:{oid}` (delegated/OBO data is per user); "sp" anonymous.
+ */
 export function cachePrefix(bearerToken: string | undefined): string {
-  return bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  if (!bearerToken) return "sp";
+  return scopeResolver?.(bearerToken) ?? principalKey(bearerToken);
+}
+
+/** The signed-in person, stable across token renewals (`u:{tid}:{oid}`) — ownership of saved things (diagrams) */
+export function principalKey(bearerToken: string): string {
+  let key = userKeys.get(bearerToken);
+  if (!key) {
+    try {
+      const c = decodeJwt(bearerToken);
+      key = typeof c.tid === "string" && typeof c.oid === "string" ? `u:${c.tid.toLowerCase()}:${c.oid.toLowerCase()}` : bearerKeyPrefix(bearerToken);
+    } catch {
+      key = bearerKeyPrefix(bearerToken);
+    }
+    if (userKeys.size >= 500) userKeys.clear();
+    userKeys.set(bearerToken, key);
+  }
+  return key;
 }

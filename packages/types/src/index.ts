@@ -1,4 +1,5 @@
 export * from "./common.js";
+export * from "./connection.js";
 export * from "./architecture.js";
 export * from "./network.js";
 export * from "./reservations.js";

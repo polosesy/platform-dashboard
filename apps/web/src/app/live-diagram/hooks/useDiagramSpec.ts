@@ -4,9 +4,10 @@ import type { DiagramSpecResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 
+/** Empty `diagramId` = nothing chosen yet: no request, no spec. */
 export function useDiagramSpec(diagramId: string) {
   const { data, error, loading } = useApiQuery(
-    `diagram-spec:${diagramId}`,
+    diagramId ? `diagram-spec:${diagramId}` : null,
     (token) => fetchJsonWithBearer<DiagramSpecResponse>(apiUrl(`/api/live/diagrams/${encodeURIComponent(diagramId)}`), token),
     { tokenOptional: true },
   );

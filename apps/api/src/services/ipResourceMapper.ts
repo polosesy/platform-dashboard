@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
@@ -56,7 +56,7 @@ export async function buildIpResourceMap(
   bearerToken: string | undefined,
   nodes: DiagramNodeSpec[],
 ): Promise<IpResourceMap> {
-  const cacheKey = `ipmap:${nodes.map((n) => n.id).sort().join(",")}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:ipmap:${nodes.map((n) => n.id).sort().join(",")}`;
   const cached = ipMapCache.get(cacheKey);
   if (cached) return cached;
 

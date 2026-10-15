@@ -13,7 +13,7 @@ import type {
 } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { getArmFetcher, getArmFetcherSP, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { anonymousSpAllowed, getAnonymousArmFetcher, getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 
@@ -51,9 +51,9 @@ const DOMAIN_BY_CATEGORY: Record<string, PostureDomain> = {
   appservices: "appServices",
 };
 
-const GUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-/** Subscription / object IDs never leave the API — keep only the last 4 characters for disambiguation. */
-export const maskGuids = (v: string): string => v.replace(GUID_RE, (g) => `…${g.slice(-4)}`);
+// Masking lives with the other response helpers (re-exported for existing imports)
+import { maskGuids, safeMessage } from "../infra/requestParams.js";
+export { maskGuids, safeMessage };
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
@@ -237,11 +237,6 @@ const Q = {
     " | order by t desc | take 200",
 };
 
-/** Mask IDs and ARM scopes in an error message before it can reach a response. */
-export function safeMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  return maskGuids(raw.replace(/\/subscriptions\/[^\s'",]+/gi, "[scope]")).slice(0, 200);
-}
 
 /** Run the six Resource Graph queries; a failing section becomes a gap. Throws only when every section fails. */
 export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: string[]): Promise<SecurityPostureResponse> {
@@ -286,7 +281,7 @@ export type PostureDeps = {
   obo: (env: Env, token: string) => Promise<Pick<ArmFetcher, "postJson">>;
   sp: (env: Env) => Promise<Pick<ArmFetcher, "postJson">>;
 };
-const defaultDeps: PostureDeps = { obo: getArmFetcher, sp: getArmFetcherSP };
+const defaultDeps: PostureDeps = { obo: getArmFetcher, sp: (env) => getAnonymousArmFetcher(env, env.AZURE_SECURITY_SP_FALLBACK) };
 const inflight = new Map<string, Promise<SecurityPostureResponse>>();
 
 /**
@@ -304,7 +299,8 @@ export async function tryGetSecurityPosture(
   if (!env.AZURE_SECURITY_ENABLED) return null;
   const subs = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
   if (!subs.length) return null;
-  const useSp = !bearerToken && env.AZURE_SECURITY_SP_FALLBACK && !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);
+  // Anonymous: only in dev mode (AUD_ANONYMOUS_SP) and with this feature's own opt-in
+  const useSp = !bearerToken && anonymousSpAllowed(env, env.AZURE_SECURITY_SP_FALLBACK) && !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);
   if (!bearerToken && !useSp) return null;
 
   const key = `${bearerToken ? cachePrefix(bearerToken) : "sp"}:posture:${subs.join(",")}`;

@@ -19,12 +19,19 @@ dotenvConfig(); // Also try local apps/api/.env if present
 import cors from "cors";
 import express from "express";
 import { loadEnv } from "./env.js";
-import { bearerTokenMiddleware } from "./auth.js";
+import { getConnections } from "./infra/connectionRegistry.js";
+import { initPlatformAccess } from "./infra/platformAccess.js";
+import { createAuthorizeMiddleware } from "./middleware/authorize.js";
+import { createAuthMiddleware, verifierFromEnv } from "./auth.js";
 import { registerAllRoutes } from "./routes/index.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { setDebugLogging } from "./infra/logger.js";
 
 const env = loadEnv(process.env);
+// Fail fast on a bad connections file (schema, duplicate subscriptions, secrets in the file …)
+const connections = getConnections(env);
+initPlatformAccess(env);
+console.log(`[auth] SSO roles (default role: ${env.AUD_DEFAULT_ROLE ?? (env.NODE_ENV === "production" ? "none" : "viewer")}) · Azure connections: ${connections.map((c) => `${c.key}:${c.mode}`).join(", ")}`);
 setDebugLogging(env.AUD_DEBUG);
 
 const app = express();
@@ -35,10 +42,23 @@ const allowedOrigins = env.CORS_ORIGIN.split(",").map((s) => s.trim());
 app.use(
   cors({
     origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
-    credentials: true,
+    // Bearer tokens, no cookies
+    credentials: false,
+    methods: ["GET", "POST"],
+    allowedHeaders: ["authorization", "content-type", "x-request-id"],
   })
 );
-app.use(bearerTokenMiddleware);
+// Every Authorization header is verified before a route runs; no header = anonymous (sample data / 401)
+app.use("/api", createAuthMiddleware(verifierFromEnv(env)));
+// Platform role + connection access (403 before routes), audit line per signed-in request
+app.use("/api", createAuthorizeMiddleware(env));
+if (env.AUD_ANONYMOUS_SP) {
+  console.warn("[auth] AUD_ANONYMOUS_SP=true — anonymous callers read Azure with the platform credential (local development only)");
+  app.use("/api", (req, res, next) => {
+    if (req.auth?.kind === "anonymous") res.setHeader("x-aud-principal", "sp-anonymous");
+    next();
+  });
+}
 
 registerAllRoutes(app, env);
 
@@ -71,8 +91,8 @@ const MAX_RETRIES = 2;
 let retryCount = 0;
 
 function startServer() {
-  const server = app.listen(env.PORT, () => {
-    console.log(`API listening on http://localhost:${env.PORT}`);
+  const server = app.listen(env.PORT, env.API_BIND_HOST, () => {
+    console.log(`API listening on http://${env.API_BIND_HOST}:${env.PORT}`);
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {

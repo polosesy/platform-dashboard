@@ -32,7 +32,7 @@ export const VIZ = {
   peering: [16, 185, 129], // VNet peering (emerald)
   neutral: [107, 113, 122], // logging / inferred / control (slate)
   subnet: [95, 75, 139], // subnet boundary (plum)
-  fault: [239, 68, 68], // fault ripple / impact (red)
+  fault: [239, 68, 68], // fault impact (red)
   canvas: [247, 248, 250], // diagram canvas background
   integration: [14, 116, 144], // VNet integration (teal)
   violet: [112, 48, 160], // security advisories, user-defined routes

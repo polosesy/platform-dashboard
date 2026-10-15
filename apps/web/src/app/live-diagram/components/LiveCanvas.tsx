@@ -1,45 +1,53 @@
 "use client";
 
-import { useMemo, useCallback, useRef, useState, useEffect } from "react";
+import { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
   MiniMap,
   ReactFlowProvider,
+  MarkerType,
   useNodesState,
-
-  useOnViewportChange,
   useReactFlow,
   type Node as FlowNode,
   type Edge as FlowEdge,
   type NodeTypes,
   type EdgeTypes,
-  type Viewport,
+  type NodeChange,
 } from "reactflow";
 import type {
+  DiagramNodeSpec,
   DiagramSpec,
+  FaultImpact,
   LiveDiagramSnapshot,
-  VisualizationMode,
+  PrivateLinkUsageResponse,
+  LiveNode as LiveNodeState,
   SubResource,
   AksVmssInstance,
 } from "@aud/types";
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
+import { useI18n } from "@/lib/i18n";
+import { liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
+import { routeEdges } from "@/lib/liveRoute";
+import { shortNamesWithParts } from "@/lib/liveNames";
+import { usageThresholds } from "@/lib/liveMetricFormat";
+import { useReducedMotion } from "@/lib/useReducedMotion";
+import { disconnectedPes, usageChips, usageEdges } from "@/lib/plUsage";
+import { edgeLayer, impactView, isDirectedEdge, type EdgeLayer } from "@/lib/liveScope";
+import { PARTICLE_TONE_VAR, clipLabel, legendKeys, liveEdgeStyleKey, liveStroke, mergeReversePairs, relationLabel, type ParticleTone } from "@/lib/liveStyle";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
-import { GroupNode, type GroupNodeData, type NatGwBadgeInfo } from "./GroupNode";
+import { GroupNode, type EgressInfo, type GroupNodeData, type PeeringInfo } from "./GroupNode";
 import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
 import { VmssInstanceNode, type VmssInstanceNodeData } from "./VmssInstanceNode";
 import { InternetNode, type InternetNodeData } from "./InternetNode";
+import { LaneNode, type LaneNodeData } from "./LaneNode";
+import { EmptySubnetsNode, type EmptySubnetsNodeData } from "./EmptySubnetsNode";
 import { AnimatedEdge, type AnimatedEdgeData } from "./AnimatedEdge";
-import { FaultRipple } from "./FaultRipple";
-import { ImpactCascade } from "./ImpactCascade";
-import { TrafficHeatmap } from "./TrafficHeatmap";
-import { nodeColor } from "../utils/designTokens";
+import { Legend } from "./Legend";
+import { cardStatus } from "@/lib/liveStatus";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
-
-/** Filter mode determines layout and fitView behavior */
-type FilterMode = "overview" | "single-focus" | "multi-focus";
 
 type LiveCanvasProps = {
   spec: DiagramSpec;
@@ -47,25 +55,56 @@ type LiveCanvasProps = {
   onNodeSelect: (nodeId: string | null) => void;
   onEdgeSelect?: (edgeId: string | null) => void;
   onSubResourceSelect?: (sr: SubResource) => void;
-  vizMode: VisualizationMode;
-  showNetworkFlow: boolean;
-  showParticles: boolean;
-  showFaultRipple: boolean;
-  showHeatmap: boolean;
-  isFiltered?: boolean;
+  /** Edge layers switched on in the toolbar's "연결선" menu */
+  layers: ReadonlySet<EdgeLayer>;
+  /** "트래픽 (실측)": particles on edges with measured traffic */
+  trafficOn: boolean;
+  /** "연결 강조": hovering a resource dims everything it is not linked to (off = whole picture stays as is) */
+  hoverFocus: boolean;
+  /**
+   * "장애 영향": failing resources in view and their configured neighbours (lib/liveScope scopeImpacts) —
+   * empty when the toggle is off. The same list the toolbar counts, so the canvas never dims for an impact
+   * outside this view.
+   */
+  impacts: FaultImpact[];
+  /** Who used each Private Endpoint (access / flow logs) — lines, chips and the PE → PaaS state; null = not loaded */
+  usage?: PrivateLinkUsageResponse | null;
+  /** Selected resource — its subnet ↔ NAT association lines are shown while it is selected */
+  selectedNodeId?: string | null;
   focusNodeId?: string | null;
   onVmssInstanceSelect?: (data: VmssInstanceNodeData) => void;
 };
 
-const nodeTypes: NodeTypes = { live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode, internet: InternetNode };
+const nodeTypes: NodeTypes = {
+  live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode, internet: InternetNode,
+  lane: LaneNode, emptySubnets: EmptySubnetsNode,
+};
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
 
-/** Minimum gap between nodes to prevent overlap (px) */
-const NODE_MIN_GAP = 20;
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 100;
-const NSG_BADGE_WIDTH = 140;
-const NSG_BADGE_HEIGHT = 24;
+/** Nodes that frame others — never dimmed, never hover targets */
+const FRAME_TYPES = new Set(["group", "lane", "emptySubnets"]);
+
+/** Metric values the card shows, compared shallowly */
+function sameMetrics(a: LiveNodeState["metrics"], b: LiveNodeState["metrics"]): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  return ka.every((k) => a[k] === b[k]);
+}
+
+/** Last sample time of each sparkline — changes whenever a new point arrives */
+function lastSparkTs(lines: LiveNodeState["sparklines"]): string {
+  return Object.values(lines ?? {}).map((l) => l.timestamps[l.timestamps.length - 1] ?? "").join("|");
+}
+
+function parsePeerings(raw: string | undefined): PeeringInfo[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const list = JSON.parse(raw) as Array<{ name?: string; state?: string }>;
+    return list.map((p) => ({ name: String(p.name ?? ""), state: String(p.state ?? "Unknown") })).filter((p) => p.name);
+  } catch {
+    return undefined;
+  }
+}
 
 function LiveCanvasInner({
   spec,
@@ -73,48 +112,100 @@ function LiveCanvasInner({
   onNodeSelect,
   onEdgeSelect,
   onSubResourceSelect,
-  vizMode,
-  showNetworkFlow,
-  showParticles,
-  showFaultRipple,
-  showHeatmap,
-  isFiltered,
+  layers,
+  trafficOn,
+  hoverFocus,
+  impacts,
+  usage,
+  selectedNodeId,
   focusNodeId,
   onVmssInstanceSelect,
 }: LiveCanvasProps) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, zoom: 1 });
+  const { t } = useI18n();
+  const reduceMotion = useReducedMotion();
   const [showMiniMap, setShowMiniMap] = useState(true);
   const reactFlowInstance = useReactFlow();
 
-  // Track pre-drag positions for group node snap-back (overlap prevention)
-  const dragStartPos = useRef<Record<string, { x: number; y: number }>>({});
-  // Track group nodes the user has manually repositioned — preserve through spec refreshes
-  const userPositionedIds = useRef<Set<string>>(new Set());
-
-  // ── VMSS expand state: ref-based to avoid triggering fitView on expand/collapse ──
+  // ── VMSS expand state: ref-based to avoid triggering a relayout on expand/collapse ──
   const expandedVmssIds = useRef<Set<string>>(new Set());
   const vmssInstanceCache = useRef<Map<string, AksVmssInstance[]>>(new Map());
   const getApiToken = useApiToken();
-  // Stable ref for onVmssInstanceSelect — avoids stale closure in inject callback
   const onVmssInstanceSelectRef = useRef(onVmssInstanceSelect);
-  onVmssInstanceSelectRef.current = onVmssInstanceSelect;
-  // handleVmssExpand ref — handler defined after useNodesState, but needs to be accessible in initialNodes
+  useLayoutEffect(() => { onVmssInstanceSelectRef.current = onVmssInstanceSelect; });
   const handleVmssExpandRef = useRef<((nodeId: string, azureResourceId: string, aksClusterArmId?: string) => void) | null>(null);
   const stableVmssExpand = useCallback((nodeId: string, azureResourceId: string, aksClusterArmId?: string) => {
     handleVmssExpandRef.current?.(nodeId, azureResourceId, aksClusterArmId);
   }, []);
 
-  // ── Hover highlight state ──
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  // ── Layout (lib/liveLayout): grid of subnets, lanes outside the VNet, empty subnets folded ──
+  const [expandedEmpty, setExpandedEmpty] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleEmpty = useCallback((vnetId: string) => {
+    setExpandedEmpty((prev) => {
+      const next = new Set(prev);
+      if (next.has(vnetId)) next.delete(vnetId);
+      else next.add(vnetId);
+      return next;
+    });
+  }, []);
+  const layout = useMemo(() => liveLayout(spec, { expandedEmpty }), [spec, expandedEmpty]);
+  const nodeById = useMemo(() => new Map(spec.nodes.map((n) => [n.id, n])), [spec.nodes]);
+  // Short names inside this view (the VNet's own words dropped) — cards and subnet headers
+  const nameInfo = useMemo(() => {
+    const byId = new Map(spec.nodes.map((n) => [n.id, n]));
+    const vnetOf = (id: string): string | undefined => {
+      const self = byId.get(id);
+      if (self?.metadata?.ghostOf) return self.metadata.ghostOf;
+      let cur = self;
+      const seen = new Set<string>();
+      while (cur?.parentId && !seen.has(cur.id)) { seen.add(cur.id); cur = byId.get(cur.parentId); }
+      return cur && cur !== self && cur.icon === "vnet" ? cur.label : undefined;
+    };
+    // Subnets and cards are named separately (a subnet "web" and a card "web" do not collide on screen);
+    // NSGs drawn as badges have no name of their own on the canvas
+    const entry = (n: DiagramNodeSpec) => ({ id: n.id, label: n.label, kind: n.resourceKind ?? n.icon });
+    const subnets = spec.nodes.filter((n) => n.nodeType === "group" && n.icon !== "vnet").map(entry);
+    const cards = spec.nodes.filter((n) => n.nodeType !== "group" && !n.metadata?.nsgAttachedTo).map(entry);
+    return new Map([...shortNamesWithParts(subnets, vnetOf), ...shortNamesWithParts(cards, vnetOf)]);
+  }, [spec.nodes]);
+  const names = useMemo(() => new Map([...nameInfo].map(([id, v]) => [id, v.text])), [nameInfo]);
+  // Selected resource / subnet — its full-name tag shows. Read by the node build (ref, so a selection does not
+  // rebuild every node) and patched into the two nodes that change by the effect below.
+  const selectedRef = useRef(selectedNodeId ?? null);
+  /** One line for kinds the API reads no metric for: where a Private Endpoint leads, how many subnets a NAT serves */
+  const relationOf = useMemo(() => {
+    const m = new Map<string, string>();
+    const SERVICE: Record<string, string> = { keyVault: "Key Vault", storage: "Storage", redis: "Redis", appService: "App Service", functionApp: "Functions", sql: "SQL", postgres: "PostgreSQL", cosmosDb: "Cosmos DB", serviceBus: "Service Bus", eventHub: "Event Hubs" };
+    for (const e of spec.edges) {
+      if (e.edgeKind === "privateLink") {
+        const tgt = spec.nodes.find((n) => n.id === e.target);
+        const k = tgt?.resourceKind ?? tgt?.icon ?? "";
+        if (!m.has(e.source)) m.set(e.source, t("ld.card.peTarget", { target: SERVICE[k] ?? k }));
+      }
+    }
+    const natCount = new Map<string, number>();
+    for (const e of spec.edges) if (e.edgeKind === "natgw-association") natCount.set(e.target, (natCount.get(e.target) ?? 0) + 1);
+    for (const [id, n] of natCount) m.set(id, t("ld.card.natSubnets", { n }));
+    return m;
+  }, [spec.nodes, spec.edges, t]);
+  /** Spec nodes drawn as their own React Flow node */
+  const renderedIds = useMemo(() => new Set(spec.nodes.filter((n) => !layout.hidden.has(n.id)).map((n) => n.id)), [spec.nodes, layout.hidden]);
+  // Observed Private Link use (workload → PE) joins the configured lines after layout — the picture never moves
+  const usageLines = useMemo(() => usageEdges(usage, nodeById, renderedIds), [usage, nodeById, renderedIds]);
+  const allEdges = useMemo(() => (usageLines.length ? [...spec.edges, ...usageLines] : spec.edges), [spec.edges, usageLines]);
+  const disconnected = useMemo(() => disconnectedPes(usage), [usage]);
+  const chipsByNode = useMemo(() => usageChips(usage), [usage]);
+  // Read when cards are rebuilt (layout effect) so a rebuild keeps the chips
+  const chipsRef = useRef(chipsByNode);
+  useLayoutEffect(() => { chipsRef.current = chipsByNode; }, [chipsByNode]);
 
-  // Compute connected edges + nodes from hovered node
+  // ── Hover highlight state (resources dim the rest; a hovered subnet only reveals its NAT association) ──
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
   const { connectedEdgeIds, connectedNodeIds } = useMemo(() => {
     if (!hoveredNodeId) return { connectedEdgeIds: new Set<string>(), connectedNodeIds: new Set<string>() };
     const eIds = new Set<string>();
     const nIds = new Set<string>([hoveredNodeId]);
-    for (const e of spec.edges) {
+    for (const e of allEdges) {
       if (e.source === hoveredNodeId || e.target === hoveredNodeId) {
         eIds.add(e.id);
         nIds.add(e.source);
@@ -122,292 +213,45 @@ function LiveCanvasInner({
       }
     }
     return { connectedEdgeIds: eIds, connectedNodeIds: nIds };
-  }, [hoveredNodeId, spec.edges]);
+  }, [hoveredNodeId, allEdges]);
 
-  // Track container size
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) {
-        setDimensions({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        });
-      }
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
+  // ── Fault impact roles (configured links, one hop — computed by the API) ──
+  const { active: impactActive, roles: impactRoles, edgeIds: impactEdgeIds } = useMemo(() => impactView(impacts), [impacts]);
+  // Read when cards are rebuilt (layout effect) so a rebuild keeps the impact badges
+  const impactRolesRef = useRef(impactRoles);
+  useLayoutEffect(() => { impactRolesRef.current = impactRoles; });
 
-  // Continuous viewport tracking — fires on every frame during pan/zoom
-  useOnViewportChange({
-    onChange: useCallback((vp: Viewport) => {
-      setViewTransform({ x: vp.x, y: vp.y, zoom: vp.zoom });
-    }, []),
-  });
-
-  // Build NSG → target map for embedded rendering (Cat 1/2/3)
-  // nsgAttachedTo in metadata tells us which node the NSG badge should embed into
+  // NSGs embedded as badges on their subnet / NIC / VM (nsgAttachedTo)
   const nsgByTarget = useMemo(() => {
     const map = new Map<string, Array<{ nodeId: string; label: string; icon: string; azureResourceId?: string }>>();
-    for (const nodeSpec of spec.nodes) {
-      const targetId = nodeSpec.metadata?.nsgAttachedTo;
-      if (!targetId || nodeSpec.icon !== "nsg") continue;
+    for (const n of spec.nodes) {
+      const targetId = n.metadata?.nsgAttachedTo;
+      if (!targetId || n.icon !== "nsg") continue;
       const arr = map.get(targetId) ?? [];
-      arr.push({
-        nodeId: nodeSpec.id,
-        label: nodeSpec.label,
-        icon: nodeSpec.icon,
-        azureResourceId: nodeSpec.azureResourceId,
-      });
+      arr.push({ nodeId: n.id, label: n.label, icon: n.icon, azureResourceId: n.azureResourceId });
       map.set(targetId, arr);
     }
     return map;
   }, [spec.nodes]);
 
-  // Set of NSG node IDs that are embedded (not rendered as separate ReactFlow nodes)
-  const embeddedNsgIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const nodeSpec of spec.nodes) {
-      if (nodeSpec.metadata?.nsgAttachedTo) ids.add(nodeSpec.id);
-    }
-    return ids;
-  }, [spec.nodes]);
+  /** Clicking a badge or chip (NSG, NAT) selects that resource for the detail panel */
+  const handleBadgeSelect = useCallback((nodeId: string) => onNodeSelect(nodeId), [onNodeSelect]);
 
+  // Nodes are (re)built from the layout by the layout effect below — the first render starts empty
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
 
-  // Build NAT GW badge map keyed by subnetId (from subnet metadata natGwBadgeId)
-  const natGwBySubnet = useMemo(() => {
-    const map = new Map<string, NatGwBadgeInfo>();
-    for (const nodeSpec of spec.nodes) {
-      const natGwBadgeId = nodeSpec.metadata?.natGwBadgeId;
-      if (!natGwBadgeId || nodeSpec.nodeType !== "group") continue;
-      map.set(nodeSpec.id, {
-        nodeId: natGwBadgeId,
-        label: nodeSpec.metadata?.natGwBadgeLabel ?? "NAT Gateway",
-        azureResourceId: nodeSpec.metadata?.natGwBadgeAzureId,
-      });
-    }
-    return map;
-  }, [spec.nodes]);
-
-  // Handler: clicking an embedded NSG badge selects the NSG node (for detail panel)
-  const handleNsgSelect = useCallback((nodeId: string) => {
-    onNodeSelect(nodeId);
-  }, [onNodeSelect]);
-
-  // Handler: clicking NAT GW badge selects the NAT GW card (opens detail panel)
-  const handleNatGwSelect = useCallback((nodeId: string) => {
-    onNodeSelect(nodeId);
-  }, [onNodeSelect]);
-
-  // Build initial nodes from spec — group nodes first, then resource nodes
-  const initialNodes = useMemo(() => {
-    // Group nodes MUST come before their children in the array for ReactFlow
-    const sorted = [...spec.nodes].sort((a, b) => {
-      const aGroup = a.nodeType === "group" ? 0 : 1;
-      const bGroup = b.nodeType === "group" ? 0 : 1;
-      if (aGroup !== bGroup) return aGroup - bGroup;
-      // Among groups, parents before children (no parentId first)
-      const aHasParent = a.parentId ? 1 : 0;
-      const bHasParent = b.parentId ? 1 : 0;
-      return aHasParent - bHasParent;
-    });
-
-    const result: FlowNode[] = [];
-    for (const nodeSpec of sorted) {
-      // Skip embedded NSGs — they render as badges inside parent GroupNode
-      if (embeddedNsgIds.has(nodeSpec.id)) continue;
-
-      if (nodeSpec.nodeType === "group") {
-        // Inject embedded NSG badges + NAT GW badge for this group
-        const attachedNsgs = nsgByTarget.get(nodeSpec.id);
-        const attachedNatGw = natGwBySubnet.get(nodeSpec.id);
-        const groupNode: FlowNode<GroupNodeData> = {
-          id: nodeSpec.id,
-          type: "group",
-          position: nodeSpec.position ?? { x: 0, y: 0 },
-          draggable: true,
-          selectable: true,
-          style: {
-            width: nodeSpec.width ?? 400,
-            height: nodeSpec.height ?? 200,
-          },
-          data: {
-            label: nodeSpec.label,
-            icon: nodeSpec.icon,
-            subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
-            region: nodeSpec.icon === "vnet" ? (nodeSpec.location ?? undefined) : undefined,
-            nsgBadges: attachedNsgs?.map((n) => ({
-              nodeId: n.nodeId,
-              label: n.label,
-              icon: n.icon as GroupNodeData["icon"],
-              azureResourceId: n.azureResourceId,
-            })),
-            natGwBadge: attachedNatGw,
-            onNsgSelect: handleNsgSelect,
-            onNatGwToggle: handleNatGwSelect,
-          },
-        };
-        if (nodeSpec.parentId) {
-          (groupNode as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-          (groupNode as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
-        }
-        result.push(groupNode);
-        continue;
-      }
-
-      // Internet sentinel node — outbound traffic destination (per VNet)
-      if (nodeSpec.resourceKind === "internet") {
-        const methodCount = parseInt(nodeSpec.metadata?.outboundMethodCount ?? "0", 10);
-        const internetNode: FlowNode<InternetNodeData> = {
-          id: nodeSpec.id,
-          type: "internet",
-          position: nodeSpec.position ?? { x: 0, y: 0 },
-          draggable: true,
-          data: {
-            label: nodeSpec.label,
-            outboundMethodCount: methodCount,
-            hasDeprecatedPath: nodeSpec.metadata?.hasDeprecatedPath === "true",
-          },
-        };
-        result.push(internetNode);
-        continue;
-      }
-
-      // Cat 4: detached/standalone NSG — render as separate nsgBadge node
-      const isNsg = nodeSpec.resourceKind === "nsg" || nodeSpec.icon === "nsg";
-      if (isNsg) {
-        const badgeNode: FlowNode<NsgBadgeData> = {
-          id: nodeSpec.id,
-          type: "nsgBadge",
-          position: nodeSpec.position ?? { x: 0, y: 0 },
-          draggable: true,
-          zIndex: 10,
-          style: { width: NSG_BADGE_WIDTH, height: NSG_BADGE_HEIGHT },
-          data: {
-            label: nodeSpec.label,
-            icon: nodeSpec.icon,
-            resourceKind: nodeSpec.resourceKind,
-            azureResourceId: nodeSpec.azureResourceId,
-            detached: nodeSpec.metadata?.detached === "true",
-          },
-        };
-        if (nodeSpec.parentId) {
-          (badgeNode as FlowNode<NsgBadgeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-          (badgeNode as FlowNode<NsgBadgeData> & { extent: string }).extent = "parent";
-        }
-        result.push(badgeNode);
-        continue;
-      }
-
-      const live = snapshot?.nodes.find((n) => n.id === nodeSpec.id);
-
-      // Inject embedded NSG badge for this live node (Cat 2/3: VM/NIC-attached)
-      const attachedNsgs = nsgByTarget.get(nodeSpec.id);
-      const firstNsg = attachedNsgs?.[0];
-
-      const liveNode: FlowNode<LiveNodeData> = {
-        id: nodeSpec.id,
-        type: "live",
-        position: nodeSpec.position ?? { x: 0, y: 0 },
-        draggable: true,
-        data: {
-          label: nodeSpec.label,
-          icon: nodeSpec.icon,
-          health: live?.health ?? "unknown",
-          healthScore: live?.healthScore ?? 0.5,
-          metrics: live?.metrics ?? {},
-          hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
-          sparklines: live?.sparklines,
-          endpoint: nodeSpec.endpoint,
-          subResources: nodeSpec.subResources,
-          onSubResourceSelect,
-          resourceKind: nodeSpec.resourceKind,
-          azureResourceId: nodeSpec.azureResourceId,
-          powerState: live?.powerState,
-          archRole: nodeSpec.metadata?.archRole,
-          archGroupId: nodeSpec.metadata?.archGroupId,
-          nsgBadge: firstNsg ? {
-            nodeId: firstNsg.nodeId,
-            label: firstNsg.label,
-            icon: firstNsg.icon as LiveNodeData["icon"],
-            azureResourceId: firstNsg.azureResourceId,
-          } : undefined,
-          onNsgSelect: handleNsgSelect,
-          vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
-          onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
-          isUnused: nodeSpec.metadata?.unused === "true",
-        },
-      };
-      if (nodeSpec.parentId) {
-        (liveNode as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-        (liveNode as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
-      }
-      result.push(liveNode);
-    }
-
-    // ── Checkpoint 2: Verify parentNode mapping ──
-    if (process.env.NODE_ENV !== "production") {
-      const specWithParent = spec.nodes.filter((n) => n.parentId);
-      type AnyFlowNode = FlowNode & { parentNode?: string; extent?: string };
-      const flowWithParent = result.filter((n) => (n as AnyFlowNode).parentNode);
-      const allIds = new Set(result.map((n) => n.id));
-      const brokenRefs = flowWithParent.filter((n) => !allIds.has((n as AnyFlowNode).parentNode!));
-      console.log(
-        `[CP2] spec.nodes: ${spec.nodes.length} total, ${specWithParent.length} with parentId` +
-        ` → flowNodes: ${result.length} total, ${flowWithParent.length} with parentNode` +
-        ` (${brokenRefs.length} broken refs)`,
-      );
-      // Sample first 5
-      for (const n of flowWithParent.slice(0, 5)) {
-        const an = n as AnyFlowNode;
-        console.log(`[CP2]  "${n.id}" type=${n.type} parentNode="${an.parentNode}" extent="${an.extent}" pos=(${n.position.x},${n.position.y})`);
-      }
-      if (brokenRefs.length > 0) {
-        for (const n of brokenRefs.slice(0, 3)) {
-          console.error(`[CP2] BROKEN: "${n.id}" parentNode="${(n as AnyFlowNode).parentNode}" NOT in node array`);
-        }
-      }
-    }
-
-    return result;
-  // expandedVmssIds, expandedNatGwIds are refs — intentionally excluded from deps
-   
-  }, [spec.nodes, snapshot?.nodes, onSubResourceSelect, embeddedNsgIds, nsgByTarget, natGwBySubnet, handleNsgSelect, stableVmssExpand, handleNatGwSelect]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-
-  // ── VMSS expand handler (needs setNodes from above) ──
+  // ── VMSS expand handler ──
   const handleVmssExpand = useCallback(async (vmssNodeId: string, azureResourceId: string, aksClusterArmId?: string) => {
-    const isExpanded = expandedVmssIds.current.has(vmssNodeId);
-
-    // Toggle: if already expanded, collapse
-    if (isExpanded) {
+    if (expandedVmssIds.current.has(vmssNodeId)) {
       expandedVmssIds.current.delete(vmssNodeId);
       setNodes((prev: FlowNode[]) => prev
-        .filter((n: FlowNode) => {
-          const d = n.data as VmssInstanceNodeData | undefined;
-          return n.type !== "vmssInstance" || d?.parentVmssId !== vmssNodeId;
-        })
-        .map((n: FlowNode) =>
-          n.id === vmssNodeId
-            ? { ...n, data: { ...n.data, vmssExpanded: false } }
-            : n,
-        ));
+        .filter((n: FlowNode) => n.type !== "vmssInstance" || (n.data as VmssInstanceNodeData | undefined)?.parentVmssId !== vmssNodeId)
+        .map((n: FlowNode) => (n.id === vmssNodeId ? { ...n, data: { ...n.data, vmssExpanded: false } } : n)));
       return;
     }
-
-    // Mark expanded + update button label immediately
     expandedVmssIds.current.add(vmssNodeId);
-    setNodes((prev: FlowNode[]) => prev.map((n: FlowNode) =>
-      n.id === vmssNodeId
-        ? { ...n, data: { ...n.data, vmssExpanded: true } }
-        : n,
-    ));
+    setNodes((prev: FlowNode[]) => prev.map((n: FlowNode) => (n.id === vmssNodeId ? { ...n, data: { ...n.data, vmssExpanded: true } } : n)));
 
-    // Fetch instances if not cached
     if (!vmssInstanceCache.current.has(vmssNodeId)) {
       try {
         const token = await getApiToken().catch(() => null);
@@ -418,31 +262,24 @@ function LiveCanvasInner({
         vmssInstanceCache.current.set(vmssNodeId, []);
       }
     }
-
     const instances = vmssInstanceCache.current.get(vmssNodeId) ?? [];
     if (instances.length === 0) return;
 
-    // Inject instance nodes below the VMSS node
+    // Instances stack in one column under the VMSS card
     setNodes((prev: FlowNode[]) => {
       const vmssNode = prev.find((n: FlowNode) => n.id === vmssNodeId);
       if (!vmssNode) return prev;
-
-      // Single-column — instances stack vertically under parent VMSS node.
       const INST_W = 200;
       const INST_H = 54;
       const INST_GAP = 6;
-      const vmssW = vmssNode.width ?? NODE_WIDTH;
-      const vmssH = vmssNode.height ?? NODE_HEIGHT;
+      const vmssW = vmssNode.width ?? LIVE.CARD_W;
+      const vmssH = vmssNode.height ?? LIVE.CARD_H;
       const instX = Math.round((vmssW - INST_W) / 2);
-
       const instanceNodes: (FlowNode<VmssInstanceNodeData> & { parentNode: string })[] = instances.map((inst, i) => ({
         id: `vmss-inst-${vmssNodeId}-${inst.instanceId}`,
         type: "vmssInstance" as const,
         parentNode: vmssNodeId,
-        position: {
-          x: instX,
-          y: vmssH + 20 + i * (INST_H + INST_GAP),
-        },
+        position: { x: instX, y: vmssH + 20 + i * (INST_H + INST_GAP) },
         draggable: false,
         selectable: true,
         style: { width: INST_W, height: INST_H },
@@ -459,556 +296,202 @@ function LiveCanvasInner({
           onSelect: onVmssInstanceSelectRef.current,
         },
       }));
-
-      // Remove old instances for this VMSS (if any), then add new
-      const filtered = prev.filter((n: FlowNode) => {
-        const d = n.data as VmssInstanceNodeData | undefined;
-        return n.type !== "vmssInstance" || d?.parentVmssId !== vmssNodeId;
-      });
-      return [...filtered, ...instanceNodes];
+      const others = prev.filter((n: FlowNode) => n.type !== "vmssInstance" || (n.data as VmssInstanceNodeData | undefined)?.parentVmssId !== vmssNodeId);
+      return [...others, ...instanceNodes];
     });
   }, [getApiToken, setNodes]);
-  handleVmssExpandRef.current = handleVmssExpand;
+  useLayoutEffect(() => { handleVmssExpandRef.current = handleVmssExpand; });
 
-  // Stable ref to reactFlowInstance.
-  // useReactFlow() returns a new object on every render in ReactFlow v11,
-  // so storing it in a ref lets us call fitView without unstable deps.
+  // useReactFlow() returns a new object every render in v11 — keep the latest in a ref for effects
   const rfRef = useRef(reactFlowInstance);
-  rfRef.current = reactFlowInstance;
-
-  // Stable ref for snapshot — read in the filter-change effect without being in its deps.
-  // The snapshot-update effect (Effect B) handles health/status refreshes independently.
+  useLayoutEffect(() => { rfRef.current = reactFlowInstance; });
+  // Latest snapshot for the layout effect (health / metrics updates are Effect B's job)
   const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
+  useLayoutEffect(() => { snapshotRef.current = snapshot; });
 
-  // Stable ref for isFiltered — lets Effect A read current value without deps.
-  const isFilteredRef = useRef(isFiltered);
-  isFilteredRef.current = isFiltered;
-
-  // Pre-computed fitBounds from compact layout (avoids relying on DOM-measured node.width/height).
-  // Set in Effect A before calling setFitVersion; read in the fitBounds effect.
-  const fitBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-
-  // Spec-derived top-level group IDs — authoritative source for both compact layout and fitBounds.
-  const topGroupIds = useMemo(
-    () => spec.nodes.filter((n) => n.nodeType === "group" && !n.parentId).map((n) => n.id),
-    [spec.nodes],
-  );
-  const topGroupIdsRef = useRef(topGroupIds);
-  topGroupIdsRef.current = topGroupIds;
-
-  // fitVersion incremented by Effect A on every filter/spec change; drives the fitBounds effect.
-  const [fitVersion, setFitVersion] = useState(0);
-  const fitModeRef = useRef<FilterMode>("overview");
-  const executedFitVersionRef = useRef(0);
-
-  // ── Viewport fit: fires once per fitVersion, deferred to rAF ──
-  // Uses pre-computed bounds (fitBoundsRef) for multi-focus to bypass stale DOM measurements.
-  // overview    → fitView all nodes
-  // single-focus → fitView explicit node IDs
-  // multi-focus  → fitBounds with pre-computed centered bounds
-  useEffect(() => {
-    if (fitVersion === 0) return;
-    if (fitVersion === executedFitVersionRef.current) return;
-    executedFitVersionRef.current = fitVersion;
-
-    const mode = fitModeRef.current;
-    const bounds = fitBoundsRef.current;
-    const targetIds = topGroupIdsRef.current.slice();
-
-    const rafId = requestAnimationFrame(() => {
-      const rf = rfRef.current;
-
-      if (process.env.NODE_ENV !== "production") {
-        const liveTargets = rf.getNodes().filter((n) => new Set(targetIds).has(n.id));
-        console.log("[fitBounds] viewport adjust", {
-          mode,
-          computedBounds: bounds,
-          targetIds,
-          liveTargets: liveTargets.map((n) => ({
-            id: n.id,
-            pos: n.position,
-            w: n.width,
-            h: n.height,
-          })),
-        });
-      }
-
-      if (bounds) {
-        // overview/multi-focus: use pre-computed centered bounds — bypasses stale DOM measurements
-        rf.fitBounds(bounds, { padding: 0.2, duration: 400 });
-      } else if (mode === "overview") {
-        rf.fitView({ padding: 0.15, duration: 400 });
-      } else {
-        // single-focus: fitView with explicit node IDs
-        rf.fitView({
-          nodes: targetIds.length > 0 ? targetIds.map((id) => ({ id })) : undefined,
-          padding: 0.2,
-          duration: 400,
-        });
-      }
-    });
-
-    return () => cancelAnimationFrame(rafId);
-  // rfRef, fitModeRef, fitBoundsRef, topGroupIdsRef are stable refs — intentionally excluded
-   
-  }, [fitVersion]);
-
-  // ── Focus node: zoom to a specific node when focusNodeId changes ──
-  // focusNodeId format: "nodeId:timestamp" (timestamp ensures re-trigger for same node)
+  // ── Focus node: zoom to a specific node ("nodeId:timestamp" re-triggers for the same node) ──
   useEffect(() => {
     if (!focusNodeId) return;
     const nodeId = focusNodeId.replace(/:\d+$/, "");
-    const rf = rfRef.current;
-    if (!rf) return;
     const rafId = requestAnimationFrame(() => {
-      rf.fitView({
-        nodes: [{ id: nodeId }],
-        padding: 0.5,
-        duration: 500,
-      });
+      rfRef.current.fitView({ nodes: [{ id: nodeId }], padding: 0.5, duration: 500 });
     });
     return () => cancelAnimationFrame(rafId);
-   
   }, [focusNodeId]);
 
-  // ── Effect A: Filter change — full node rebuild + compact layout ──
-  // Triggered only by spec.nodes changes (filter/diagram changes).
-  // Snapshot health updates are handled separately in Effect B.
+  // ── Layout effect: rebuild every node from the layout (scope change, new diagram, empty subnets toggled) ──
+  const lastFitKey = useRef("");
   useEffect(() => {
     const currentSnapshot = snapshotRef.current;
-    const currentIsFiltered = isFilteredRef.current;
-    const COMPACT_GAP = 60;
-
-    // Determine mode from spec
-    const topGroupsFromSpec = spec.nodes.filter((n) => n.nodeType === "group" && !n.parentId);
-    const mode: FilterMode = !currentIsFiltered
-      ? "overview"
-      : topGroupsFromSpec.length <= 1
-      ? "single-focus"
-      : "multi-focus";
-
-    fitModeRef.current = mode;
-
-    // ── Pre-compute compact plan OUTSIDE setNodes (safe to write refs here) ──
-    // Compact positions are centered around x=0 so the layout feels balanced.
-    // Computed from spec dimensions (nodeSpec.width/height) — no DOM measurement needed.
-    type CompactPlan = {
-      pos: Map<string, { x: number; y: number }>;
-      bounds: { x: number; y: number; width: number; height: number };
+    const pos = (id: string): LayoutBox | undefined => layout.items.get(id);
+    const placeOf = (n: DiagramNodeSpec) => {
+      const box = pos(n.id);
+      const parent = box?.parent ?? undefined;
+      return {
+        position: box ? { x: box.x, y: box.y } : (n.position ?? { x: 0, y: 0 }),
+        ...(parent ? { parentNode: parent, extent: "parent" as const } : {}),
+      };
     };
-    let compactPlan: CompactPlan | null = null;
 
-    if ((mode === "multi-focus" || mode === "overview") && topGroupsFromSpec.length > 1) {
-      const sorted = [...topGroupsFromSpec].sort(
-        (a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0),
-      );
-      const widths = sorted.map((n) => n.width ?? 400);
-      const heights = sorted.map((n) => n.height ?? 200);
-      const totalWidth =
-        widths.reduce((s, w) => s + w, 0) + COMPACT_GAP * (sorted.length - 1);
-      const maxH = heights.length > 0 ? Math.max(...heights) : 200;
-      const startX = -Math.round(totalWidth / 2);
-
-      const pos = new Map<string, { x: number; y: number }>();
-      let cx = startX;
-      for (let i = 0; i < sorted.length; i++) {
-        pos.set(sorted[i].id, { x: cx, y: 0 });
-        cx += widths[i] + COMPACT_GAP;
-      }
-      compactPlan = { pos, bounds: { x: startX, y: 0, width: totalWidth, height: maxH } };
-
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[compact-layout] plan", {
-          selectedVnetIds: sorted.map((n) => n.id),
-          compactTargets: sorted.map((n, i) => ({
-            id: n.id,
-            specPos: n.position,
-            compactPos: pos.get(n.id),
-            specW: widths[i],
-            specH: heights[i],
-            directChildren: spec.nodes
-              .filter((sn) => sn.parentId === n.id)
-              .map((sn) => ({ id: sn.id, relativePos: sn.position })),
-          })),
-          bounds: { x: startX, y: 0, width: totalWidth, height: maxH },
-        });
-      }
-    }
-
-    // ── External standalone node delta-offset (multi-focus subgraph layout) ──
-    // VNet group children (parentId set) follow parents automatically via ReactFlow transform.
-    // But external standalone nodes (no parentId, not VNet groups) connected via edges
-    // to VNet descendants stay at spec coordinates — creating long dangling edges.
-    // Fix: compute each selected VNet's positional delta (compact − spec), then apply
-    // that same delta to any external node reachable via edge traversal from the subgraph.
-    let externalDeltaPos: Map<string, { x: number; y: number }> | null = null;
-
-    if ((mode === "multi-focus" || mode === "overview") && compactPlan) {
-      const nodeById = new Map(spec.nodes.map((n) => [n.id, n]));
-      const topGroupIdSet = new Set(topGroupsFromSpec.map((n) => n.id));
-
-      // Step 1: Walk parentId chain up to find each node's root VNet
-      const nodeToRootVnet = new Map<string, string>();
-      for (const n of spec.nodes) {
-        let cursor: (typeof spec.nodes)[0] | undefined = n;
-        while (cursor?.parentId) cursor = nodeById.get(cursor.parentId);
-        if (cursor && topGroupIdSet.has(cursor.id)) nodeToRootVnet.set(n.id, cursor.id);
-      }
-
-      // Step 2: Assign unassigned external nodes to VNets via edge traversal
-      for (const edge of spec.edges) {
-        const sv = nodeToRootVnet.get(edge.source);
-        const tv = nodeToRootVnet.get(edge.target);
-        if (sv && !nodeToRootVnet.has(edge.target)) nodeToRootVnet.set(edge.target, sv);
-        else if (tv && !nodeToRootVnet.has(edge.source)) nodeToRootVnet.set(edge.source, tv);
-      }
-
-      // Step 3: Compute ABSOLUTE positions for external standalone nodes.
-      // Group by owner VNet and place in a grid directly below the VNet's compact position.
-      // This replaces the previous delta-offset approach which left nodes far from their VNet
-      // because it only applied the VNet's horizontal shift, not a proximity correction.
-      const externalByVnet = new Map<string, string[]>();
-      for (const n of spec.nodes) {
-        if (n.parentId || topGroupIdSet.has(n.id)) continue;
-        const ownerVnet = nodeToRootVnet.get(n.id);
-        if (!ownerVnet) continue;
-        const arr = externalByVnet.get(ownerVnet) ?? [];
-        arr.push(n.id);
-        externalByVnet.set(ownerVnet, arr);
-      }
-
-      externalDeltaPos = new Map();
-      for (const [vnetId, extNodeIds] of externalByVnet) {
-        const compactVnetPos = compactPlan.pos.get(vnetId);
-        if (!compactVnetPos) continue;
-        const vnetSpec = nodeById.get(vnetId);
-        const vnetH = vnetSpec?.height ?? 300;
-        const COLS = Math.min(extNodeIds.length, 4);
-        extNodeIds.forEach((id, i) => {
-          const col = i % COLS;
-          const row = Math.floor(i / COLS);
-          externalDeltaPos!.set(id, {
-            x: compactVnetPos.x + col * (NODE_WIDTH + COMPACT_GAP),
-            y: compactVnetPos.y + vnetH + COMPACT_GAP + row * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2)),
-          });
-        });
-      }
-    }
-
-    // fitBounds: extend to include external delta-offset nodes so viewport covers full subgraph
-    if (compactPlan) {
-      if (externalDeltaPos && externalDeltaPos.size > 0) {
-        let minX = compactPlan.bounds.x;
-        let minY = compactPlan.bounds.y;
-        let maxX = compactPlan.bounds.x + compactPlan.bounds.width;
-        let maxY = compactPlan.bounds.y + compactPlan.bounds.height;
-        for (const [nodeId, pos] of externalDeltaPos) {
-          const sn = spec.nodes.find((n) => n.id === nodeId);
-          const w = sn?.width ?? NODE_WIDTH;
-          const h = sn?.height ?? NODE_HEIGHT;
-          minX = Math.min(minX, pos.x);
-          minY = Math.min(minY, pos.y);
-          maxX = Math.max(maxX, pos.x + w);
-          maxY = Math.max(maxY, pos.y + h);
-        }
-        fitBoundsRef.current = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-      } else {
-        fitBoundsRef.current = compactPlan.bounds;
-      }
-    } else {
-      fitBoundsRef.current = null;
-    }
-
-    // Single-focus: place external standalone nodes near the focused VNet.
-    // In single-focus mode there is no compact layout, so external nodes would render at
-    // their raw spec coordinates (which may be far below all VNets).
-    // Override: position them in a grid directly below the focused VNet.
-    if (mode === "single-focus" && topGroupsFromSpec.length === 1) {
-      const focusedVnet = topGroupsFromSpec[0]!;
-      const vnetX = focusedVnet.position?.x ?? 0;
-      const vnetY = focusedVnet.position?.y ?? 0;
-      const vnetH = focusedVnet.height ?? 300;
-      const vnetW = focusedVnet.width ?? 400;
-
-      const externalNodes = spec.nodes.filter((n) => !n.parentId && n.nodeType !== "group");
-      if (externalNodes.length > 0) {
-        externalDeltaPos = new Map();
-        const COLS = Math.min(externalNodes.length, 4);
-        externalNodes.forEach((n, i) => {
-          const col = i % COLS;
-          const row = Math.floor(i / COLS);
-          externalDeltaPos!.set(n.id, {
-            x: vnetX + col * (NODE_WIDTH + COMPACT_GAP),
-            y: vnetY + vnetH + COMPACT_GAP + row * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2)),
-          });
-        });
-        // Set fitBoundsRef to cover VNet + external nodes together
-        const rows = Math.ceil(externalNodes.length / COLS);
-        const extTotalW = COLS * (NODE_WIDTH + COMPACT_GAP);
-        const extTotalH = rows * (NODE_HEIGHT + Math.round(COMPACT_GAP / 2));
-        fitBoundsRef.current = {
-          x: vnetX,
-          y: vnetY,
-          width: Math.max(vnetW, extTotalW),
-          height: vnetH + COMPACT_GAP + extTotalH,
-        };
-      }
-    }
-
-    setNodes((prev) => {
-      const prevById = new Map(prev.map((n) => [n.id, n]));
-
-      // Sort: groups first, then parents before children
-      const sorted = [...spec.nodes].sort((a, b) => {
-        const aGroup = a.nodeType === "group" ? 0 : 1;
-        const bGroup = b.nodeType === "group" ? 0 : 1;
-        if (aGroup !== bGroup) return aGroup - bGroup;
-        return (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0);
+    const out: FlowNode[] = [];
+    // Lanes first (they parent cards), then VNets, subnets, folded rows, then cards — parents before children
+    for (const l of layout.lanes) {
+      out.push({
+        id: l.id, type: "lane", position: { x: l.x, y: l.y }, draggable: false, selectable: false,
+        // The wrapper lets pointer events through (panning, cards inside); the title is decoration
+        style: { width: l.w, height: l.h, pointerEvents: "none" },
+        data: { label: l.label, lane: l.lane } satisfies LaneNodeData,
       });
-
-      const result: FlowNode[] = [];
-      for (const nodeSpec of sorted) {
-        if (embeddedNsgIds.has(nodeSpec.id)) continue;
-
-        const existing = prevById.get(nodeSpec.id);
-
-        if (nodeSpec.nodeType === "group") {
-          const attachedNsgs = nsgByTarget.get(nodeSpec.id);
-          const attachedNatGw = natGwBySubnet.get(nodeSpec.id);
-          const data: GroupNodeData = {
-            label: nodeSpec.label,
-            icon: nodeSpec.icon,
-            subtitle: nodeSpec.metadata?.addressSpace ?? nodeSpec.metadata?.prefix,
-            region: nodeSpec.icon === "vnet" ? (nodeSpec.location ?? undefined) : undefined,
-            nsgBadges: attachedNsgs?.map((n) => ({
-              nodeId: n.nodeId,
-              label: n.label,
-              icon: n.icon as GroupNodeData["icon"],
-              azureResourceId: n.azureResourceId,
-            })),
-            natGwBadge: attachedNatGw,
-            onNsgSelect: handleNsgSelect,
-            onNatGwToggle: handleNatGwSelect,
-          };
-          // Position: compact plan > user-dragged existing > spec > existing > origin
-          // compact plan always wins for multi-focus top-level VNets (no existing.position preserve)
-          const compactPos = compactPlan?.pos.get(nodeSpec.id);
-          const position = compactPos
-            ? compactPos
-            : userPositionedIds.current.has(nodeSpec.id)
-            ? (existing?.position ?? nodeSpec.position ?? { x: 0, y: 0 })
-            : (nodeSpec.position ?? existing?.position ?? { x: 0, y: 0 });
-
-          if (existing) {
-            const updated = {
-              ...existing,
-              data,
-              style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
-              position,
-            } as FlowNode<GroupNodeData> & { parentNode?: string; extent?: string };
-            if (nodeSpec.parentId) {
-              updated.parentNode = nodeSpec.parentId;
-              updated.extent = "parent";
-            } else {
-              delete updated.parentNode;
-              delete updated.extent;
-            }
-            result.push(updated);
-            continue;
-          }
-          const gn: FlowNode<GroupNodeData> = {
-            id: nodeSpec.id,
-            type: "group",
-            position,
-            draggable: true,
-            selectable: true,
-            style: { width: nodeSpec.width ?? 400, height: nodeSpec.height ?? 200 },
-            data,
-          };
-          if (nodeSpec.parentId) {
-            (gn as FlowNode<GroupNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-            (gn as FlowNode<GroupNodeData> & { extent: string }).extent = "parent";
-          }
-          result.push(gn);
-          continue;
-        }
-
-        // Internet sentinel node (update path)
-        if (nodeSpec.resourceKind === "internet") {
-          const methodCount = parseInt(nodeSpec.metadata?.outboundMethodCount ?? "0", 10);
-          const idata: InternetNodeData = {
-            label: nodeSpec.label,
-            outboundMethodCount: methodCount,
-            hasDeprecatedPath: nodeSpec.metadata?.hasDeprecatedPath === "true",
-          };
-          const extPosInternet = externalDeltaPos?.get(nodeSpec.id);
-          if (existing) {
-            result.push({ ...existing, data: idata, position: extPosInternet ?? nodeSpec.position ?? existing.position });
-            continue;
-          }
-          result.push({
-            id: nodeSpec.id,
-            type: "internet",
-            position: extPosInternet ?? nodeSpec.position ?? { x: 0, y: 0 },
-            draggable: true,
-            data: idata,
-          } as FlowNode<InternetNodeData>);
-          continue;
-        }
-
-        // Cat 4: detached/standalone NSG
-        const isNsg = nodeSpec.resourceKind === "nsg" || nodeSpec.icon === "nsg";
-        if (isNsg) {
-          const badgeData: NsgBadgeData = {
-            label: nodeSpec.label,
-            icon: nodeSpec.icon,
-            resourceKind: nodeSpec.resourceKind,
-            azureResourceId: nodeSpec.azureResourceId,
-            detached: nodeSpec.metadata?.detached === "true",
-          };
-          if (existing) {
-            const updated = { ...existing, data: badgeData, type: "nsgBadge", zIndex: 10 } as FlowNode<NsgBadgeData> & { parentNode?: string; extent?: string };
-            if (nodeSpec.parentId) {
-              updated.parentNode = nodeSpec.parentId;
-              updated.extent = "parent";
-            } else {
-              delete updated.parentNode;
-              delete updated.extent;
-              const extPos = externalDeltaPos?.get(nodeSpec.id);
-              if (extPos) updated.position = extPos;
-            }
-            result.push(updated);
-            continue;
-          }
-          const extPosBadge = !nodeSpec.parentId ? externalDeltaPos?.get(nodeSpec.id) : undefined;
-          const bn: FlowNode<NsgBadgeData> = {
-            id: nodeSpec.id,
-            type: "nsgBadge",
-            position: extPosBadge ?? nodeSpec.position ?? { x: 0, y: 0 },
-            draggable: true,
-            zIndex: 10,
-            style: { width: NSG_BADGE_WIDTH, height: NSG_BADGE_HEIGHT },
-            data: badgeData,
-          };
-          if (nodeSpec.parentId) {
-            (bn as FlowNode<NsgBadgeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-            (bn as FlowNode<NsgBadgeData> & { extent: string }).extent = "parent";
-          }
-          result.push(bn);
-          continue;
-        }
-
-        // Live resource node
-        const live = currentSnapshot?.nodes.find((s) => s.id === nodeSpec.id);
-        const attachedNsgs = nsgByTarget.get(nodeSpec.id);
-        const firstNsg = attachedNsgs?.[0];
-        const data: LiveNodeData = {
-          label: nodeSpec.label,
-          icon: nodeSpec.icon,
-          health: live?.health ?? "unknown",
-          healthScore: live?.healthScore ?? 0.5,
-          metrics: live?.metrics ?? {},
-          hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
-          sparklines: live?.sparklines,
-          endpoint: nodeSpec.endpoint,
-          subResources: nodeSpec.subResources,
-          onSubResourceSelect,
-          resourceKind: nodeSpec.resourceKind,
-          azureResourceId: nodeSpec.azureResourceId,
-          powerState: live?.powerState,
-          archRole: nodeSpec.metadata?.archRole,
-          archGroupId: nodeSpec.metadata?.archGroupId,
-          nsgBadge: firstNsg
-            ? {
-                nodeId: firstNsg.nodeId,
-                label: firstNsg.label,
-                icon: firstNsg.icon as LiveNodeData["icon"],
-                azureResourceId: firstNsg.azureResourceId,
-              }
-            : undefined,
-          onNsgSelect: handleNsgSelect,
-          aksClusterArmId: nodeSpec.metadata?.aksClusterArmId,
-          vmssExpanded: expandedVmssIds.current.has(nodeSpec.id),
-          onVmssExpand: nodeSpec.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
-          isUnused: nodeSpec.metadata?.unused === "true",
-        };
-        if (existing) {
-          const updated = { ...existing, data } as FlowNode<LiveNodeData> & { parentNode?: string; extent?: string };
-          if (nodeSpec.parentId) {
-            updated.parentNode = nodeSpec.parentId;
-            updated.extent = "parent";
-          } else {
-            delete updated.parentNode;
-            delete updated.extent;
-            const extPos = externalDeltaPos?.get(nodeSpec.id);
-            if (extPos) updated.position = extPos;
-          }
-          result.push(updated);
-          continue;
-        }
-        const extPosLive = !nodeSpec.parentId ? externalDeltaPos?.get(nodeSpec.id) : undefined;
-        const ln: FlowNode<LiveNodeData> = {
-          id: nodeSpec.id,
-          type: "live" as const,
-          position: extPosLive ?? nodeSpec.position ?? { x: 0, y: 0 },
-          draggable: true,
-          data,
-        };
-        if (nodeSpec.parentId) {
-          (ln as FlowNode<LiveNodeData> & { parentNode: string; extent: string }).parentNode = nodeSpec.parentId;
-          (ln as FlowNode<LiveNodeData> & { extent: string }).extent = "parent";
-        }
-        result.push(ln);
+    }
+    const groups = spec.nodes
+      .filter((n) => n.nodeType === "group" && renderedIds.has(n.id))
+      .sort((a, b) => (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0));
+    for (const n of groups) {
+      const box = pos(n.id);
+      const egressVia = n.metadata?.egressVia as EgressInfo["via"] | undefined;
+      const data: GroupNodeData = {
+        label: n.label,
+        icon: n.icon,
+        subtitle: n.metadata?.addressSpace ?? n.metadata?.prefix,
+        region: n.icon === "vnet" ? n.location : undefined,
+        nsgBadges: nsgByTarget.get(n.id)?.map((b) => ({ nodeId: b.nodeId, label: b.label, icon: b.icon as GroupNodeData["icon"], azureResourceId: b.azureResourceId })),
+        onNsgSelect: handleBadgeSelect,
+        egress: egressVia ? { via: egressVia, name: n.metadata?.egressName, natId: n.metadata?.natGwBadgeId } : undefined,
+        nicCount: layout.nicCount.get(n.id),
+        peerings: parsePeerings(n.metadata?.peerings),
+        shortLabel: n.icon === "subnet" ? names.get(n.id) : undefined,
+        nameParts: n.icon === "subnet" ? nameInfo.get(n.id)?.parts : undefined,
+        focused: n.id === selectedRef.current,
+      };
+      out.push({
+        id: n.id, type: "group", ...placeOf(n), draggable: false, selectable: true,
+        // The wrapper lets pointer events through; the header (pointer-events: auto) stays clickable
+        style: { width: box?.w ?? n.width ?? 400, height: box?.h ?? n.height ?? 200, pointerEvents: "none" },
+        data,
+      });
+    }
+    // "No connections" frame inside a VNet (after the VNet node — React Flow needs parents first). Decoration
+    // only: the subnets inside keep the VNet as parent, the frame lets every pointer event through
+    for (const s of layout.sections) {
+      out.push({
+        id: s.id, type: "lane", position: { x: s.x, y: s.y }, parentNode: s.vnetId, extent: "parent",
+        draggable: false, selectable: false, style: { width: s.w, height: s.h, pointerEvents: "none" },
+        data: { label: s.label, lane: "section", count: s.count } satisfies LaneNodeData,
+      });
+    }
+    for (const s of layout.summaries) {
+      out.push({
+        id: s.id, type: "emptySubnets", position: { x: s.x, y: s.y }, parentNode: s.vnetId, extent: "parent",
+        draggable: false, selectable: false, style: { width: s.w, height: s.h },
+        data: { vnetId: s.vnetId, names: s.names, expanded: s.expanded, onToggle: toggleEmpty } satisfies EmptySubnetsNodeData,
+      });
+    }
+    for (const n of spec.nodes) {
+      if (n.nodeType === "group" || !renderedIds.has(n.id)) continue;
+      const kind = n.resourceKind ?? n.icon;
+      if (kind === "internet") {
+        const direction = n.metadata?.direction === "ingress" ? "ingress" : "egress";
+        out.push({
+          id: n.id, type: "internet", ...placeOf(n), draggable: false,
+          // Exactly the layout size — content height must not move the handles off the line (it drew a jog)
+          style: { width: LIVE.INTERNET_W, height: LIVE.INTERNET_H },
+          data: {
+            label: n.label,
+            direction,
+            count: parseInt((direction === "ingress" ? n.metadata?.entryCount : n.metadata?.outboundMethodCount) ?? "0", 10),
+            hasDeprecatedPath: n.metadata?.hasDeprecatedPath === "true",
+          } satisfies InternetNodeData,
+        });
+        continue;
       }
-
-      if (process.env.NODE_ENV !== "production") {
-        type AnyFN = FlowNode & { parentNode?: string };
-        if (compactPlan) {
-          const targetIds = [...compactPlan.pos.keys()];
-          const finalPositions = result
-            .filter((n) => targetIds.includes(n.id))
-            .map((n) => ({ id: n.id, finalPos: n.position, parentNode: (n as AnyFN).parentNode }));
-          const liveChildrenByVnet = targetIds.map((vnetId) => ({
-            vnetId,
-            children: result
-              .filter((n) => (n as AnyFN).parentNode === vnetId)
-              .map((n) => n.id),
-          }));
-          console.log("[compact-layout] committed", {
-            targetIds,
-            finalPositions,
-            liveChildrenByVnet,
-            bounds: compactPlan.bounds,
-          });
-        }
+      if (kind === "nsg") {
+        out.push({
+          id: n.id, type: "nsgBadge", ...placeOf(n), draggable: false, zIndex: 10,
+          style: { width: LIVE.NSG_W, height: LIVE.NSG_H },
+          data: { label: n.label, icon: n.icon, resourceKind: n.resourceKind, azureResourceId: n.azureResourceId, detached: n.metadata?.detached === "true" } satisfies NsgBadgeData,
+        });
+        continue;
       }
+      const live = currentSnapshot?.nodes.find((s) => s.id === n.id);
+      const firstNsg = nsgByTarget.get(n.id)?.[0];
+      const data: LiveNodeData = {
+        label: n.label,
+        icon: n.icon,
+        health: live?.health ?? "unknown",
+        healthScore: live?.healthScore ?? 0.5,
+        metrics: live?.metrics ?? {},
+        hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
+        sparklines: live?.sparklines,
+        endpoint: n.endpoint,
+        subResources: n.subResources,
+        onSubResourceSelect,
+        resourceKind: n.resourceKind,
+        azureResourceId: n.azureResourceId,
+        powerState: live?.powerState,
+        archRole: n.metadata?.archRole,
+        archGroupId: n.metadata?.archGroupId,
+        nsgBadge: firstNsg ? { nodeId: firstNsg.nodeId, label: firstNsg.label, icon: firstNsg.icon as LiveNodeData["icon"], azureResourceId: firstNsg.azureResourceId } : undefined,
+        onNsgSelect: handleBadgeSelect,
+        aksClusterArmId: n.metadata?.aksClusterArmId,
+        vmssExpanded: expandedVmssIds.current.has(n.id),
+        onVmssExpand: n.metadata?.archRole === "aks-vmss" ? stableVmssExpand : undefined,
+        isUnused: n.metadata?.unused === "true",
+        ghostOf: n.metadata?.ghostOf,
+        shortName: names.get(n.id),
+        nameParts: nameInfo.get(n.id)?.parts,
+        focused: n.id === selectedRef.current,
+        boundMetrics: Object.entries(n.bindings).filter(([, b]) => b.source !== "composite").map(([k]) => k),
+        usageWarn: usageThresholds(n.bindings),
+        healthRules: n.bindings.health?.rules,
+        plChips: chipsRef.current.get(n.id),
+        metricsState: currentSnapshot?.coverage?.sources.metrics,
+        relation: relationOf.get(n.id),
+        impact: impactRolesRef.current.get(n.id),
+      };
+      out.push({ id: n.id, type: "live", ...placeOf(n), draggable: false, data });
+    }
 
-      // Preserve expanded VMSS instance nodes from previous state
-      const vmssInstNodes = prev.filter((n) => n.type === "vmssInstance");
-      if (vmssInstNodes.length > 0) {
-        result.push(...vmssInstNodes);
-      }
+    setNodes((prev) => [...out, ...prev.filter((n) => n.type === "vmssInstance" && out.some((o) => o.id === (n.data as VmssInstanceNodeData).parentVmssId))]);
 
-      return result;
-    });
+    // Fit once per scope (not when a folded row is opened — the user is looking at that spot)
+    const fitKey = `${spec.id}|${spec.nodes.length}|${spec.nodes[0]?.id ?? ""}`;
+    if (fitKey === lastFitKey.current) return;
+    lastFitKey.current = fitKey;
+    const rafId = requestAnimationFrame(() => rfRef.current.fitBounds(layout.bounds, { padding: 0.06, duration: 300 }));
+    return () => cancelAnimationFrame(rafId);
+  }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf]);
 
-    // Trigger viewport fit after layout is committed
-    setFitVersion((v) => v + 1);
-  // snapshotRef, isFilteredRef, fitBoundsRef, fitModeRef are stable refs — intentionally excluded
-   
-  // expandedVmssIds is a ref — intentionally excluded from deps
-  }, [spec.nodes, onSubResourceSelect, setNodes, embeddedNsgIds, nsgByTarget, handleNsgSelect, stableVmssExpand]);
+  // ── Selection → full-name tag: only the previously and newly selected nodes get new data ──
+  useEffect(() => {
+    const prevId = selectedRef.current;
+    const nextId = selectedNodeId ?? null;
+    selectedRef.current = nextId;
+    if (prevId === nextId) return;
+    setNodes((prev) => prev.map((n) => {
+      if (n.id !== prevId && n.id !== nextId) return n;
+      if (n.type !== "live" && n.type !== "group") return n;
+      return { ...n, data: { ...n.data, focused: n.id === nextId } };
+    }));
+  }, [selectedNodeId, setNodes]);
+
+  // Keyboard selection (Tab to a card, Enter) opens the panel like a click does
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChange(changes);
+    for (const c of changes) {
+      if (c.type !== "select" || !c.selected) continue;
+      const type = rfRef.current.getNode(c.id)?.type;
+      if (type === "live" || type === "group") onNodeSelect(c.id);
+    }
+  }, [onNodesChange, onNodeSelect]);
 
   // ── Effect B: Snapshot update — health/status only, positions untouched ──
-  // Triggered only by snapshot changes. Never modifies positions, parentNode, or structure.
   useEffect(() => {
     if (!snapshot?.nodes) return;
-    const liveNodes = snapshot.nodes;
+    const liveNodes = new Map(snapshot.nodes.map((s) => [s.id, s]));
     setNodes((prev) =>
       prev.map((n) => {
         if (n.type !== "live") return n;
-        const live = liveNodes.find((s) => s.id === n.id);
+        const live = liveNodes.get(n.id);
         if (!live) return n;
         const prev_ = n.data as LiveNodeData;
         const next: LiveNodeData = {
@@ -1019,260 +502,168 @@ function LiveCanvasInner({
           hasAlert: (live.activeAlertIds?.length ?? 0) > 0,
           sparklines: live.sparklines,
           powerState: live.powerState,
+          metricsState: snapshot.coverage?.sources.metrics,
         };
-        // Skip update if nothing changed
+        // Skip update only if nothing the card shows changed — metric values and the trend included
         if (
           prev_.health === next.health &&
           prev_.healthScore === next.healthScore &&
           prev_.powerState === next.powerState &&
-          prev_.hasAlert === next.hasAlert
+          prev_.hasAlert === next.hasAlert &&
+          prev_.metricsState === next.metricsState &&
+          sameMetrics(prev_.metrics, next.metrics) &&
+          lastSparkTs(prev_.sparklines) === lastSparkTs(next.sparklines)
         )
           return n;
         return { ...n, data: next };
       }),
     );
-  }, [snapshot?.nodes, setNodes]);
+  }, [snapshot?.nodes, snapshot?.coverage, setNodes]);
 
-  // ── Hover: set node className for CSS dimming ──
+  // ── Hover / fault impact: node className for CSS dimming, impact role for the card badge ──
+  // Hover wins while it lasts; with impact on, resources outside every impact are dimmed (frames stay).
   useEffect(() => {
-    if (!hoveredNodeId) {
-      setNodes((prev) => {
-        const needsUpdate = prev.some((n) => n.className);
-        if (!needsUpdate) return prev;
-        return prev.map((n) => n.className ? { ...n, className: "" } : n);
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        const frame = FRAME_TYPES.has(n.type ?? "");
+        const cls = frame
+          ? ""
+          : hoveredNodeId && hoverFocus
+            ? (connectedNodeIds.has(n.id) ? "node-highlighted" : "node-dimmed")
+            : impactActive && !impactRoles.has(n.id) ? "node-impact-dimmed" : "";
+        const role = n.type === "live" ? impactRoles.get(n.id) : undefined;
+        const roleChanged = n.type === "live" && (n.data as LiveNodeData).impact !== role;
+        if ((n.className ?? "") === cls && !roleChanged) return n;
+        changed = true;
+        return { ...n, className: cls, ...(roleChanged ? { data: { ...n.data, impact: role } } : {}) };
       });
-      return;
-    }
-    setNodes((prev) => prev.map((n) => ({
-      ...n,
-      className: connectedNodeIds.has(n.id) ? "node-highlighted" : "node-dimmed",
-    })));
-  }, [hoveredNodeId, connectedNodeIds, setNodes]);
+      return changed ? next : prev;
+    });
+  }, [hoveredNodeId, hoverFocus, connectedNodeIds, impactActive, impactRoles, setNodes, layout]);
 
-  // Snap-back collision prevention after drag ends
-  const handleNodesChange = useCallback(
-    (changes: Parameters<typeof onNodesChange>[0]) => {
-      onNodesChange(changes);
+  // ── Edges: layer filter, one line per relationship, arrowheads for directed kinds, labels on hover ──
+  const visibleEdgeSpecs = useMemo(() => {
+    const focus = new Set([hoveredNodeId, hoveredGroupId, selectedNodeId].filter(Boolean) as string[]);
+    return allEdges.filter((e) => {
+      if (!renderedIds.has(e.source) || !renderedIds.has(e.target)) return false;
+      if (!layers.has(edgeLayer(e, nodeById))) return false;
+      // Subnet → NAT association: only while the subnet or the NAT is hovered / selected (the chip says it otherwise)
+      if (e.edgeKind === "natgw-association") return focus.has(e.source) || focus.has(e.target);
+      return true;
+    });
+  }, [allEdges, renderedIds, layers, nodeById, hoveredNodeId, hoveredGroupId, selectedNodeId]);
 
-      // After a drag ends, check for overlaps and nudge if needed
-      const dragEnd = changes.find(
-        (c) => c.type === "position" && c.dragging === false,
-      );
-      if (!dragEnd) return;
-
-      setNodes((prev) => {
-        const draggedId = dragEnd.type === "position" ? dragEnd.id : null;
-        if (!draggedId) return prev;
-
-        const dragged = prev.find((n) => n.id === draggedId);
-        if (!dragged || dragged.type === "group") return prev;
-
-        // FIX: Skip collision detection for contained nodes (inside VNet/Subnet).
-        // These nodes use extent="parent" which already constrains them within
-        // their parent bounds. Running collision detection would use positions
-        // in different coordinate systems and push nodes outside their parent.
-        type AnyFlowNode = typeof dragged & { parentNode?: string };
-        if ((dragged as AnyFlowNode).parentNode) return prev;
-
-        let { x, y } = dragged.position;
-        let adjusted = false;
-
-        for (const other of prev) {
-          if (other.id === draggedId || other.type === "group") continue;
-          // FIX: Only check collision against other top-level nodes
-          if ((other as AnyFlowNode).parentNode) continue;
-
-          const dx = x - other.position.x;
-          const dy = y - other.position.y;
-          const overlapX = NODE_WIDTH + NODE_MIN_GAP - Math.abs(dx);
-          const overlapY = NODE_HEIGHT + NODE_MIN_GAP - Math.abs(dy);
-
-          if (overlapX > 0 && overlapY > 0) {
-            if (overlapX < overlapY) {
-              x += dx >= 0 ? overlapX : -overlapX;
-            } else {
-              y += dy >= 0 ? overlapY : -overlapY;
-            }
-            adjusted = true;
-          }
-        }
-
-        if (!adjusted) return prev;
-        return prev.map((n) =>
-          n.id === draggedId ? { ...n, position: { x, y } } : n,
-        );
-      });
-    },
-    [onNodesChange, setNodes],
-  );
-
-  // ── Group node drag: record position before drag begins ──
-  const handleNodeDragStart = useCallback((_e: React.MouseEvent, node: FlowNode) => {
-    if (node.type === "group") {
-      dragStartPos.current[node.id] = { ...node.position };
-    }
-  }, []);
-
-  // ── Group node drag stop: snap back if overlapping a sibling group ──
-  // setTimeout(0) is required: in React 18, onNodeDragStop fires BEFORE the final
-  // onNodesChange(dragging: false) update is batched. Without the timeout, prev
-  // inside setNodes has the pre-final position, and the subsequent onNodesChange
-  // batch overrides our snap-back. Running after the tick ensures prev reflects
-  // the actual committed final position.
-  const handleNodeDragStop = useCallback((_e: React.MouseEvent, node: FlowNode) => {
-    if (node.type !== "group") return;
-
-    setTimeout(() => {
-      setNodes((prev) => {
-        type AnyNode = FlowNode & { parentNode?: string };
-
-        // Look up node from latest state — has the final dragged position
-        const dragged = prev.find((n) => n.id === node.id);
-        if (!dragged) {
-          delete dragStartPos.current[node.id];
-          return prev;
-        }
-
-        const parentId = (dragged as AnyNode).parentNode;
-        const dw = (dragged.style?.width as number) ?? 400;
-        const dh = (dragged.style?.height as number) ?? 200;
-        const GAP = 10;
-
-        const siblingGroups = prev.filter((n) => {
-          if (n.id === node.id || n.type !== "group") return false;
-          return (n as AnyNode).parentNode === parentId;
-        });
-
-        const hasOverlap = siblingGroups.some((sib) => {
-          const sw = (sib.style?.width as number) ?? 400;
-          const sh = (sib.style?.height as number) ?? 200;
-          return !(
-            dragged.position.x + dw + GAP <= sib.position.x ||
-            sib.position.x + sw + GAP <= dragged.position.x ||
-            dragged.position.y + dh + GAP <= sib.position.y ||
-            sib.position.y + sh + GAP <= dragged.position.y
-          );
-        });
-
-        if (hasOverlap) {
-          const orig = dragStartPos.current[node.id];
-          delete dragStartPos.current[node.id];
-          if (!orig) return prev;
-          return prev.map((n) => (n.id === node.id ? { ...n, position: orig } : n));
-        }
-
-        // Drag successful — mark as user-positioned so spec refreshes don't reset it
-        userPositionedIds.current.add(node.id);
-        delete dragStartPos.current[node.id];
-        return prev;
-      });
-    }, 0);
-  }, [setNodes]);
-
-  // ── Build edges with hover highlight flags ──
-  const particlesEnabled = showParticles && vizMode === "2d-animated";
+  const merged = useMemo(() => {
+    const { drop, both } = mergeReversePairs(visibleEdgeSpecs);
+    return { list: visibleEdgeSpecs.filter((e) => !drop.has(e.id)), both };
+  }, [visibleEdgeSpecs]);
+  // Handles and path of every line (lib/liveRoute) — right angles through the corridors between boxes
+  const routes = useMemo(() => routeEdges(layout, merged.list), [layout, merged.list]);
 
   const edges: FlowEdge<AnimatedEdgeData>[] = useMemo(() => {
-    if (!showNetworkFlow) return [];
+    const liveById = new Map((snapshot?.edges ?? []).map((e) => [e.id, e]));
+    const { both } = merged;
     const result: FlowEdge<AnimatedEdgeData>[] = [];
-    for (const edgeSpec of spec.edges) {
-      const live = snapshot?.edges.find((e) => e.id === edgeSpec.id);
-      const isHighlighted = hoveredNodeId ? connectedEdgeIds.has(edgeSpec.id) : false;
-      const isDimmed = hoveredNodeId ? !connectedEdgeIds.has(edgeSpec.id) : false;
+    for (const e of merged.list) {
+      const route = routes.get(e.id);
+      const live = liveById.get(e.id);
+      const styleKey = liveEdgeStyleKey(e, nodeById);
+      const onImpactPath = impactActive && impactEdgeIds.has(e.id);
+      const color = onImpactPath ? rgba("danger", 0.85) : liveStroke(styleKey);
+      const arrow = { type: MarkerType.ArrowClosed, width: 14, height: 14, color };
+      const rel = relationLabel(e, nodeById);
+      // A Private Endpoint whose connection is not approved: grey, labelled, no comets
+      const cut = e.edgeKind === "privateLink" && disconnected.has(e.source);
       result.push({
-        id: edgeSpec.id,
-        source: edgeSpec.source,
-        target: edgeSpec.target,
-        // natgw-association: route from the orange dot handle on the subnet badge
-        sourceHandle: edgeSpec.edgeKind === "natgw-association" ? "natgw-source" : undefined,
+        id: e.id,
+        source: e.source,
+        target: e.target,
         type: "animated",
+        // Lines and their labels draw above the VNet / subnet boxes (React Flow puts edges under nodes by default);
+        // routing keeps them off the cards, so nothing is hidden by drawing them on top
+        zIndex: 1000,
+        sourceHandle: route?.sourceHandle ?? "s-r",
+        targetHandle: route?.targetHandle ?? "t-l",
+        markerEnd: isDirectedEdge(e) || both.has(e.id) ? arrow : undefined,
+        markerStart: both.has(e.id) ? arrow : undefined,
         data: {
-          status: live?.status ?? "idle",
+          styleKey,
+          status: live?.status ?? "normal",
           trafficLevel: live?.trafficLevel ?? "none",
-          label: edgeSpec.label,
-          edgeKind: edgeSpec.edgeKind,
-          flowType: edgeSpec.flowType,
-          confidence: edgeSpec.confidence,
-          isHighlighted,
-          isDimmed,
-          showParticles: particlesEnabled,
+          label: cut ? t("ld.plu.disconnected") : rel ? clipLabel(t(rel.key, rel.vars)) : undefined,
+          disconnected: cut,
+          isHighlighted: hoveredNodeId ? connectedEdgeIds.has(e.id) : false,
+          isDimmed: hoveredNodeId && hoverFocus ? !connectedEdgeIds.has(e.id) : false,
+          showParticles: trafficOn,
+          reduceMotion,
+          measured: live?.metricsSource === "measured",
+          impact: !impactActive ? undefined : onImpactPath ? "path" : "dim",
+          route,
         },
       });
     }
     return result;
-  }, [spec.edges, snapshot?.edges, hoveredNodeId, connectedEdgeIds, particlesEnabled, showNetworkFlow]);
+  }, [merged, routes, snapshot?.edges, nodeById, impactActive, impactEdgeIds, hoveredNodeId, hoverFocus, connectedEdgeIds, trafficOn, reduceMotion, disconnected, t]);
 
-  // Node boxes in absolute flow coordinates, with measured dimensions. Nodes inside VNet / subnet
-  // groups keep positions relative to their parent, so the parent chain is summed — the overlays
-  // (fault ripple, impact cascade, heatmap) draw in flow space, not inside the group.
-  const nodePositions = useMemo(() => {
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const map = new Map<string, { x: number; y: number; w: number; h: number }>();
-    for (const node of nodes) {
-      if (node.hidden) continue;
-      let x = node.position.x;
-      let y = node.position.y;
-      const seen = new Set<string>([node.id]);
-      for (let p = node.parentNode; p && !seen.has(p); p = byId.get(p)?.parentNode) {
-        seen.add(p);
-        const parent = byId.get(p);
-        if (!parent) break;
-        x += parent.position.x;
-        y += parent.position.y;
-      }
-      map.set(node.id, { x, y, w: node.width ?? NODE_WIDTH, h: node.height ?? NODE_HEIGHT });
-    }
-    return map;
-  }, [nodes]);
+  // ── Private Link chips on PE / PaaS cards (only nodes whose chips change get new data) ──
+  useEffect(() => {
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        if (n.type !== "live") return n;
+        const want = chipsByNode.get(n.id);
+        const have = (n.data as LiveNodeData).plChips;
+        if (JSON.stringify(want ?? null) === JSON.stringify(have ?? null)) return n;
+        changed = true;
+        return { ...n, data: { ...n.data, plChips: want } };
+      });
+      return changed ? next : prev;
+    });
+  }, [chipsByNode, setNodes]);
 
-  /** Compute edge endpoints matching ReactFlow handle positions (Right→Left). */
-  function edgeEndpoints(srcId: string, tgtId: string) {
-    const src = nodePositions.get(srcId) ?? { x: 0, y: 0, w: NODE_WIDTH, h: NODE_HEIGHT };
-    const tgt = nodePositions.get(tgtId) ?? { x: 0, y: 0, w: NODE_WIDTH, h: NODE_HEIGHT };
-    return {
-      sourceX: src.x + src.w,       // Right edge (Position.Right handle)
-      sourceY: src.y + src.h / 2,   // Vertical center
-      targetX: tgt.x,               // Left edge (Position.Left handle)
-      targetY: tgt.y + tgt.h / 2,   // Vertical center
-    };
-  }
+  // ── Level of detail by zoom: a data attribute on the wrapper, CSS swaps what cards show (no re-render) ──
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const lodRef = useRef("");
+  const applyLod = useCallback((z: number) => {
+    const cur = lodRef.current;
+    // Hysteresis: detail ≥ 0.78 in / < 0.72 out, outline < 0.40 in / ≥ 0.44 out
+    const next = !cur
+      ? (z >= 0.75 ? "detail" : z < 0.42 ? "glance" : "summary")
+      : cur === "detail"
+        ? (z >= 0.72 ? "detail" : z < 0.40 ? "glance" : "summary")
+        : cur === "glance"
+          ? (z < 0.44 ? "glance" : z >= 0.78 ? "detail" : "summary")
+          : (z >= 0.78 ? "detail" : z < 0.40 ? "glance" : "summary");
+    if (next === cur) return;
+    lodRef.current = next;
+    if (wrapRef.current) wrapRef.current.dataset.lod = next;
+  }, []);
 
-  // Build edge paths for cascade overlay
-  const edgePaths = useMemo(() => {
-    const map = new Map<string, { sourceX: number; sourceY: number; targetX: number; targetY: number }>();
-    for (const edgeSpec of spec.edges) {
-      if (!nodePositions.has(edgeSpec.source) || !nodePositions.has(edgeSpec.target)) continue;
-      map.set(edgeSpec.id, edgeEndpoints(edgeSpec.source, edgeSpec.target));
-    }
-    return map;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.edges, nodePositions]);
-
-  // Build heatmap edge positions
-  const heatmapEdgePositions = useMemo(() => {
-    const map = new Map<string, { id: string; sourceX: number; sourceY: number; targetX: number; targetY: number }>();
-    for (const edgeSpec of spec.edges) {
-      if (!nodePositions.has(edgeSpec.source) || !nodePositions.has(edgeSpec.target)) continue;
-      const key = `${edgeSpec.source}->${edgeSpec.target}`;
-      map.set(key, { id: edgeSpec.id, ...edgeEndpoints(edgeSpec.source, edgeSpec.target) });
-    }
-    return map;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.edges, nodePositions]);
-
-  const faultImpacts = snapshot?.faultImpacts ?? [];
-  const heatmapData = snapshot?.heatmap ?? null;
+  const legendLines = useMemo(() => legendKeys(visibleEdgeSpecs, nodeById), [visibleEdgeSpecs, nodeById]);
+  const hasGhost = useMemo(() => spec.nodes.some((n) => n.metadata?.ghostOf), [spec.nodes]);
 
   // ── Hover handlers ──
   const handleNodeMouseEnter = useCallback((_e: React.MouseEvent, node: FlowNode) => {
-    if (node.type !== "group") setHoveredNodeId(node.id);
-  }, []);
-  const handleNodeMouseLeave = useCallback(() => {
-    setHoveredNodeId(null);
-  }, []);
+    if (node.type === "group") setHoveredGroupId(node.id);
+    else if (!FRAME_TYPES.has(node.type ?? "")) setHoveredNodeId(node.id);
+  }, [setHoveredGroupId, setHoveredNodeId]);
+  const handleNodeMouseLeave = useCallback(() => { setHoveredNodeId(null); setHoveredGroupId(null); }, [setHoveredGroupId, setHoveredNodeId]);
 
   return (
-    <div ref={wrapRef} className={styles.canvasWrap}>
+    <div className={styles.canvasWrap} ref={wrapRef}>
+      {/* Comet tail gradients, one per colour (url(#ld-ptail-*) from every edge). Not display:none — Firefox drops it */}
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
+        <defs>
+          {(Object.keys(PARTICLE_TONE_VAR) as ParticleTone[]).map((k) => (
+            <linearGradient key={k} id={`ld-ptail-${k}`} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" style={{ stopColor: `rgb(var(${PARTICLE_TONE_VAR[k]}))`, stopOpacity: 0 }} />
+              <stop offset="0.5" style={{ stopColor: `rgb(var(${PARTICLE_TONE_VAR[k]}))`, stopOpacity: 0.3 }} />
+              <stop offset="1" style={{ stopColor: `rgb(var(${PARTICLE_TONE_VAR[k]}))`, stopOpacity: 0.95 }} />
+            </linearGradient>
+          ))}
+        </defs>
+      </svg>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1280,25 +671,20 @@ function LiveCanvasInner({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={(_e, node) => {
-          if (node.type === "vmssInstance") {
-            // Route vmssInstance clicks to dedicated callback, not node selection
-            const d = node.data as VmssInstanceNodeData;
-            onVmssInstanceSelect?.(d);
-          } else {
-            onNodeSelect(node.id);
-          }
+          if (node.type === "vmssInstance") onVmssInstanceSelect?.(node.data as VmssInstanceNodeData);
+          else if (node.type !== "lane" && node.type !== "emptySubnets") onNodeSelect(node.id);
         }}
         onEdgeClick={(_e, edge) => onEdgeSelect?.(edge.id)}
         onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); }}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
-        onNodeDragStart={handleNodeDragStart}
-        onNodeDragStop={handleNodeDragStop}
-        fitView
-        fitViewOptions={{ padding: 0.15 }}
+        onMove={(_e, vp) => applyLod(vp.zoom)}
+        onInit={(rf) => applyLod(rf.getZoom())}
+        nodesDraggable={false}
         minZoom={0.05}
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
+        elevateNodesOnSelect={false}
         elevateEdgesOnSelect={true}
       >
         <Background gap={20} size={1} color={rgba("ink", 0.06)} />
@@ -1306,66 +692,31 @@ function LiveCanvasInner({
         {showMiniMap && (
           <MiniMap
             nodeColor={(n) => {
-              const health = (n.data as LiveNodeData | undefined)?.health ?? "unknown";
-              return nodeColor(health).ringStroke;
+              if (FRAME_TYPES.has(n.type ?? "")) return rgba("ink", 0.05);
+              // Same status the card shows (lib: cardStatus — unknown and "running only" stay grey)
+              const d = n.data as LiveNodeData | undefined;
+              return cardStatus(d?.health ?? "unknown", d?.powerState, d?.impact).color;
             }}
             maskColor={rgba("canvas", 0.85)}
             style={{ borderRadius: 12, border: `1px solid ${rgba("ink", 0.1)}` }}
           />
         )}
       </ReactFlow>
+      <Legend lines={legendLines} impact={impactActive} ghost={hasGhost} traffic={trafficOn} />
       <button
         type="button"
         className={styles.miniMapToggle}
         onClick={() => setShowMiniMap((v) => !v)}
-        title={showMiniMap ? "Hide mini-map" : "Show mini-map"}
+        title={t(showMiniMap ? "ld.minimap.hide" : "ld.minimap.show")}
       >
         {showMiniMap ? "⊟" : "⊞"}
       </button>
-
-      {/* Fault Ripple overlay */}
-      {showFaultRipple && faultImpacts.length > 0 && (
-        <FaultRipple
-          impacts={faultImpacts}
-          nodePositions={nodePositions}
-          transform={viewTransform}
-          width={dimensions.width}
-          height={dimensions.height}
-          enabled={showFaultRipple}
-        />
-      )}
-
-      {/* Impact Cascade overlay */}
-      {showFaultRipple && faultImpacts.length > 0 && (
-        <ImpactCascade
-          impacts={faultImpacts}
-          nodePositions={nodePositions}
-          edgePaths={edgePaths}
-          transform={viewTransform}
-          width={dimensions.width}
-          height={dimensions.height}
-          enabled={showFaultRipple}
-        />
-      )}
-
-      {/* Traffic Heatmap overlay */}
-      {showHeatmap && (
-        <TrafficHeatmap
-          heatmap={heatmapData}
-          edgePositions={heatmapEdgePositions}
-          transform={viewTransform}
-          width={dimensions.width}
-          height={dimensions.height}
-          enabled={showHeatmap}
-        />
-      )}
     </div>
   );
 }
 
 export function LiveCanvas(props: LiveCanvasProps) {
-  // key={spec.id} forces full ReactFlow remount when diagram changes
-  // — clears stale nodes/edges/viewport from previous diagram
+  // key={spec.id} forces a full React Flow remount when the diagram changes (no stale nodes / viewport)
   return (
     <ReactFlowProvider key={props.spec.id}>
       <LiveCanvasInner {...props} />

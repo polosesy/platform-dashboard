@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import type { Env } from "../env.js";
+import { registrySubscriptions } from "./connectionRegistry.js";
 
 /** Error carrying an HTTP status — thrown by input validators, mapped by `sendError`. */
 export class HttpError extends Error {
@@ -12,17 +13,31 @@ export class HttpError extends Error {
   }
 }
 
-/** Respond with an HttpError's status, or 500 with the given code for anything else. */
+const GUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+/** Subscription / object IDs never leave the API — keep only the last 4 characters for disambiguation. */
+export const maskGuids = (v: string): string => v.replace(GUID_RE, (g) => `…${g.slice(-4)}`);
+/** An error message safe to return: ARM scopes and GUIDs masked, 200 characters at most */
+export function safeMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  return maskGuids(raw.replace(/\/subscriptions\/[^\s'",]+/gi, "[scope]")).slice(0, 200);
+}
+
+/** Respond with an HttpError's status (401 also with WWW-Authenticate), or 500 with the given code. */
 export function sendError(res: Response, e: unknown, fallbackCode: string, logTag?: string): void {
   if (res.headersSent) return;
   if (e instanceof HttpError) {
-    res.status(e.status).json({ error: e.code, message: e.message });
+    if (e.status === 401) res.setHeader("WWW-Authenticate", `Bearer error="${e.code}"`);
+    const claims = (e as { claims?: string }).claims;
+    res.status(e.status).json({ error: e.code, message: safeMessage(e), ...(claims ? { claims } : {}) });
     return;
   }
-  const message = e instanceof Error ? e.message : String(e);
+  const message = safeMessage(e);
   if (logTag) console.error(`[${logTag}] ${fallbackCode}:`, message);
   res.status(500).json({ error: fallbackCode, message });
 }
+
+/** The caller must sign in (anonymous, dev mode off) — routes with sample data answer with the sample */
+export const isSigninRequired = (e: unknown) => e instanceof HttpError && e.code === "signin_required";
 
 /**
  * Serve live Azure data, falling back to mock data (with the failure in `note`)
@@ -39,10 +54,30 @@ export async function respondWithFallback<T extends object>(
   try {
     body = (await load()) ?? fallback;
   } catch (e: unknown) {
-    if (e instanceof HttpError) return sendError(res, e, logTag);
-    const message = e instanceof Error ? e.message : String(e);
-    console.error(`[${logTag}] falling back to mock data:`, message);
-    body = { ...fallback, note: message };
+    if (isSigninRequired(e)) body = { ...fallback, source: "mock", note: "signin_required" };
+    else if (e instanceof HttpError) return sendError(res, e, logTag);
+    else {
+      const message = safeMessage(e);
+      console.error(`[${logTag}] falling back to mock data:`, message);
+      body = { ...fallback, note: message };
+    }
+  }
+  if (res.headersSent || res.writableEnded) return;
+  res.json(body);
+}
+
+/**
+ * Live data for signed-in users, sample data only for anonymous callers: signin_required → 200 with the sample
+ * (`source:"mock"`, `note:"signin_required"`); any other failure → its status (HttpError) or 500 with a masked
+ * message — a signed-in user never sees sample numbers dressed as theirs.
+ */
+export async function respondLiveOrSignin<T extends object>(res: Response, load: () => Promise<T>, sample: () => T, code: string): Promise<void> {
+  let body: object;
+  try {
+    body = await load();
+  } catch (e: unknown) {
+    if (!isSigninRequired(e)) return sendError(res, e, code, code);
+    body = { ...sample(), source: "mock", note: "signin_required" };
   }
   if (res.headersSent || res.writableEnded) return;
   res.json(body);
@@ -60,12 +95,12 @@ export function queryInt(req: Request, name: string, fallback: number, min: numb
   return Math.min(max, Math.max(min, Number.isFinite(n) ? n : fallback));
 }
 
-/** Subscription IDs configured in AZURE_SUBSCRIPTION_IDS (the allow-list). */
+/**
+ * Managed subscriptions (the allow-list): every subscription of the tenant registry — the home tenant's
+ * every subscription of the Azure connections (infra/connectionRegistry.ts).
+ */
 export function parseSubscriptionIds(env: Env): string[] {
-  return (env.AZURE_SUBSCRIPTION_IDS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return registrySubscriptions(env);
 }
 
 function isAllowedSubscription(env: Env, subscriptionId: string): boolean {
@@ -81,7 +116,7 @@ function isAllowedSubscription(env: Env, subscriptionId: string): boolean {
 export function assertAllowedSubscription(env: Env, subscriptionId: string | undefined): string | undefined {
   if (!subscriptionId) return undefined;
   if (!isAllowedSubscription(env, subscriptionId)) {
-    throw new HttpError(400, "subscription_not_allowed", "subscriptionId is not in AZURE_SUBSCRIPTION_IDS allow-list");
+    throw new HttpError(400, "subscription_not_allowed", "subscriptionId is not a managed subscription");
   }
   return subscriptionId;
 }
@@ -93,6 +128,7 @@ export function querySubscriptionId(req: Request, env: Env): string | undefined 
 
 /** Demo diagrams use "/subscriptions/mock/..." IDs — they can never resolve in ARM, so they bypass the allow-list. */
 const MOCK_SUBSCRIPTION = "mock";
+const SAMPLE_SUBSCRIPTION = "00000000-0000-0000-0000-000000000000";
 const ARM_ID_RE = /^\/subscriptions\/([0-9a-f-]{36}|mock)\/resourcegroups\/[^/?#\s]+\/providers\/[^?#\s]+$/i;
 
 /**
@@ -106,12 +142,16 @@ export function assertArmResourceId(env: Env, raw: string | undefined, paramName
   if (!m || id.includes("/../") || id.includes("/./")) {
     throw new HttpError(400, "invalid_resource_id", `${paramName} must be an Azure resource ID`);
   }
+  // The sample data (shown to anonymous callers) uses the all-zero subscription: asking about it means "sign in"
+  if (m[1]! === SAMPLE_SUBSCRIPTION && !allowMock) {
+    throw new HttpError(401, "signin_required", "Sample resource — sign in to read your own Azure resources");
+  }
   const isMock = m[1]!.toLowerCase() === MOCK_SUBSCRIPTION;
   if (isMock && !allowMock) {
     throw new HttpError(400, "invalid_resource_id", `${paramName} must be a real Azure resource ID`);
   }
   if (!isMock && !isAllowedSubscription(env, m[1]!)) {
-    throw new HttpError(400, "subscription_not_allowed", `${paramName} belongs to a subscription outside AZURE_SUBSCRIPTION_IDS`);
+    throw new HttpError(400, "subscription_not_allowed", `${paramName} belongs to a subscription that is not managed here`);
   }
   return id;
 }

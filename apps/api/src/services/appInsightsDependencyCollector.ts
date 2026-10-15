@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
@@ -48,7 +48,7 @@ export async function collectAppInsightsDependencies(
 ): Promise<DependencyEdgeData[]> {
   if (!env.AZURE_APP_INSIGHTS_APP_ID) return [];
 
-  const cacheKey = `aidep:${env.AZURE_APP_INSIGHTS_APP_ID}:${edges.length}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:aidep:${env.AZURE_APP_INSIGHTS_APP_ID}:${edges.length}`;
   const cached = dependencyCache.get(cacheKey);
   if (cached) return cached;
 

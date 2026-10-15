@@ -20,7 +20,9 @@ const publicEnv = Object.fromEntries(
   Object.entries(process.env).filter((e): e is [string, string] => e[0].startsWith("NEXT_PUBLIC_") && typeof e[1] === "string"),
 );
 
-const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+// The API listens on loopback IPv4 (API_BIND_HOST=127.0.0.1); "localhost" may resolve to ::1 first on Node 24,
+// so the server-side proxy targets 127.0.0.1 explicitly
+const apiUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000").replace(/^(https?:\/\/)localhost(?=[:/]|$)/i, (_m, scheme: string) => `${scheme}127.0.0.1`);
 
 const nextConfig: NextConfig = {
   env: publicEnv,

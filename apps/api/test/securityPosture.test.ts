@@ -144,11 +144,14 @@ test("tryGetSecurityPosture auth: OBO with a token, SP only when the switch is o
   });
   assert.equal(await tryGetSecurityPosture(baseEnv(), undefined, undefined, deps()), null, "anonymous + switch off → mock");
   assert.deepEqual(used, []);
-  const sp = await tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true" }), undefined, undefined, deps());
+  // the feature flag alone no longer opens the service principal: the dev master switch must be on too
+  assert.equal(await tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true" }), undefined, undefined, deps()), null);
+  assert.deepEqual(used, [], "old flag without AUD_ANONYMOUS_SP → no SP");
+  const sp = await tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true", AUD_ANONYMOUS_SP: "true" }), undefined, undefined, deps());
   assert.equal(sp?.source, "azure");
   assert.deepEqual(used, ["sp"]);
   used.length = 0;
-  await assert.rejects(tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true" }), "token-a.b.c-unique-1", undefined, deps(true)));
+  await assert.rejects(tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true", AUD_ANONYMOUS_SP: "true" }), "token-a.b.c-unique-1", undefined, deps(true)));
   assert.deepEqual(used, ["obo"], "an OBO failure must not fall back to the service principal");
   assert.equal(await tryGetSecurityPosture(baseEnv({ AZURE_SECURITY_ENABLED: "false" }), "t", undefined, deps()), null);
 });
@@ -157,7 +160,7 @@ test("tryGetSecurityPosture: concurrent identical requests share one set of quer
   const calls = { n: 0 };
   const arm = fakeArm([], calls);
   const deps: PostureDeps = { obo: async () => arm, sp: async () => arm };
-  const env = baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true", AZURE_SUBSCRIPTION_IDS: "22222222-2222-2222-2222-222222222222" });
+  const env = baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true", AUD_ANONYMOUS_SP: "true", AZURE_SUBSCRIPTION_IDS: "22222222-2222-2222-2222-222222222222" });
   const [a, b] = await Promise.all([tryGetSecurityPosture(env, undefined, undefined, deps), tryGetSecurityPosture(env, undefined, undefined, deps)]);
   assert.equal(a, b);
   assert.equal(calls.n, 6);

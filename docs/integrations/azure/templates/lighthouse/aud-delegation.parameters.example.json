@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "mspOfferName": { "value": "AUD operations (read-only)" },
+    "managedByTenantId": { "value": "<HOME_TENANT_ID>" },
+    "authorizations": {
+      "value": [
+        { "principalId": "<PLATFORM_SP_OBJECT_ID>", "principalIdDisplayName": "aud-api (platform)", "roleDefinitionId": "acdd72a7-3385-48ef-bd42-f606fba81ae7" },
+        { "principalId": "<PLATFORM_SP_OBJECT_ID>", "principalIdDisplayName": "aud-api (platform)", "roleDefinitionId": "43d0d8ad-25c7-4714-9337-8ba259a9fe05" },
+        { "principalId": "<PLATFORM_SP_OBJECT_ID>", "principalIdDisplayName": "aud-api (platform)", "roleDefinitionId": "73c42c96-874c-492b-b04d-ab87d138a893" },
+        { "principalId": "<PLATFORM_SP_OBJECT_ID>", "principalIdDisplayName": "aud-api (platform)", "roleDefinitionId": "39bc4728-0917-49c7-9d2c-d95423bc2eb4" },
+        { "principalId": "<PLATFORM_SP_OBJECT_ID>", "principalIdDisplayName": "aud-api (platform)", "roleDefinitionId": "4abbcc35-e782-43d8-92c5-2d3f1bd2253f" }
+      ]
+    }
+  }
+}

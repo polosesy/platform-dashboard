@@ -8,22 +8,22 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | Path | Role |
 |------|------|
 | `packages/types/` | `@aud/types` — 공유 타입 (14 domain modules) |
-| `apps/api/` | Express 4 (port 4000) — Azure SDK, Zod, OBO auth |
+| `apps/api/` | Express 4 (port 4000) — Azure SDK, Zod, SSO 토큰 검증 + 플랫폼 역할 + Azure 연결 |
 | `apps/web/` | Next.js 16 (port 3000) — React 19, ReactFlow, MSAL |
-| `apps/api/src/infra/` | OBOTokenPool, CacheManager, AzureClientFactory |
+| `apps/api/src/infra/` | connectionRegistry·connectionCredentials·platformAccess, AzureClientFactory, CacheManager, OBOTokenPool(delegated) |
 | `apps/api/src/routes/` | 도메인별 라우트 (index.ts 오케스트레이터) |
 | `apps/api/src/services/` | 비즈니스 로직 (hubbleClient, hubbleCollector 등) |
-| `apps/api/src/middleware/` | subscriptionContext, requestId |
+| `apps/api/src/middleware/` | requestId, authorize(역할·연결 접근·감사) |
 | `docs/` | 운영 가이드, 트러블슈팅, 용어집 |
 
 ## Domain Routes (API)
 | Route | 타입 모듈 | 설명 |
 |-------|-----------|------|
-| `/api/azure/*` | `common.ts` | 구독/리소스 목록 |
+| `/api/azure/*`, `/api/me` | `common.ts`·`connection.ts` | 구독 목록, Azure 연결 목록·점검(관리자), 내 역할 |
 | `/api/architecture/*` | `architecture.ts` | 리소스 토폴로지 (`source: "mock"`이면 예시 데이터). 공용 IP는 `metadata.attachedTo`(소유자 ARM ID) |
 | `/api/live-diagram/*` | `liveDiagram.ts` | 실시간 다이어그램 (ReactFlow) |
 | `/api/health/*` | `health.ts` | 리소스 헬스 |
-| `/api/network/*` | `network.ts` | NSG/네트워크 플로우 |
+| `/api/network/*` | `network.ts` | `flows`(탭별 KQL)·`coverage`(흐름 로그 수집 범위)·`summary`(구성도 오버레이) |
 | `/api/cost/*` | `cost.ts` | 비용 분석 |
 | `/api/security/*` | `security.ts` | 보안 점수/경고 (OBO 전용) |
 | `/api/security/posture` | `securityPosture.ts` | Defender 권고·컨트롤·규정 준수·플랜·경고 (Resource Graph `securityresources`, 섹션별 실패는 `gaps`) |
@@ -40,9 +40,9 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 |------|-----------|------|
 | `/` | 개요 | 메뉴와 같은 구성의 기능 카드 (navConfig에서 생성) |
 | `/architecture` | 인프라 구성도 | 구독 전체 draw.io식 구성도 — 리전 › VNet › 서브넷 › 리소스, 인터넷·엣지 레인, PaaS 레인 |
-| `/live-diagram` | 라이브 다이어그램 | VNet 1개 실시간 메트릭·알림·장애 파급 |
+| `/live-diagram` | 라이브 다이어그램 | VNet 1개 실측 메트릭·알림·장애 영향(구성 연결 1홉). 실측 없는 값은 만들지 않음(`coverage`·미측정), 추정 연결은 기본 끔 (`lib/liveScope.ts`) |
 | `/health` | 리소스 상태 | Service Health · Resource Health |
-| `/network` | VNet 트래픽 (NSG) | NSG Flow Log · Traffic Analytics |
+| `/network` | VNet 트래픽 (Flow Log) | 탭(`?tab=`): 개요·상위 통신·차단·인터넷·위협·수집 범위 — VNet 흐름 로그 + Traffic Analytics |
 | `/hubble` | Pod 트래픽 (Hubble) | Observability의 Hubble 탭과 같은 컴포넌트 |
 | `/kubernetes` | AKS 클러스터 | 클러스터 객체 브라우저 |
 | `/observability` | AKS 모니터링 | 탭: 개요·워크로드·인프라·로그·Hubble 네트워크 |
@@ -54,8 +54,9 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `/security/compliance` | 규정 준수 | 표준별 통과·실패 + Defender 플랜 |
 | `/policies` | AKS 보안 점검 | 탭 그룹(`?tab=<패널>`): 위험 개요 · 네트워크 노출 · ID·권한 · 구성 점검 · 인벤토리 (`policies/tabs.ts`) |
 | `/cost` | 비용 관리 | 비용 추이·예산·예측 + 예약 인스턴스 사용률 |
+| `/settings/connections` | Azure 연결 | 연결 목록(방식·구독·작업 영역) + 관리자 점검(토큰·보이는 구독·기능별 권한·과도 권한·작업 영역) |
 
-**메뉴** (`apps/web/src/lib/navConfig.ts` 단일 설정 → TopNav·Sidebar·홈 카드): 개요 · Azure 리소스(인프라 구성도·라이브 다이어그램·리소스 상태) · 네트워크(VNet 트래픽·Pod 트래픽) · Kubernetes(AKS 클러스터·AKS 모니터링) · 보안(소제목 Azure + 클러스터: 통합 위험 / Azure 보안: 보안 개요·보안 권고·ID·권한·위협 탐지·규정 준수 / 클러스터 보안: AKS 보안 점검) · 비용
+**메뉴** (`apps/web/src/lib/navConfig.ts` 단일 설정 → TopNav·Sidebar·홈 카드): 개요 · Azure 리소스(인프라 구성도·라이브 다이어그램·리소스 상태) · 네트워크(VNet 트래픽·Pod 트래픽) · Kubernetes(AKS 클러스터·AKS 모니터링) · 보안(소제목 Azure + 클러스터: 통합 위험 / Azure 보안: 보안 개요·보안 권고·ID·권한·위협 탐지·규정 준수 / 클러스터 보안: AKS 보안 점검) · 비용 · 설정(Azure 연결)
 - 활성 항목은 최장 접두사 일치 `activeNavItem()` (`/security/findings`에서 `/security`는 비활성)
 - 소제목은 `NavItem.section`(i18n 키), 같은 소제목은 연속 배치
 - 페이지를 추가하면 메뉴에도 넣어야 `navConfig.test.ts`(경로 ↔ 메뉴 1:1)가 통과
@@ -72,7 +73,8 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 ## Critical Files
 - `packages/types/src/index.ts` — 전체 공유 타입 re-export
 - `apps/api/src/routes/index.ts` — registerAllRoutes
-- `apps/api/src/infra/oboTokenPool.ts` — OBO credential pool
+- `apps/api/src/infra/connectionRegistry.ts` · `connectionCredentials.ts` · `platformAccess.ts` — Azure 연결·자격 증명·플랫폼 역할
+- `apps/api/src/infra/oboTokenPool.ts` — OBO credential pool (delegated 연결 전용)
 - `apps/api/src/infra/cacheManager.ts` — LRU cache (bearer key prefix 패턴)
 - `apps/api/src/env.ts` — Zod 환경변수 스키마 (불리언은 `envBool` — `z.coerce.boolean` 금지)
 - `apps/api/src/infra/requestParams.ts` — 쿼리 파싱, 구독 허용목록·ARM ID 검증, `kqlString`, `respondWithFallback`
@@ -80,8 +82,8 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 - `apps/web/src/lib/useApiQuery.ts` — 웹 데이터 로딩 공통 훅 (key 기반, stale 응답 무시)
 - `apps/web/src/components/ui/` — 공용 UI 키트 (PageHeader·Panel·Tabs·Segmented·Select·Button·Toggle·Notice·SampleDataNotice·Loading/EmptyState·Badge·Stat) + `ui.module.css`
 - `apps/web/src/app/globals.css` — 디자인 토큰 (색 `--success/--danger/--warning(-soft)`, 심각도 `--sev-*`, 반경 `--radius-*`, 그림자 `--shadow-*`). 폰트 별칭은 `body`에 선언(next/font 변수가 body에 붙음)
-  - 색의 원천은 채널 토큰 `--x-rgb`(예: `--danger-rgb`) 하나 — 다른 투명도는 `rgba(var(--x-rgb), a)`. canvas·SVG 속성·three.js·D3처럼 CSS 변수를 못 쓰는 곳은 `lib/palette.ts`(`rgba(key, a)`/`hex(key)`)를 쓰고, `apps/api/test/palette.test.ts`가 두 곳의 값이 같음을 검증
-  - 남겨 둔 직접 색: 3D 장면 음영·YlOrRd 히트맵 스케일·흰 글자·3D 배경 (각 파일에 이유 주석)
+  - 색의 원천은 채널 토큰 `--x-rgb`(예: `--danger-rgb`) 하나 — 다른 투명도는 `rgba(var(--x-rgb), a)`. canvas·SVG 속성·D3처럼 CSS 변수를 못 쓰는 곳은 `lib/palette.ts`(`rgba(key, a)`/`hex(key)`)를 쓰고, `apps/api/test/palette.test.ts`가 두 곳의 값이 같음을 검증
+  - 남겨 둔 직접 색: 흰 글자·내보내기 배경 (각 파일에 이유 주석)
 
 ## Hubble (Cilium 네트워크 관측)
 - **클라이언트**: `apps/api/src/services/hubbleClient.ts` — K8s exec → `hubble observe`
@@ -116,15 +118,39 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 - **내보내기**: draw.io(`lib/archDrawio.ts` `toDrawio` — 순수, 부모 상대 좌표·html=0·hex 선 색), PNG(`hooks/useDiagramExport.ts`, html-to-image 동적 import, 내보내는 동안 `onlyRenderVisibleElements` 끔). 파일·캡션에 필터·선 표시·RG 강조·'GUID 마스킹·내부 네트워크 구성 정보 포함'을 적음. 리소스 이름의 GUID는 `lib/mask.ts`로 마스킹
 - **테스트**: `apps/api/test/archModel.test.ts`(필터 포함), `archDrawio.test.ts` (합성 픽스처 — 실데이터 graph.json은 커밋하지 않음)
 
+## Live Diagram (/live-diagram)
+- **원칙**: 실측이 아닌 값은 만들지 않는다 — 측정 없음은 `미측정`·`coverage`(수집원별 `ok|empty|signin|disabled|failed`), 예시 다이어그램(`prod-infra`)·mock 응답은 `dataSource:"mock"` + 샘플 배너. 전원 상태·헬스는 수집된 것만(활동 규칙 `metric > 0`은 위험 판정에 쓰지 않음), running만으로는 정상이 아님(회색)
+- **API**: `services/liveAggregator.ts`(스냅샷, `buildFaultImpacts` = 구성 연결 1홉·위험 경고도 시작점) · `healthCalculator.ts` · `metricsCollector.ts`(값이 있는 마지막 1분 버킷, 노드·선 공용 `queryResourceMetrics`: `$filter`별 요청·이름 대소문자 무시·`optional` 거부(400) 기억·`complement`(100−값)→`scale`(바이트/분→bit/s 등)→`derived`(share·ratio·sum, 분모 부족은 null). 스파크라인은 메트릭마다) · `specGenerator.ts` `NODE_BINDINGS`(종류별 대표 지표 + 단계 규칙 `level` warning/critical·`when` 표본 가드, 테넌트 16종은 실리소스 정의로 검증) · `effectiveBindings`/`normalizeSpecBindings`(서버가 바인딩 소유 — `auto-*` 스펙은 저장 시 현재 표로 교체) · `edgeBindings`(인터넷→공용 LB = LB `ByteCount` `Direction eq 'In'`·`node:"target"`, →AppGW `BytesReceived`, PE→PaaS = PEBytesIn+Out, LB/AppGW→백엔드는 없음) · 트래픽 단계는 절대 bit/s 구간(`resolveTrafficLevel`) · `specGenerator.ts`(서브넷 `egressVia`, 인입 `internet-in-*` 노드 — 부하 분산 규칙 0개인 공용 LB는 인입 아님, VNet `peerings`, VM 공용 IP는 카드 칩, 공용 전용 LB는 백엔드 VNet 소속 `placement:"public-frontend"`, 리소스 그룹 추정 배치는 `placement:"rg-guess"`) · `dependencyInference.ts`(같은 리전·신호 2개 이상·PE 경로 제외, `reasons`) · `edgeDetailService.ts`(예시 값은 `/subscriptions/mock/` 리소스만)
+- **웹 순수 모듈** (`apps/web/src/lib/`)
+  - `liveScope.ts` VNet 범위(구성 연결로 1회 확장, 다른 VNet은 고스트) · 선 레이어 7종 · 화면 범위 커버리지
+  - `liveLayout.ts` 연결 기반 배치(연결 없는 서브넷·VNet 직속 카드는 연결 흐름 아래 '연결 없음 n' 틀 안 격자, tier→이름 순 — 틀은 장식, 부모는 VNet / 미사용 공용 IP·분리된 NSG는 오른쪽 맨 아래 '미사용 · 분리됨' 레인): 공용 LB·Front Door는 인입 레인, 서브넷 연결 그래프의 성분 = 띠(줄바꿈 없음), 층 = 인입(또는 출구) 쪽에서 BFS 거리, barycenter 정렬, 층 사이 48px 통로, 연결 없는 서브넷만 tier→이름, 카드 L/R/LR/N 배치, 레인 세로 정렬, 빈 서브넷 접기/펼치기. 문자열 비교는 코드포인트(결정적)
+  - `liveRoute.ts` 선마다 핸들(`s-l/r/t/b`, `t-l/r/t/b` — 모든 노드에 `HiddenHandles`)과 경로(직각 step: 세로 구간은 통로·인입 간격에 고정 / 오른쪽 레인·연결선은 bezier)
+  - `liveStyle.ts` 선 문법(색=관계, 점선=약한 근거만, 빨강=장애 영향 전용, 관계 라벨, 역방향 병합, 범례) + 실측 트래픽 코멧(`particlePlan` px/s 고정 속도·화살촉 전 페이드, `particleTone` down 선엔 없음, 꼬리 그라데이션은 캔버스에 한 번, reduced-motion이면 정지) · `liveStatus.ts` `cardStatus`(카드·미니맵·패널 공용) · `liveMetricFormat.ts` 단위(%·/분·KB/분·ms)·0 기준 추세 척도 · `liveNames.ts` VNet 단어를 뺀 짧은 이름(`shortNamesWithParts` — 전체 이름 조각에 남은 단어 표시) · 배치 엔진 `boxPack.ts`(archModel과 공유)
+- **카드**: 220×100 하나(상태 띠 · 짧은 이름 + 상태 알약 · 종류·사설 IP·칩 · 단위 붙은 메트릭 칸 2개 + 추세). 칸은 종류별 `CARD_CELLS`(1칸 = 부하·활동 + 추세, 2칸 = 품질 — LB 데이터 경로·백엔드, AppGW 요청·백엔드, Storage 트랜잭션·가용성, Redis 부하·메모리, Service Bus 대기·서버 오류 …), 색은 상태와 같은 단계 규칙(`cellTone`, 카드 안 위험도 주황). NSG·NIC·DNS는 메트릭 줄 없음. 메모리가 있는 컴퓨팅(VM·VMSS·AKS·Redis·PostgreSQL·SQL)은 사용률 쌍(CPU/DTU + 메모리, 키 줄의 22×4 게이지, 헬스 규칙 임계값(없으면 85) 이상만 주황, 미측정은 막대 없음) — 요약 줌은 막대 2줄(`lib/liveMetricFormat` `pairPrimary`·`usageTone`). 선택하면 카드 위에 전체 이름표(NodeToolbar, 화면 12px, 복사는 원문 — 서브넷 머리글도). 줌 단계(`data-lod`: 상세 ≥0.78 / 요약 / 윤곽 <0.40)는 CSS로만 전환. 드래그 없음
+- **상세 패널** (320px): 고정 헤더(짧은 이름·전체 이름·위치·상태 근거·Portal·ID 복사) → 장애 영향 → 알림 → 메트릭 → 연결(누르면 이동) → 네트워크 → 종류별(LB/AppGW·NSG·AKS·VMSS·PE·NAT) → 속성(접힘, GUID 마스킹·복사는 원문). 조회 실패는 Notice. 계층은 `detail/primitives`의 깊이 context: 1단 `Section` = 불투명 띠(sticky), 2단(중첩 Section·`Group`) = 작은 제목 + 규칙선, 행 = 왼쪽 레일. 열지 않는 띠는 `StaticSection`
+- **Private Link 사용** (`/api/live/private-link-usage`, `services/privateLinkUsage.ts` 순수 조인 + `privateLinkUsageCollector.ts`): 근거는 관측만 — PaaS 접근 로그(KV AuditEvent·Storage 로그·Redis 연결 클라이언트, 진단 설정이 워크스페이스로 보낼 때만 조회) `access` / VNet 흐름 로그+Traffic Analytics(호출 쪽 VNet) `flow`. 호출자는 NIC IP·서브넷 단독 소유자·관리 ID로 정확히 하나일 때만, 아니면 `unresolved`(VM 없는 NIC·모호·PE 미확정·차단). 공용 경로는 개수만. 로그인 사용자 전용(`AZURE_PL_USAGE_SP_FALLBACK`은 로컬 검증용), 사용자별 5분 캐시. 웹 `lib/plUsage.ts`: 레이아웃 뒤에 워크로드→PE 실선(레이어 `privateLinkUsage`, 기본 켬, 파티클 없음), PE/PaaS 칩(사용 n·근거 없음·사용처 n·공용 접근), 승인 안 된 PE→PaaS는 회색 '연결 끊김'. 패널 '사용 중인 워크로드'에 근거·켜는 명령(복사만, 실행 안 함)
+- **툴바**: `연결선 ▾`(레이어) · `연결 강조`(호버 시 나머지 흐림 on/off, 브라우저에 기억) · `트래픽 (실측)`(실측 없으면 비활성) · `장애 영향 (n)`(개수·캔버스 흐림·패널이 모두 `scopeImpacts` 한 목록 — 화면 밖 장애가 이 VNet을 흐리게 하면 안 됨). 라벨·서브넷→NAT 연결선은 호버·선택 때만. 알림 탭: 목록 = 심각도 순, 타임라인 = 발생 시각 순 + 누적 그래프
+- **React Flow 주의**: 기본 `.react-flow__node-group` 스타일(padding 10px·테두리)을 캔버스에서 0으로 덮어씀(머리글·카드 오프셋이 레이아웃과 일치해야 함). 선은 `zIndex: 1000`, 라벨 레이어는 1001 — VNet·서브넷 박스 위에 그림. 빈 서브넷은 VNet 맨 아래 별도 영역(접기 행 + 같은 크기 격자)
+- **테스트**: `apps/api/test/liveDiagram.test.ts`·`liveScope.test.ts`·`liveLayout.test.ts`·`liveRoute.test.ts`(교차·결정성)·`liveCard.test.ts`·`specGenerator.test.ts`
+
+## VNet Traffic (/network)
+- **개념**: 기간을 정한 흐름 로그 감사(그림 없음). NSG 흐름 로그는 2027-09-30 종료 → VNet 흐름 로그 + Traffic Analytics(`NTANetAnalytics`·`NTAIpDetails`). NSG만 있는 VNet은 '이전 필요'로만 표시(옛 `AzureNetworkAnalytics_CL`은 집계 안 함)
+- **API**: `services/networkQueries.ts`(순수 — `baseQuery` 범위 접두사 `구독/rg/vnet/`는 `kqlString`, 불확실 열은 `column_ifexists`, 인터넷 탭은 `mv-expand` 후 바이트 합산 금지(기록 수), 라벨에서 구독 제거·GUID 마스킹) · `flowLogCoverage.ts`(순수 — vnet/partial/nsgOnly/none, 켜진 로그만, 작업 영역 일치) · `networkFlows.ts`(탭 하나만 조회, 캐시+single-flight, `laState` → `noAccess`/`noTable`, 연결 거부는 그대로 오류) · `networkMock.ts`(익명 전용, RFC 5737 IP). 라우트는 `respondLiveOrSignin` — 로그인 사용자에게 mock 없음, 상태(`disabled`·`noAccess`·`noTable`·`empty`)로 답함. 구성도 흐름 오버레이도 로그인 사용자에게 mock 없음
+- **웹**: `app/network/page.tsx`(`useQueryParam("tab")`, Suspense) + `tabs.ts`(`isRiskyPort` = 인터넷 허용 관리 포트) + `components/`(CoverageStrip·SectionState·Overview(SVG 막대+선)·Talkers·Blocked·Internet·CoverageTable — 켜는 명령은 자리표시자, 복사만)
+- **테스트**: `apps/api/test/networkQueries.test.ts`
+
 ## Security (Defender for Cloud)
 - **서비스**: `apps/api/src/services/securityPosture.ts` — Resource Graph 6개 쿼리(권고 summarize·점수·컨트롤·규정 준수·플랜·경고), 섹션별 실패는 `gaps`(메시지의 구독 ID·GUID 마스킹), 동시 요청 병합
-- **인증**: 로그인 사용자(OBO)만. 비로그인은 mock(`source:"mock"`, 화면에 '예시 데이터' 배너). `AZURE_SECURITY_SP_FALLBACK=true`일 때만 서비스 주체 사용(로컬 검증용), OBO 실패 시 SP로 넘어가지 않음
+- **인증**: 로그인 사용자만(연결의 자격 증명으로 읽음 — delegated 연결이면 OBO). 비로그인은 mock(`source:"mock"`, 화면에 '예시 데이터' 배너). `AZURE_SECURITY_SP_FALLBACK=true`일 때만 익명에게 플랫폼 자격 증명(로컬 검증용)
 - **웹**: `app/security/layout.tsx`가 구독 선택·조회를 공유(하위 화면 이동 시 유지). 영역 분류는 Defender `metadata.categories`만 사용, 없으면 '분류 없음'(추측 재분류 금지)
 - **통합 위험** (`/security/risk`): `lib/riskJoin.ts`(순수)가 posture·구성도 그래프·정책 인사이트를 조인. 키 = (RG, 전체 ARM 유형 `provider/type`, 이름) + GUID 마스킹, 후보가 정확히 1개일 때만 연결(2개 이상은 '모호'로 집계). 흡수는 1:1(NIC→VM·VMSS→AKS·공용 IP→소유자)만, NSG는 연결하지 않음. LB는 `metadata.inboundRules`>0이면 진입, 0이면 '백엔드만', 미상이면 unk. unk 연결은 요약 숫자에서 빼고 '식별 불확실'로 따로. 샘플 데이터는 조인하지 않음, 로딩 중·다른 구독 응답은 섞지 않음. 테스트 `apps/api/test/riskJoin.test.ts`
 - **테스트**: `apps/api/test/securityPosture.test.ts`
 
 ## Env
 `.env.example` 참조. 필수: `AZURE_AD_*`, `AZURE_SUBSCRIPTION_IDS`
+인증: `API_BIND_HOST`(기본 127.0.0.1 — 웹 rewrite는 localhost를 127.0.0.1로 바꿔 보냄), `NODE_ENV`, `AUD_DEFAULT_ROLE`(앱 역할 없을 때 — 개발 기본 viewer, 프로덕션은 none만), `AUD_AUDIT_LOG`, `AUD_ANONYMOUS_SP`·`AUD_ANONYMOUS_K8S`(기본 false, 로컬 전용), `AUD_AUTH_SCOPES`, `AUD_AUTH_AUDIENCES`
+연결: `AUD_CONNECTIONS_FILE`(→ `config/connections.json`, 커밋 금지; 옛 `AUD_TENANTS_FILE`도 읽음), `AUD_HOME_CONNECTION_MODE`(platform|delegated), `AUD_PLATFORM_CERT_PATH`, `AUD_CONN_<KEY>_SECRET`(servicePrincipal 비밀 값 — 파일엔 이름만)
+VNet 트래픽: `AZURE_LOG_ANALYTICS_WORKSPACE_ID`·`AZURE_LOG_ANALYTICS_TABLE`(기본 NTANetAnalytics)·`AZURE_NETWORK_COVERAGE_TTL_MS`
 Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE_FLOW_LIMIT`
 보안: `AZURE_SECURITY_ENABLED`, `AZURE_SECURITY_SP_FALLBACK`(기본 false)
 
@@ -137,7 +163,16 @@ Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE
 - **캐시**: `CacheManager` + `cachePrefix(token)` 패턴 (사용자별 캐시 격리, TTL은 env `*_CACHE_TTL_MS`)
 - **로그**: 진단 로그는 `debug()` (`AUD_DEBUG=true`일 때만 출력), `console.log` 지양
 - **웹 데이터 로딩**: `useApiQuery` / `useSubscriptions` / `useAksClusters` 사용, URL은 `apiUrl(path, params)` (`new URL()` 금지 — 브라우저 base가 "")
-- **인증**: MSAL (Web) → Bearer token → OBO (API) → Azure SDK
+- **인증 = 로그인(SSO)과 Azure 연결의 분리** (Datadog·Managed Grafana 모델, 문서 `docs/integrations/azure/`)
+  - 로그인: MSAL (Web) → Bearer token(대상 `api://<aud-api>`, Azure 권한 없음) → **검증**(`infra/tokenVerifier.ts` — jose, RS256·발급자 v1/v2·대상·만료·`scp` `Azure.Read.All`·홈 `tid`, `auth.ts`가 `/api`에서 401/403) → **역할**(`infra/platformAccess.ts` `platformRole` — 토큰 `roles`의 `AUD.Viewer`<`AUD.Operator`<`AUD.Admin`, 없으면 `AUD_DEFAULT_ROLE`) → `middleware/authorize.ts`(역할 없음 403 `no_platform_role`(/api/me 제외), 쿼리의 구독이 내 역할로 못 쓰는 연결이면 403 `connection_forbidden` — 캐시·Azure 호출 전, 감사 줄 `AUD_AUDIT_LOG`). 라우트 게이트 `requireRole(env, "operator"|"admin")` — Pod 로그 운영자, 연결 점검 관리자
+  - Azure 연결: `infra/connectionRegistry.ts`(zod strict, 비밀 값·PEM 거부, 홈 정확히 1개, 구독·작업 영역 중복 금지, v1 `tenants` 변환) — `mode` platform(aud-api SP)·lighthouse(홈 자격 증명)·servicePrincipal(고객 앱, `secretEnv`/`certificatePath`)·delegated(사용자 OBO). `credentialGroup`으로 자격 증명 묶음
+  - 누구의 신원으로 읽나: `azureClientFactory.ts`의 사용자 fetcher가 **요청마다** 구독(URL·Resource Graph 본문·리소스 ID)/작업 영역 → 연결 → 역할 확인 → `connectionToken`(`infra/connectionCredentials.ts` — 자격 증명 생성은 여기와 `oboTokenPool.ts`만, 토큰 `tid` ≠ 연결 테넌트면 거부, 오류는 `connection_*` 코드·마스킹, **다른 연결·자격 증명으로 폴백 없음**). Resource Graph는 자격 증명별로 나눠 보내고 합침. SDK는 `connectionCredentialGroups`/`homeConnectionCredential`. delegated의 OBO 실패는 `mapOboError`(`consent_required` …)
+  - 익명은 `signin_required`(401, 예시 데이터가 있는 라우트는 `respondWithFallback`/`respondLiveOrSignin`이 mock + `note:"signin_required"` — **로그인 사용자에게는 mock 금지**). 플랫폼 자격 증명은 `getAnonymous*` 게이트로만 — `AUD_ANONYMOUS_SP=true`(로컬, 루프백 바인드, 연결 1개) [+ `AZURE_SECURITY_SP_FALLBACK`·`AZURE_PL_USAGE_SP_FALLBACK`, AKS는 `AUD_ANONYMOUS_K8S`]. 정적 테스트(`authPolicy.test.ts`)가 자격 증명 생성 위치·services의 OBO 직접 사용을 막음
+  - fetcher 오류 메시지는 `<ARM|LogAnalytics> <status>: <code>: <마스킹된 메시지>`(원문 본문은 비열거 `detail`, 응답에 안 나감)
+  - kubeconfig는 `sanitizeKubeconfig` — exec 플러그인(kubelogin) 실행 안 함, Entra 전용 클러스터는 501 `aad_cluster_unsupported`
+  - 예시 데이터의 리소스 ID는 구독이 전부 0 — `assertArmResourceId`가 401 `signin_required`로 답함(익명이 예시 클러스터로 Hubble·관측·정책을 열 때). 웹 `fetchJson`은 인증 코드를 현재 언어 문장(`auth.state.*`)으로 바꿔 어디서 출력해도 읽히게 함
+  - 캐시 키 = `cachePrefix(token)`: 플랫폼 자격 증명만 쓰는 사용자는 연결 집합 `c:home,custa`(같은 데이터 공유), delegated가 섞이면 `u:{tid}:{oid}`(`initPlatformAccess`가 리졸버 설치). 라이브 다이어그램 소유자 = `principalKey(token)` = `u:{tid}:{oid}` — 생성한 다이어그램은 소유자만 읽음, 샘플만 공개, SSE는 샘플 전용(사용자 다이어그램은 토큰 실린 폴링)
+  - 웹: `ApiError`(`lib/api.ts`, `authStateOf`/`authStateOfCode` — `norole`·`denied`·`connection`·`consent` …), `SampleDataNotice`/`useNoteText`가 노트의 코드를 현재 언어 문장으로. `lib/useMe.ts`(`/api/me`) → 상단 역할 배지(`AuthControls`, 기본 역할이면 `*`)
   - MSAL v5 팝업은 redirect bridge 필수 — `providers.tsx`가 팝업 응답을 `broadcastResponseToMainFrame()`로 전달 (error-catalog AUTH-005)
   - 웹은 루트 `.env`를 `next.config.ts`에서 로드해 `NEXT_PUBLIC_*` 인라인 — 값 변경 시 dev 서버 재시작 (AUTH-004)
 - **UI 텍스트**: 한국어 기본 (i18n: `useI18n()`, 번역표는 `apps/web/src/lib/i18nMessages.ts` + 영역 모듈 `i18nPolicies.ts`·`i18nOps.ts`, `MODULES`로 병합). 고유명사(Azure·AKS·NSG·Hubble)와 K8s 필드명만 영어. 웹 코드에 한국어 문자열 금지·키 존재·ko/en 자리표시자 일치는 `apps/api/test/i18n.test.ts`가 검사
@@ -150,10 +185,11 @@ Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE
 ## Docs
 | 경로 | 내용 |
 |------|------|
-| `docs/getting-started/` | setup-guide, azure-integration-guide |
+| `docs/integrations/` | **연동 문서 표준**(`_template.md` 12절: 개요·동작·준비·자동 설정·Portal·권한·수집 데이터·확인·문제 해결·교체·해제·보안 FAQ). `azure/`: overview·sso(앱 역할)·connect-tenant(A 홈·B 고객 SP·C Lighthouse·연결 파일)·permissions·data-collected·verify·troubleshooting·lifecycle·security-faq + `templates/`(lighthouse ARM, service-principal `onboard.sh`·`roles.bicep`). `scripts/verify-tenant.sh` 읽기 전용 |
+| `docs/getting-started/` | setup-guide, azure-integration-guide(앱 등록·RBAC — 로그인·연결은 integrations), multi-tenant-onboarding(이동 안내) |
 | `docs/architecture/` | GLOSSARY (용어집) |
-| `docs/observability/` | instrumentation-guide, hubble-guide, hubble-troubleshooting |
-| `docs/troubleshooting/` | error-catalog (도메인별 에러 통합) |
+| `docs/observability/` | instrumentation-guide, hubble-guide, hubble-troubleshooting, vnet-flow-logs(VNet 트래픽 화면) |
+| `docs/troubleshooting/` | error-catalog (도메인별 에러 통합 — AUTH·CONN·NET 포함) |
 
 ## Session Rules
 - 기능 단위로 세션 분리 (10~15턴).

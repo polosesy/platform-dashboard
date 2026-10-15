@@ -2,7 +2,8 @@
 
 import { memo } from "react";
 import { useI18n } from "@/lib/i18n";
-import { Handle, Position, type NodeProps } from "reactflow";
+import { type NodeProps } from "reactflow";
+import { HiddenHandles } from "./HiddenHandles";
 import type { DiagramIconKind } from "@aud/types";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import styles from "../styles.module.css";
@@ -21,7 +22,7 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
   if (data.detached) {
     return (
       <div className={`${styles.nsgBadge} ${styles.nsgBadgeDetached}`}>
-        <Handle type="target" position={Position.Left} className={styles.handleHidden} />
+        <HiddenHandles />
         <span className={styles.nsgDetachedX}>X</span>
         <img
           src={getAzureIconUrl(data.icon)}
@@ -31,7 +32,6 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
           className={styles.nsgBadgeIcon}
         />
         <span className={styles.nsgBadgeLabel}>{data.label}</span>
-        <Handle type="source" position={Position.Right} className={styles.handleHidden} />
         <div className={styles.nsgDetachedTooltip}>
           {t("ld.nsgDetached")}
         </div>
@@ -41,7 +41,7 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
 
   return (
     <div className={styles.nsgBadge}>
-      <Handle type="target" position={Position.Left} className={styles.handleHidden} />
+      <HiddenHandles />
       <img
         src={getAzureIconUrl(data.icon)}
         alt="nsg"
@@ -50,7 +50,6 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
         className={styles.nsgBadgeIcon}
       />
       <span className={styles.nsgBadgeLabel}>{data.label}</span>
-      <Handle type="source" position={Position.Right} className={styles.handleHidden} />
     </div>
   );
 });

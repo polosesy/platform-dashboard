@@ -7,9 +7,9 @@ import type {
   KubernetesClusterOverview,
   AksNodeCondition,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
-import { parseSubscriptionIds } from "../infra/requestParams.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { anonymousSpAllowed, getArmFetcherAuto, signinRequired } from "../infra/azureClientFactory.js";
+import { HttpError, parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 
 // ────────────────────────────────────────────
@@ -37,7 +37,7 @@ export async function listAksClusters(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<KubernetesClustersResponse> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:clusters:${opts?.subscriptionId ?? "all"}`;
   const cached = clustersCache.get(cacheKey);
   if (cached) return cached;
@@ -100,8 +100,9 @@ export async function getKubeconfig(
   bearerToken: string | undefined,
   azureResourceId: string,
 ): Promise<string> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:kubeconfig:${azureResourceId}`;
+  // A kubeconfig opens the cluster (pod logs, exec): anonymous only with both dev switches on
+  if (!bearerToken && !anonymousSpAllowed(env, env.AUD_ANONYMOUS_K8S)) throw signinRequired();
+  const cacheKey = `${cachePrefix(bearerToken)}:kubeconfig:${azureResourceId}`;
   const cached = kubeconfigCache.get(cacheKey);
   if (cached) return cached;
 
@@ -128,7 +129,23 @@ export async function loadKubeConfig(
 ): Promise<k8s.KubeConfig> {
   const kc = new k8s.KubeConfig();
   kc.loadFromString(await getKubeconfig(env, bearerToken, azureResourceId));
-  return kc;
+  return sanitizeKubeconfig(kc);
+}
+
+/**
+ * Static credentials only: exec plugins (kubelogin …) and auth providers would run programs on the API host
+ * with whatever identity it has — they are removed. A cluster that needs them (Entra-integrated AKS) is
+ * reported as unsupported instead (later: an Entra token for the AKS server app, per user).
+ */
+export function sanitizeKubeconfig(kc: k8s.KubeConfig): k8s.KubeConfig {
+  const users = kc.users.map((u) => ({ ...u, exec: undefined, authProvider: undefined }));
+  const current = kc.getContextObject(kc.getCurrentContext());
+  const user = users.find((u) => u.name === current?.user);
+  const hasStatic = !!user && (!!(user.certData && user.keyData) || !!(user.certFile && user.keyFile) || !!user.token || !!(user.username && user.password));
+  if (!hasStatic) throw new HttpError(501, "aad_cluster_unsupported", "This cluster needs an Entra sign-in plugin (kubelogin); it is not run on the API host");
+  const out = new k8s.KubeConfig();
+  out.loadFromOptions({ clusters: kc.clusters, users, contexts: kc.contexts, currentContext: kc.getCurrentContext() });
+  return out;
 }
 
 // ────────────────────────────────────────────
@@ -142,7 +159,7 @@ export async function fetchAksNodeInfoMap(
   bearerToken: string | undefined,
   aksClusterArmId: string,
 ): Promise<Record<string, K8sNodeInfo>> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:k8s-nodes:${aksClusterArmId}`;
   const cached = k8sNodeInfoCache.get(cacheKey);
   if (cached) return cached;
@@ -186,7 +203,7 @@ export async function getClusterOverview(
   azureResourceId: string,
   clusterInfo: KubernetesClusterInfo,
 ): Promise<KubernetesClusterOverview> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:overview:${azureResourceId}`;
   const cached = overviewCache.get(cacheKey);
   if (cached) return cached;
@@ -416,7 +433,7 @@ export async function listAllNamespacePods(
   bearerToken: string | undefined,
   azureResourceId: string,
 ): Promise<{ pods: K8sPodInfo[]; namespaces: K8sNamespaceInfo[] }> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:k8s-nspods:${azureResourceId}`;
   const cached = nsPodK8sCache.get(cacheKey);
   if (cached) return cached;
@@ -551,7 +568,7 @@ export async function getWorkloadDetail(
   workloadName: string,
   kind: string,
 ): Promise<WorkloadDetailResponse> {
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
+  const prefix = cachePrefix(bearerToken);
   const cacheKey = `${prefix}:wl-detail:${azureResourceId}:${kind}:${namespace}/${workloadName}`;
   const cached = workloadDetailCache.get(cacheKey);
   if (cached) return cached;

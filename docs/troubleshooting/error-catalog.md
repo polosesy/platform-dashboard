@@ -9,10 +9,12 @@
 
 1. [Hubble (Cilium 네트워크)](#1-hubble-cilium-네트워크)
 2. [Observability (Container Insights / Prometheus)](#2-observability)
-3. [Azure 인증 / OBO](#3-azure-인증--obo)
+3. [Azure 인증 / OBO · 플랫폼 역할](#3-azure-인증--obo)
 4. [Kubernetes API](#4-kubernetes-api)
 5. [프론트엔드 (Next.js / React)](#5-프론트엔드)
 6. [보안 (Defender for Cloud)](#6-보안-defender-for-cloud)
+7. [Azure 연결 (Connection)](#7-azure-연결-connection)
+8. [VNet 트래픽 (Flow Log)](#8-vnet-트래픽-flow-log)
 
 ---
 
@@ -69,9 +71,9 @@
 ## 3. Azure 인증 / OBO
 
 ### AUTH-001: AADSTS65001 — 동의 누락
-- **에러**: `AADSTS65001: The user or administrator has not consented to use the application`
-- **원인**: API App Registration에 대한 admin consent 미완료
-- **해결**: Azure Portal → App Registration → API Permissions → Grant admin consent
+- **에러**: `AADSTS65001: The user or administrator has not consented to use the application` (화면: `consent_required` 문장 — 원문·앱 ID·추적 ID는 더 이상 노출되지 않음)
+- **원인**: 사용자 위임(OBO) 연결(`AUD_HOME_CONNECTION_MODE=delegated` 또는 `mode:"delegated"`)에서 API 앱의 위임 권한(Log Analytics `Data.Read` 등)에 관리자 동의가 없음. 기본 플랫폼 연결에서는 발생하지 않음
+- **해결**: 플랫폼 연결을 쓰거나(권장, [overview](../integrations/azure/overview.md)), Azure Portal → App Registration → API Permissions → Grant admin consent
 
 ### AUTH-002: OBO 토큰 교환 실패
 - **에러**: `AADSTS50013: Assertion failed signature validation`
@@ -92,6 +94,37 @@
 - **에러**: `BrowserAuthError: timed_out` (`redirect_bridge_timeout`), 팝업이 닫히지 않음
 - **원인**: MSAL v5는 팝업 응답을 BroadcastChannel(redirect bridge)로만 받음. 리디렉트 URI 페이지가 `broadcastResponseToMainFrame()`을 호출하지 않으면 원래 창이 응답을 받지 못함 (v2/v3의 팝업 URL 감시 방식은 제거됨)
 - **해결**: `apps/web/src/app/providers.tsx`가 모듈 로드 시 URL에 인증 응답(`state` + `code|error`)이 있으면 `@azure/msal-browser/redirect-bridge`의 `broadcastResponseToMainFrame()`을 호출하고 앱을 렌더링하지 않음. 리디렉트 URI(`NEXT_PUBLIC_AZURE_AD_REDIRECT_URI`)는 Entra 앱 등록의 **SPA** 플랫폼에 등록되어 있어야 함
+
+### AUTH-006: 401 `invalid_token` / `token_expired`
+- **증상**: 모든 `/api` 호출이 401, 응답 `{"error":"invalid_token","reason":"aud|iss|signature|kid|tid|malformed"}` 또는 `token_expired`
+- **원인**: API가 토큰을 검증함(`infra/tokenVerifier.ts`): 서명(RS256, 테넌트 공개 키) · 발급자(v1/v2) · 대상(`api://<AZURE_AD_CLIENT_ID>` 또는 client id) · 만료(60초 허용) · `scp`(`AUD_AUTH_SCOPES`, 기본 `Azure.Read.All`) · `oid`
+- **해결**: `reason`이 가리키는 항목 확인 — `aud`면 웹의 `NEXT_PUBLIC_AZURE_AD_API_SCOPE`가 API 앱의 Application ID URI와 같은지, 다르면 `AUD_AUTH_AUDIENCES`로 지정. `token_expired`면 다시 로그인(웹은 자동으로 재로그인 안내). 위조·만료 토큰은 서비스 주체로 대신 조회되지 않음
+
+### AUTH-007: `signin_required` — 로그인하지 않으면 예시 데이터
+- **증상**: 화면에 '예시 데이터 — 로그인하면 실제 데이터', API 응답 `note:"signin_required"` 또는 401 `signin_required`
+- **원인**: 익명 호출은 실제 Azure를 읽지 않음(정책). 예전에는 서비스 주체로 실제 인벤토리·kubeconfig까지 읽었음
+- **해결**: 로그인. 로컬 개발에서만 `AUD_ANONYMOUS_SP=true`(루프백 바인드 필수, 다른 테넌트가 레지스트리에 있으면 시작 실패), AKS까지는 `AUD_ANONYMOUS_K8S=true`. 응답 헤더 `x-aud-principal: sp-anonymous`로 표시
+
+### AUTH-008: `consent_required` / `interaction_required` / `access_blocked`
+- **에러**: OBO 교환 실패 — AADSTS65001(동의 없음) · 50076/50079/50158(MFA·추가 인증) · 53003(조건부 액세스 차단)
+- **해결**: 동의는 테넌트 관리자가 API 앱에 admin consent. 추가 인증은 다시 로그인(`claims`가 함께 옴). 차단은 조건부 액세스 정책 확인. 어느 경우에도 서비스 주체로 넘어가지 않음
+
+### AUTH-009: 501 `aad_cluster_unsupported`
+- **증상**: AKS 화면·Hubble·정책 점검이 501
+- **원인**: Entra 연동 AKS의 kubeconfig는 `kubelogin` exec 플러그인을 요구함. API 호스트에서 외부 프로그램을 실행하지 않음(`sanitizeKubeconfig`)
+- **해결**: 로컬 계정이 켜진 클러스터는 그대로 동작. Entra 전용 클러스터는 사용자별 AKS 토큰 주입(후속 과제)
+
+### AUTH-010: `subscription_not_allowed` / `tenant_not_allowed`
+- **원인**: 구독이 어떤 연결(`AUD_CONNECTIONS_FILE`, 없으면 `AZURE_SUBSCRIPTION_IDS`)에도 없음 / 토큰의 테넌트가 홈 테넌트가 아님(게스트도 홈 테넌트로 로그인)
+- **해결**: [연결 등록](../integrations/azure/connect-tenant.md#연결-등록-플랫폼-관리자) 확인
+
+### AUTH-011: 403 `no_platform_role`
+- **원인**: 토큰에 앱 역할(`AUD.Viewer`·`AUD.Operator`·`AUD.Admin`)이 없고 기본 역할이 `none`(프로덕션)
+- **해결**: [sso.md](../integrations/azure/sso.md) — `aud-api` 엔터프라이즈 앱에서 사용자·그룹에 역할 할당 → 로그아웃 후 다시 로그인. 개발에서는 `AUD_DEFAULT_ROLE`(기본 `viewer`)
+
+### AUTH-012: 403 `role_required`
+- **원인**: 역할이 낮음 — Pod 로그는 운영자, 연결 점검은 관리자
+- **해결**: 역할 상향
 
 ---
 
@@ -165,6 +198,60 @@
 ### SEC-003: 통합 위험에 '근거 있는 연결이 없습니다' 또는 '미확인'만 나옴
 - **원인**: 연결은 근거가 있을 때만 만듦 — ① 클러스터가 선택한 구독의 구성도에 없음(`clusterNotInGraph`), ② Hubble 관측 없음(`hubble`)이나 Azure PaaS 목록 실패(`azureMatch`), ③ Defender 샘플(권고당 최대 5개) 밖의 리소스, ④ 같은 키 후보가 둘 이상(모호), ⑤ 비로그인(예시 데이터는 조인하지 않음)
 - **해결**: 화면 위 '미확인' 알림의 항목부터 확인. 클러스터와 같은 구독을 고르고, AKS 보안 점검의 Hubble 상태를 확인. 연결 0건은 '안전'을 뜻하지 않으며 하단 '연결 근거가 없는 항목'에서 원 화면으로 이동
+
+---
+
+## 7. Azure 연결 (Connection)
+
+연결 = 플랫폼이 고객 Azure를 읽는 자격 증명 단위 — [docs/integrations/azure](../integrations/azure/overview.md). 화면 문장은 "Azure 연결에 문제가 있습니다"(관리자는 설정 › Azure 연결 › 점검).
+
+### CONN-001: 403 `connection_forbidden`
+- **원인**: 요청한 구독의 연결이 내 역할을 허용하지 않음(연결 파일 `roles`)
+- **해결**: 연결의 `roles`에 역할 추가, 또는 역할 상향. Azure 호출 전에 막히므로 Azure 쪽 기록은 없음
+
+### CONN-002: 503 `connection_unconfigured`
+- **원인**: `secretEnv`가 가리키는 환경 변수 없음 / `AZURE_AD_CLIENT_SECRET`·`AUD_PLATFORM_CERT_PATH` 둘 다 없음
+- **해결**: 메시지에 나온 **변수 이름**을 설정하고 API 재시작(값은 메시지에 나오지 않음)
+
+### CONN-003: 503 `connection_credential_invalid`
+- **에러**: AADSTS7000215(잘못된 비밀 값) · 7000222(만료) · 700027(인증서 불일치)
+- **해결**: [lifecycle.md](../integrations/azure/lifecycle.md) 자격 증명 교체
+
+### CONN-004: 403 `connection_not_consented`
+- **에러**: AADSTS700016 — 그 테넌트에 앱(서비스 주체)이 없음
+- **해결**: 연결의 `clientId`·`tenantId` 오타 확인, 고객이 `onboard.sh`를 실행했는지 확인
+
+### CONN-005: 502 `connection_tenant_mismatch`
+- **원인**: 발급된 토큰의 테넌트가 연결 테넌트와 다름 / AADSTS90002·50020
+- **해결**: 연결 파일 `tenantId` 확인 (설정 실수로 다른 테넌트를 읽지 않도록 거부됨)
+
+### CONN-006: 504 `connection_timeout`
+- **원인**: 토큰 발급 10초 초과 (네트워크·프록시)
+- **해결**: 아웃바운드 `login.microsoftonline.com` 확인 후 재시도
+
+### CONN-007: 502 `connection_failed`
+- **원인**: 그 밖의 토큰 실패(메시지는 GUID·추적 ID를 가림)
+- **해결**: `AUD_DEBUG=true`로 API 로그 확인, 연결 점검 실행
+
+### CONN-008: `ARM 403: AuthorizationFailed` (화면: 일부 데이터·권한 없음)
+- **원인**: 연결의 자격 증명에 그 기능의 역할이 없음
+- **해결**: [permissions.md](../integrations/azure/permissions.md)의 역할 부여 → 연결 점검의 기능 표가 `가능`인지 확인
+
+---
+
+## 8. VNet 트래픽 (Flow Log)
+
+### NET-001: '작업 영역을 읽을 권한이 없습니다' (`state: noAccess`)
+- **원인**: 연결에 작업 영역의 Log Analytics Reader 없음 (예전 화면의 AADSTS65001 원문 노출은 수정됨 — 이제 코드·문장만)
+- **해결**: 작업 영역(또는 구독)에 Log Analytics Reader 부여
+
+### NET-002: 모든 탭이 '기록 없음' (`state: empty`)
+- **원인**: ① VNet 흐름 로그가 없거나 Traffic Analytics가 꺼짐 ② NSG 흐름 로그만 있음(옛 테이블 `AzureNetworkAnalytics_CL`로 감 — 이 화면은 집계하지 않음) ③ TA 처리 간격(10/60분)만큼 아직 도착 전
+- **해결**: '수집 범위' 탭에서 VNet별 상태 확인 → VNet 흐름 로그 + TA(간격 10분) 켜기. NSG 흐름 로그는 2027-09-30 종료 — [vnet-flow-logs.md](../observability/vnet-flow-logs.md)
+
+### NET-003: 흐름 로그는 켜져 있는데 기록 없음 + 작업 영역 `≠`
+- **원인**: 흐름 로그가 보내는 작업 영역 ≠ `AZURE_LOG_ANALYTICS_WORKSPACE_ID`
+- **해결**: 같은 작업 영역으로 맞추거나 환경 변수를 그 작업 영역으로 변경(여러 작업 영역 동시 조회는 후속)
 
 ---
 

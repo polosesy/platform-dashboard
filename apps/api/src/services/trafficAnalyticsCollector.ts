@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getLogAnalyticsFetcherAuto, tableToObjects, type LogAnalyticsResponse } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
@@ -20,6 +20,11 @@ export type EdgeTrafficData = {
 };
 
 const trafficCache = new CacheManager<EdgeTrafficData[]>(20, 60_000);
+/**
+ * Look-back for flow rows. Traffic Analytics lands every 10–60 min, so a 5 min window was almost always empty;
+ * throughput is the average over this window.
+ */
+const WINDOW_MIN = 120;
 
 /**
  * Collect traffic analytics data and map to diagram edges.
@@ -36,7 +41,7 @@ export async function collectTrafficAnalytics(
   if (!env.AZURE_TRAFFIC_ANALYTICS_ENABLED) return [];
   if (!env.AZURE_LOG_ANALYTICS_WORKSPACE_ID) return [];
 
-  const cacheKey = `traffic:${edges.map((e) => e.id).sort().join(",")}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:traffic:${edges.map((e) => e.id).sort().join(",")}`;
   const cached = trafficCache.get(cacheKey);
   if (cached) return cached;
 
@@ -71,7 +76,7 @@ export async function collectTrafficAnalytics(
 
   // Subnet pair traffic (IP-pair resolution is not implemented, so only subnet pairs are queried)
   const subnetKql = `${table}
-| where SubType == "FlowLog" and TimeGenerated > ago(5m)
+| where SubType == "FlowLog" and TimeGenerated > ago(${WINDOW_MIN}m)
 | where isnotempty(SrcSubnet) and isnotempty(DestSubnet)
 | extend TotalBytes = tolong(coalesce(BytesSrcToDest, 0)) + tolong(coalesce(BytesDestToSrc, 0))
 | summarize
@@ -115,7 +120,7 @@ export async function collectTrafficAnalytics(
   }
 
   // Convert to EdgeTrafficData[]
-  const LOOKBACK_SECONDS = 300; // 5 minutes
+  const LOOKBACK_SECONDS = WINDOW_MIN * 60;
   const result: EdgeTrafficData[] = [];
 
   for (const [edgeId, data] of edgeTraffic) {

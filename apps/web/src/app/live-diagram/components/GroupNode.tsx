@@ -2,13 +2,16 @@
 
 import { memo } from "react";
 import { useI18n } from "@/lib/i18n";
-import { Handle, Position, type NodeProps, NodeResizer } from "reactflow";
+import { type NodeProps } from "reactflow";
+import { HiddenHandles } from "./HiddenHandles";
+import { FullNameTag } from "./NameParts";
+import type { NamePart } from "@/lib/liveNames";
+import { maskGuids } from "@/lib/mask";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { scopeStyle } from "../utils/designTokens";
 import { formatAzureRegion } from "../utils/regionFormat";
 import type { DiagramIconKind } from "@aud/types";
 import styles from "../styles.module.css";
-import { rgba } from "@/lib/palette";
 
 export type NsgBadgeInfo = {
   nodeId: string;
@@ -17,11 +20,15 @@ export type NsgBadgeInfo = {
   azureResourceId?: string;
 };
 
-export type NatGwBadgeInfo = {
-  nodeId: string;
-  label: string;
-  azureResourceId?: string;
+/** How a subnet reaches the Internet (from the generator's `egressVia`) */
+export type EgressInfo = {
+  via: "nat" | "lb-snat" | "default" | "none" | "unknown";
+  /** NAT Gateway name and node id (the chip selects the NAT card on the egress rail) */
+  name?: string;
+  natId?: string;
 };
+
+export type PeeringInfo = { name: string; state: string };
 
 export type GroupNodeData = {
   label: string;
@@ -29,108 +36,94 @@ export type GroupNodeData = {
   subtitle?: string;  // CIDR display (addressSpace for VNet, prefix for Subnet)
   region?: string;    // Azure region code — shown as badge on VNet nodes
   nsgBadges?: NsgBadgeInfo[];
-  natGwBadge?: NatGwBadgeInfo;
   onNsgSelect?: (nodeId: string) => void;
-  onNatGwToggle?: (nodeId: string) => void;
+  egress?: EgressInfo;
+  /** NICs without a VM in this subnet (folded into a count) */
+  nicCount?: number;
+  peerings?: PeeringInfo[];
+  /** Subnet name without the words its VNet repeats (full name in a tag while selected) */
+  shortLabel?: string;
+  /** The full name split into the words the short name kept and dropped */
+  nameParts?: NamePart[];
+  /** Selected — shows the full-name tag over a shortened subnet name */
+  focused?: boolean;
 };
 
-export const GroupNode = memo(function GroupNode({ data, selected }: NodeProps<GroupNodeData>) {
+export const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupNodeData>) {
   const { t } = useI18n();
-  const { label, icon, subtitle, region, nsgBadges, natGwBadge, onNsgSelect, onNatGwToggle } = data;
+  const { label, icon, subtitle, region, nsgBadges, onNsgSelect, egress, nicCount, peerings, shortLabel, focused, nameParts } = data;
   const scope = scopeStyle(icon);
+  const isSubnet = icon === "subnet";
+
+  const nsg = nsgBadges && nsgBadges.length > 0 && (
+    <div className={styles.groupNsgBadges}>
+      {nsgBadges.map((b) => (
+        <button
+          key={b.nodeId}
+          type="button"
+          className={`${styles.nsgBadge} ${styles.nsgBadgeCompact}`}
+          onClick={(e) => { e.stopPropagation(); onNsgSelect?.(b.nodeId); }}
+          title={b.label}
+        >
+          <img src={getAzureIconUrl(b.icon)} alt="nsg" width={12} height={12} className={styles.nsgBadgeIcon} />
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <>
-      <NodeResizer
-        isVisible={selected}
-        minWidth={200}
-        minHeight={120}
-        color={scope.borderColor}
-        handleClassName={styles.groupResizeHandle}
-        lineClassName={styles.groupResizeLine}
-      />
       <div
         className={styles.groupNode}
-        style={{
-          borderColor: scope.borderColor,
-          borderStyle: scope.borderStyle,
-          borderWidth: scope.borderWidth,
-          background: scope.background,
-        }}
+        style={{ borderColor: scope.borderColor, borderStyle: scope.borderStyle, borderWidth: scope.borderWidth, background: scope.background }}
       >
-        <div className={styles.groupNodeHeader}>
-          {/* NSG badge(s) at top-left — Cat 1: subnet-attached NSGs, compact icon-only */}
-          {nsgBadges && nsgBadges.length > 0 && (
-            <div className={styles.groupNsgBadges}>
-              {nsgBadges.map((nsg) => (
-                <button
-                  key={nsg.nodeId}
-                  type="button"
-                  className={`${styles.nsgBadge} ${styles.nsgBadgeCompact}`}
-                  onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsg.nodeId); }}
-                  title={nsg.label}
-                >
-                  <img
-                    src={getAzureIconUrl(nsg.icon)}
-                    alt="nsg"
-                    width={12}
-                    height={12}
-                    className={styles.nsgBadgeIcon}
-                  />
-                </button>
-              ))}
+        {isSubnet ? (
+          <div className={styles.subnetHeader}>
+            <div className={styles.subnetHeaderLine}>
+              {nsg}
+              <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} className={styles.groupNodeIcon} />
+              <span className={styles.groupNodeLabel} title={label}>{shortLabel || label}</span>
+              {/* At a distance line 2 is hidden; the outbound path stays visible as a dot here */}
+              {egress && <span className={styles.egressDot} data-via={egress.via} title={egress.via === "nat" ? t("ld.egress.nat", { name: egress.name ?? "" }) : t(`ld.egress.${egress.via}`)} />}
             </div>
-          )}
-          <img
-            src={getAzureIconUrl(icon)}
-            alt={icon}
-            width={16}
-            height={16}
-            className={styles.groupNodeIcon}
-          />
-          <span className={styles.groupNodeLabel}>{label}</span>
-          {region && <span className={styles.groupNodeRegion}>{formatAzureRegion(region)}</span>}
-          {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
-          {/* NAT GW badge — right corner of subnet header, click to expand to card */}
-          {natGwBadge && (
-            <button
-              type="button"
-              className={styles.natGwBadge}
-              style={{ marginLeft: "auto" }}
-              onClick={(e) => { e.stopPropagation(); onNatGwToggle?.(natGwBadge.nodeId); }}
-              title={`${natGwBadge.label} — ${t("ld.natExpand")}`}
-            >
-              <img
-                src={getAzureIconUrl("natGateway")}
-                alt="nat-gateway"
-                width={16}
-                height={16}
-              />
-            </button>
-          )}
-        </div>
+            <div className={`${styles.subnetHeaderLine} ${styles.lodDetailBlock}`}>
+              {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
+              {egress && (
+                <button
+                  type="button"
+                  className={styles.egressChip}
+                  data-via={egress.via}
+                  title={t(`ld.egress.${egress.via}.hint`)}
+                  onClick={(e) => { if (egress.natId) { e.stopPropagation(); onNsgSelect?.(egress.natId); } }}
+                >
+                  {egress.via === "nat" ? t("ld.egress.nat", { name: egress.name ?? "" }) : t(`ld.egress.${egress.via}`)}
+                </button>
+              )}
+              {nicCount ? <span className={styles.nicChip} title={t("ld.nicCount.hint")}>{t("ld.nicCount", { n: nicCount })}</span> : null}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.groupNodeHeader}>
+            {nsg}
+            <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} className={styles.groupNodeIcon} />
+            <span className={styles.groupNodeLabel} title={label}>{label}</span>
+            {region && <span className={styles.groupNodeRegion}>{formatAzureRegion(region)}</span>}
+            {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
+            {peerings && peerings.length > 0 && (
+              <span className={styles.peeringStubs}>
+                {peerings.map((p) => (
+                  <span key={p.name} className={styles.peeringStub} data-state={p.state === "Connected" ? "ok" : "warn"} title={t("ld.peering.hint", { name: p.name, state: p.state })}>
+                    ↔ {p.name}
+                  </span>
+                ))}
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      {/* Hidden handles — allow programmatic edges from/to subnet GroupNodes */}
-      <Handle type="source" position={Position.Right} style={{ opacity: 0, pointerEvents: "none" }} />
-      <Handle type="target" position={Position.Left} style={{ opacity: 0, pointerEvents: "none" }} />
-      {/* NAT GW source handle — orange dot positioned at badge right edge (inside subnet border) */}
-      {natGwBadge && (
-        <Handle
-          id="natgw-source"
-          type="source"
-          position={Position.Right}
-          style={{
-            top: 19,
-            right: 8,
-            width: 8,
-            height: 8,
-            background: rgba("egress", 0.85),
-            border: `2px solid ${rgba("egress")}`,
-            borderRadius: "50%",
-            pointerEvents: "none",
-          }}
-        />
-      )}
+      <HiddenHandles />
+      {/* The VNet header already shows its full name; subnets get the tag when their name is shortened */}
+      {isSubnet && focused && shortLabel && shortLabel !== label && <FullNameTag fullName={maskGuids(label)} original={label} parts={nameParts} offset={2} />}
     </>
   );
 });

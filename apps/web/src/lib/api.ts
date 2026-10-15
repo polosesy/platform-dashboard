@@ -1,3 +1,4 @@
+import { T, type Locale } from "./i18nMessages";
 export function apiBaseUrl() {
   // In the browser, use same-origin relative path (Next.js rewrites /api/* → API server).
   // On the server (SSR), call the API directly.
@@ -27,6 +28,51 @@ export function apiUrl(path: string, params?: Record<string, string | number | u
   return `${apiBaseUrl()}${path}${query ? `?${query}` : ""}`;
 }
 
+/**
+ * A refused API call with the API's error code (signin_required, invalid_token, token_expired,
+ * consent_required, interaction_required, access_blocked, tenant_not_allowed, no_platform_role, role_required,
+ * connection_forbidden, connection_* (the platform's Azure connection), aad_cluster_unsupported …).
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+    readonly claims?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** What the page should ask the user to do for an API error (null = nothing about sign-in) */
+export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection";
+
+export function authStateOf(e: unknown): AuthState | null {
+  if (!(e instanceof ApiError)) return null;
+  return authStateOfCode(e.code);
+}
+
+/** The same mapping for a code carried in a response note (sample data / partial data) */
+export function authStateOfCode(code: string | null | undefined): AuthState | null {
+  switch (code) {
+    case "signin_required": return "signin";
+    case "token_expired": case "invalid_token": case "interaction_required": return "reauth";
+    case "consent_required": return "consent";
+    case "access_blocked": return "blocked";
+    case "tenant_not_allowed": case "insufficient_scope": case "role_required": case "connection_forbidden": return "denied";
+    case "no_platform_role": return "norole";
+    case "connection_not_consented": case "connection_credential_invalid": case "connection_unconfigured":
+    case "connection_tenant_mismatch": case "connection_failed": case "connection_timeout": return "connection";
+    default: return null;
+  }
+}
+
+function authText(state: NonNullable<ReturnType<typeof authStateOf>>): string {
+  let locale: Locale = "ko";
+  try { locale = localStorage.getItem("aud-locale") === "en" ? "en" : "ko"; } catch { /* default */ }
+  return T[`auth.state.${state}`]?.[locale] ?? state;
+}
+
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -38,7 +84,13 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+    let body: { error?: string; claims?: string } = {};
+    try { body = JSON.parse(text) as typeof body; } catch { /* not JSON */ }
+    const raw = `HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`;
+    const probe = new ApiError(res.status, body.error, raw, body.claims);
+    // Sign-in problems read as a sentence wherever a page prints the error (in the app's language)
+    const auth = authStateOf(probe);
+    throw auth ? new ApiError(res.status, body.error, authText(auth), body.claims) : probe;
   }
   return (await res.json()) as T;
 }

@@ -20,6 +20,7 @@
 // ──────────────────────────────────────────────────────────────
 
 import type { ArchitectureGraph, ArchitectureNode } from "@aud/types";
+import { measure, place, type PackNode } from "./boxPack";
 
 export type ArchEdgeKind = "ingress" | "exposure" | "routes" | "privateLink" | "peering" | "outbound" | "vnetIntegration" | "logging";
 export const ARCH_EDGE_KINDS: ArchEdgeKind[] = ["ingress", "routes", "privateLink", "peering", "outbound", "vnetIntegration", "exposure", "logging"];
@@ -575,9 +576,7 @@ export type ArchLayout = {
   offscreen: ArchEdge[];
 };
 
-type TNode =
-  | { t: "box"; shape: Extract<ArchShape, { shape: "box" }>; dir: "row" | "col"; children: TNode[]; minW?: number; maxW?: number }
-  | { t: "leaf"; shape: Exclude<ArchShape, { shape: "box" }>; w: number; h: number };
+type TNode = PackNode<ArchShape>;
 
 export type ArchViewOptions = {
   /** Region key to show, or "all" */
@@ -625,7 +624,14 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
   const layers = opts.layers ?? new Set(DEFAULT_LAYERS);
   const shown = opts.region === "all" ? model.regions : model.regions.filter((r) => r.key === opts.region);
   const leaf = (shape: Exclude<ArchShape, { shape: "box" }>, w: number = ARCH.LEAF_W, h: number = ARCH.LEAF_H): TNode => ({ t: "leaf", shape, w, h });
-  const box = (shape: Extract<ArchShape, { shape: "box" }>, dir: "row" | "col", children: TNode[], minW?: number, maxW?: number): TNode => ({ t: "box", shape, dir, children, minW, maxW });
+  const box = (shape: Extract<ArchShape, { shape: "box" }>, dir: "row" | "col", children: TNode[], minW?: number, maxW?: number): TNode => ({
+    t: "box", shape, dir, children, minW,
+    maxW: maxW ?? MAXW[shape.type],
+    head: HEAD[shape.type],
+    pad: ARCH.PAD,
+    gap: shape.type === "root" ? 24 : ARCH.GAP,
+    framed: shape.type !== "root",
+  });
   const shownAt = new Map<string, string>();
 
   /** Tiles of one container; same-kind runs above `at` become a stack unless expanded. */
@@ -712,55 +718,11 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
   }
   const root = box({ id: "root", shape: "box", type: "root", label: "" }, "row", rootKids);
 
-  // ── measure / place ──
-  type M = { n: TNode; w: number; h: number; rows: M[][] };
-  const gapOf = (n: TNode) => (n.t === "box" && n.shape.type === "root" ? 24 : ARCH.GAP);
-  const measure = (n: TNode): M => {
-    if (n.t === "leaf") return { n, w: n.w, h: n.h, rows: [] };
-    const kids = n.children.map(measure);
-    const type = n.shape.type;
-    const gap = gapOf(n);
-    const maxW = n.dir === "col" ? 0 : n.maxW ?? MAXW[type];
-    const rows: M[][] = [[]];
-    let rw = 0;
-    for (const c of kids) {
-      const cur = rows[rows.length - 1]!;
-      if (cur.length && rw + gap + c.w > maxW) { rows.push([]); rw = 0; }
-      rw += (rows[rows.length - 1]!.length ? gap : 0) + c.w;
-      rows[rows.length - 1]!.push(c);
-    }
-    const packed = rows.filter((r) => r.length);
-    const innerW = Math.max(0, ...packed.map((r) => r.reduce((s, c) => s + c.w, 0) + gap * (r.length - 1)));
-    const innerH = packed.reduce((s, r) => s + Math.max(...r.map((c) => c.h)), 0) + gap * Math.max(0, packed.length - 1);
-    const framed = type !== "root";
-    const pad = framed ? ARCH.PAD : 0;
-    return {
-      n,
-      w: Math.max(innerW + pad * 2, framed ? n.minW ?? 0 : 0),
-      h: HEAD[type] + (packed.length === 0 ? (framed ? 10 : 0) : innerH + pad),
-      rows: packed,
-    };
-  };
-  const shapes: ArchPlaced[] = [];
-  const place = (m: M, x: number, y: number, depth: number, parent: string | null) => {
-    shapes.push({ ...m.n.shape, x, y, w: m.w, h: m.h, depth, parent } as ArchPlaced);
-    if (m.n.t === "leaf") return;
-    const type = m.n.shape.type;
-    const gap = gapOf(m.n);
-    const pad = type === "root" ? 0 : ARCH.PAD;
-    let cy = y + HEAD[type];
-    for (const row of m.rows) {
-      let cx = x + pad;
-      const rh = Math.max(...row.map((c) => c.h));
-      for (const c of row) {
-        place(c, cx, cy, depth + 1, m.n.shape.id);
-        cx += c.w + gap;
-      }
-      cy += rh + gap;
-    }
-  };
+  // ── measure / place (lib/boxPack) ──
   const measured = measure(root);
-  place(measured, 0, 0, 0, null);
+  const shapes: ArchPlaced[] = place(measured).map(
+    (p) => ({ ...p.shape, x: p.x, y: p.y, w: p.w, h: p.h, depth: p.depth, parent: p.parent ? p.parent.id : null }) as ArchPlaced,
+  );
   // Unframed wrappers only position their children
   const wrappers = new Set(["root", "regions", ...shapes.filter((s) => s.id.startsWith("vnets:")).map((s) => s.id)]);
   const parentOf = new Map(shapes.map((s) => [s.id, s.parent]));

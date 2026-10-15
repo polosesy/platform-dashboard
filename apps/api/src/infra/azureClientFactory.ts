@@ -1,7 +1,16 @@
-import { ResourceGraphClient } from "@azure/arm-resourcegraph";
-import { ClientSecretCredential } from "@azure/identity";
+import type { TokenCredential } from "@azure/identity";
+import { decodeJwt } from "jose";
 import type { Env } from "../env.js";
-import { getOBOCredential, getArmToken, getLogAnalyticsToken, getPrometheusToken } from "./oboTokenPool.js";
+import { HttpError, maskGuids } from "./requestParams.js";
+import {
+  connectionForSubscription,
+  connectionForWorkspace,
+  credentialGroup,
+  homeConnection,
+  type AzureConnection,
+} from "./connectionRegistry.js";
+import { credentials, mapCredentialError, signinRequiredError } from "./connectionCredentials.js";
+import { accessibleConnections, callerOf, canUse, connectionForbidden } from "./platformAccess.js";
 
 const ARM_SCOPE = "https://management.azure.com/.default";
 const LOG_ANALYTICS_SCOPE = "https://api.loganalytics.io/.default";
@@ -13,137 +22,239 @@ const PROMETHEUS_SCOPE = "https://prometheus.monitor.azure.com/.default";
  *  callers (e.g. HEALTH_SUMMARY_TIMEOUT_MS) still act as the hard ceiling. */
 const ARM_FETCH_TIMEOUT_MS = 30_000;
 
-/** Timeout for Azure AD token acquisition (ms). */
-const TOKEN_ACQUIRE_TIMEOUT_MS = 10_000;
+// ────────────────────────────────────────────
+// Whose identity reads Azure
+//
+//   signed-in user → the CONNECTION of the data being read (infra/connectionRegistry.ts): the subscription in the
+//                    URL / Resource Graph body / resource id, or the workspace. Its credential is the platform's own
+//                    identity (platform · lighthouse), the customer's service principal, or — only for a "delegated"
+//                    connection — the user's OBO token. The user's platform role must be allowed on that connection
+//                    (403 connection_forbidden before any request). Failures are coded (connection_* / OBO codes),
+//                    and a connection never falls back to another credential.
+//   anonymous      → the platform credential only with AUD_ANONYMOUS_SP=true (local development, loopback bind
+//                    enforced in env.ts); otherwise 401 signin_required — routes with sample data answer with it.
+// ────────────────────────────────────────────
 
-export function getResourceGraphClient(env: Env, bearerToken: string): ResourceGraphClient {
-  return new ResourceGraphClient(getOBOCredential(env, bearerToken));
+/** Anonymous reads may use the platform credential (master switch, and the feature's own opt-in when it has one) */
+export function anonymousSpAllowed(env: Env, featureFlag = true): boolean {
+  return env.AUD_ANONYMOUS_SP && featureFlag;
 }
 
+export const signinRequired = signinRequiredError;
+
 export type ArmFetcher = {
-  armToken: string;
   fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) => Promise<T>;
   postJson: <T>(url: string, body: unknown, opts?: { timeoutMs?: number }) => Promise<T>;
 };
 
 export type LogAnalyticsFetcher = {
-  token: string;
   query: (workspaceId: string, kql: string) => Promise<unknown>;
+  /**
+   * Resource-centric query: the logs one Azure resource sent to any workspace (or a workspace by its ARM id).
+   * A resource with no diagnostic setting answers with 0 rows, not an error.
+   */
+  queryResource: (armId: string, kql: string, timespan: string) => Promise<unknown>;
 };
 
 export type PrometheusFetcher = {
-  token: string;
   query: (endpoint: string, promql: string, time?: string) => Promise<unknown>;
   queryRange: (endpoint: string, promql: string, start: string, end: string, step: string) => Promise<unknown>;
 };
 
-// ────────────────────────────────────────────
-// OBO (user bearer token) variants
-// ────────────────────────────────────────────
+// ── Connection routing ──
+
+const SUB_IN_PATH = /\/subscriptions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=[/?]|$)/i;
+export const subscriptionInPath = (s: string): string | undefined => SUB_IN_PATH.exec(s)?.[1]?.toLowerCase();
+
+/** The connection that owns a subscription; a subscription outside the registry is read by the home connection */
+function connectionFor(env: Env, subscriptionId: string | undefined): AzureConnection {
+  return (subscriptionId && connectionForSubscription(env, subscriptionId)) || homeConnection(env);
+}
+
+function assertCanUse(env: Env, bearerToken: string, c: AzureConnection): void {
+  const role = callerOf(env, bearerToken)?.role ?? null;
+  if (!role) throw new HttpError(403, "no_platform_role", "No platform role");
+  if (!canUse(c, role)) throw connectionForbidden();
+}
+
+const tokenCache = new Map<string, { token: string; until: number }>();
+
+/** A connection's token for a scope, after the caller's role was checked on it (non-delegated tokens shared briefly) */
+export async function connectionToken(env: Env, bearerToken: string, c: AzureConnection, scope: string): Promise<string> {
+  assertCanUse(env, bearerToken, c);
+  const group = credentialGroup(env, c);
+  if (group === "delegated") return credentials().token(env, c, scope, bearerToken);
+  const key = `${group}|${scope}`;
+  const hit = tokenCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.token;
+  const token = await credentials().token(env, c, scope);
+  let exp = Date.now() + 10 * 60_000;
+  try { exp = Number(decodeJwt(token).exp ?? 0) * 1000 || exp; } catch { /* keep the default */ }
+  tokenCache.set(key, { token, until: exp - 5 * 60_000 });
+  return token;
+}
+
+/** Tests: forget shared connection tokens */
+export const clearConnectionTokens = () => tokenCache.clear();
+
+/** SDK clients (Resource Graph, Blob): the credential of the connection(s) behind these subscriptions, one per group */
+export function connectionCredentialGroups(
+  env: Env,
+  bearerToken: string,
+  subscriptionIds: string[],
+): Array<{ credential: TokenCredential; subscriptions: string[] }> {
+  const groups = new Map<string, { credential: TokenCredential; subscriptions: string[] }>();
+  for (const sub of subscriptionIds) {
+    const c = connectionFor(env, sub);
+    assertCanUse(env, bearerToken, c);
+    const g = credentialGroup(env, c);
+    let entry = groups.get(g);
+    if (!entry) groups.set(g, (entry = { credential: credentials().credential(env, c, bearerToken), subscriptions: [] }));
+    entry.subscriptions.push(sub);
+  }
+  return [...groups.values()];
+}
+
+/** The home connection's credential (deployment-level resources such as the configured flow-log storage account) */
+export function homeConnectionCredential(env: Env, bearerToken: string): TokenCredential {
+  const c = homeConnection(env);
+  assertCanUse(env, bearerToken, c);
+  return credentials().credential(env, c, bearerToken);
+}
+
+/** The managed subscriptions a caller may read: the allow-list narrowed by the caller's role (anonymous: home) */
+export function callerSubscriptions(env: Env, bearerToken: string | undefined): string[] {
+  if (!bearerToken) return homeConnection(env).subscriptions;
+  const role = callerOf(env, bearerToken)?.role ?? null;
+  return accessibleConnections(env, role).flatMap((c) => c.subscriptions);
+}
+
+type ArgBody = { subscriptions?: string[]; managementGroups?: string[]; options?: Record<string, unknown> };
+type ArgPage = { data?: unknown[]; $skipToken?: string };
+const isResourceGraph = (url: string) => /\/providers\/Microsoft\.ResourceGraph\/resources\b/i.test(url);
+const jsonHeaders = (t: string) => ({ Authorization: `Bearer ${t}`, "Content-Type": "application/json" });
+
+function userArmFetcher(env: Env, bearerToken: string): ArmFetcher {
+  const viaUrl = async <T>(url: string, init: RequestInit, timeoutMs?: number) => {
+    const t = await connectionToken(env, bearerToken, connectionFor(env, subscriptionInPath(url)), ARM_SCOPE);
+    return fetchJsonWithTimeout<T>("ARM", url, { ...init, headers: jsonHeaders(t) }, timeoutMs);
+  };
+  return {
+    fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) => viaUrl<T>(url, {}, opts?.timeoutMs),
+    postJson: async <T>(url: string, body: unknown, opts?: { timeoutMs?: number }): Promise<T> => {
+      const b = (body ?? {}) as ArgBody;
+      if (!isResourceGraph(url) || b.managementGroups) return viaUrl<T>(url, { method: "POST", body: JSON.stringify(body) }, opts?.timeoutMs);
+      // Resource Graph: the body's subscriptions (or every one the caller may read), split by credential
+      const subs = (b.subscriptions?.length ? b.subscriptions : callerSubscriptions(env, bearerToken)).map((s) => s.toLowerCase());
+      const groups = new Map<string, { conn: AzureConnection; subs: string[] }>();
+      for (const s of subs) {
+        const c = connectionFor(env, s);
+        assertCanUse(env, bearerToken, c);
+        const g = credentialGroup(env, c);
+        const e = groups.get(g) ?? { conn: c, subs: [] };
+        e.subs.push(s);
+        groups.set(g, e);
+      }
+      const post = async (g: { conn: AzureConnection; subs: string[] }, options?: Record<string, unknown>) => {
+        const t = await connectionToken(env, bearerToken, g.conn, ARM_SCOPE);
+        const payload = { ...(body as object), subscriptions: g.subs, ...(options ? { options } : {}) };
+        return fetchJsonWithTimeout<ArgPage>("ARM", url, { method: "POST", headers: jsonHeaders(t), body: JSON.stringify(payload) }, opts?.timeoutMs);
+      };
+      const list = [...groups.values()];
+      if (list.length <= 1) return (await post(list[0] ?? { conn: homeConnection(env), subs })) as T;
+      // Several credentials: drain each one's pages (bounded) and concatenate
+      const data: unknown[] = [];
+      for (const g of list) {
+        let options = b.options;
+        for (let page = 0; page < 10; page++) {
+          const r = await post(g, options);
+          data.push(...(r.data ?? []));
+          if (!r.$skipToken) break;
+          options = { ...(b.options ?? {}), $skipToken: r.$skipToken };
+        }
+      }
+      return { data, totalRecords: data.length, count: data.length } as T;
+    },
+  };
+}
+
+function userLogFetcher(env: Env, bearerToken: string): LogAnalyticsFetcher {
+  return buildLogFetcher(
+    (workspaceId) => connectionToken(env, bearerToken, connectionForWorkspace(env, workspaceId), LOG_ANALYTICS_SCOPE),
+    (armId) => connectionToken(env, bearerToken, connectionFor(env, subscriptionInPath(armId)), LOG_ANALYTICS_SCOPE),
+  );
+}
+
+function userPrometheusFetcher(env: Env, bearerToken: string): PrometheusFetcher {
+  // Azure Monitor workspaces are read by the home connection (per-connection Prometheus is later)
+  return buildPrometheusFetcher(() => connectionToken(env, bearerToken, homeConnection(env), PROMETHEUS_SCOPE));
+}
+
+// ── Signed-in user (verified token) ──
 
 export async function getArmFetcher(env: Env, bearerToken: string): Promise<ArmFetcher> {
-  return buildArmFetcher(await withTokenTimeout(getArmToken(env, bearerToken), "OBO ARM"));
+  return userArmFetcher(env, bearerToken);
 }
 
 export async function getLogAnalyticsFetcher(env: Env, bearerToken: string): Promise<LogAnalyticsFetcher> {
-  return buildLogFetcher(await withTokenTimeout(getLogAnalyticsToken(env, bearerToken), "OBO LogAnalytics"));
+  return userLogFetcher(env, bearerToken);
 }
 
 export async function getPrometheusFetcher(env: Env, bearerToken: string): Promise<PrometheusFetcher> {
-  return buildPrometheusFetcher(await withTokenTimeout(getPrometheusToken(env, bearerToken), "OBO Prometheus"));
+  return userPrometheusFetcher(env, bearerToken);
 }
 
-// ────────────────────────────────────────────
-// SP Fallback variants — no user bearer token required
-// Uses ClientSecretCredential directly.
-// ────────────────────────────────────────────
+// ── Anonymous (dev switch only) — the platform credential ──
 
-function ensureSPConfig(env: Env): { tenantId: string; clientId: string; clientSecret: string } {
-  const tenantId = env.AZURE_AD_TENANT_ID;
-  const clientId = env.AZURE_AD_CLIENT_ID;
-  const clientSecret = env.AZURE_AD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("SP not configured: AZURE_AD_TENANT_ID, CLIENT_ID, CLIENT_SECRET required");
+async function anonymousToken(env: Env, scope: string): Promise<string> {
+  try {
+    const t = await credentials().platformCredential(env).getToken(scope);
+    if (!t?.token) throw new Error("no token");
+    return t.token;
+  } catch (e) {
+    throw mapCredentialError(e);
   }
-  return { tenantId, clientId, clientSecret };
 }
 
-let _spCredential: ClientSecretCredential | undefined;
-
-/** Shared ClientSecretCredential (for SDK clients like Storage / Resource Graph). */
-export function getSPCredential(env: Env): ClientSecretCredential {
-  if (!_spCredential) {
-    const { tenantId, clientId, clientSecret } = ensureSPConfig(env);
-    _spCredential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  }
-  return _spCredential;
+/** Anonymous callers with the dev switch on (throws signin_required otherwise) */
+export function getAnonymousSPCredential(env: Env, featureFlag = true): TokenCredential {
+  if (!anonymousSpAllowed(env, featureFlag)) throw signinRequired();
+  return credentials().platformCredential(env);
+}
+export async function getAnonymousArmFetcher(env: Env, featureFlag = true): Promise<ArmFetcher> {
+  if (!anonymousSpAllowed(env, featureFlag)) throw signinRequired();
+  return buildArmFetcher(() => anonymousToken(env, ARM_SCOPE));
+}
+export async function getAnonymousLogFetcher(env: Env, featureFlag = true): Promise<LogAnalyticsFetcher> {
+  if (!anonymousSpAllowed(env, featureFlag)) throw signinRequired();
+  const t = () => anonymousToken(env, LOG_ANALYTICS_SCOPE);
+  return buildLogFetcher(t, t);
 }
 
-async function getSPToken(env: Env, scope: string): Promise<string> {
-  const result = await withTokenTimeout(getSPCredential(env).getToken(scope), "SP");
-  return result.token;
+// ── Auto: the caller's identity — the user's connections, or the platform credential for anonymous dev only ──
+
+export async function getArmFetcherAuto(env: Env, bearerToken: string | undefined): Promise<ArmFetcher> {
+  if (bearerToken) return userArmFetcher(env, bearerToken);
+  return getAnonymousArmFetcher(env);
 }
 
-export async function getArmFetcherSP(env: Env): Promise<ArmFetcher> {
-  return buildArmFetcher(await getSPToken(env, ARM_SCOPE));
+export async function getLogAnalyticsFetcherAuto(env: Env, bearerToken: string | undefined): Promise<LogAnalyticsFetcher> {
+  if (bearerToken) return userLogFetcher(env, bearerToken);
+  return getAnonymousLogFetcher(env);
 }
 
-export async function getLogAnalyticsFetcherSP(env: Env): Promise<LogAnalyticsFetcher> {
-  return buildLogFetcher(await getSPToken(env, LOG_ANALYTICS_SCOPE));
-}
-
-export async function getPrometheusFetcherSP(env: Env): Promise<PrometheusFetcher> {
-  return buildPrometheusFetcher(await getSPToken(env, PROMETHEUS_SCOPE));
-}
-
-// ────────────────────────────────────────────
-// Auto — tries OBO if a bearer token is available, falls back to SP.
-// ────────────────────────────────────────────
-
-async function withSpFallback<T>(
-  label: string,
-  bearerToken: string | undefined,
-  obo: (token: string) => Promise<T>,
-  sp: () => Promise<T>,
-): Promise<T> {
-  if (bearerToken) {
-    try {
-      return await obo(bearerToken);
-    } catch (e) {
-      console.warn(`[auth] ${label} OBO failed, falling back to service principal:`, e instanceof Error ? e.message : e);
-    }
-  }
-  return sp();
-}
-
-export function getArmFetcherAuto(env: Env, bearerToken: string | undefined): Promise<ArmFetcher> {
-  return withSpFallback("ARM", bearerToken, (t) => getArmFetcher(env, t), () => getArmFetcherSP(env));
-}
-
-export function getLogAnalyticsFetcherAuto(env: Env, bearerToken: string | undefined): Promise<LogAnalyticsFetcher> {
-  return withSpFallback("LogAnalytics", bearerToken, (t) => getLogAnalyticsFetcher(env, t), () => getLogAnalyticsFetcherSP(env));
-}
-
-export function getPrometheusFetcherAuto(env: Env, bearerToken: string | undefined): Promise<PrometheusFetcher> {
-  return withSpFallback("Prometheus", bearerToken, (t) => getPrometheusFetcher(env, t), () => getPrometheusFetcherSP(env));
+export async function getPrometheusFetcherAuto(env: Env, bearerToken: string | undefined): Promise<PrometheusFetcher> {
+  if (bearerToken) return userPrometheusFetcher(env, bearerToken);
+  if (!anonymousSpAllowed(env)) throw signinRequired();
+  return buildPrometheusFetcher(() => anonymousToken(env, PROMETHEUS_SCOPE));
 }
 
 // ── Internal helpers ──
 
-/** Wrap a token-acquisition promise with a hard timeout. */
-async function withTokenTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label}: token acquisition timed out (${TOKEN_ACQUIRE_TIMEOUT_MS}ms)`)), TOKEN_ACQUIRE_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** fetch → JSON with an abort timeout; non-2xx responses throw `<label> <status>: <body>`. */
+/**
+ * fetch → JSON with an abort timeout. Non-2xx responses throw `<label> <status>: <code>: <message>` — the upstream
+ * error code and message with GUIDs masked (callers match on " 400:" or the message text; never the raw body).
+ */
 async function fetchJsonWithTimeout<T>(
   label: string,
   url: string,
@@ -154,49 +265,67 @@ async function fetchJsonWithTimeout<T>(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new Error(`${label} ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const text = await res.text();
+      let code = "error";
+      let message = text;
+      try {
+        type E = { code?: string; message?: string; innererror?: E };
+        const j = JSON.parse(text) as { error?: E };
+        code = j.error?.code ?? code;
+        message = [j.error?.message, j.error?.innererror?.message, j.error?.innererror?.innererror?.message].filter(Boolean).join(" · ") || text;
+      } catch { /* not JSON */ }
+      const err = new Error(`${label} ${res.status}: ${code}: ${maskGuids(message.replace(/\/subscriptions\/[^\s'",/]+/gi, "/subscriptions/[sub]")).slice(0, 400)}`);
+      Object.defineProperty(err, "detail", { value: text, enumerable: false });
+      throw err;
+    }
     return (await res.json()) as T;
   } finally {
     clearTimeout(timer);
   }
 }
 
-function buildArmFetcher(armToken: string): ArmFetcher {
-  const headers = { Authorization: `Bearer ${armToken}`, "Content-Type": "application/json" };
+function buildArmFetcher(token: () => Promise<string>): ArmFetcher {
   return {
-    armToken,
-    fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) =>
-      fetchJsonWithTimeout<T>("ARM", url, { headers }, opts?.timeoutMs),
-    postJson: <T>(url: string, body: unknown, opts?: { timeoutMs?: number }) =>
-      fetchJsonWithTimeout<T>("ARM", url, { method: "POST", headers, body: JSON.stringify(body) }, opts?.timeoutMs),
+    fetchJson: async <T>(url: string, opts?: { timeoutMs?: number }) =>
+      fetchJsonWithTimeout<T>("ARM", url, { headers: jsonHeaders(await token()) }, opts?.timeoutMs),
+    postJson: async <T>(url: string, body: unknown, opts?: { timeoutMs?: number }) =>
+      fetchJsonWithTimeout<T>("ARM", url, { method: "POST", headers: jsonHeaders(await token()), body: JSON.stringify(body) }, opts?.timeoutMs),
   };
 }
 
-function buildPrometheusFetcher(token: string): PrometheusFetcher {
-  const headers = { Authorization: `Bearer ${token}` };
+function buildPrometheusFetcher(token: () => Promise<string>): PrometheusFetcher {
   return {
-    token,
-    query(endpoint: string, promql: string, time?: string): Promise<unknown> {
+    async query(endpoint: string, promql: string, time?: string): Promise<unknown> {
       const params = new URLSearchParams({ query: promql });
       if (time) params.set("time", time);
-      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers });
+      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers: { Authorization: `Bearer ${await token()}` } });
     },
-    queryRange(endpoint: string, promql: string, start: string, end: string, step: string): Promise<unknown> {
+    async queryRange(endpoint: string, promql: string, start: string, end: string, step: string): Promise<unknown> {
       const params = new URLSearchParams({ query: promql, start, end, step });
-      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query_range?${params}`, { headers });
+      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query_range?${params}`, { headers: { Authorization: `Bearer ${await token()}` } });
     },
   };
 }
 
-function buildLogFetcher(token: string): LogAnalyticsFetcher {
+function buildLogFetcher(
+  workspaceToken: (workspaceId: string) => Promise<string>,
+  resourceToken: (armId: string) => Promise<string>,
+): LogAnalyticsFetcher {
   return {
-    token,
-    query(workspaceId: string, kql: string): Promise<unknown> {
+    async query(workspaceId: string, kql: string): Promise<unknown> {
       return fetchJsonWithTimeout("LogAnalytics", `https://api.loganalytics.io/v1/workspaces/${encodeURIComponent(workspaceId)}/query`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: jsonHeaders(await workspaceToken(workspaceId)),
         body: JSON.stringify({ query: kql }),
       });
+    },
+    async queryResource(armId: string, kql: string, timespan: string): Promise<unknown> {
+      return fetchJsonWithTimeout("LogAnalytics", `https://api.loganalytics.io/v1${armId}/query`, {
+        method: "POST",
+        headers: jsonHeaders(await resourceToken(armId)),
+        body: JSON.stringify({ query: kql, timespan }),
+      }, 30_000);
     },
   };
 }

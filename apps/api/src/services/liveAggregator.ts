@@ -9,11 +9,12 @@ import type {
   PowerState,
   SparklineData,
   FaultImpact,
-  HeatmapCell,
-  TrafficHeatmapData,
+  LiveCoverage,
+  LiveSourceState,
 } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { CacheManager, bearerKeyPrefix, cachePrefix, principalKey } from "../infra/cacheManager.js";
 import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector.js";
+import { normalizeSpecBindings } from "./specGenerator.js";
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector.js";
 import { collectDiagramAlerts } from "./alertsCollector.js";
 import { collectAlertRules } from "./alertRulesCollector.js";
@@ -46,7 +47,13 @@ import {
 const snapshotCache = new CacheManager<LiveDiagramSnapshot>(20, 30_000);
 
 // ── In-memory diagram store (PoC — migrate to DB later) ──
+// Keyed by owner: a diagram generated from Azure holds that user's inventory, so only that user reads it.
+// Built-in samples are "public". Owner = the stable per-user cache prefix (u:{tid}:{oid}).
 const diagramStore = new Map<string, DiagramSpec>();
+export const PUBLIC_OWNER = "public";
+/** Owner of what a caller saves / reads: the signed-in user, or "public" (samples, anonymous dev mode) */
+export const diagramOwner = (bearerToken: string | undefined) => (bearerToken ? principalKey(bearerToken) : PUBLIC_OWNER);
+const storeKey = (owner: string, id: string) => `${owner}|${id}`;
 
 // ── Sparkline ring buffer (last N metric values per node) ──
 const SPARKLINE_MAX_LEN = 20;
@@ -55,31 +62,34 @@ const sparklineBuffers = new Map<string, { values: number[]; timestamps: string[
 /** Upper bound on stored specs — POST /api/live/diagrams accepts arbitrary IDs. */
 const MAX_DIAGRAMS = 50;
 
-export function saveDiagramSpec(spec: DiagramSpec): void {
-  diagramStore.delete(spec.id);
-  diagramStore.set(spec.id, spec);
+export function saveDiagramSpec(input: DiagramSpec, owner: string = PUBLIC_OWNER): void {
+  // Diagrams generated from Azure are measured with the current binding table (a copy saved in a browser may be
+  // older); the sample diagram keeps its own
+  const spec = input.id.startsWith("auto-") ? normalizeSpecBindings(input) : input;
+  const key = storeKey(owner, spec.id);
+  diagramStore.delete(key);
+  diagramStore.set(key, spec);
   // Evict least-recently-saved diagrams, keeping the first (seed) entry
-  const seedId = diagramStore.keys().next().value;
-  for (const id of diagramStore.keys()) {
+  const seedKey = diagramStore.keys().next().value;
+  for (const k of diagramStore.keys()) {
     if (diagramStore.size <= MAX_DIAGRAMS) break;
-    if (id === seedId || id === spec.id) continue;
-    diagramStore.delete(id);
-    sparklineBuffers.forEach((_v, key) => {
-      if (key.startsWith(`${id}:`)) sparklineBuffers.delete(key);
+    if (k === seedKey || k === key) continue;
+    diagramStore.delete(k);
+    sparklineBuffers.forEach((_v, b) => {
+      if (b.startsWith(`${k}:`)) sparklineBuffers.delete(b);
     });
   }
 }
 
-export function getDiagramSpec(id: string): DiagramSpec | undefined {
-  return diagramStore.get(id);
+/** The caller's own diagram, else a public sample with that id */
+export function getDiagramSpec(id: string, owner: string = PUBLIC_OWNER): DiagramSpec | undefined {
+  return diagramStore.get(storeKey(owner, id)) ?? diagramStore.get(storeKey(PUBLIC_OWNER, id));
 }
 
-export function listDiagramSpecs(): Array<{ id: string; name: string; updatedAt: string }> {
-  return [...diagramStore.values()].map((d) => ({
-    id: d.id,
-    name: d.name,
-    updatedAt: d.updatedAt,
-  }));
+export function listDiagramSpecs(owner: string = PUBLIC_OWNER): Array<{ id: string; name: string; updatedAt: string }> {
+  return [...diagramStore.entries()]
+    .filter(([k]) => k.startsWith(`${owner}|`) || k.startsWith(`${PUBLIC_OWNER}|`))
+    .map(([, d]) => ({ id: d.id, name: d.name, updatedAt: d.updatedAt }));
 }
 
 // ────────────────────────────────────────────
@@ -91,7 +101,7 @@ export async function buildLiveSnapshot(
   bearerToken: string | undefined,
   diagramId: string,
 ): Promise<LiveDiagramSnapshot | null> {
-  const spec = diagramStore.get(diagramId);
+  const spec = getDiagramSpec(diagramId, diagramOwner(bearerToken));
   if (!spec) return null;
 
   // Check cache
@@ -111,6 +121,8 @@ export async function buildLiveSnapshot(
   let nodeMetricsMap = new Map<string, Record<string, number | null>>();
   let resolvedBindings = 0;
   let failedBindings = 0;
+  // Per-source state, so the page can say why something is empty (sign in / not configured / failed)
+  let metricsState: LiveSourceState = !azureEnabled ? "disabled" : !hasBearerToken ? "signin" : "ok";
 
   if (azureEnabled && hasBearerToken) {
     const resources = spec.nodes
@@ -128,6 +140,7 @@ export async function buildLiveSnapshot(
       );
     } catch {
       failedBindings = resources.length;
+      metricsState = "failed";
     }
   }
 
@@ -136,15 +149,11 @@ export async function buildLiveSnapshot(
   let edgeMonitorMetrics = new Map<string, Record<string, number | null>>();
 
   if (azureEnabled && hasBearerToken) {
+    // The queried end: `node: "target"` on a binding (Internet → public LB reads the LB), the source otherwise
+    const queried = (e: (typeof spec.edges)[number]) => nodeById.get(Object.values(e.bindings).some((b) => b.node === "target") ? e.target : e.source);
     const edgeItems = spec.edges
-      .filter((e) => {
-        const srcNode = nodeById.get(e.source);
-        return srcNode?.azureResourceId && Object.values(e.bindings).some((b) => b.source === "monitor");
-      })
-      .map((e) => ({
-        edge: e,
-        sourceNode: nodeById.get(e.source)!,
-      }));
+      .filter((e) => queried(e)?.azureResourceId && Object.values(e.bindings).some((b) => b.source === "monitor"))
+      .map((e) => ({ edge: e, node: queried(e)! }));
 
     if (edgeItems.length > 0) {
       try {
@@ -192,13 +201,14 @@ export async function buildLiveSnapshot(
   // ── Collect Azure Monitor Alerts ──
   let liveAlerts: LiveAlert[] = [];
   let alertRules: AlertRuleInfo[] = [];
+  let alertsState: LiveSourceState = !azureEnabled ? "disabled" : !hasBearerToken ? "signin" : "ok";
 
   if (azureEnabled && hasBearerToken) {
     const edgeMap = new Map(spec.edges.map((e) => [e.id, { source: e.source, target: e.target }]));
     try {
       liveAlerts = await collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap);
     } catch {
-      // Non-critical
+      alertsState = "failed";
     }
     try {
       alertRules = await collectAlertRules(env, bearerToken!, spec.nodes);
@@ -208,11 +218,6 @@ export async function buildLiveSnapshot(
   }
 
   // ── Collect PowerState for compute resources ──
-  const COMPUTE_KINDS = new Set([
-    "vm", "vmss", "aks", "containerApp", "functionApp", "appService",
-    "postgres", "sql", "redis", "cosmosDb", "storage", "keyVault",
-    "appGateway", "lb", "firewall",
-  ]);
   let powerStateMap = new Map<string, PowerState>();
 
   if (azureEnabled) {
@@ -228,19 +233,13 @@ export async function buildLiveSnapshot(
       }
     }
 
-    // Default: assume "running" for compute resources with no collected powerState
-    for (const n of spec.nodes) {
-      if (n.azureResourceId && n.resourceKind && COMPUTE_KINDS.has(n.resourceKind)) {
-        if (!powerStateMap.has(n.azureResourceId)) {
-          powerStateMap.set(n.azureResourceId, "running");
-        }
-      }
-    }
+    // No default: a power state that was not collected stays unknown (LB / App Gateway / PaaS have none,
+    // and an assumed "running" painted cards green without evidence)
   }
 
   // ── Collect Traffic Flow Data (multi-source) ──
   // These collectors use SP fallback — no bearer token required.
-  const trafficFlowData = await collectAllTrafficSources(env, bearerToken, spec);
+  const trafficFlowData = await collectAllTrafficSources(env, bearerToken, spec, azureEnabled);
 
   // ── Build alert lookup for node/edge activeAlertIds ──
   const nodeAlertIds = new Map<string, string[]>();
@@ -264,20 +263,25 @@ export async function buildLiveSnapshot(
 
   const liveNodes: LiveNode[] = resourceNodeSpecs.map((nodeSpec) => {
     const metrics = nodeMetricsMap.get(nodeSpec.azureResourceId ?? "") ?? {};
-    const { health, score } = resolveNodeHealth(metrics, nodeSpec.bindings);
+    // VM availability is judged only while the VM is meant to run (a stopped VM is "unavailable" by design)
+    const running = powerStateMap.get(nodeSpec.azureResourceId ?? "") === "running";
+    const forHealth = !running && "vmAvail" in metrics ? Object.fromEntries(Object.entries(metrics).filter(([k]) => k !== "vmAvail")) : metrics;
+    const { health, score } = resolveNodeHealth(forHealth, nodeSpec.bindings);
 
-    // ── Sparkline ring buffer: push primary metric per node ──
-    const bufferKey = `${diagramId}:${nodeSpec.id}`;
-    const primaryValue = findPrimaryMetric(metrics);
+    // ── Sparkline ring buffers: one series per (node, metric) so different metrics never mix ──
+    // Every measured metric keeps its own trend (card: CPU and memory, panel: each metric row)
+    const bufferKey = `${diagramId}:${nodeSpec.id}:${findPrimaryMetricName(metrics) ?? "primary"}`;
     const sparklines: Record<string, SparklineData> = {};
 
-    if (primaryValue != null) {
-      let buf = sparklineBuffers.get(bufferKey);
+    for (const [metricName, value] of Object.entries(metrics)) {
+      if (value == null) continue;
+      const key = `${diagramId}:${nodeSpec.id}:${metricName}`;
+      let buf = sparklineBuffers.get(key);
       if (!buf) {
         buf = { values: [], timestamps: [] };
-        sparklineBuffers.set(bufferKey, buf);
+        sparklineBuffers.set(key, buf);
       }
-      buf.values.push(primaryValue);
+      buf.values.push(value);
       buf.timestamps.push(now);
 
       // Ring buffer: keep last SPARKLINE_MAX_LEN entries
@@ -285,13 +289,10 @@ export async function buildLiveSnapshot(
         buf.values = buf.values.slice(-SPARKLINE_MAX_LEN);
         buf.timestamps = buf.timestamps.slice(-SPARKLINE_MAX_LEN);
       }
-
-      // Determine the metric name for the primary metric
-      const primaryMetricName = findPrimaryMetricName(metrics) ?? "primary";
-      sparklines[primaryMetricName] = {
+      sparklines[metricName] = {
         values: [...buf.values],
         timestamps: [...buf.timestamps],
-        metric: primaryMetricName,
+        metric: metricName,
       };
     }
 
@@ -364,36 +365,44 @@ export async function buildLiveSnapshot(
     rawEdges.push({ id: edgeSpec.id, edgeMetrics });
   }
 
-  // ── Simulated traffic: if NO edges have real throughput data, generate demo traffic ──
-  const hasAnyRealThroughput = rawEdges.some((e) => e.edgeMetrics.throughputBps != null && e.edgeMetrics.throughputBps > 0);
-  if (!hasAnyRealThroughput && rawEdges.length > 0) {
-    for (const raw of rawEdges) {
-      // Deterministic pseudo-random based on edge ID hash
-      const hash = simpleHash(raw.id);
-      const base = 2_000_000 + (hash % 20_000_000); // 2M–22M bps
-      const jitter = (Date.now() % 3_000_000) * ((hash % 7) / 7);
-      raw.edgeMetrics.throughputBps = Math.round(base + jitter);
-      raw.edgeMetrics.latencyMs = raw.edgeMetrics.latencyMs ?? (5 + (hash % 45));
-      raw.edgeMetrics.requestsPerSec = raw.edgeMetrics.requestsPerSec ?? (10 + (hash % 90));
-      resolvedBindings++;
-    }
-  }
+  // Only measured values reach the page. (A former fallback invented 2–22 Mbps per edge when nothing was
+  // measured — it drove particles, widths and the edge panel with numbers that were not real.)
+  const isMeasured = (m: LiveEdge["metrics"]) => Object.values(m).some((v) => v != null);
 
-  const maxThroughput = Math.max(1, ...rawEdges.map((e) => e.edgeMetrics.throughputBps ?? 0));
-
-  const liveEdges: LiveEdge[] = rawEdges.map(({ id, edgeMetrics }) => ({
-    id,
-    status: resolveEdgeStatus(edgeMetrics),
-    metrics: edgeMetrics,
-    trafficLevel: resolveTrafficLevel(edgeMetrics.throughputBps, maxThroughput),
-    activeAlertIds: edgeAlertIds.get(id) ?? [],
-  }));
+  const liveEdges: LiveEdge[] = rawEdges.map(({ id, edgeMetrics }) => {
+    const measured = isMeasured(edgeMetrics);
+    return {
+      id,
+      status: measured ? resolveEdgeStatus(edgeMetrics) : "normal",
+      metrics: measured ? edgeMetrics : {},
+      trafficLevel: measured ? resolveTrafficLevel(edgeMetrics.throughputBps) : "none",
+      activeAlertIds: edgeAlertIds.get(id) ?? [],
+      ...(measured ? { metricsSource: "measured" as const } : {}),
+    };
+  });
 
   // ── Fault impact detection ──
-  const faultImpacts: FaultImpact[] = buildFaultImpacts(liveNodes, spec.edges);
+  const faultImpacts: FaultImpact[] = buildFaultImpacts(liveNodes, spec.edges, liveAlerts);
 
-  // ── Heatmap generation ──
-  const heatmap: TrafficHeatmapData = buildTrafficHeatmap(liveEdges, spec.edges, maxThroughput);
+  // ── Coverage: how much of this picture is measured ──
+  // Resources with a metric binding, and how many of them returned a value (numerator ⊆ denominator)
+  const boundIds = new Set(resourceNodeSpecs.filter((n) => Object.values(n.bindings).some((b) => b.source !== "composite")).map((n) => n.id));
+  const nodesWithBindings = boundIds.size;
+  const configuredEdges = spec.edges.filter((e) => e.edgeKind !== "inferred" && e.evidence !== "inferred").length;
+  const edgesWithTraffic = liveEdges.filter((e) => e.metricsSource === "measured").length;
+  const nodesWithMetrics = liveNodes.filter((n) => boundIds.has(n.id) && Object.values(n.metrics).some((v) => v != null)).length;
+  if (metricsState === "ok" && nodesWithMetrics === 0) metricsState = "empty";
+  const coverage: LiveCoverage = {
+    nodesWithMetrics,
+    nodesWithBindings,
+    edgesWithTraffic,
+    configuredEdges,
+    sources: {
+      metrics: metricsState,
+      traffic: !azureEnabled ? "disabled" : !hasBearerToken && edgesWithTraffic === 0 ? "signin" : edgesWithTraffic > 0 ? "ok" : "empty",
+      alerts: alertsState,
+    },
+  };
 
   const snapshot: LiveDiagramSnapshot = {
     diagramId,
@@ -410,7 +419,8 @@ export async function buildLiveSnapshot(
       failedBindings,
     },
     faultImpacts: faultImpacts.length > 0 ? faultImpacts : undefined,
-    heatmap: heatmap.cells.length > 0 ? heatmap : undefined,
+    dataSource: "azure",
+    coverage,
   };
 
   // Cache
@@ -437,6 +447,7 @@ async function collectAllTrafficSources(
   env: Env,
   bearerToken: string | undefined,
   spec: DiagramSpec,
+  enabled: boolean,
 ): Promise<TrafficFlowResult> {
   const result: TrafficFlowResult = {
     traffic: new Map(),
@@ -445,7 +456,7 @@ async function collectAllTrafficSources(
     connectionMonitor: new Map(),
   };
 
-  if (!env.AZURE_LIVE_DIAGRAM_ENABLED) return result;
+  if (!enabled) return result;
 
   // Collect all traffic sources in parallel
   const [trafficResult, nsgResult, depResult, cmResult] = await Promise.allSettled([
@@ -505,14 +516,6 @@ function toNumber(v: unknown): number | undefined {
 // Sparkline helpers
 // ────────────────────────────────────────────
 
-/** Return the first non-null metric value from a node's metrics map. */
-function findPrimaryMetric(metrics: Record<string, number | null>): number | null {
-  for (const v of Object.values(metrics)) {
-    if (v != null) return v;
-  }
-  return null;
-}
-
 /** Return the key of the first non-null metric (for labelling). */
 function findPrimaryMetricName(metrics: Record<string, number | null>): string | null {
   for (const [key, v] of Object.entries(metrics)) {
@@ -525,104 +528,32 @@ function findPrimaryMetricName(metrics: Record<string, number | null>): string |
 // Fault Impact Detection
 // ────────────────────────────────────────────
 
+/** Configured links an impact may travel along. Guessed (inferred), Internet and NAT-association links never carry it. */
+const IMPACT_EDGE_KINDS = new Set(["network", "routes", "privateLink", "peering"]);
+
 /**
- * For each critical node, find connected edges and their
- * target/source nodes as affected. Ripple radius is based
- * on the health status of the critical node's neighbours.
+ * A resource whose metric health is critical, or that has an active critical Azure Monitor alert, and the
+ * resources one configured hop away. "Affected" means impact is possible — it is not confirmed.
  */
-function buildFaultImpacts(
+export function buildFaultImpacts(
   liveNodes: LiveNode[],
   edgeSpecs: DiagramSpec["edges"],
+  alerts: LiveAlert[] = [],
 ): FaultImpact[] {
-  const criticalNodes = liveNodes.filter((n) => n.health === "critical");
-  if (criticalNodes.length === 0) return [];
+  const criticalAlertNodes = new Set(alerts.filter((a) => a.severity === "critical").flatMap((a) => a.affectedNodeIds));
+  const sources = liveNodes
+    .map((n) => (n.health === "critical" ? { id: n.id, trigger: "metric" as const } : criticalAlertNodes.has(n.id) ? { id: n.id, trigger: "alert" as const } : null))
+    .filter((x): x is { id: string; trigger: "metric" | "alert" } => x !== null);
+  const links = edgeSpecs.filter((e) => e.evidence !== "inferred" && (e.edgeKind == null || IMPACT_EDGE_KINDS.has(e.edgeKind)));
 
-  const nodeHealthMap = new Map(liveNodes.map((n) => [n.id, n.health]));
-  const impacts: FaultImpact[] = [];
-
-  for (const critNode of criticalNodes) {
-    const affectedEdgeIds: string[] = [];
-    const affectedNodeIdSet = new Set<string>();
-
-    for (const edge of edgeSpecs) {
-      if (edge.source === critNode.id || edge.target === critNode.id) {
-        affectedEdgeIds.push(edge.id);
-        const peerId = edge.source === critNode.id ? edge.target : edge.source;
-        affectedNodeIdSet.add(peerId);
-      }
-    }
-
-    // Determine severity — check the worst health among affected neighbours
-    const peerHealthStatuses = [...affectedNodeIdSet]
-      .map((id) => nodeHealthMap.get(id))
-      .filter(Boolean);
-    const hasCriticalPeer = peerHealthStatuses.includes("critical");
-    const hasWarningPeer = peerHealthStatuses.includes("warning");
-
-    // Base ripple from the critical source node = 3
-    // Extend if there are degraded neighbours
-    const rippleRadius = hasCriticalPeer ? 3 : hasWarningPeer ? 2 : 3;
-
-    impacts.push({
-      sourceNodeId: critNode.id,
+  return sources.map(({ id, trigger }) => {
+    const touching = links.filter((e) => e.source === id || e.target === id);
+    return {
+      sourceNodeId: id,
       severity: "critical",
-      affectedNodeIds: [...affectedNodeIdSet],
-      affectedEdgeIds,
-      rippleRadius,
-    });
-  }
-
-  return impacts;
-}
-
-// ────────────────────────────────────────────
-// Traffic Heatmap Generation
-// ────────────────────────────────────────────
-
-/**
- * Build a heatmap from edge throughput metrics.
- * Each cell is an edge between source → target normalised
- * against the max throughput across all edges.
- */
-function buildTrafficHeatmap(
-  liveEdges: LiveEdge[],
-  edgeSpecs: DiagramSpec["edges"],
-  maxThroughput: number,
-): TrafficHeatmapData {
-  const edgeSpecMap = new Map(edgeSpecs.map((e) => [e.id, e]));
-  const subnetSet = new Set<string>();
-  const cells: HeatmapCell[] = [];
-
-  for (const edge of liveEdges) {
-    const spec = edgeSpecMap.get(edge.id);
-    if (!spec) continue;
-
-    const throughput = edge.metrics.throughputBps ?? 0;
-    const normalizedValue = maxThroughput > 0 ? throughput / maxThroughput : 0;
-
-    subnetSet.add(spec.source);
-    subnetSet.add(spec.target);
-
-    cells.push({
-      source: spec.source,
-      target: spec.target,
-      value: throughput,
-      normalizedValue: Math.round(normalizedValue * 1000) / 1000,
-    });
-  }
-
-  return {
-    cells,
-    subnets: [...subnetSet],
-    maxValue: maxThroughput,
-  };
-}
-
-/** Simple deterministic hash for generating stable pseudo-random values. */
-function simpleHash(str: string): number {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
+      trigger,
+      affectedNodeIds: [...new Set(touching.map((e) => (e.source === id ? e.target : e.source)))].filter((x) => x !== id),
+      affectedEdgeIds: touching.map((e) => e.id),
+    };
+  });
 }

@@ -11,7 +11,10 @@
  *   +20  Shared environment tag (e.g. env=prod on both)
  *   +10  Shared name prefix (first segment before '-')
  *
- * Edges with score < 40 are dropped.  score / 100 → confidence.
+ * A guess is kept only when both resources are in the same region, at least two signals agree and the
+ * score is ≥ 40. Data services reached through a Private Endpoint are skipped — that path is configured
+ * and already drawn. score / 100 → confidence; the signals are returned as `reasons` so the page can say
+ * why a guessed line exists.
  */
 
 import type {
@@ -119,7 +122,8 @@ function buildVNetMembership(graph: ArchitectureGraph): Map<string, Set<string>>
 
 function inferProtocol(dataKind: string): string {
   switch (dataKind) {
-    case "sql": case "postgres": return "TCP/1433";
+    case "sql": return "TCP/1433";
+    case "postgres": return "TCP/5432";
     case "redis": return "TCP/6380";
     case "cosmosDb": return "HTTPS/443";
     case "storage": return "HTTPS/443";
@@ -131,11 +135,16 @@ function inferProtocol(dataKind: string): string {
 
 // ── Main export ──
 
+export type InferenceReason = "same-rg" | "same-vnet" | "env-tag" | "name-prefix";
+
 export interface InferredEdge extends ArchitectureEdge {
   kind: "inferred";
   confidence: number;
   metadata: { protocol: string };
+  reasons: InferenceReason[];
 }
+
+const normRegion = (loc: string | undefined) => loc?.toLowerCase().replace(/\s+/g, "") || undefined;
 
 /**
  * Infer implicit compute→data edges using proximity scoring.
@@ -159,6 +168,7 @@ export function inferImplicitEdges(
 
   // Pre-build indexes
   const vnetMembership = buildVNetMembership(graph);
+  const privateLinked = new Set(graph.edges.filter((e) => e.kind === "privateLink").flatMap((e) => [e.source, e.target]));
   const results: InferredEdge[] = [];
 
   for (const compute of computeNodes) {
@@ -169,14 +179,21 @@ export function inferImplicitEdges(
 
       // Skip if explicit edge already exists
       if (existingPairs(existingEdgePairs, cId, dId)) continue;
+      // Reached through a Private Endpoint: the configured path is drawn, a guess would duplicate it
+      if (privateLinked.has(data.id)) continue;
+      // Different or unknown region: proximity signals mean little across regions
+      const cRegion = normRegion(compute.location);
+      if (!cRegion || cRegion !== normRegion(data.location)) continue;
 
       let score = 0;
+      const reasons: InferenceReason[] = [];
 
       // 1. Same Resource Group (+40)
       const cRg = compute.resourceGroup ?? rgFromId(compute.azureId);
       const dRg = data.resourceGroup ?? rgFromId(data.azureId);
       if (cRg && dRg && cRg.toLowerCase() === dRg.toLowerCase()) {
         score += 40;
+        reasons.push("same-rg");
       }
 
       // 2. Same VNet (+30)
@@ -184,7 +201,7 @@ export function inferImplicitEdges(
       const dVnets = vnetMembership.get(data.id);
       if (cVnets && dVnets) {
         for (const v of cVnets) {
-          if (dVnets.has(v)) { score += 30; break; }
+          if (dVnets.has(v)) { score += 30; reasons.push("same-vnet"); break; }
         }
       }
 
@@ -193,15 +210,17 @@ export function inferImplicitEdges(
       const dEnv = envTagValue(data.tags);
       if (cEnv && dEnv && cEnv === dEnv) {
         score += 20;
+        reasons.push("env-tag");
       }
 
       // 4. Name prefix similarity (+10)
       if (namePrefix(compute.name) === namePrefix(data.name)) {
         score += 10;
+        reasons.push("name-prefix");
       }
 
-      // Threshold check
-      if (score < 40) continue;
+      // Threshold check: one signal alone (e.g. only the resource group) is not enough
+      if (score < 40 || reasons.length < 2) continue;
 
       const edgeId = `e:inferred:${compute.id}:${data.id}`;
       results.push({
@@ -211,6 +230,7 @@ export function inferImplicitEdges(
         kind: "inferred",
         confidence: Math.min(score / 100, 1),
         metadata: { protocol: inferProtocol(data.kind) },
+        reasons,
       });
     }
   }

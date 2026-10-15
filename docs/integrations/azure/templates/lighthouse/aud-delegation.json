@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-08-01/subscriptionDeploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "mspOfferName": { "type": "string", "metadata": { "description": "Offer name shown to the customer, e.g. 'AUD operations (read-only)'" } },
+    "mspOfferDescription": { "type": "string", "defaultValue": "Azure Unified Dashboard — read-only operations access" },
+    "managedByTenantId": { "type": "string", "metadata": { "description": "Home (managing) tenant ID" } },
+    "authorizations": { "type": "array", "metadata": { "description": "principalId (the platform service principal object id — or an operator group for a delegated connection), principalIdDisplayName, roleDefinitionId per role" } }
+  },
+  "variables": {
+    "definitionName": "[guid(parameters('mspOfferName'))]",
+    "assignmentName": "[guid(parameters('mspOfferName'), subscription().id)]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ManagedServices/registrationDefinitions",
+      "apiVersion": "2022-10-01",
+      "name": "[variables('definitionName')]",
+      "properties": {
+        "registrationDefinitionName": "[parameters('mspOfferName')]",
+        "description": "[parameters('mspOfferDescription')]",
+        "managedByTenantId": "[parameters('managedByTenantId')]",
+        "authorizations": "[parameters('authorizations')]"
+      }
+    },
+    {
+      "type": "Microsoft.ManagedServices/registrationAssignments",
+      "apiVersion": "2022-10-01",
+      "name": "[variables('assignmentName')]",
+      "dependsOn": ["[resourceId('Microsoft.ManagedServices/registrationDefinitions', variables('definitionName'))]"],
+      "properties": {
+        "registrationDefinitionId": "[resourceId('Microsoft.ManagedServices/registrationDefinitions', variables('definitionName'))]"
+      }
+    }
+  ],
+  "outputs": {
+    "mspOfferName": { "type": "string", "value": "[concat('Managed by ', parameters('mspOfferName'))]" }
+  }
+}

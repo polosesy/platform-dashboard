@@ -14,6 +14,8 @@ import type {
   DiagramGroupSpec,
   DiagramIconKind,
   DiagramLayoutKind,
+  HealthRule,
+  MetricAggregation,
   MetricBinding,
   SubResource,
   SubResourceKind,
@@ -73,145 +75,258 @@ const KIND_TO_ICON: Record<GraphNodeKind, DiagramIconKind> = {
 };
 
 // ── Default Azure Monitor metric bindings per resource type ──
+//
+// Two card metrics per kind (apps/web/src/lib/liveMetricFormat.ts CARD_CELLS: cell 1 = load / activity with the
+// trend, cell 2 = quality), the rest for the detail panel. Rules are pass conditions with a level (warning /
+// critical); a failing one sets at least that status. `when` keeps a few requests from turning a card red.
+// Bindings belong to the server: saved diagrams get the current table through `effectiveBindings`.
 
-const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
+const mon = (metric: string, aggregation: MetricAggregation, extra: Partial<MetricBinding> = {}): MetricBinding =>
+  ({ source: "monitor", metric, aggregation, ...extra });
+const derived = (op: "share" | "ratio" | "sum", a: string, b: string, minDenominator?: number): MetricBinding =>
+  ({ source: "derived", derive: { op, of: [a, b], ...(minDenominator != null ? { minDenominator } : {}) } });
+const rule = (metric: string, op: HealthRule["op"], threshold: number, level: "warning" | "critical", when?: HealthRule["when"]): HealthRule =>
+  ({ metric, op, threshold, weight: 1, level, ...(when ? { when } : {}) });
+const health = (...rules: HealthRule[]): MetricBinding => ({ source: "composite", rules });
+/** "below w is fine, critical from c": cpu < 85 warn, < 95 crit */
+const under = (metric: string, w: number, c: number, when?: HealthRule["when"]) => [rule(metric, "<", w, "warning", when), rule(metric, "<", c, "critical", when)];
+/** "at least w is fine, critical below c": availability ≥ 99 warn, ≥ 90 crit */
+const atLeast = (metric: string, w: number, c: number, when?: HealthRule["when"]) => [rule(metric, ">=", w, "warning", when), rule(metric, ">=", c, "critical", when)];
+const ENOUGH_REQUESTS = (metric: string) => ({ metric, atLeast: 20 });
+
+/** Memory used % for VMs / scale sets: 100 − "Available Memory Percentage" (platform metric, no agent needed) */
+const MEMORY_FROM_AVAILABLE: MetricBinding = mon("Available Memory Percentage", "avg", { transform: "complement", optional: true });
+const PRIVATE_V4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
+/** Bytes per minute → bit/s (the unit of edge throughput from flow logs) */
+const PER_MIN_TO_BPS = 8 / 60;
+
+export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
+  vm: {
+    cpu: mon("Percentage CPU", "avg"),
+    memory: MEMORY_FROM_AVAILABLE,
+    network: mon("Network In Total", "total"),
+    vmAvail: mon("VmAvailabilityMetric", "avg", { scale: 100, optional: true }),
+    health: health(...under("cpu", 85, 95), ...under("memory", 85, 95), rule("vmAvail", ">=", 50, "critical")),
+  },
+  vmss: {
+    cpu: mon("Percentage CPU", "avg"),
+    memory: MEMORY_FROM_AVAILABLE,
+    vmAvail: mon("VmAvailabilityMetric", "avg", { scale: 100, optional: true }),
+    health: health(...under("cpu", 85, 95), ...under("memory", 85, 95), ...atLeast("vmAvail", 100, 1)),
+  },
   aks: {
-    cpu: { source: "monitor", metric: "node_cpu_usage_percentage", aggregation: "avg" },
-    memory: { source: "monitor", metric: "node_memory_rss_percentage", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "cpu", op: "<", threshold: 80, weight: 0.5 },
-        { metric: "memory", op: "<", threshold: 85, weight: 0.5 },
-      ],
-    },
+    cpu: mon("node_cpu_usage_percentage", "avg"),
+    memory: mon("node_memory_working_set_percentage", "avg"),
+    health: health(...under("cpu", 80, 95), ...under("memory", 85, 95)),
+  },
+  lb: {
+    dataPath: mon("VipAvailability", "avg"),
+    backend: mon("DipAvailability", "avg"),
+    bytesIn: mon("ByteCount", "total", { filter: "Direction eq 'In'", optional: true }),
+    snatFail: mon("SnatConnectionCount", "total", { filter: "ConnectionState eq 'Failed'", optional: true }),
+    health: health(...atLeast("dataPath", 99, 90), ...atLeast("backend", 99, 1), rule("snatFail", "<", 1, "warning")),
   },
   appGateway: {
-    rps: { source: "monitor", metric: "TotalRequests", aggregation: "total" },
-    latency: { source: "monitor", metric: "BackendLastByteResponseTime", aggregation: "p95" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "rps", op: ">", threshold: 0, weight: 0.5 },
-        { metric: "latency", op: "<", threshold: 500, weight: 0.5 },
-      ],
-    },
+    requests: mon("TotalRequests", "total"),
+    healthyHosts: mon("HealthyHostCount", "avg"),
+    unhealthyHosts: mon("UnhealthyHostCount", "avg"),
+    backend: derived("share", "healthyHosts", "unhealthyHosts"),
+    failedReq: mon("FailedRequests", "total"),
+    errorRate: derived("ratio", "failedReq", "requests"),
+    latency: mon("BackendLastByteResponseTime", "avg", { optional: true }),
+    health: health(...atLeast("backend", 100, 1), ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
   },
-  vm: {
-    cpu: { source: "monitor", metric: "Percentage CPU", aggregation: "avg" },
-    network: { source: "monitor", metric: "Network In Total", aggregation: "total" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "cpu", op: "<", threshold: 85, weight: 0.6 },
-        { metric: "network", op: ">", threshold: 0, weight: 0.4 },
-      ],
-    },
+  frontDoor: {
+    requests: mon("RequestCount", "total"),
+    backend: mon("BackendHealthPercentage", "avg"),
+    latency: mon("TotalLatency", "avg", { optional: true }),
+    health: health(...atLeast("backend", 90, 1)),
+  },
+  trafficManager: {
+    queries: mon("QpsByEndpoint", "total"),
+    health: health(),
+  },
+  firewall: {
+    fwHealth: mon("FirewallHealth", "avg"),
+    snat: mon("SNATPortUtilization", "max", { optional: true }),
+    throughput: mon("Throughput", "avg", { optional: true }),
+    health: health(...atLeast("fwHealth", 100, 50), ...under("snat", 80, 95)),
+  },
+  natGateway: {
+    dataPath: mon("DatapathAvailability", "avg"),
+    snatFail: mon("SNATConnectionCount", "total", { filter: "ConnectionState eq 'Failed'", optional: true }),
+    health: health(...atLeast("dataPath", 99, 90), rule("snatFail", "<", 1, "warning")),
+  },
+  publicIP: {
+    bytesIn: mon("ByteCount", "total", { filter: "Direction eq 'In'", optional: true }),
+    ddos: mon("IfUnderDDoSAttack", "max", { optional: true }),
+    health: health(rule("ddos", "<", 1, "critical")),
+  },
+  privateEndpoint: {
+    bytesIn: mon("PEBytesIn", "total"),
+    bytesOut: mon("PEBytesOut", "total"),
+    health: health(),
   },
   nic: {
-    health: { source: "composite", rules: [] },
-  },
-  sql: {
-    dtu: { source: "monitor", metric: "dtu_consumption_percent", aggregation: "avg" },
-    connections: { source: "monitor", metric: "connection_successful", aggregation: "total" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "dtu", op: "<", threshold: 90, weight: 0.6 },
-        { metric: "connections", op: ">", threshold: 0, weight: 0.4 },
-      ],
-    },
+    health: health(),
   },
   storage: {
-    transactions: { source: "monitor", metric: "Transactions", aggregation: "total" },
-    availability: { source: "monitor", metric: "Availability", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "availability", op: ">", threshold: 99, weight: 0.7 },
-        { metric: "transactions", op: ">", threshold: 0, weight: 0.3 },
-      ],
-    },
-  },
-  lb: {
-    dataPath: { source: "monitor", metric: "VipAvailability", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [{ metric: "dataPath", op: ">", threshold: 90, weight: 1.0 }],
-    },
-  },
-  redis: {
-    cpu: { source: "monitor", metric: "percentProcessorTime", aggregation: "avg" },
-    memory: { source: "monitor", metric: "usedmemorypercentage", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "cpu", op: "<", threshold: 80, weight: 0.5 },
-        { metric: "memory", op: "<", threshold: 80, weight: 0.5 },
-      ],
-    },
-  },
-  cosmosDb: {
-    ru: { source: "monitor", metric: "NormalizedRUConsumption", aggregation: "avg" },
-    requests: { source: "monitor", metric: "TotalRequests", aggregation: "total" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "ru", op: "<", threshold: 80, weight: 0.6 },
-        { metric: "requests", op: ">", threshold: 0, weight: 0.4 },
-      ],
-    },
-  },
-  postgres: {
-    cpu: { source: "monitor", metric: "cpu_percent", aggregation: "avg" },
-    storage: { source: "monitor", metric: "storage_percent", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "cpu", op: "<", threshold: 80, weight: 0.5 },
-        { metric: "storage", op: "<", threshold: 85, weight: 0.5 },
-      ],
-    },
+    transactions: mon("Transactions", "total"),
+    availability: mon("Availability", "avg"),
+    latency: mon("SuccessE2ELatency", "avg", { optional: true }),
+    health: health(...atLeast("availability", 99, 90, ENOUGH_REQUESTS("transactions"))),
   },
   keyVault: {
-    availability: { source: "monitor", metric: "Availability", aggregation: "avg" },
-    health: {
-      source: "composite",
-      rules: [{ metric: "availability", op: ">", threshold: 99, weight: 1.0 }],
-    },
+    requests: mon("ServiceApiHit", "count"),
+    availability: mon("Availability", "avg"),
+    saturation: mon("SaturationShoebox", "avg", { optional: true }),
+    latency: mon("ServiceApiLatency", "avg", { optional: true }),
+    health: health(...atLeast("availability", 99, 90, ENOUGH_REQUESTS("requests")), rule("saturation", "<", 75, "warning")),
   },
-  functionApp: {
-    executions: { source: "monitor", metric: "FunctionExecutionCount", aggregation: "total" },
-    errors: { source: "monitor", metric: "Http5xx", aggregation: "total" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "executions", op: ">", threshold: 0, weight: 0.5 },
-        { metric: "errors", op: "<", threshold: 10, weight: 0.5 },
-      ],
-    },
+  redis: {
+    load: mon("serverLoad", "max"),
+    memory: mon("usedmemorypercentage", "max"),
+    health: health(...under("load", 80, 95), ...under("memory", 80, 95)),
+  },
+  postgres: {
+    cpu: mon("cpu_percent", "avg"),
+    memory: mon("memory_percent", "avg", { optional: true }),
+    storage: mon("storage_percent", "avg", { optional: true }),
+    dbAlive: mon("is_db_alive", "avg", { optional: true }),
+    health: health(...under("cpu", 80, 95), ...under("memory", 85, 95), ...under("storage", 85, 95), rule("dbAlive", ">=", 1, "critical")),
+  },
+  sql: {
+    // vCore databases have no DTU and DTU databases may lack the instance metrics — each is optional
+    cpu: mon("cpu_percent", "avg", { optional: true }),
+    memory: mon("sql_instance_memory_percent", "avg", { optional: true }),
+    dtu: mon("dtu_consumption_percent", "avg", { optional: true }),
+    storage: mon("storage_percent", "avg", { optional: true }),
+    health: health(rule("cpu", "<", 90, "warning"), rule("dtu", "<", 90, "warning"), ...under("storage", 90, 95)),
+  },
+  cosmosDb: {
+    requests: mon("TotalRequests", "count"),
+    ru: mon("NormalizedRUConsumption", "max"),
+    throttled: mon("TotalRequests", "count", { filter: "StatusCode eq '429'", optional: true }),
+    health: health(rule("throttled", "<", 1, "warning")),
   },
   appService: {
-    requests: { source: "monitor", metric: "Requests", aggregation: "total" },
-    errors: { source: "monitor", metric: "Http5xx", aggregation: "total" },
-    health: {
-      source: "composite",
-      rules: [
-        { metric: "requests", op: ">", threshold: 0, weight: 0.5 },
-        { metric: "errors", op: "<", threshold: 10, weight: 0.5 },
-      ],
-    },
+    requests: mon("Requests", "total"),
+    http5xx: mon("Http5xx", "total"),
+    errorRate: derived("ratio", "http5xx", "requests"),
+    latency: mon("HttpResponseTime", "avg", { scale: 1000, optional: true }),
+    health: health(...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+  },
+  functionApp: {
+    requests: mon("Requests", "total"),
+    http5xx: mon("Http5xx", "total"),
+    errorRate: derived("ratio", "http5xx", "requests"),
+    executions: mon("FunctionExecutionCount", "total", { optional: true }),
+    health: health(...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+  },
+  containerApp: {
+    requests: mon("Requests", "total"),
+    req5xx: mon("Requests", "total", { filter: "statusCodeCategory eq '5xx'", optional: true }),
+    errorRate: derived("ratio", "req5xx", "requests"),
+    replicas: mon("Replicas", "max"),
+    health: health(...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+  },
+  serviceBus: {
+    backlog: mon("ActiveMessages", "max"),
+    serverErrors: mon("ServerErrors", "total"),
+    throttled: mon("ThrottledRequests", "total", { optional: true }),
+    health: health(rule("serverErrors", "<", 1, "warning"), rule("throttled", "<", 1, "warning")),
+  },
+  eventHub: {
+    inMsgs: mon("IncomingMessages", "total"),
+    serverErrors: mon("ServerErrors", "total"),
+    throttled: mon("ThrottledRequests", "total", { optional: true }),
+    health: health(rule("serverErrors", "<", 1, "warning"), rule("throttled", "<", 1, "warning")),
+  },
+  appInsights: {
+    // A telemetry store: its numbers describe the app it watches, so they never set this card's status
+    requests: mon("requests/count", "count"),
+    reqFailed: mon("requests/failed", "count"),
+    errorRate: derived("ratio", "reqFailed", "requests"),
+    health: health(),
   },
 };
 
-const EDGE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
-  appGateway: {
-    throughput: { source: "monitor", metric: "ByteCount", aggregation: "total" },
-  },
-  lb: {
-    throughput: { source: "monitor", metric: "ByteCount", aggregation: "total" },
-  },
-};
+/** No monitor binding: nothing is measured, so the card shows no metric row (never "미측정") */
+const NOT_MEASURED: Record<string, MetricBinding> = { health: { source: "composite", rules: [] } };
+
+/**
+ * The bindings the server reads for a node. Known kinds always get the current table (a diagram saved in the
+ * browser keeps whatever it was generated with, and changed thresholds or metric names must still reach it);
+ * an unused public IP and a SQL logical server (not a database) get none; unknown kinds keep the spec's.
+ */
+export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "icon" | "bindings" | "azureResourceId" | "metadata">): Record<string, MetricBinding> {
+  const kind = n.resourceKind ?? n.icon;
+  if (kind === "publicIP" && n.metadata?.unused === "true") return NOT_MEASURED;
+  if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
+  return NODE_BINDINGS[kind] ?? n.bindings ?? NOT_MEASURED;
+}
+
+/**
+ * Measured traffic on a line, read from one end's Azure resource (Monitor totals per minute → bit/s):
+ * - Internet → public LB: the LB's received bytes (ByteCount, Direction In) — may include outbound SNAT replies
+ * - Internet → App Gateway with a public frontend: BytesReceived
+ * - Private Endpoint → PaaS: PEBytesIn + PEBytesOut on the PE
+ * LB / App Gateway → backend lines get none (Azure Monitor has no per-backend bytes); flow logs measure them.
+ */
+export function edgeBindings(
+  e: Pick<DiagramEdgeSpec, "edgeKind" | "flowType" | "source" | "target">,
+  byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "resourceKind" | "icon" | "subResources" | "metadata">>,
+  /** Load balancers that are also an outbound (SNAT) path — their In bytes may include SNAT replies */
+  snatLbs: ReadonlySet<string> = new Set(),
+): { bindings: Record<string, MetricBinding>; caveats?: string[] } {
+  const src = byId.get(e.source), tgt = byId.get(e.target);
+  const kindOf = (n?: { resourceKind?: string; icon: string }) => n?.resourceKind ?? n?.icon;
+  if (kindOf(src) === "internet" && e.flowType === "ingress" && tgt) {
+    if (kindOf(tgt) === "lb") {
+      return {
+        bindings: { throughput: mon("ByteCount", "total", { filter: "Direction eq 'In'", scale: PER_MIN_TO_BPS, node: "target" }) },
+        ...(snatLbs.has(e.target) ? { caveats: ["ld.edge.caveat.snat"] } : {}),
+      };
+    }
+    if (kindOf(tgt) === "appGateway") {
+      const hasPrivate = tgt.subResources?.some((s) => s.kind === "frontendIP" && !!s.endpoint && PRIVATE_V4.test(s.endpoint));
+      return {
+        bindings: { throughput: mon("BytesReceived", "total", { scale: PER_MIN_TO_BPS, node: "target" }) },
+        ...(hasPrivate ? { caveats: ["ld.edge.caveat.publicPrivateSum"] } : {}),
+      };
+    }
+  }
+  if (e.edgeKind === "privateLink" && kindOf(src) === "privateEndpoint") {
+    return {
+      bindings: {
+        peIn: mon("PEBytesIn", "total", { scale: PER_MIN_TO_BPS }),
+        peOut: mon("PEBytesOut", "total", { scale: PER_MIN_TO_BPS }),
+        throughput: derived("sum", "peIn", "peOut"),
+      },
+    };
+  }
+  return { bindings: {} };
+}
+
+/**
+ * The spec as the server measures it: current bindings on every node and line. Applied when a diagram is read,
+ * so a diagram generated before a binding changed is measured (and judged) like a new one.
+ */
+export function normalizeSpecBindings(spec: DiagramSpec): DiagramSpec {
+  const byId = new Map(spec.nodes.map((n) => [n.id, n]));
+  const snatLbs = new Set(spec.edges.filter((e) => e.edgeKind === "outbound-internet" && e.label === "LB SNAT").map((e) => e.source));
+  return {
+    ...spec,
+    nodes: spec.nodes.map((n) => (n.nodeType === "group" ? n : { ...n, bindings: effectiveBindings(n) })),
+    edges: spec.edges.map((e) => {
+      const { bindings, caveats } = edgeBindings(e, byId, snatLbs);
+      const next: DiagramEdgeSpec = { ...e, bindings };
+      if (caveats) next.caveats = caveats;
+      else delete next.caveats;
+      return next;
+    }),
+  };
+}
 
 // ── Dependency inference sets ──
 
@@ -473,12 +588,20 @@ export type ContainmentDiagnostics = {
 type ContainmentMap = {
   subnetParent: Map<string, string>;   // subnetOrigId → vnetOrigId
   resourceSubnet: Map<string, string>; // resourceOrigId → subnetOrigId
+  /** Resources placed in a subnet only because they share its resource group (Pass 4) — a guess */
+  rgGuess: Set<string>;
   diagnostics: ContainmentDiagnostics;
 };
+
+/** RFC 1918 private IPv4 (a frontend with any other address is public) */
+function isPrivateAddress(ip: string): boolean {
+  return /^10./.test(ip) || /^172.(1[6-9]|2d|3[01])./.test(ip) || /^192.168./.test(ip);
+}
 
 function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
   const subnetParent = new Map<string, string>();
   const resourceSubnet = new Map<string, string>();
+  const rgGuess = new Set<string>();
   const sampleChains: string[] = [];
 
   const nodeKindMap = new Map(graph.nodes.map((n) => [n.id, n.kind]));
@@ -606,6 +729,11 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     // Public IP addresses and NAT Gateways are not subnet resources — always external
     if (node.kind === "publicIP") continue;
     if (node.kind === "natGateway") continue;
+    // Global / public entry points have no subnet: Front Door, Traffic Manager, a load balancer whose
+    // frontend is a public IP (its backends decide its VNet later). Guessing a subnet drew the Internet
+    // line straight into an unrelated subnet.
+    if (node.kind === "frontDoor" || node.kind === "trafficManager") continue;
+    if (node.kind === "lb" && node.endpoint && !isPrivateAddress(node.endpoint)) continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
     if (!rgSubnets || rgSubnets.length === 0) continue;
@@ -620,6 +748,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
       }
     }
     resourceSubnet.set(node.id, bestSubnet);
+    rgGuess.add(node.id);
     pass4Count++;
     if (pass4Count <= 5) {
       sampleChains.push(
@@ -737,6 +866,7 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
   return {
     subnetParent,
     resourceSubnet,
+    rgGuess,
     diagnostics: {
       subnetParentCount: subnetParent.size,
       resourceSubnetCount: resourceSubnet.size,
@@ -892,8 +1022,9 @@ async function applyElkLayout(
     };
 
     applyPositions(layout.children ?? []);
-  } catch {
-    // ELK failed — positions remain from manual layout as fallback
+  } catch (err) {
+    // ELK failed — positions remain from manual layout (the web lays out the live view itself)
+    debug(`[specGenerator] ELK layout failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -1498,27 +1629,8 @@ export async function generateDiagramSpec(
         }
 
         // Build subResources for VM (bound NICs) and AppGW (frontend IPs)
-        const childSubResources: SubResource[] = [];
-        const boundNics = vmBoundNics.get(child.node.id);
-        if (boundNics) {
-          for (const nic of boundNics) {
-            childSubResources.push({
-              id: idMap.get(nic.id) ?? shortId(nic.azureId ?? nic.id),
-              label: nic.name,
-              kind: "nic" as SubResourceKind,
-              endpoint: nic.endpoint,
-              azureResourceId: nic.azureId,
-            });
-          }
-        }
-        const feIPs = appGwFrontendIPs.get(child.node.id);
-        if (feIPs) {
-          childSubResources.push(...feIPs);
-        }
-        const lbFeIPs = lbFrontendIPs.get(child.node.id);
-        if (lbFeIPs) {
-          childSubResources.push(...lbFeIPs);
-        }
+        // Same chips as every other placement (NICs, the VM public IP, frontend IPs) — one builder
+        const childSubResources: SubResource[] = collectSubResources(child.node.id) ?? [];
 
         const childArchMeta = archMetaMap.get(child.node.id);
 
@@ -1660,16 +1772,6 @@ export async function generateDiagramSpec(
     }
 
     cursorY += vSize.height + EXTERNAL_GAP;
-  }
-
-  // ── Apply small position corrections based on architecture metadata ──
-  for (const node of diagramNodes) {
-    if (!node.parentId || node.nodeType === "group") continue;
-    const hint = node.metadata?.flowHint;
-    if (!hint) continue;
-    if (hint === "ingress") node.position!.x -= 8;
-    else if (hint === "dependency") node.position!.x += 8;
-    if (hint === "egress") node.position!.y += 12;
   }
 
   // Identify resources NOT inside any subnet
@@ -2215,6 +2317,7 @@ export async function generateDiagramSpec(
     edgeKind?: DiagramEdgeKind,
     confidence?: number,
     flowType?: DiagramFlowType,
+    inferenceReasons?: string[],
   ): DiagramEdgeSpec {
     let edgeId = `${srcId}-to-${tgtId}`;
     if (edgeIdSeen.has(edgeId)) {
@@ -2232,8 +2335,10 @@ export async function generateDiagramSpec(
       protocol,
       edgeKind,
       confidence,
+      evidence: edgeKind === "inferred" ? "inferred" as const : "configured" as const,
+      ...(inferenceReasons ? { inferenceReasons } : {}),
       flowType,
-      bindings: EDGE_BINDINGS[srcKind] ?? {},
+      bindings: {},
       animation: edgeKind === "logging" || edgeKind === "inferred" ? "dash" as const : "flow" as const,
     };
   }
@@ -2299,10 +2404,9 @@ export async function generateDiagramSpec(
     if (existingPairs.has(`${cId}→${dId}`) || existingPairs.has(`${dId}→${cId}`)) continue;
 
     const srcNode = filteredNodes.find((n) => n.id === inf.source);
-    const tgtNode = filteredNodes.find((n) => n.id === inf.target);
-    const label = buildEdgeLabel(srcNode, tgtNode);
+    // No label: a guessed link must not read like a configured one (the edge panel says it is a guess)
     const ft = resolveFlowType(archMetaMap.get(inf.source), archMetaMap.get(inf.target), "inferred");
-    diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", label, inf.metadata.protocol, "inferred", inf.confidence, ft));
+    diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", undefined, inf.metadata.protocol, "inferred", inf.confidence, ft, inf.reasons));
     existingPairs.add(`${cId}→${dId}`);
   }
 
@@ -2312,6 +2416,44 @@ export async function generateDiagramSpec(
     if (!aksClusterId) continue;
     diagramEdges.push(makeEdge(apiNode.id, aksClusterId, "aks", "control flow", undefined, "network", undefined, "control"));
     existingPairs.add(`${apiNode.id}→${aksClusterId}`);
+  }
+
+  // ── Public load balancers belong to the VNet of their backends (they have no subnet) ──
+  // A LB whose frontends are all public IPs is not inside any subnet. Its VNet is the one most of its
+  // backends (routes) live in; ties by VNet id; no backend → no VNet. The web draws it in the inbound lane.
+  {
+    const byId = new Map(diagramNodes.map((x) => [x.id, x]));
+    const vnetOf = (id: string): string | undefined => {
+      let cur = byId.get(id);
+      const seen = new Set<string>();
+      while (cur?.parentId && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        const p = byId.get(cur.parentId);
+        if (p?.icon === "vnet") return p.id;
+        cur = p;
+      }
+      return undefined;
+    };
+    for (const n of diagramNodes) {
+      if (n.resourceKind !== "lb" || !n.subResources?.length || !n.subResources.every((sr) => sr.kind === "publicIP")) continue;
+      const votes = new Map<string, number>();
+      for (const e of diagramEdges) {
+        if (e.edgeKind !== "routes" || (e.source !== n.id && e.target !== n.id)) continue;
+        const v = vnetOf(e.source === n.id ? e.target : e.source);
+        if (v) votes.set(v, (votes.get(v) ?? 0) + 1);
+      }
+      const best = [...votes.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))[0]?.[0];
+      n.parentId = best;
+      n.metadata = { ...n.metadata, placement: "public-frontend" };
+    }
+    // Everything Pass 4 put in a subnet only by resource group is marked as a guess
+    const origOf = new Map([...idMap.entries()].map(([orig, sid]) => [sid, orig]));
+    for (const n of diagramNodes) {
+      const orig = origOf.get(n.id);
+      if (orig && containment.rgGuess.has(orig) && n.metadata?.placement !== "public-frontend") {
+        n.metadata = { ...n.metadata, placement: "rg-guess" };
+      }
+    }
   }
 
   // ── Outbound Internet: per-VNet Internet node + outbound edges ──
@@ -2388,12 +2530,9 @@ export async function generateDiagramSpec(
     }
   }
 
-  // 3. VM/VMSS with instance-level Public IP → Internet
-  for (const n of diagramNodes) {
-    if (!n.subResources?.some((sr) => sr.kind === "publicIP") || outboundSourceSet.has(n.id)) continue;
-    outboundSources.push({ id: n.id, label: "Public IP", deprecated: false });
-    outboundSourceSet.add(n.id);
-  }
+  // 3. An instance-level public IP (VM, or an LB frontend) is shown as a chip on the card, not as an outbound
+  //    line: a public frontend is an inbound path, and the outbound rail keeps one line per egress device
+  //    (NAT Gateway, LB outbound rule).
 
   // 4. Subnets with defaultOutboundAccess=true and no explicit egress → deprecated
   for (const subnetNode of subnetNodes) {
@@ -2437,6 +2576,7 @@ export async function generateDiagramSpec(
       bindings: {},
       resourceKind: "internet",
       metadata: {
+        direction: "egress",
         outboundMethodCount: String(sources.length),
         hasDeprecatedPath: String(hasDeprecated),
         vnetId,
@@ -2449,6 +2589,74 @@ export async function generateDiagramSpec(
       diagramEdges.push(edge);
       existingPairs.add(`${src.id}→${internetNodeId}`);
     }
+  }
+
+  // ── Inbound: Internet → public entry points (LB / Application Gateway with a public frontend) ──
+  // Same rule as /architecture: an entry point whose frontend is a public IP is reachable from the Internet.
+  // Internal LBs (private frontend) are not inbound paths.
+  const ingressByVnet = new Map<string, string[]>();
+  const graphNodeByAzureId = new Map(graph.nodes.filter((g) => g.azureId).map((g) => [g.azureId!.toLowerCase(), g]));
+  for (const n of diagramNodes) {
+    if (n.resourceKind !== "lb" && n.resourceKind !== "appGateway") continue;
+    const isPublic = n.subResources?.some((sr) => sr.kind === "publicIP" || (sr.kind === "frontendIP" && !!sr.endpoint && !isPrivateIp(sr.endpoint)));
+    if (!isPublic) continue;
+    // A public frontend with no load-balancing / NAT rule takes no traffic in (e.g. the AKS "kubernetes" LB used
+    // only for outbound) — it is not an inbound path. Unknown rule count keeps the line.
+    const rules = n.azureResourceId ? graphNodeByAzureId.get(n.azureResourceId.toLowerCase())?.metadata?.inboundRules : undefined;
+    if (typeof rules === "number") (n.metadata ??= {}).inboundRules = String(rules);
+    if (rules === 0) continue;
+    const vnetId = shortIdToVnet.get(n.id) ?? "external";
+    (ingressByVnet.get(vnetId) ?? ingressByVnet.set(vnetId, []).get(vnetId)!).push(n.id);
+  }
+  for (const [vnetId, entryIds] of ingressByVnet) {
+    const inId = vnetId === "external" ? "internet-in-external" : `internet-in-${vnetId}`;
+    diagramNodes.push({
+      id: inId,
+      label: "Internet",
+      icon: "internet" as DiagramIconKind,
+      position: { x: 0, y: 0 },
+      bindings: {},
+      resourceKind: "internet",
+      metadata: { direction: "ingress", entryCount: String(entryIds.length), vnetId },
+    });
+    for (const target of entryIds) {
+      diagramEdges.push(makeEdge(inId, target, "internet", undefined, undefined, "network", undefined, "ingress"));
+    }
+  }
+
+  // ── Subnet outbound path (shown as a chip on the subnet header) ──
+  // nat > LB outbound rule (SNAT) > default outbound (on / off) > unknown (property not reported; UDR not read yet)
+  const snatSources = new Set(outboundSources.filter((s) => s.label === "LB SNAT").map((s) => s.id));
+  for (const sub of diagramNodes) {
+    if (sub.icon !== "subnet" || sub.nodeType !== "group") continue;
+    const meta = (sub.metadata ??= {});
+    if (meta.natGwBadgeId) {
+      meta.egressVia = "nat";
+      meta.egressName = meta.natGwBadgeLabel ?? "";
+      continue;
+    }
+    const kids = diagramNodes.filter((c) => c.parentId === sub.id).map((c) => c.id);
+    const viaSnat = diagramEdges.some((e) => e.flowType === "egress" && kids.includes(e.source) && snatSources.has(e.target));
+    if (viaSnat) { meta.egressVia = "lb-snat"; continue; }
+    const origId = [...idMap.entries()].find(([, sid]) => sid === sub.id)?.[0];
+    const dflt = origId ? graph.nodes.find((g) => g.id === origId)?.metadata?.defaultOutboundAccess : undefined;
+    meta.egressVia = dflt === "true" ? "default" : dflt === "false" ? "none" : "unknown";
+  }
+
+  // ── VNet peerings (shown as stubs on the VNet header — the remote VNet may not be in view) ──
+  for (const vnet of vnetNodes) {
+    const vShortId = idMap.get(vnet.id);
+    const spec = vShortId ? diagramNodes.find((n) => n.id === vShortId) : undefined;
+    if (!spec) continue;
+    const peers = graph.edges
+      .filter((e) => e.kind === "peering" && (e.source === vnet.id || e.target === vnet.id))
+      .map((e) => {
+        const remote = e.source === vnet.id ? e.target : e.source;
+        const remoteNode = graph.nodes.find((g) => g.id === remote);
+        return { id: idMap.get(remote) ?? null, name: remoteNode?.name ?? remote.split("/").pop() ?? remote, state: String(e.metadata?.peeringState ?? "Unknown") };
+      });
+    const unique = [...new Map(peers.map((p) => [p.name, p])).values()];
+    if (unique.length) spec.metadata = { ...spec.metadata, peerings: JSON.stringify(unique) };
   }
 
   // Build groups
@@ -2521,7 +2729,7 @@ export async function generateDiagramSpec(
   const specId = `auto-${subscriptionId.slice(0, 8)}`;
 
   return {
-    spec: {
+    spec: normalizeSpecBindings({
       version: "1.0",
       id: specId,
       name: `Azure Resources (${subscriptionId.slice(0, 8)}…)`,
@@ -2536,7 +2744,7 @@ export async function generateDiagramSpec(
         defaultTimeRange: "5m",
         layout: layoutMode,
       },
-    },
+    }),
     containmentDiagnostics: containment.diagnostics,
   };
 }

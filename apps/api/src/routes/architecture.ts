@@ -1,12 +1,12 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env.js";
+import { anonymousSpAllowed } from "../infra/azureClientFactory.js";
 import type { ArchitectureFlowOverlayResponse } from "@aud/types";
 import { mockArchitectureGraph } from "../mockData.js";
 import { tryGetArchitectureGraphFromAzure } from "../services/azure.js";
 import { mockNetworkSummary, tryGetNetworkSummaryFromLogAnalytics } from "../services/network.js";
 import { mapSubnetPairsToGraphEdgeMetrics } from "../services/flowOverlay.js";
-import { queryInt, querySubscriptionId, sendError } from "../infra/requestParams.js";
-import { safeMessage } from "../services/securityPosture.js";
+import { isSigninRequired, queryInt, querySubscriptionId, safeMessage, sendError } from "../infra/requestParams.js";
 
 export function registerArchitectureRoutes(router: Router, env: Env) {
   router.get("/api/architecture/graph", async (req: Request, res: Response) => {
@@ -16,7 +16,7 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
         const graph = await tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, { subscriptionId });
         res.json(graph ? { ...graph, source: "azure" } : { ...mockArchitectureGraph, source: "mock" });
       } catch (e: unknown) {
-        res.json({ ...mockArchitectureGraph, source: "mock", note: safeMessage(e) });
+        res.json({ ...mockArchitectureGraph, source: "mock", note: isSigninRequired(e) ? "signin_required" : safeMessage(e) });
       }
     } catch (e: unknown) {
       sendError(res, e, "architecture_graph_failed");
@@ -34,15 +34,28 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
       return sendError(res, e, "flow_overlay_failed");
     }
 
+    const bearer = req.auth?.bearerToken;
+    // Anonymous: the sample overlay on the sample graph. Signed-in users never get sample traffic.
+    if (!bearer && !anonymousSpAllowed(env)) {
+      const sample = mockNetworkSummary(lookbackMinutes, env.AZURE_LOG_ANALYTICS_TABLE, "signin_required");
+      const mapped = mapSubnetPairsToGraphEdgeMetrics(mockArchitectureGraph, sample.topSubnetPairs);
+      const resp: ArchitectureFlowOverlayResponse = {
+        generatedAt: new Date().toISOString(), lookbackMinutes, level: "subnet", edges: mapped.edges, unmatchedPairs: mapped.unmatchedPairs, note: "signin_required",
+      };
+      return res.json(resp);
+    }
     try {
-      const bearer = req.auth?.bearerToken;
       const [graphMaybe, summaryMaybe] = await Promise.all([
         tryGetArchitectureGraphFromAzure(env, bearer, { subscriptionId }),
         tryGetNetworkSummaryFromLogAnalytics(env, bearer, { lookbackMinutes, top }),
       ]);
-
-      const graph = graphMaybe ?? mockArchitectureGraph;
-      const summary = summaryMaybe ?? mockNetworkSummary(lookbackMinutes, env.AZURE_LOG_ANALYTICS_TABLE, "mock data");
+      if (!graphMaybe || !summaryMaybe) {
+        // No workspace configured (or no graph): nothing measured — no edges, never sample numbers
+        const resp: ArchitectureFlowOverlayResponse = { generatedAt: new Date().toISOString(), lookbackMinutes, level: "subnet", edges: [], unmatchedPairs: [] };
+        return res.json(resp);
+      }
+      const graph = graphMaybe;
+      const summary = summaryMaybe;
       const mapped = mapSubnetPairsToGraphEdgeMetrics(graph, summary.topSubnetPairs);
 
       const resp: ArchitectureFlowOverlayResponse = {
@@ -55,15 +68,7 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
       };
       res.json(resp);
     } catch (e: unknown) {
-      const resp: ArchitectureFlowOverlayResponse = {
-        generatedAt: new Date().toISOString(),
-        lookbackMinutes,
-        level: "subnet",
-        edges: [],
-        unmatchedPairs: [],
-        note: e instanceof Error ? e.message : "flow overlay error",
-      };
-      res.json(resp);
+      sendError(res, e, "flow_overlay_failed", "architecture");
     }
   });
 }

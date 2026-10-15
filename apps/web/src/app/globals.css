@@ -14,6 +14,7 @@
   /* Visualization-only colours (diagram relationships and effects) — mirrored in palette.ts VIZ */
   --egress-rgb: 251, 146, 60;
   --private-link-rgb: 139, 92, 246;
+  --peering-rgb: 16, 185, 129;
   --fault-rgb: 239, 68, 68;
   --canvas-rgb: 247, 248, 250;
   --violet-rgb: 112, 48, 160;

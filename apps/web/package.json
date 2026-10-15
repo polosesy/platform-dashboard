@@ -14,8 +14,6 @@
     "@azure/msal-browser": "^5.0.2",
     "@azure/msal-react": "^5.0.2",
     "@next/env": "16.1.6",
-    "@react-three/drei": "^10.0.0",
-    "@react-three/fiber": "^9.1.2",
     "d3-ease": "^3.0.1",
     "d3-force": "^3.0.0",
     "d3-interpolate": "^3.0.1",
@@ -28,8 +26,7 @@
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "reactflow": "^11.11.4",
-    "three": "^0.172.0"
+    "reactflow": "^11.11.4"
   },
   "devDependencies": {
     "@types/d3-ease": "^3",
@@ -43,7 +40,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^0.172.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "typescript": "^5"

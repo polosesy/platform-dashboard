@@ -1,5 +1,6 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env.js";
+import { requireRole } from "../infra/platformAccess.js";
 import {
   getObservabilityOverview,
   getObservabilityWorkloads,
@@ -129,7 +130,8 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
   });
 
   // ── Logs — K8s API 직접 조회 (primary) + Container Insights (fallback) ──
-  router.get("/api/observability/logs", async (req: Request, res: Response) => {
+  // Pod logs can carry secrets and personal data — operators and admins only
+  router.get("/api/observability/logs", requireRole(env, "operator"), async (req: Request, res: Response) => {
     let clusterId: string;
     let namespace: string;
     let podName: string;

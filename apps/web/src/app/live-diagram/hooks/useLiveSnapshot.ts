@@ -42,13 +42,16 @@ export function useLiveSnapshot(
   }, [fetchSnapshot, key]);
 
   useEffect(() => {
+    if (!diagramId) return; // nothing chosen yet
     let cancelled = false;
     const update = (patch: Partial<Omit<SnapshotState, "key">>) => {
       if (cancelled) return;
       setState((s) => ({ ...(s.key === key ? s : { key, ...EMPTY }), ...patch }));
     };
 
-    if (mode === "sse") {
+    // A diagram generated from Azure belongs to the signed-in user: EventSource cannot carry the token, so it is
+    // polled (the stream serves the public samples only)
+    if (mode === "sse" && !diagramId.startsWith("auto-")) {
       // EventSource cannot send an Authorization header — the stream is served without the user's token
       const es = new EventSource(apiUrl("/api/live/stream", { diagramId }));
       es.onopen = () => update({ connected: true });

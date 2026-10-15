@@ -2,14 +2,19 @@
 
 import { memo, type CSSProperties } from "react";
 import { useI18n } from "@/lib/i18n";
-import { Handle, Position, type NodeProps } from "reactflow";
-import type { HealthStatus, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
-import { nodeColor, defaultTokens } from "../utils/designTokens";
+import type { NodeProps } from "reactflow";
+import type { HealthRule, HealthStatus, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import { cardStatus } from "@/lib/liveStatus";
 import { getAzureIconUrl } from "../utils/azureIcons";
-import { D3Sparkline } from "./D3Sparkline";
-import { RESOURCE_KIND_DISPLAY } from "./ResourceDetailPanel";
+import { HiddenHandles } from "./HiddenHandles";
+import { Spark } from "./Spark";
+import { FullNameTag } from "./NameParts";
+import type { NamePart } from "@/lib/liveNames";
+import type { UsageChip } from "@/lib/plUsage";
+import { cardCells, cellTone, compactPercent, isUsagePair, metricCells, METRIC_META, sparkDomain, USAGE_DEFAULT_THRESHOLD, type MetricCell } from "@/lib/liveMetricFormat";
+import { middleEllipsis } from "@/lib/liveNames";
+import { maskGuids } from "@/lib/mask";
 import styles from "../styles.module.css";
-import { rgba } from "@/lib/palette";
 
 export type NsgBadgeInfo = {
   nodeId: string;
@@ -20,12 +25,30 @@ export type NsgBadgeInfo = {
 
 export type LiveNodeData = {
   label: string;
+  /** Name without the words its VNet repeats (lib/liveNames) — the full name shows in a tag while selected */
+  shortName?: string;
+  /** The full name split into the words the short name kept and dropped */
+  nameParts?: NamePart[];
+  /** Selected (detail panel open) — shows the full-name tag */
+  focused?: boolean;
   icon: DiagramIconKind;
   health: HealthStatus;
   healthScore: number;
   metrics: Record<string, number | null>;
   hasAlert: boolean;
   sparklines?: Record<string, SparklineData>;
+  /** Metric keys the API reads for this kind (NODE_BINDINGS); empty → the card shows a relation line */
+  boundMetrics?: string[];
+  /** Usage thresholds from the kind's health rules (cpu 85, memory 80, …) — the gauge turns orange there */
+  usageWarn?: Record<string, number>;
+  /** The kind's health rules (from the API) — a card value is toned by the same rules that set the status */
+  healthRules?: HealthRule[];
+  /** Private Link use chips (lib/plUsage usageChips): PE "사용 n" / "사용 기록 없음" / "근거 없음", PaaS "사용처 n" / "공용 접근" */
+  plChips?: UsageChip[];
+  /** Why metrics may be missing: sign-in needed, not collected (example diagram), … */
+  metricsState?: LiveSourceState;
+  /** One line for kinds without metrics ("→ App Service · Private Link", "연결 서브넷 3") — already translated */
+  relation?: string;
   endpoint?: string;
   subResources?: SubResource[];
   onSubResourceSelect?: (sr: SubResource) => void;
@@ -40,292 +63,250 @@ export type LiveNodeData = {
   vmssExpanded?: boolean;
   onVmssExpand?: (nodeId: string, azureResourceId: string, aksClusterArmId?: string) => void;
   isUnused?: boolean; // public IP not attached to any resource
+  /** Shown only because a configured link reaches it — it belongs to this other VNet */
+  ghostOf?: string;
+  /** Fault impact role: the failing resource, or one configured hop away from it */
+  impact?: "source" | "affected";
 };
 
-const RING_R = defaultTokens.dimensions.healthRingRadius;
-const RING_STROKE = defaultTokens.dimensions.healthRingStroke;
-const CIRCUMFERENCE = 2 * Math.PI * RING_R;
+/** Kind as the card's second line names it (product names / CAF abbreviations — not translated) */
+const KIND_ABBR: Record<string, string> = {
+  vm: "VM", vmss: "VMSS", aks: "AKS", containerApp: "Container Apps",
+  functionApp: "Functions", appService: "App Service", sql: "SQL",
+  storage: "Storage", redis: "Redis", cosmosDb: "Cosmos DB",
+  postgres: "PostgreSQL", keyVault: "Key Vault", appGateway: "App GW",
+  lb: "LB", frontDoor: "Front Door", trafficManager: "Traffic Manager",
+  firewall: "Firewall", natGateway: "NAT GW", appInsights: "App Insights", logAnalytics: "Log Analytics",
+  nic: "NIC", nsg: "NSG", dns: "DNS", privateEndpoint: "PE", publicIP: "Public IP",
+  serviceBus: "Service Bus", eventHub: "Event Hubs",
+};
 
-export function fmtMetric(val: number | null): string {
-  if (val == null) return "-";
-  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
-  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
-  return val % 1 === 0 ? String(val) : val.toFixed(1);
+const PRIVATE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** Second line: what it is and where it answers (private IP, frontend kind), from configuration only */
+function describe(d: LiveNodeData, t: TFn): string {
+  const kind = d.resourceKind ?? d.icon;
+  const abbr = KIND_ABBR[kind] ?? kind;
+  const subs = d.subResources ?? [];
+  const nics = subs.filter((s) => s.kind === "nic");
+  const nicIp = nics.find((s) => s.endpoint)?.endpoint;
+  const publics = subs.filter((s) => s.kind === "publicIP");
+  const frontends = subs.filter((s) => s.kind === "frontendIP");
+  switch (kind) {
+    case "vm":
+      return [abbr, nicIp, nics.length > 1 ? t("ld.card.nics", { n: nics.length }) : null].filter(Boolean).join(" · ");
+    case "vmss":
+      return d.archRole === "aks-vmss" ? `${abbr} · ${t("ld.card.aksPool")}` : abbr;
+    case "lb": {
+      if (publics.length && publics.length === subs.length) return `${abbr} · ${t("ld.card.public")} ${publics[0]!.endpoint ?? ""}`.trim();
+      const fe = frontends[0]?.endpoint ?? publics[0]?.endpoint;
+      return fe ? `${abbr} · ${PRIVATE.test(fe) ? t("ld.card.internal") : t("ld.card.public")} ${fe}` : abbr;
+    }
+    case "appGateway": {
+      const fe = frontends[0]?.endpoint;
+      if (!fe) return abbr;
+      return `${abbr} · ${PRIVATE.test(fe) ? t("ld.card.privateFrontend") : t("ld.card.publicFrontend")}`;
+    }
+    case "privateEndpoint":
+      return [abbr, nicIp ?? (d.endpoint && PRIVATE.test(d.endpoint) ? d.endpoint : undefined)].filter(Boolean).join(" · ");
+    case "natGateway":
+      return `${abbr} · ${t("ld.card.publicIps", { n: publics.length })}`;
+    default:
+      return abbr;
+  }
 }
 
-const POWER_STATE_LABEL: Record<string, string> = {
-  running: "Running",
-  stopped: "Stopped",
-  deallocated: "Deallocated",
-  starting: "Starting",
-  stopping: "Stopping",
-};
-
-// PowerState → ring visual mapping
-type PowerStateRing = { health: HealthStatus; score: number; color: string; spin: boolean };
-const MAX_METRIC_CHIPS = 2;
-/** Short chip labels so two chips and the trend fit one line; the full name is in the chip tooltip */
-const METRIC_SHORT: Record<string, string> = {
-  cpu: "CPU", memory: "Mem", network: "Net", throughput: "Thru", requests: "Req", errors: "Err",
-  availability: "Avail", transactions: "Txn", storage: "Stor", ru: "RU", rps: "RPS", latency: "Lat",
-  executions: "Exec", dtu: "DTU", dataPath: "Path", connections: "Conn",
-};
-const MAX_SUB_CHIPS = 2;
-
-const HEALTH_RANK: Record<HealthStatus, number> = { unknown: 0, ok: 0, warning: 1, critical: 2 };
-
-const POWER_STATE_RING: Record<string, PowerStateRing> = {
-  running:     { health: "ok",       score: 1,    color: rgba("ok", 0.7),  spin: true },
-  starting:    { health: "ok",       score: 0.5,  color: rgba("accent", 0.65),  spin: true },
-  stopping:    { health: "warning",  score: 0.5,  color: rgba("warning", 0.7),  spin: true },
-  stopped:     { health: "warning",  score: 0.3,  color: rgba("warning", 0.6),  spin: false },
-  deallocated: { health: "unknown",  score: 0.15, color: rgba("ink", 0.25),   spin: false },
-};
-
-// Azure CAF resource type abbreviations
-const RESOURCE_TYPE_ABBR: Record<string, string> = {
-  vm: "VM", vmss: "VMSS", aks: "AKS", containerApp: "CA",
-  functionApp: "Func", appService: "App Svc", sql: "SQL",
-  storage: "Storage", redis: "Redis", cosmosDb: "Cosmos",
-  postgres: "PgSQL", keyVault: "KV", appGateway: "App GW",
-  lb: "LB", frontDoor: "AFD", trafficManager: "TM",
-  firewall: "FW", natGateway: "NAT GW", appInsights: "App Insights", logAnalytics: "Log Analytics",
-  nic: "NIC", nsg: "NSG", dns: "DNS", privateEndpoint: "PE",
-  serviceBus: "Service Bus", eventHub: "Event Hub",
-};
-
-// Architecture role badges — only shown when role provides extra context beyond type
-const ARCH_ROLE_BADGE: Record<string, { abbr: string; label: string }> = {
-  // label = i18n key
-  "aks-cluster":      { abbr: "AKS",  label: "ld.role.aksCluster" },
-  "aks-vmss":         { abbr: "Pool", label: "ld.role.aksVmss" },
-  "aks-ingress":      { abbr: "Ing",  label: "ld.role.aksIngress" },
-  "aks-egress":       { abbr: "Egr",  label: "ld.role.aksEgress" },
-  "gateway":          { abbr: "GW",   label: "ld.role.gateway" },
-  "load-balancer":    { abbr: "LB",   label: "ld.role.lb" },
-  "firewall":         { abbr: "FW",   label: "ld.role.firewall" },
-  "db":               { abbr: "DB",   label: "ld.role.db" },
-  "cache":            { abbr: "Cache", label: "ld.role.cache" },
-  "private-endpoint": { abbr: "PE",   label: "ld.role.pe" },
-  "messaging":        { abbr: "Msg",  label: "ld.role.messaging" },
-  "nat-gateway":      { abbr: "NAT",  label: "ld.role.nat" },
-};
+/** Rough text widths (px) to decide whether the second metric cell still leaves room for the trend */
+const textW = (s: string, ko: number, other: number) => [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? ko : other), 0);
 
 export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<LiveNodeData>) {
   const { t } = useI18n();
-  const { label, icon, health, healthScore, metrics, hasAlert, sparklines, endpoint, subResources, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused } = data;
-  const typeAbbr = resourceKind ? RESOURCE_TYPE_ABBR[resourceKind] : undefined;
-  const fullAzureName = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
+  const { label, icon, health, metrics, hasAlert, sparklines, subResources, resourceKind, azureResourceId, powerState, archRole, nsgBadge, onNsgSelect, aksClusterArmId, vmssExpanded, onVmssExpand, isUnused, ghostOf, impact } = data;
+  const status = cardStatus(health, powerState, impact);
+  const name = data.shortName || label;
+  const original = azureResourceId ? azureResourceId.split("/").pop() ?? label : label;
+  const fullName = maskGuids(original);
+  // Tag only when the card does not already show the whole name (13 = the summary zoom's clip, the tightest)
+  const showTag = !!data.focused && (fullName !== name || [...name].length > 13);
+  const kind = resourceKind ?? icon;
 
-  // ── Ring visuals: power state, unless the metrics say something worse ──
-  // A "running" power state (often assumed for LB / App Gateway / Firewall) must not paint a node
-  // green while its metric-based health is warning or critical.
-  const ringFromPower = powerState ? POWER_STATE_RING[powerState] : undefined;
-  const metricWorse = !!ringFromPower && HEALTH_RANK[health] > HEALTH_RANK[ringFromPower.health];
-  const fromPower = ringFromPower && !metricWorse ? ringFromPower : undefined;
-  const effectiveHealth: HealthStatus = fromPower?.health ?? health;
-  const effectiveScore = fromPower?.score ?? healthScore;
-  const isSpinning = fromPower?.spin ?? false;
+  // ── metrics: bound keys only; trend = the series the API keeps for this node ──
+  // Spec keys plus what the API now reads for the kind (a diagram saved before memory was added still shows it)
+  const specBound = data.boundMetrics ?? [];
+  const bound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))];
+  // The kind's two card metrics (lib/liveMetricFormat CARD_CELLS): cell 1 = load / activity with the trend,
+  // cell 2 = quality. Compute kinds are a usage pair (two gauges).
+  const fallbackTrend = sparklines ? Object.values(sparklines).find((s) => s.values.length >= 2)?.metric : undefined;
+  const cellKeys = cardCells(kind, bound, fallbackTrend);
+  const first = cellKeys[0] ? sparklines?.[cellKeys[0]] : undefined;
+  const trend = first && first.values.length >= 2 ? first : undefined;
+  const trendKey = trend ? cellKeys[0] : undefined;
+  const cells = metricCells(cellKeys, metrics, cellKeys[0]);
+  const threshold = (k: string) => data.usageWarn?.[k] ?? USAGE_DEFAULT_THRESHOLD;
+  const tone = (k: string) => cellTone(k, metrics, data.healthRules, threshold(k));
+  // crit is drawn like warn inside the card — red belongs to the status pill and the fault-impact outline
+  const toneAttr = (k: string) => { const x = tone(k); return x === "crit" || x === "warn" ? "warn" : x; };
+  const usageLabel = (k: string) => t(k === "memory" ? "ld.metric.memShort" : METRIC_META[k]?.label ?? k);
+  const pair = isUsagePair(cellKeys);
+  const usagePair = pair ? cellKeys : [];
+  const anyValue = cells.some((c) => c.state === "value");
+  const cellText = (c: MetricCell) => ({
+    key: t(METRIC_META[c.key]?.label ?? c.key),
+    value: c.state === "value" ? c.value : t("ld.unmeasured"),
+    unit: c.state === "value" ? `${c.unit}${c.unitKey ? t(c.unitKey) : ""}` : "",
+  });
+  const shown = cells.slice(0, 2).map(cellText);
+  // Second cell only while the trend keeps at least 48 px
+  const cellW = (c: { key: string; value: string; unit: string }) => Math.max(textW(c.key, 10, 6), textW(c.value, 9.6, 9.6) + textW(c.unit, 11, 6.6));
+  const trendW = shown.length > 1 ? 196 - (cellW(shown[0]!) + 12 + cellW(shown[1]!)) - 8 : 196 - cellW(shown[0] ?? { key: "", value: "", unit: "" }) - 20;
+  const twoCells = shown.length > 1 && trendW >= 48;
+  const visibleCells = twoCells ? shown : shown.slice(0, 1);
+  const trendColor = status.tone === "high" || status.tone === "medium" ? status.color : "rgba(var(--accent-rgb), 0.85)";
+  const metricsBlocked = !anyValue && (data.metricsState === "signin" || data.metricsState === "disabled");
+  const cellTitle = cells.map((c) => {
+    const x = cellText(c);
+    const x2 = tone(c.key);
+    const warn = x2 === "warn" || x2 === "crit" ? ` (${t(x2 === "crit" ? "ld.card.cellCrit" : "ld.card.cellWarn")})` : "";
+    return `${x.key} ${x.value}${x.unit}${warn}`;
+  }).join(" · ");
+  const spark = trend && trendKey
+    ? <Spark className={styles.cardSpark} values={trend.values} domain={sparkDomain(trendKey, trend.values)} color={trendColor} />
+    : <span className={styles.cardSpark} data-empty="true" aria-hidden="true">—</span>;
+  /** 4 px bar in the key line — neutral grey, orange at the health-rule threshold; nothing drawn without a value */
+  const gauge = (v: number | null) => (
+    <span className={styles.cardGauge} aria-hidden="true">
+      <i style={{ width: v == null || v <= 0 ? 0 : `max(1.5px, ${Math.min(100, v)}%)` }} />
+    </span>
+  );
 
-  const colors = nodeColor(effectiveHealth);
-  const ringStroke = fromPower?.color ?? colors.ringStroke;
-  // Sparkline = metric trend, coloured by the metric-based health (power state says nothing about it)
-  const trendColor = nodeColor(health === "unknown" ? effectiveHealth : health).ringStroke;
-  const pulse = defaultTokens.animation.pulseFrequency[effectiveHealth];
+  // ── chips on the second line (at most two, by priority) ──
+  const publicIp = subResources?.find((s) => s.kind === "publicIP")?.endpoint;
+  const chips: Array<{ key: string; el: React.ReactNode }> = [];
+  // Observed Private Link use first: it is what this card is about when the layer is on
+  for (const c of data.plChips ?? []) {
+    chips.push({ key: `pl:${c.key}`, el: <span className={styles.cardChip} data-tone={c.tone === "warn" ? "public" : c.tone === "muted" ? "muted" : "pl"} title={t(`${c.key}.hint`)}>{t(c.key, c.vars)}</span> });
+  }
+  if (archRole === "aks-vmss" && azureResourceId && onVmssExpand) {
+    chips.push({ key: "inst", el: (
+      <button type="button" className={styles.cardChip} onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId, aksClusterArmId); }}>
+        {t("ld.card.instances")} {vmssExpanded ? "▴" : "▾"}
+      </button>
+    ) });
+  }
+  if (publicIp && kind !== "lb" && kind !== "natGateway") chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone="public" title={publicIp}>⊕ {t("ld.card.public")}</span> });
+  if (nsgBadge) {
+    chips.push({ key: "nsg", el: (
+      <button type="button" className={styles.cardChip} title={nsgBadge.label} onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsgBadge.nodeId); }}>NSG</button>
+    ) });
+  }
+  if (ghostOf) chips.push({ key: "ghost", el: <span className={styles.cardChip} title={t("ld.ghostHint", { vnet: ghostOf })}>↗ {middleEllipsis(ghostOf, 12)}</span> });
+  if (isUnused) chips.push({ key: "unused", el: <span className={styles.cardChip} title={t("ld.unusedPipHint")}>{t("ld.unused")}</span> });
 
-  // Get first available sparkline
-  const primarySparkline = sparklines
-    ? Object.values(sparklines).find((s) => s.values.length >= 2)
-    : undefined;
+  const line3 = !cellKeys.length
+    ? <div className={styles.cardRelation}>{data.relation ?? t(kind === "vmss" ? "ld.card.vmssNoMetrics" : "ld.card.noMetrics")}</div>
+    : metricsBlocked
+      ? <div className={styles.cardRelation}>{t(data.metricsState === "signin" ? "ld.card.signin" : "ld.card.notCollected")}</div>
+      : pair
+        ? (
+          <div className={styles.cardMetrics} data-pair="true" title={cellTitle}>
+            {usagePair.map((k) => {
+              const v = metrics[k] ?? null;
+              return (
+                <div key={k} className={styles.cardCell} data-usage={toneAttr(k)} data-unmeasured={v == null || undefined}>
+                  <span className={styles.cardCellKey}>
+                    {k === trendKey ? <i className={styles.cardTrendDot} style={{ background: trendColor }} /> : null}
+                    {usageLabel(k)}
+                    {gauge(v)}
+                  </span>
+                  <span className={styles.cardCellVal}>{v == null ? t("ld.unmeasuredShort") : <>{compactPercent(v)}<small>%</small></>}</span>
+                </div>
+              );
+            })}
+            {spark}
+          </div>
+        )
+        : (
+          <div className={styles.cardMetrics} title={cellTitle}>
+            {visibleCells.map((c, i) => (
+              <div key={i} className={styles.cardCell} data-usage={toneAttr(cells[i]!.key)} data-unmeasured={cells[i]!.state === "unmeasured" || undefined}>
+                <span className={styles.cardCellKey}>{cells[i]!.key === trendKey ? <i className={styles.cardTrendDot} style={{ background: trendColor }} /> : null}{c.key}</span>
+                <span className={styles.cardCellVal}>{c.value}<small>{c.unit}</small></span>
+              </div>
+            ))}
+            {spark}
+          </div>
+        );
 
-  // Fixed card anatomy (the API lays cards out on a fixed height budget — 100 px, +26 with sub-resources):
-  //   header (ring · name · badges) / metric strip (≤ 2 chips | trend slot) / sub-resource strip (one line)
-  // The trend metric's chip comes first and carries the trend colour, so the line has a visible owner.
-  const metricEntries = Object.entries(metrics).filter(([, v]) => v != null);
-  const trendMetric = primarySparkline?.metric;
-  const orderedMetrics = trendMetric
-    ? [...metricEntries.filter(([k]) => k === trendMetric), ...metricEntries.filter(([k]) => k !== trendMetric)]
-    : metricEntries;
-  const topMetrics = orderedMetrics.slice(0, MAX_METRIC_CHIPS);
-  const metricsTitle = orderedMetrics.map(([k, v]) => `${k} ${fmtMetric(v)}`).join(" · ");
-  const subs = subResources ?? [];
-  // Two fit on one line as IP-only chips; three or more collapse to the first one + "+N"
-  const shownSubs = subs.length > MAX_SUB_CHIPS ? subs.slice(0, 1) : subs;
-  const hiddenSubs = subs.slice(shownSubs.length);
+  const primary = shown[0];
+  const glyphQuiet = status.key === "ld.status.ok" || status.key === "ld.power.running";
 
   return (
     <div
-      className={styles.liveNode}
-      style={{
-        background: colors.fill,
-        borderColor: colors.border,
-        boxShadow: `0 8px 20px ${colors.shadow}`,
-      }}
+      className={styles.card}
+      data-ghost={ghostOf ? "true" : undefined}
+      data-impact={impact}
+      data-tone={status.tone}
+      data-focused={data.focused || undefined}
+      style={{ "--status": status.color } as CSSProperties}
+      title={showTag ? undefined : fullName}
+      aria-label={fullName}
     >
-      <Handle type="target" position={Position.Left} className={styles.handle} />
+      <HiddenHandles />
+      {showTag && <FullNameTag fullName={fullName} original={original} parts={original === label ? data.nameParts : undefined} ghostOf={ghostOf} />}
+      <span className={styles.cardStrip} aria-hidden="true" />
+      {hasAlert && <span className={styles.cardAlertDot} aria-label={t("live.alerts")} />}
 
-      {/* Embedded NSG badge — Cat 2/3: VM/NIC-attached NSG */}
-      {nsgBadge && (
-        <div className={styles.liveNsgBadge}>
-          <button
-            type="button"
-            className={styles.nsgBadge}
-            onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsgBadge.nodeId); }}
-            title={nsgBadge.label}
-          >
-            <img
-              src={getAzureIconUrl(nsgBadge.icon)}
-              alt="nsg"
-              width={12}
-              height={12}
-              className={styles.nsgBadgeIcon}
-            />
-            <span className={styles.nsgBadgeLabel}>{nsgBadge.label}</span>
-          </button>
+      {/* Detail (zoom ≥ 0.78) */}
+      <div className={`${styles.cardBody} ${styles.lodDetail}`}>
+        <div className={styles.cardRow1}>
+          <img src={getAzureIconUrl(icon)} alt="" width={18} height={18} />
+          <span className={styles.cardName}>{middleEllipsis(name, 18)}</span>
+          <span className={styles.cardPill} data-tone={status.tone}>{status.glyph} {t(status.key)}</span>
         </div>
-      )}
-
-      {/* Health ring */}
-      <div className={styles.ringWrap}>
-        <svg viewBox="0 0 40 40" width={40} height={40}>
-          {/* Background ring */}
-          <circle
-            cx="20" cy="20" r={RING_R}
-            fill="none"
-            stroke={rgba("ink", 0.06)}
-            strokeWidth={RING_STROKE}
-          />
-          {/* Health / PowerState arc */}
-          <circle
-            cx="20" cy="20" r={RING_R}
-            fill="none"
-            stroke={ringStroke}
-            strokeWidth={RING_STROKE}
-            strokeDasharray={isSpinning
-              ? `${0.75 * CIRCUMFERENCE} ${0.25 * CIRCUMFERENCE}`
-              : `${effectiveScore * CIRCUMFERENCE} ${CIRCUMFERENCE}`}
-            strokeLinecap="round"
-            transform="rotate(-90 20 20)"
-            className={isSpinning ? styles.healthRingSpin : undefined}
-            style={isSpinning ? undefined : { transition: `stroke-dasharray ${defaultTokens.animation.transitionDuration}ms ease` }}
-          />
-          {/* Alert indicator */}
-          {hasAlert && (
-            <circle cx="34" cy="6" r="4" fill={defaultTokens.colors.alert.critical}>
-              {pulse > 0 && (
-                <animate attributeName="r" values="3;5.5;3" dur={`${pulse}s`} repeatCount="indefinite" />
-              )}
-            </circle>
-          )}
-        </svg>
+        <div className={styles.cardRow2}>
+          <span className={styles.cardDesc}>{describe(data, t)}</span>
+          {chips.slice(0, 2).map((c) => <span key={c.key} className={styles.cardChipWrap}>{c.el}</span>)}
+        </div>
+        <div className={styles.cardDivider} />
+        {line3}
       </div>
 
-      {/* Node info */}
-      <div className={styles.nodeInfo} title={fullAzureName}>
-        <div className={styles.nodeLabel} style={{ color: colors.text }}>
-          {label}
+      {/* Summary (0.40–0.78): big name, one metric, the trend */}
+      <div className={`${styles.cardBody} ${styles.lodSummary}`}>
+        <div className={styles.cardRow1}>
+          <img src={getAzureIconUrl(icon)} alt="" width={24} height={24} />
+          <span className={styles.cardNameBig}>{middleEllipsis(name, 13)}</span>
+          {!glyphQuiet && <span className={styles.cardGlyphBig} style={{ color: status.color }}>{status.glyph}</span>}
         </div>
-        <div className={styles.nodeIcon}>
-          <img src={getAzureIconUrl(icon)} alt={icon} width={20} height={20} />
-          {typeAbbr && (
-            <span className={styles.nodeTypeAbbr} title={RESOURCE_KIND_DISPLAY[resourceKind!] ?? resourceKind}>
-              {typeAbbr}
-            </span>
-          )}
-          {archRole && ARCH_ROLE_BADGE[archRole] && ARCH_ROLE_BADGE[archRole]!.abbr !== typeAbbr && (
-            <span className={styles.archRoleBadge} title={t(ARCH_ROLE_BADGE[archRole]!.label)}>
-              {ARCH_ROLE_BADGE[archRole]!.abbr}
-            </span>
-          )}
-          {powerState && (
-            <span className={styles.powerStateBadge} data-state={powerState}>
-              {POWER_STATE_LABEL[powerState] ?? powerState}
-            </span>
-          )}
-          {(!powerState || metricWorse) && health !== "unknown" && (
-            <span className={styles.healthStatusBadge} data-health={health}>
-              {health === "ok" ? "OK" : health === "warning" ? "Warn" : "Crit"}
-            </span>
-          )}
-          {isUnused && (
-            <span className={styles.unusedBadge} title={t("ld.unusedPipHint")}>
-              {t("ld.unused")}
-            </span>
-          )}
-        </div>
-        {endpoint && !subResources?.some((sr) => sr.endpoint === endpoint) && (
-          <div className={styles.nodeEndpoint} title={endpoint}>{endpoint}</div>
-        )}
-      </div>
-
-      {/* Metric strip: chips on the left, the trend always in the same right-hand slot */}
-      {(topMetrics.length > 0 || primarySparkline) && (
-        <div
-          className={styles.metricBadges}
-          data-trend={primarySparkline ? "on" : undefined}
-          style={{ "--trend": trendColor } as CSSProperties}
-          title={metricsTitle}
-        >
-          <div className={styles.metricChips}>
-            {topMetrics.map(([key, val]) => (
-              <div key={key} className={styles.metricBadge} data-trend={key === trendMetric || undefined} title={`${key} ${fmtMetric(val)}`}>
-                <span className={styles.metricKey}>{METRIC_SHORT[key] ?? key}</span>
-                <span className={styles.metricVal}>{fmtMetric(val)}</span>
-              </div>
-            ))}
+        {pair && !metricsBlocked ? (
+          <div className={styles.cardMeters} title={cellTitle}>
+            {usagePair.map((k) => {
+              const v = metrics[k] ?? null;
+              return (
+                <div key={k} className={styles.cardMeter} data-usage={toneAttr(k)} data-unmeasured={v == null || undefined}>
+                  <span className={styles.cardMeterKey}>{usageLabel(k)}</span>
+                  {gauge(v)}
+                  <span className={styles.cardMeterVal}>{v == null ? t("ld.unmeasuredShort") : <>{compactPercent(v)}<small>%</small></>}</span>
+                </div>
+              );
+            })}
           </div>
-          {primarySparkline && (
-            <div className={styles.sparklineWrap} title={primarySparkline.metric}>
-              <D3Sparkline values={primarySparkline.values} width={40} height={20} color={trendColor} />
-            </div>
-          )}
-        </div>
-      )}
+        ) : cellKeys.length && primary && !metricsBlocked ? (
+          <div className={styles.cardMetricBig} data-usage={toneAttr(cellKeys[0]!)}>
+            <span className={styles.cardCellKeyBig}>{primary.key}</span>
+            <span className={styles.cardCellValBig}>{primary.value}<small>{primary.unit}</small></span>
+            {trend && trendKey ? <Spark className={styles.cardSparkBig} values={trend.values} domain={sparkDomain(trendKey, trend.values)} color={trendColor} /> : null}
+          </div>
+        ) : null}
+      </div>
 
-      {/* Sub-resource chips (NIC bound to VM, Frontend IP in AppGW) */}
-      {subs.length > 0 && (
-        <div className={styles.subResourceChips} data-compact={subs.length > 1 || undefined}>
-          {shownSubs.map((sr) => (
-            <div
-              key={sr.id}
-              className={styles.subResourceChip}
-              title={`${sr.label}${sr.endpoint ? `: ${sr.endpoint}` : ""}`}
-            >
-              <img
-                src={getAzureIconUrl(sr.kind === "nic" ? "nic" : sr.kind === "publicIP" ? "publicIP" : "appGateway")}
-                alt={sr.kind}
-                width={12}
-                height={12}
-              />
-              <span className={styles.subResourceLabel}>{sr.label}</span>
-              {sr.endpoint && (
-                <span className={styles.subResourceEndpoint}>{sr.endpoint}</span>
-              )}
-            </div>
-          ))}
-          {hiddenSubs.length > 0 && (
-            <span
-              className={styles.subResourceMore}
-              title={hiddenSubs.map((sr) => `${sr.label}${sr.endpoint ? `: ${sr.endpoint}` : ""}`).join("\n")}
-            >
-              +{hiddenSubs.length}
-            </span>
-          )}
-        </div>
-      )}
-
-      <Handle type="source" position={Position.Right} className={styles.handle} />
-
-      {/* VMSS expand/collapse toggle */}
-      {archRole === "aks-vmss" && azureResourceId && onVmssExpand && (
-        <button
-          type="button"
-          className={styles.vmssExpandBtn}
-          onClick={(e) => { e.stopPropagation(); onVmssExpand(nodeId, azureResourceId, aksClusterArmId); }}
-        >
-          {vmssExpanded ? `▲ ${t("ld.collapse")}` : `▼ ${t("ld.showInstances")}`}
-        </button>
-      )}
+      {/* Outline (< 0.40): the name only, tinted by status */}
+      <div className={`${styles.cardBody} ${styles.lodGlance}`}>
+        <img src={getAzureIconUrl(icon)} alt="" width={32} height={32} />
+        <span className={styles.cardNameHuge}>{middleEllipsis(name, 16)}</span>
+      </div>
     </div>
   );
 });

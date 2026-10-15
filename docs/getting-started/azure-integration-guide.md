@@ -1,5 +1,8 @@
 # Azure API Integration & Troubleshooting Guide
 
+> **로그인(SSO·플랫폼 역할)과 Azure 연결(누구의 자격 증명으로 Azure를 읽는지)은 [docs/integrations/azure](../integrations/azure/overview.md)가 기준입니다.**
+> 이 문서의 OBO·로그인 정책 설명(3장)은 `delegated` 연결(사용자 위임)에만 해당합니다. 기본(`platform`)은 사용자에게 Azure 권한이 필요 없고, 5장의 역할은 **연결의 서비스 주체**에 부여합니다.
+
 > "Failed to load: Failed to fetch" 에러의 원인 분석과 Azure 실연동 설정 가이드
 
 ---
@@ -95,7 +98,7 @@ curl http://localhost:4000/api/live/snapshot
 사용자 (Browser)
   │
   │ 1. MSAL loginPopup() → Azure AD에 로그인
-  │ 2. acquireTokenSilent() → user_impersonation scope 토큰 획득
+  │ 2. acquireTokenSilent() → api://<aud-api-client-id>/Azure.Read.All 토큰 획득
   │
   ▼
 Next.js Frontend (SPA)
@@ -126,6 +129,19 @@ Azure REST APIs (management.azure.com)
 
 > 이 프로젝트는 OBO 방식을 사용하므로 **2개의 App Registration**이 필요합니다.
 
+### 로그인 정책 (API가 토큰을 다루는 방식)
+
+| 호출 | API 동작 |
+|------|----------|
+| 토큰 없음 (익명) | 예시 데이터(`source:"mock"`, `note:"signin_required"`) 또는 401 `signin_required`. 실제 Azure를 읽지 않음 |
+| 유효한 토큰 | 서명·발급자·대상(`api://<client-id>`)·만료·`scp`(`Azure.Read.All`)·`tid`(홈 테넌트) 검증 후 **사용자 본인 권한(OBO)** 으로만 조회 |
+| 위조·만료·다른 테넌트 토큰 | 라우트 실행 전 401/403 (`invalid_token`·`token_expired`·`tenant_not_allowed`). 서비스 주체로 대신 조회하지 않음 |
+| OBO 실패 | `interaction_required`·`consent_required`·`access_blocked`·`obo_failed` 오류. 서비스 주체로 넘어가지 않음 |
+
+- 서비스 주체(SP)는 **로컬 개발에서만** 익명 조회에 쓴다: `AUD_ANONYMOUS_SP=true` + 루프백 바인드(`API_BIND_HOST=127.0.0.1`, 기본값). AKS(kubeconfig·로그·exec)는 `AUD_ANONYMOUS_K8S=true`가 더 필요하다.
+- 역할은 **사용자(또는 운영자 그룹)** 에 준다 — SP에는 고객 테넌트 권한이 필요 없다.
+- 다른 테넌트·구독 연동은 [멀티 테넌트 온보딩](./multi-tenant-onboarding.md)을 따른다.
+
 ---
 
 ## 4. App Registration 설정 (Azure Portal)
@@ -153,7 +169,7 @@ Redirect URI: (비워둠)
 2. **Application ID URI** → `api://<aud-api-client-id>` (자동 제안 수락)
 3. **Add a scope**:
    ```
-   Scope name: user_impersonation
+   Scope name: Azure.Read.All
    Who can consent: Admins and users
    Admin consent display name: Access Azure Unified Dashboard API
    Admin consent description: Allows the app to access Azure APIs on behalf of the signed-in user
@@ -165,7 +181,8 @@ Redirect URI: (비워둠)
 1. `aud-api` → **API permissions** → **Add a permission**
 2. **APIs my organization uses** → `Azure Service Management` 검색
 3. **Delegated permissions** → `user_impersonation` 체크 → **Add permissions**
-4. **Grant admin consent for [Tenant]** 클릭 (관리자 권한 필요)
+4. 같은 방법으로 **Log Analytics API** → `Data.Read`, **Azure Storage** → `user_impersonation`(흐름 로그 blob)을 추가
+5. **Grant admin consent for [Tenant]** 클릭 (관리자 권한 필요)
 
 ```
 최종 API permissions 목록:
@@ -173,6 +190,8 @@ Redirect URI: (비워둠)
 │ API                             │ Permission │ Type         │
 ├─────────────────────────────────┼────────────┼──────────────┤
 │ Azure Service Management        │ user_impersonation │ Delegated │
+│ Log Analytics API               │ Data.Read  │ Delegated    │
+│ Azure Storage                   │ user_impersonation │ Delegated │
 │ Microsoft Graph (기본)          │ User.Read  │ Delegated    │
 └─────────────────────────────────┴────────────┴──────────────┘
 ```
@@ -222,7 +241,7 @@ Redirect URI: Single-page application (SPA) → http://localhost:3000
 ┌────────────────────┬────────────────────┬──────────────┐
 │ API                │ Permission         │ Type         │
 ├────────────────────┼────────────────────┼──────────────┤
-│ aud-api            │ user_impersonation │ Delegated    │
+│ aud-api            │ Azure.Read.All     │ Delegated    │
 │ Microsoft Graph    │ User.Read          │ Delegated    │
 └────────────────────┴────────────────────┴──────────────┘
 ```
@@ -263,48 +282,49 @@ OBO 토큰은 **사용자의 Azure 권한**으로 API를 호출합니다.
 SUBSCRIPTION_ID="<your-subscription-id>"
 USER_OBJECT_ID="<user-or-group-object-id>"
 
-$SUBSCRIPTION_ID="4fb319b6-4cbe-48b9-8a38-7de71d184239"
-$USER_OBJECT_ID="ebbca125-f138-45dd-82ec-b22e7f008fd2"
+$SUBSCRIPTION_ID="<subscription-id>"
+$USER_OBJECT_ID="<user-or-group-object-id>"
 
-$SP_OBJECT_ID="0479392a-c965-4823-a425-237a40306df8"
+$OPERATOR_GROUP_ID="<operator-group-object-id>"
 
 # 1. Reader (Architecture, Health, Reservations 커버)
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 2. Monitoring Reader (Live Diagram, Monitor Metrics, Alerts)
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Monitoring Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 3. Cost Management Reader (Cost 도메인)
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Cost Management Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 # 4. Security Reader (Defender for Cloud)
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Security Reader" `
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
 
 # 5. Log Analytics Reader (Network — Workspace 범위)
-$WORKSPACE_RESOURCE_ID="/subscriptions/4fb319b6-4cbe-48b9-8a38-7de71d184239/resourcegroups/defaultresourcegroup-se/providers/microsoft.operationalinsights/workspaces/defaultworkspace-4fb319b6-4cbe-48b9-8a38-7de71d184239-se"
+$WORKSPACE_RESOURCE_ID="/subscriptions/<subscription-id>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<workspace>"
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Log Analytics Reader" `
   --scope "$WORKSPACE_RESOURCE_ID"
 
-# 6. Storage Reader (Defender for Cloud)
+# 6. Storage Blob Data Reader (NSG 흐름 로그 blob — 흐름 로그 저장소 계정 범위만)
+$FLOWLOG_STORAGE_ID="/subscriptions/<subscription-id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<flow-log-account>"
 az role assignment create `
-  --assignee "$SP_OBJECT_ID" `
+  --assignee "$OPERATOR_GROUP_ID" `
   --role "Storage Blob Data Reader" `
-  --scope "/subscriptions/$SUBSCRIPTION_ID"
+  --scope "$FLOWLOG_STORAGE_ID"
 
 ```
 
@@ -578,7 +598,7 @@ AZURE_LIVE_DIAGRAM_ENABLED=true
 
 - [ ] Live Diagram 2D Animated 모드 → 파티클 애니메이션
 - [ ] Live Diagram 3D 모드 → Three.js 렌더
-- [ ] Fault Ripple 오버레이 → critical 노드 ripple
+- [ ] 장애 영향 → critical 노드 빨간 테두리 + 구성 연결 1홉 이웃 '영향 가능'
 - [ ] Traffic Heatmap → 엣지 색상 강도
 
 ---

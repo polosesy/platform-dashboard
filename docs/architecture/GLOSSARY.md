@@ -115,3 +115,17 @@
 
 > **업데이트 기준**: 신규 컴포넌트 추가, 용어 혼선 발생 시 즉시 이 파일에 추가한다.
 > Last updated: 2026-03-12
+
+## 플랫폼 로그인·Azure 연결
+
+| 용어 | 뜻 |
+|---|---|
+| 연결 (Connection) | 플랫폼이 한 고객의 Azure(테넌트 + 구독 + 작업 영역)를 읽는 단위. 자격 증명 방식(`mode`)과 쓸 수 있는 플랫폼 역할을 가짐 — `infra/connectionRegistry.ts` |
+| 플랫폼 역할 | SSO 토큰의 앱 역할 `AUD.Viewer`(조회자)·`AUD.Operator`(운영자)·`AUD.Admin`(관리자). Azure 권한과 무관 — `infra/platformAccess.ts` |
+| 플랫폼 ID (`platform`) | 홈 테넌트의 `aud-api` 서비스 주체로 읽는 연결 |
+| Lighthouse 연결 | 고객이 Azure Lighthouse로 구독을 플랫폼 서비스 주체에 위임한 연결. 새 비밀 값 없음 |
+| 고객 서비스 주체 (`servicePrincipal`) | 고객 테넌트에 고객이 만든 앱. 비밀 값은 환경 변수 `AUD_CONN_<KEY>_SECRET`(이름만 파일에), 또는 인증서 |
+| 사용자 위임 (`delegated`) | 로그인한 사용자 본인의 Azure 권한(OBO)으로 읽는 연결 — 선택 사항 |
+| 관리자 동의 | 테넌트 관리자가 앱의 권한을 조직 전체에 승인하는 것. `delegated` 연결의 위임 권한에 필요 |
+| 연결 점검 | 설정 › Azure 연결 › 점검(관리자) — 토큰·보이는 구독·기능별 권한·과도한 권한·작업 영역 |
+| VNet 흐름 로그 | VNet 단위 흐름 기록(NSG 흐름 로그의 후속). Traffic Analytics가 `NTANetAnalytics`로 집계 |

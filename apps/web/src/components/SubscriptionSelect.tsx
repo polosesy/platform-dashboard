@@ -13,6 +13,7 @@ type Props = {
 /** Subscription picker used by every page — shows the display name, never the full ID. */
 export function SubscriptionSelect({ subscriptions, value, onChange }: Props) {
   const { t } = useI18n();
+  const multiConnection = new Set(subscriptions.map((s) => s.connectionKey).filter(Boolean)).size > 1;
   return (
     <Select
       label={t("common.subscription")}
@@ -21,6 +22,8 @@ export function SubscriptionSelect({ subscriptions, value, onChange }: Props) {
       options={subscriptions.map((s) => ({
         value: s.subscriptionId,
         label: s.name && s.name !== s.subscriptionId ? s.name : `${s.subscriptionId.slice(0, 8)}…`,
+        // Several Azure connections (customers): grouped by connection
+        ...(multiConnection && s.connectionName ? { group: s.connectionName } : {}),
       }))}
     />
   );

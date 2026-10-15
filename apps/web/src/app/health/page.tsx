@@ -405,7 +405,8 @@ function InstanceHealthPanel({
   );
   if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
 
-  const hasFallbackNote = data?.note && (data.note.includes("mock") || data.note.includes("timed out") || data.note.includes("error"));
+  const signin = data?.note === "signin_required";
+  const hasFallbackNote = data?.note && (signin || data.note.includes("mock") || data.note.includes("timed out") || data.note.includes("error"));
 
   return (
     <div className={styles.grid}>
@@ -415,13 +416,15 @@ function InstanceHealthPanel({
           <div className={styles.fallbackNoticeIcon}>!</div>
           <div>
             <div className={styles.fallbackNoticeText}>
-              {data.note!.includes("timed out")
-                ? t("health.timeoutFallback")
-                : data.note!.includes("mock")
-                  ? t("health.mockFallback")
-                  : t("health.errorFallback")}
+              {signin
+                ? t("common.sampleData")
+                : data.note!.includes("timed out")
+                  ? t("health.timeoutFallback")
+                  : data.note!.includes("mock")
+                    ? t("health.mockFallback")
+                    : t("health.errorFallback")}
             </div>
-            <div className={styles.fallbackNoticeHint}>{data.note}</div>
+            <div className={styles.fallbackNoticeHint}>{signin ? t("auth.signinForReal") : data.note}</div>
           </div>
         </div>
       )}

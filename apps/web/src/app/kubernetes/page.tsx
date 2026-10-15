@@ -6,7 +6,7 @@ import type { KubernetesClusterOverview, KubernetesObjectKind } from "@aud/types
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
-import { ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat } from "@/components/ui";
+import { ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat, useNoteText } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 
 /** base64url of the cluster's ARM resource ID (path segment for the overview API). */
@@ -36,6 +36,7 @@ function relativeAge(iso: string): string {
 
 export default function KubernetesPage() {
   const { t } = useI18n();
+  const noteText = useNoteText();
   const {
     clusters,
     clusterId: selectedClusterId,
@@ -114,8 +115,8 @@ export default function KubernetesPage() {
         }
       />
 
-      {clustersNote ? <Notice tone="info">{clustersNote}</Notice> : null}
-      {overview?.note ? <Notice tone="info">{overview.note}</Notice> : null}
+      {clustersNote ? <Notice tone="info">{noteText(clustersNote)}</Notice> : null}
+      {overview?.note ? <Notice tone="info">{noteText(overview.note)}</Notice> : null}
       <ErrorNotice error={error} />
       {loading ? <LoadingState /> : null}
 

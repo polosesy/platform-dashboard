@@ -1,0 +1,6 @@
+{
+  "tenants": [
+    { "key": "home", "displayName": "Home", "tenantId": "<HOME_TENANT_ID>", "access": "home", "subscriptions": [] },
+    { "key": "custa", "displayName": "Customer A", "tenantId": "<CUSTOMER_TENANT_ID>", "access": "lighthouse", "subscriptions": ["<CUSTOMER_SUBSCRIPTION_ID>"] }
+  ]
+}

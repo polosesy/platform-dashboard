@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolute } from "node:path";
 
 /**
  * Boolean env flag. `z.coerce.boolean()` treats any non-empty string as true
@@ -17,6 +18,39 @@ const envBool = (defaultValue: boolean) =>
 const EnvSchema = z.object({
   PORT: z.coerce.number().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000,http://localhost:3001"),
+  /** Interface the API listens on — loopback by default (the web reaches it through its /api rewrite) */
+  API_BIND_HOST: z.string().default("127.0.0.1"),
+
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+
+  // ── Sign-in policy ──
+  // Every bearer token is verified (signature, issuer, audience, lifetime, scope). Sign-in (SSO) decides WHO may use
+  // the platform and with which platform role (app roles AUD.Viewer / AUD.Operator / AUD.Admin); Azure is read with
+  // the platform's own credential of each connection (infra/connectionRegistry.ts) — not with the user's Azure
+  // permissions, unless a connection is "delegated" (OBO). Anonymous callers get sample data or 401.
+  /** Local development only: anonymous callers read Azure with the service principal (loopback bind required) */
+  AUD_ANONYMOUS_SP: envBool(false),
+  /** …and may also reach AKS (kubeconfig, pod logs, Hubble exec). Ignored unless AUD_ANONYMOUS_SP is on */
+  AUD_ANONYMOUS_K8S: envBool(false),
+  /** Delegated scopes of this API accepted in `scp` (comma list) */
+  AUD_AUTH_SCOPES: z.string().default("Azure.Read.All"),
+  /** Accepted `aud` values (comma list); default api://{AZURE_AD_CLIENT_ID} and {AZURE_AD_CLIENT_ID} */
+  AUD_AUTH_AUDIENCES: z.string().optional(),
+  /**
+   * Role for a signed-in user whose token carries none of this app's roles (app roles not assigned yet).
+   * Unset: "viewer" in development, "none" (403 no_platform_role) in production — production refuses any other value.
+   */
+  AUD_DEFAULT_ROLE: z.enum(["none", "viewer", "operator", "admin"]).optional(),
+  /** Azure connections (JSON, never committed — config/connections.example.json). Unset: the home connection only */
+  AUD_CONNECTIONS_FILE: z.string().optional(),
+  /** Deprecated alias of AUD_CONNECTIONS_FILE (version-1 "tenants" document) */
+  AUD_TENANTS_FILE: z.string().optional(),
+  /** How the home connection reads Azure: the platform identity (default) or each user's own permissions (OBO) */
+  AUD_HOME_CONNECTION_MODE: z.enum(["platform", "delegated"]).default("platform"),
+  /** Platform credential as a certificate (absolute PEM path) instead of AZURE_AD_CLIENT_SECRET */
+  AUD_PLATFORM_CERT_PATH: z.string().optional(),
+  /** One JSON audit line per signed-in API request (who · role · connection · route · status), never tokens or IDs */
+  AUD_AUDIT_LOG: z.enum(["off", "stdout"]).optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)
@@ -26,6 +60,8 @@ const EnvSchema = z.object({
   AZURE_LOG_ANALYTICS_WORKSPACE_ID: z.string().optional(),
   AZURE_LOG_ANALYTICS_TABLE: z.string().default("NTANetAnalytics"),
   AZURE_LOG_ANALYTICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+  /** VNet traffic coverage (flow-log resources, workspaces, last row) cache */
+  AZURE_NETWORK_COVERAGE_TTL_MS: z.coerce.number().default(300_000),
 
   // Azure Reservations (Consumption)
   AZURE_RESERVATIONS_GRAIN: z.enum(["daily", "monthly"]).default("monthly"),
@@ -50,6 +86,13 @@ const EnvSchema = z.object({
   // Security posture (/api/security/posture) uses the signed-in user (OBO) only. Set true to let
   // anonymous requests read live Defender data with the service principal (local verification only).
   AZURE_SECURITY_SP_FALLBACK: envBool(false),
+
+  // Live diagram: who uses each Private Endpoint (PaaS access logs + VNet flow logs). Signed-in users only;
+  // the SP fallback is for local verification (access logs name callers, so anonymous use is off by default).
+  AZURE_PL_USAGE_ENABLED: envBool(true),
+  AZURE_PL_USAGE_SP_FALLBACK: envBool(false),
+  AZURE_PL_USAGE_CACHE_TTL_MS: z.coerce.number().default(5 * 60_000),
+  AZURE_PL_USAGE_WINDOW_H: z.coerce.number().int().min(1).max(168).default(24),
 
   // Azure Resource Health (set false to serve mock data only)
   AZURE_HEALTH_ENABLED: envBool(true),
@@ -100,5 +143,24 @@ export function loadEnv(processEnv: NodeJS.ProcessEnv): Env {
     const msg = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid environment variables:\n${msg}`);
   }
-  return parsed.data;
+  return assertSafeEnv(parsed.data);
+}
+
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/i;
+
+/** Settings that must never ship together (exported for tests) */
+export function assertSafeEnv(env: Env): Env {
+  if (env.AUD_ANONYMOUS_SP && !LOOPBACK.test(env.API_BIND_HOST)) {
+    throw new Error(`AUD_ANONYMOUS_SP=true needs a loopback API_BIND_HOST (got ${env.API_BIND_HOST}) — anonymous callers would read Azure with the service principal`);
+  }
+  if (env.NODE_ENV === "production" && env.AUD_DEFAULT_ROLE && env.AUD_DEFAULT_ROLE !== "none") {
+    throw new Error("AUD_DEFAULT_ROLE must be none in production — assign the app roles (AUD.Viewer / AUD.Operator / AUD.Admin) instead");
+  }
+  if (env.AUD_PLATFORM_CERT_PATH && !isAbsolute(env.AUD_PLATFORM_CERT_PATH)) {
+    throw new Error("AUD_PLATFORM_CERT_PATH must be an absolute path");
+  }
+  if (env.CORS_ORIGIN.split(",").some((o) => o.trim() === "*")) {
+    throw new Error("CORS_ORIGIN must list origins, not *");
+  }
+  return env;
 }

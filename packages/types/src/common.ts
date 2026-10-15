@@ -1,6 +1,9 @@
 export type AzureSubscriptionOption = {
   subscriptionId: string;
   name?: string;
+  /** Azure connection this subscription belongs to (several connections → the selector groups by it) */
+  connectionKey?: string;
+  connectionName?: string;
 };
 
 export type AzureSubscriptionsResponse = {
@@ -9,13 +12,3 @@ export type AzureSubscriptionsResponse = {
   note?: string;
 };
 
-export type AzureTenantOption = {
-  tenantId: string;
-  displayName?: string;
-};
-
-export type AzureTenantsResponse = {
-  generatedAt: string;
-  tenants: AzureTenantOption[];
-  note?: string;
-};

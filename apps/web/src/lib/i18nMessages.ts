@@ -1,5 +1,6 @@
 // Translation table (pure data — importable by tests and non-React code).
 import { OPS_T } from "./i18nOps";
+import { PLATFORM_T } from "./i18nPlatform";
 import { POLICIES_T } from "./i18nPolicies";
 
 export type Locale = "ko" | "en";
@@ -21,27 +22,14 @@ const CORE: Translations = {
   "live.generateFromAzure": { ko: "Azure에서 생성", en: "Generate from Azure" },
   "live.generating": { ko: "생성 중...", en: "Generating..." },
   "live.subscription": { ko: "구독", en: "Subscription" },
-  "live.networkFlow": { ko: "네트워크 플로우", en: "Network Flow" },
-  "live.particles": { ko: "파티클", en: "Particles" },
-  "live.faultRipple": { ko: "장애 파급", en: "Fault Ripple" },
-  "live.heatmap": { ko: "히트맵", en: "Heatmap" },
   "live.timeline": { ko: "타임라인", en: "Timeline" },
-  "live.nodes": { ko: "노드", en: "Nodes" },
-  "live.edges": { ko: "엣지", en: "Edges" },
-  "live.bindings": { ko: "바인딩", en: "Bindings" },
   "live.alerts": { ko: "알림", en: "Alerts" },
   "live.noAlerts": { ko: "활성 알림 없음", en: "No active alerts" },
   "live.scopeHint": { ko: "구독 전체 구성은 인프라 구성도에서 확인", en: "Whole-subscription layout is in the Infrastructure Diagram" },
-  "live.vizMode": { ko: "표시 방식", en: "View" },
   "live.updateMode": { ko: "갱신 방식", en: "Update mode" },
-  "live.faults": { ko: "장애", en: "Faults" },
-  "live.loading3d": { ko: "3D 로딩 중...", en: "Loading 3D..." },
   "live.searchResource": { ko: "리소스 검색...", en: "Search resources..." },
 
   // ── Visualization Modes ──
-  "viz.2d": { ko: "2D 기본", en: "2D Standard" },
-  "viz.2d-animated": { ko: "2D 애니메이션", en: "2D Animated" },
-  "viz.3d": { ko: "3D 토폴로지", en: "3D Topology" },
 
   // ── Alert Sidebar ──
   "alert.title": { ko: "활성 알림", en: "Active Alerts" },
@@ -114,8 +102,8 @@ const CORE: Translations = {
   "detail.edge.deny": { ko: "차단", en: "Deny" },
 
   // ── Tenant / Subscription Selector ──
-  "live.tenant": { ko: "테넌트", en: "Tenant" },
-  "live.selectTenant": { ko: "테넌트 선택", en: "Select Tenant" },
+  "live.tenant": { ko: "연결", en: "Connection" },
+  "live.selectTenant": { ko: "연결 선택", en: "Select connection" },
   "live.region": { ko: "리전", en: "Region" },
   "live.vnet": { ko: "VNet", en: "VNet" },
   "live.allRegions": { ko: "전체 리전", en: "All Regions" },
@@ -150,6 +138,14 @@ const CORE: Translations = {
   "auth.logout": { ko: "로그아웃", en: "Sign out" },
   "auth.signingIn": { ko: "로그인 중…", en: "Signing in…" },
   "auth.signedIn": { ko: "로그인됨", en: "Signed in" },
+  "auth.signinForReal": { ko: "로그인하지 않아 예시 데이터를 보여 줍니다. 로그인하면 연결된 Azure의 실제 데이터를 봅니다.", en: "Not signed in, so this is sample data. Sign in to see real data from the connected Azure." },
+  "auth.state.signin": { ko: "로그인이 필요합니다.", en: "Sign in first." },
+  "auth.state.norole": { ko: "플랫폼 역할이 없습니다 — 관리자에게 역할(조회자·운영자·관리자) 할당을 요청하세요.", en: "No platform role — ask an admin to assign one (Viewer, Operator, Admin)." },
+  "auth.state.connection": { ko: "Azure 연결에 문제가 있습니다 — 관리자가 '설정 › Azure 연결'에서 점검해야 합니다.", en: "The Azure connection needs attention — an admin can check it under Settings › Azure connections." },
+  "auth.state.reauth": { ko: "로그인이 만료되었거나 추가 인증이 필요합니다. 다시 로그인하세요.", en: "Your sign-in expired or needs another step. Sign in again." },
+  "auth.state.consent": { ko: "사용자 위임(OBO) 연결에 관리자 동의가 필요합니다 (테넌트 관리자에게 요청).", en: "The user-delegated (OBO) connection needs admin consent (ask a tenant admin)." },
+  "auth.state.blocked": { ko: "조건부 액세스 정책이 접근을 막았습니다.", en: "Blocked by a Conditional Access policy." },
+  "auth.state.denied": { ko: "내 플랫폼 역할로는 사용할 수 없습니다.", en: "Your platform role does not allow this." },
   "auth.notConfigured": { ko: "Entra ID 앱 설정(NEXT_PUBLIC_AZURE_AD_*)이 없어 로그인할 수 없습니다", en: "Entra ID app settings (NEXT_PUBLIC_AZURE_AD_*) are missing" },
   "auth.err.cancelled": { ko: "로그인 창이 닫혔습니다.", en: "The sign-in window was closed." },
   "auth.err.popupBlocked": { ko: "팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용한 뒤 다시 시도하세요.", en: "The pop-up was blocked. Allow pop-ups for this site in the browser and try again." },
@@ -255,6 +251,7 @@ const CORE: Translations = {
   "nav.group.kubernetes": { ko: "Kubernetes", en: "Kubernetes" },
   "nav.group.security": { ko: "보안", en: "Security" },
   "nav.group.cost": { ko: "비용", en: "Cost" },
+  "nav.group.settings": { ko: "설정", en: "Settings" },
   "nav.section.crossRisk": { ko: "Azure + 클러스터", en: "Azure + Cluster" },
   "nav.section.azureSecurity": { ko: "Azure 보안", en: "Azure Security" },
   "nav.section.clusterSecurity": { ko: "클러스터 보안", en: "Cluster Security" },
@@ -262,7 +259,7 @@ const CORE: Translations = {
   "nav.item.health": { ko: "리소스 상태", en: "Resource Health" },
   "nav.item.liveDiagram": { ko: "라이브 다이어그램", en: "Live Diagram" },
   "nav.item.architecture": { ko: "인프라 구성도", en: "Infrastructure Diagram" },
-  "nav.item.vnetTraffic": { ko: "VNet 트래픽 (NSG)", en: "VNet Traffic (NSG)" },
+  "nav.item.vnetTraffic": { ko: "VNet 트래픽 (Flow Log)", en: "VNet Traffic (Flow Logs)" },
   "nav.item.podTraffic": { ko: "Pod 트래픽 (Hubble)", en: "Pod Traffic (Hubble)" },
   "nav.item.aksClusters": { ko: "AKS 클러스터", en: "AKS Clusters" },
   "nav.item.aksMonitoring": { ko: "AKS 모니터링", en: "AKS Monitoring" },
@@ -274,11 +271,12 @@ const CORE: Translations = {
   "nav.item.securityCompliance": { ko: "규정 준수", en: "Compliance" },
   "nav.item.clusterSecurity": { ko: "AKS 보안 점검", en: "AKS Security Posture" },
   "nav.item.costManagement": { ko: "비용 관리", en: "Cost Management" },
+  "nav.item.connections": { ko: "Azure 연결", en: "Azure Connections" },
   "nav.desc.overview": { ko: "구독 전체 요약 — 리소스·상태·비용·보안", en: "Subscription summary — resources, health, cost, security" },
   "nav.desc.health": { ko: "Service Health · Resource Health (리전별)", en: "Service Health · Resource Health by region" },
-  "nav.desc.liveDiagram": { ko: "VNet 1개 — 실시간 메트릭·알림·장애 파급", en: "One VNet — live metrics, alerts, blast radius" },
+  "nav.desc.liveDiagram": { ko: "VNet 1개 — 실측 메트릭·알림·장애 영향", en: "One VNet — measured metrics, alerts, fault impact" },
   "nav.desc.architecture": { ko: "구독 전체 — 리전·VNet·서브넷에 배치된 리소스와 구성 연결(설정 기준)", en: "Whole subscription — resources in regions, VNets and subnets, with configured connections" },
-  "nav.desc.vnetTraffic": { ko: "NSG Flow Log · Traffic Analytics", en: "NSG flow logs · Traffic Analytics" },
+  "nav.desc.vnetTraffic": { ko: "VNet 흐름 로그 · Traffic Analytics", en: "VNet flow logs · Traffic Analytics" },
   "nav.desc.podTraffic": { ko: "Cilium Hubble Pod 간 흐름 · Service Map", en: "Cilium Hubble pod-to-pod flows · Service Map" },
   "nav.desc.aksClusters": { ko: "클러스터 · 노드 · 워크로드 · Pod", en: "Clusters · nodes · workloads · pods" },
   "nav.desc.aksMonitoring": { ko: "Container Insights · Prometheus · 로그", en: "Container Insights · Prometheus · logs" },
@@ -290,6 +288,7 @@ const CORE: Translations = {
   "nav.desc.securityCompliance": { ko: "규정 표준별 통과·실패 컨트롤과 Defender 플랜 보호 범위", en: "Passed and failed controls per standard, Defender plan coverage" },
   "nav.desc.clusterSecurity": { ko: "AKS 위험 개요·공격 경로·네트워크 노출·권한·구성 점검·인벤토리", en: "AKS risk overview, attack paths, exposure, permissions, config checks, inventory" },
   "nav.desc.costManagement": { ko: "비용 추이 · 예산 · 예측 · 예약", en: "Cost trend · budgets · forecast · reservations" },
+  "nav.desc.connections": { ko: "플랫폼이 Azure를 읽는 연결 · 권한 점검", en: "How the platform reads Azure · permission check" },
 
   // ── Infrastructure diagram (/architecture) ──
   "arch.liveHint": { ko: "설정(구성) 기준 구성도입니다. VNet 1개의 실시간 상태는 라이브 다이어그램에서 확인하세요.", en: "Configuration-based diagram. For one VNet's live state, use the Live Diagram." },
@@ -474,22 +473,14 @@ const CORE: Translations = {
   },
 
   // ── VNet traffic (/network) ──
-  "net.table": { ko: "테이블", en: "Table" },
   "net.range": { ko: "기간", en: "Range" },
   "net.top": { ko: "상위", en: "Top" },
-  "net.totals": { ko: "합계", en: "Totals" },
   "net.bytes": { ko: "바이트", en: "Bytes" },
   "net.allowed": { ko: "허용된 흐름", en: "Allowed flows" },
   "net.denied": { ko: "거부된 흐름", en: "Denied flows" },
   "net.deniedShort": { ko: "거부", en: "Denied" },
-  "net.subnetPairs": { ko: "상위 서브넷 쌍", en: "Top subnet pairs" },
-  "net.talkers": { ko: "상위 통신 IP 쌍", en: "Top talkers (IP)" },
-  "net.ports": { ko: "상위 포트", en: "Top ports" },
   "net.pair": { ko: "출발 → 도착", en: "Source → destination" },
   "net.port": { ko: "포트", en: "Port" },
-  "net.noPairs": { ko: "서브넷 간 흐름이 없습니다", en: "No subnet pairs" },
-  "net.noTalkers": { ko: "IP 간 흐름이 없습니다", en: "No talkers" },
-  "net.noPorts": { ko: "포트 데이터가 없습니다", en: "No ports" },
 
   // ── Pod traffic (/hubble) and AKS monitoring (/observability) ──
   "hub.checkStatus": { ko: "상태 확인", en: "Check status" },
@@ -745,7 +736,7 @@ const CORE: Translations = {
 };
 
 /** Every module, in merge order — tests check that no key appears twice */
-export const MODULES: Record<string, Translations> = { core: CORE, policies: POLICIES_T, ops: OPS_T };
+export const MODULES: Record<string, Translations> = { core: CORE, policies: POLICIES_T, ops: OPS_T, platform: PLATFORM_T };
 export const T: Translations = Object.assign({}, ...Object.values(MODULES));
 
 /** True when `key` has a non-empty value in every locale. */

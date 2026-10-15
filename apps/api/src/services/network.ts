@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { NetworkFlowPair, NetworkPortSummary, NetworkSummary, NetworkTotals } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import {
   getLogAnalyticsFetcher,
   tableToObjects,
@@ -137,7 +137,7 @@ export async function tryGetNetworkSummaryFromLogAnalytics(
   const top = clampInt(params.top, 5, 50);
   const table = env.AZURE_LOG_ANALYTICS_TABLE;
 
-  const key = `${bearerKeyPrefix(bearerToken)}:${workspaceId}:${table}:${lookbackMinutes}:${top}`;
+  const key = `${cachePrefix(bearerToken)}:${workspaceId}:${table}:${lookbackMinutes}:${top}`;
   const cached = summaryCache.get(key);
   if (cached) return cached;
 

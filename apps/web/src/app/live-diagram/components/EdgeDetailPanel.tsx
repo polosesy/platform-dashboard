@@ -12,6 +12,9 @@ import type {
   LiveEdge,
 } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
+import { formatBitsPerSec } from "@/lib/format";
+import { isInferredEdge } from "@/lib/liveScope";
+import { Notice } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
@@ -21,25 +24,20 @@ type EdgeDetailPanelProps = {
   loading: boolean;
   edgeSpec: DiagramEdgeSpec | null;
   liveEdge?: LiveEdge;
+  /** Example diagram — the detail values are samples, not this edge's traffic */
+  sample?: boolean;
   onClose: () => void;
 };
 
-function fmtRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const secs = Math.max(0, Math.floor(diff / 1000));
-  if (secs < 60) return `${secs}s ago`;
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+function fmtRelativeTime(iso: string, t: TFn): string {
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return t("common.secondsAgo", { n: secs });
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return t("common.minutesAgo", { n: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function fmtThroughput(bps: number | undefined): string {
-  if (bps == null) return "-";
-  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} MB/s`;
-  if (bps >= 1_000) return `${(bps / 1_000).toFixed(1)} KB/s`;
-  return `${bps.toFixed(0)} B/s`;
+  if (hrs < 24) return t("common.hoursAgo", { n: hrs });
+  return t("common.daysAgo", { n: Math.floor(hrs / 24) });
 }
 
 function fmtBytes(bytes: number | undefined): string {
@@ -209,18 +207,23 @@ export function EdgeDetailPanel({
   loading,
   edgeSpec,
   liveEdge,
+  sample,
   onClose,
 }: EdgeDetailPanelProps) {
   const { t } = useI18n();
+  const isMock = !!sample || detail?.note === "mock";
+  const inferred = edgeSpec ? isInferredEdge(edgeSpec) : false;
+  const measured = liveEdge?.metricsSource === "measured";
+  const flowsUnknown = detail?.flowsCollected === false;
 
   const sourceLabel = localizeLabel(detail?.sourceNodeLabel ?? edgeSpec?.source ?? t("hb.col.source"), t);
   const targetLabel = localizeLabel(detail?.targetNodeLabel ?? edgeSpec?.target ?? t("hb.col.destination"), t);
   const protocol = detail?.protocol ?? edgeSpec?.protocol;
   const edgeKind = detail?.edgeKind ?? edgeSpec?.edgeKind;
 
-  // Prefer live edge metrics over detail metrics
-  const metrics = liveEdge?.metrics ?? detail?.liveMetrics;
-  const status = liveEdge?.status ?? "idle";
+  // Measured values only: live edge metrics when a real source reported them, sample detail only on the example
+  const metrics = measured ? liveEdge?.metrics : isMock ? detail?.liveMetrics : undefined;
+  const status = measured ? (liveEdge?.status ?? "idle") : "idle";
 
   const STATUS_COLORS: Record<string, string> = {
     normal: rgba("ok", 0.75),
@@ -261,11 +264,15 @@ export function EdgeDetailPanel({
           <div className={styles.edgeLoadingNote}>{t("live.loading")}</div>
         )}
 
+        {isMock && (
+          <Notice tone="warning" title={t("common.sampleData")}>{t("ld.sample.hint")}</Notice>
+        )}
+
         {detail && (
           <>
             {/* Refresh info */}
             <div className={styles.edgeRefreshInfo}>
-              {t("detail.edge.lastUpdated")} {fmtRelativeTime(detail.generatedAt)} · ⟳ 1min
+              {t("detail.edge.lastUpdated")} {fmtRelativeTime(detail.generatedAt, t)} · ⟳ {t("ld.edge.refreshEvery")}
             </div>
 
             {/* Overview */}
@@ -277,16 +284,40 @@ export function EdgeDetailPanel({
                     <span className={styles.essentialsValue}>{edgeKind}</span>
                   </div>
                 )}
-                <div className={styles.essentialsRow}>
-                  <span className={styles.essentialsLabel}>{t("hb.status")}</span>
-                  <span className={styles.essentialsValue} style={{ color: STATUS_COLORS[status] }}>
-                    {status}
-                  </span>
-                </div>
+                {inferred && (
+                  <div className={styles.essentialsRow} data-testid="edge-evidence">
+                    <span className={styles.essentialsLabel}>{t("ld.edge.evidence")}</span>
+                    <span className={styles.essentialsValue}>
+                      {t("ld.edge.inferred", { pct: Math.round((edgeSpec?.confidence ?? 0) * 100) })}
+                      {edgeSpec?.inferenceReasons?.length
+                        ? ` — ${edgeSpec.inferenceReasons.map((r) => t(`ld.reason.${r}`)).join(" · ")}`
+                        : ""}
+                    </span>
+                  </div>
+                )}
+                {edgeSpec?.caveats?.length ? (
+                  <div className={styles.essentialsRow} data-testid="edge-caveats">
+                    <span className={styles.essentialsLabel}>{t("ld.edge.caveat")}</span>
+                    <span className={styles.essentialsValue}>{edgeSpec.caveats.map((c) => t(c)).join(" · ")}</span>
+                  </div>
+                ) : null}
+                {metrics ? (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("hb.status")}</span>
+                    <span className={styles.essentialsValue} style={{ color: STATUS_COLORS[status] }}>
+                      {t(`ld.edgeStatus.${status}`)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className={styles.essentialsRow}>
+                    <span className={styles.essentialsLabel}>{t("ld.coverage.traffic")}</span>
+                    <span className={styles.essentialsValue} title={t("ld.traffic.none")}>{t("ld.edge.unmeasured")}</span>
+                  </div>
+                )}
                 {metrics?.throughputBps != null && (
                   <div className={styles.essentialsRow}>
                     <span className={styles.essentialsLabel}>{t("ld.edge.throughput")}</span>
-                    <span className={styles.essentialsValue}>{fmtThroughput(metrics.throughputBps)}</span>
+                    <span className={styles.essentialsValue}>{formatBitsPerSec(metrics.throughputBps)}</span>
                   </div>
                 )}
                 {metrics?.latencyMs != null && (
@@ -361,12 +392,12 @@ export function EdgeDetailPanel({
               </Section>
             )}
 
-            {/* Inbound Flows */}
+            {/* Inbound Flows — "미수집" when per-IP flow records are not collected (not "no flows") */}
             <Section
-              title={`${t("detail.edge.inboundFlows")} (${detail.inboundSummary.flowCount})`}
+              title={flowsUnknown ? t("detail.edge.inboundFlows") : `${t("detail.edge.inboundFlows")} (${detail.inboundSummary.flowCount})`}
               defaultOpen={true}
             >
-              <FlowList flows={detail.inboundFlows} emptyText={t("detail.edge.noFlows")} />
+              <FlowList flows={detail.inboundFlows} emptyText={flowsUnknown ? t("ld.edge.flowsNotCollected") : t("detail.edge.noFlows")} />
               {detail.inboundSummary.topPorts.length > 0 && (
                 <PortSummary summary={detail.inboundSummary} />
               )}
@@ -374,10 +405,10 @@ export function EdgeDetailPanel({
 
             {/* Outbound Flows */}
             <Section
-              title={`${t("detail.edge.outboundFlows")} (${detail.outboundSummary.flowCount})`}
+              title={flowsUnknown ? t("detail.edge.outboundFlows") : `${t("detail.edge.outboundFlows")} (${detail.outboundSummary.flowCount})`}
               defaultOpen={true}
             >
-              <FlowList flows={detail.outboundFlows} emptyText={t("detail.edge.noFlows")} />
+              <FlowList flows={detail.outboundFlows} emptyText={flowsUnknown ? t("ld.edge.flowsNotCollected") : t("detail.edge.noFlows")} />
               {detail.outboundSummary.topPorts.length > 0 && (
                 <PortSummary summary={detail.outboundSummary} />
               )}

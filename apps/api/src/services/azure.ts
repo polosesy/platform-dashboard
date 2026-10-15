@@ -1,9 +1,14 @@
 import { ResourceGraphClient } from "@azure/arm-resourcegraph";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { getSPCredential } from "../infra/azureClientFactory.js";
-import { getOBOCredential } from "../infra/oboTokenPool.js";
-import { parseSubscriptionIds } from "../infra/requestParams.js";
+import {
+  anonymousSpAllowed,
+  callerSubscriptions,
+  connectionCredentialGroups,
+  getAnonymousSPCredential,
+  signinRequired,
+} from "../infra/azureClientFactory.js";
+import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind } from "@aud/types";
 
@@ -40,16 +45,22 @@ export function clearGraphCache(): void {
   graphCache.clear();
 }
 
-type RGClientBundle = { client: ResourceGraphClient; subscriptions: string[]; pageSize: number };
+type RGClientBundle = { groups: Array<{ client: ResourceGraphClient; subscriptions: string[] }>; subscriptions: string[]; pageSize: number };
 
-/** Resource Graph client — pooled OBO credential when a user token is present, shared SP credential otherwise. */
-function createResourceGraphClient(env: Env, bearerToken: string | undefined): RGClientBundle {
-  const subscriptions = parseSubscriptionIds(env);
+/**
+ * Resource Graph clients — one per credential of the Azure connections behind the subscriptions (platform identity,
+ * a customer's service principal, or a delegated connection's OBO); anonymous dev mode: the platform credential.
+ */
+function createResourceGraphClient(env: Env, bearerToken: string | undefined, only?: string[]): RGClientBundle {
+  // The managed subscriptions this caller may read (home + customer connections the caller's role reaches)
+  const subscriptions = only ?? callerSubscriptions(env, bearerToken);
   if (subscriptions.length === 0) {
-    throw new Error("AZURE_SUBSCRIPTION_IDS is empty");
+    throw new Error("No managed subscriptions for this caller");
   }
-  const credential = bearerToken ? getOBOCredential(env, bearerToken) : getSPCredential(env);
-  return { client: new ResourceGraphClient(credential), subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
+  const groups = bearerToken
+    ? connectionCredentialGroups(env, bearerToken, subscriptions).map((g) => ({ client: new ResourceGraphClient(g.credential), subscriptions: g.subscriptions }))
+    : [{ client: new ResourceGraphClient(getAnonymousSPCredential(env)), subscriptions }];
+  return { groups, subscriptions, pageSize: env.AZURE_RESOURCE_GRAPH_PAGE_SIZE };
 }
 
 function mapKind(type: string | undefined, resourceKind?: string): GraphNodeKind {
@@ -531,7 +542,13 @@ function deepScanForSubnetId(
   return undefined;
 }
 
-async function resourceGraphQueryAll<T>(
+/** Every page of a query, across the bundle's credential groups */
+async function resourceGraphQueryAll<T>(bundle: RGClientBundle, query: string): Promise<T[]> {
+  const parts = await Promise.all(bundle.groups.map((g) => resourceGraphQueryOne<T>(g.client, g.subscriptions, query, bundle.pageSize)));
+  return parts.flat();
+}
+
+async function resourceGraphQueryOne<T>(
   client: ResourceGraphClient,
   subscriptions: string[],
   query: string,
@@ -557,8 +574,8 @@ async function resourceGraphQueryAll<T>(
   return all;
 }
 
-async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | undefined): Promise<ArchitectureGraph> {
-  const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
+async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | undefined, only?: string[]): Promise<ArchitectureGraph> {
+  const bundle = createResourceGraphClient(env, bearerToken, only);
 
   const subsQuery =
     "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
@@ -604,10 +621,10 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     " | project id, name, type, kind, location, resourceGroup, subscriptionId, tags, properties";
 
   const [subRows, rgRows, resRows, diagRows] = await Promise.all([
-    resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize),
-    resourceGraphQueryAll<AzureResourceGroupRow>(client, subscriptions, rgQuery, pageSize),
-    resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, resQuery, pageSize),
-    resourceGraphQueryAll<AzureResourceRow>(client, subscriptions, diagQuery, pageSize).catch(() => [] as AzureResourceRow[]),
+    resourceGraphQueryAll<AzureSubscriptionRow>(bundle, subsQuery),
+    resourceGraphQueryAll<AzureResourceGroupRow>(bundle, rgQuery),
+    resourceGraphQueryAll<AzureResourceRow>(bundle, resQuery),
+    resourceGraphQueryAll<AzureResourceRow>(bundle, diagQuery).catch(() => [] as AzureResourceRow[]),
   ]);
 
   // Normalize Azure resource IDs to lowercase — Azure resource IDs are
@@ -625,7 +642,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   const edges: ArchitectureEdge[] = [];
 
   // subscriptions
-  for (const subId of subscriptions) {
+  for (const subId of bundle.subscriptions) {
     nodes.push({
       id: `sub:${subId}`,
       kind: "subscription",
@@ -1553,33 +1570,43 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   };
 }
 
+/** A signed-in user, or anonymous dev mode — anonymous otherwise is "sign in" (routes answer with sample data) */
 function hasCredentials(env: Env, bearerToken: string | undefined): boolean {
-  return !!bearerToken || !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);
+  if (bearerToken) return true;
+  if (!anonymousSpAllowed(env)) throw signinRequired();
+  return !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);
 }
 
 export async function tryListAzureSubscriptionsFromAzure(
   env: Env,
   bearerToken: string | undefined,
 ): Promise<AzureSubscriptionOption[] | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS || !hasCredentials(env, bearerToken)) return null;
+  if (!hasCredentials(env, bearerToken)) return null;
+  const all = callerSubscriptions(env, bearerToken);
+  if (!all.length) return null;
 
-  const cacheKey = `${cachePrefix(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:${all.join(",")}`;
   const cached = subsCache.get(cacheKey);
   if (cached) return cached;
 
-  const { client, subscriptions, pageSize } = createResourceGraphClient(env, bearerToken);
+  const bundle = createResourceGraphClient(env, bearerToken, all);
+  const { subscriptions } = bundle;
   const subsQuery = "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId, name";
-  const rows = await resourceGraphQueryAll<AzureSubscriptionRow>(client, subscriptions, subsQuery, pageSize);
+  const rows = await resourceGraphQueryAll<AzureSubscriptionRow>(bundle, subsQuery);
 
   const nameById = new Map<string, string>();
   for (const r of rows) {
     if (r.subscriptionId && r.name) nameById.set(r.subscriptionId.toLowerCase(), r.name);
   }
 
-  const out: AzureSubscriptionOption[] = subscriptions.map((subscriptionId) => ({
-    subscriptionId,
-    name: nameById.get(subscriptionId.toLowerCase()),
-  }));
+  const out: AzureSubscriptionOption[] = subscriptions.map((subscriptionId) => {
+    const conn = connectionForSubscription(env, subscriptionId);
+    return {
+      subscriptionId,
+      name: nameById.get(subscriptionId.toLowerCase()),
+      ...(conn ? { connectionKey: conn.key, connectionName: conn.displayName } : {}),
+    };
+  });
 
   subsCache.set(cacheKey, out, env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS);
   return out;
@@ -1590,22 +1617,25 @@ export async function tryGetArchitectureGraphFromAzure(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<ArchitectureGraph | null> {
-  if (!env.AZURE_SUBSCRIPTION_IDS || !hasCredentials(env, bearerToken)) return null;
+  if (!hasCredentials(env, bearerToken)) return null;
+  const all = callerSubscriptions(env, bearerToken);
+  if (!all.length) return null;
 
-  // Optional narrowing to a single subscription (must be in the allow-list env)
+  // Optional narrowing to a single subscription (must be a managed one)
+  let subs = all;
   if (opts?.subscriptionId) {
     const wanted = opts.subscriptionId.toLowerCase();
-    if (!parseSubscriptionIds(env).some((s) => s.toLowerCase() === wanted)) {
-      throw new Error("subscriptionId is not in AZURE_SUBSCRIPTION_IDS allow-list");
+    if (!all.some((s) => s.toLowerCase() === wanted)) {
+      throw new Error("subscriptionId is not a managed subscription");
     }
-    env = { ...env, AZURE_SUBSCRIPTION_IDS: opts.subscriptionId };
+    subs = [opts.subscriptionId];
   }
 
-  const cacheKey = `${cachePrefix(bearerToken)}:${env.AZURE_SUBSCRIPTION_IDS}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:${subs.join(",")}`;
   const cached = graphCache.get(cacheKey);
   if (cached) return cached;
 
-  const graph = await fetchTopologyFromResourceGraph(env, bearerToken);
+  const graph = await fetchTopologyFromResourceGraph(env, bearerToken, subs);
   graphCache.set(cacheKey, graph, env.AZURE_RESOURCE_GRAPH_CACHE_TTL_MS);
   return graph;
 }

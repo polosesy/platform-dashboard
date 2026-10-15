@@ -5,6 +5,8 @@ import { InteractionStatus } from "@azure/msal-browser";
 import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { loginErrorMessage, loginRequest, msalConfigured } from "@/lib/msal";
 import { useI18n } from "@/lib/i18n";
+import { useMe } from "@/lib/useMe";
+import { Badge } from "@/components/ui";
 import styles from "./TopNav.module.css";
 
 /** Sign-in / signed-in user / sign-out, with visible errors instead of console-only failures. */
@@ -14,6 +16,8 @@ export function AuthControls() {
   const [error, setError] = useState<string | null>(null);
   const user = instance.getActiveAccount() ?? accounts[0];
   const busy = inProgress !== InteractionStatus.None;
+  const me = useMe().data;
+  const role = me && !me.anonymous ? me.role : undefined;
 
   const login = async () => {
     setError(null);
@@ -34,6 +38,12 @@ export function AuthControls() {
           <span className={styles.userDot} aria-hidden="true" />
           <span className={styles.userName}>{user?.name ?? user?.username ?? t("auth.signedIn")}</span>
         </div>
+        {/* Platform role (SSO app role) — what this account may do here, independent of any Azure permission */}
+        {role !== undefined ? (
+          <Badge tone={role ? (role === "admin" ? "high" : role === "operator" ? "medium" : "info") : "neutral"} title={me?.roleFromDefault ? t("auth.role.defaultHint") : undefined}>
+            {t(`auth.role.${role ?? "none"}`)}{me?.roleFromDefault ? "*" : ""}
+          </Badge>
+        ) : null}
         <button className={styles.btnSecondary} onClick={logout} type="button" disabled={busy}>
           {t("auth.logout")}
         </button>

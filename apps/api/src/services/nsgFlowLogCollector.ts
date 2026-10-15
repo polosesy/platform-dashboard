@@ -1,8 +1,8 @@
 import { BlobServiceClient } from "@azure/storage-blob";
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager.js";
-import { getSPCredential } from "../infra/azureClientFactory.js";
+import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { getAnonymousSPCredential, homeConnectionCredential } from "../infra/azureClientFactory.js";
 import { buildIpResourceMap, resolveIpsToNodes, type IpResourceMap } from "./ipResourceMapper.js";
 
 // ────────────────────────────────────────────
@@ -80,15 +80,16 @@ export async function collectNsgFlowLogs(
 ): Promise<NsgFlowEdgeData[]> {
   if (!env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT) return [];
 
-  const cacheKey = `nsgflow:${env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT}:${edges.length}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:nsgflow:${env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT}:${edges.length}`;
   const cached = nsgFlowCache.get(cacheKey);
   if (cached) return cached;
 
   // Build IP→Resource map
   const ipMap = await buildIpResourceMap(env, bearerToken, nodes);
 
-  // Connect to blob storage using SP credential
-  const credential = getSPCredential(env);
+  // Flow-log blobs with the home connection's credential (Storage Blob Data Reader on the flow-log account — the
+  // account is configured for this deployment, not per connection); the platform credential for anonymous dev mode
+  const credential = bearerToken ? homeConnectionCredential(env, bearerToken) : getAnonymousSPCredential(env);
   const blobServiceClient = new BlobServiceClient(
     `https://${env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT}.blob.core.windows.net`,
     credential,

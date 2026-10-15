@@ -85,7 +85,8 @@ export type DiagramEdgeKind =
   | "attached-to"        // Subnet → NIC
   | "bound-to"           // NIC → VM
   | "outbound-internet"  // Resource → Internet (NAT GW / LB SNAT / PIP / default)
-  | "natgw-association"; // Subnet → NAT GW (visible when NAT GW card is expanded)
+  | "natgw-association"  // Subnet → NAT GW (visible when NAT GW card is expanded)
+  | "privateLinkUsage";  // Workload → Private Endpoint, observed in access / flow logs (web-only, never in a stored spec)
 
 export type DiagramEdgeSpec = {
   id: string;
@@ -95,6 +96,14 @@ export type DiagramEdgeSpec = {
   protocol?: string;
   edgeKind?: DiagramEdgeKind;
   confidence?: number;         // 0-1, for inferred edges
+  /** Where the link comes from: Azure configuration, or a guess from naming / grouping (never drawn as fact).
+   *  Older saved specs omit it — treat `edgeKind === "inferred"` as inferred. */
+  /** configured = Azure configuration · inferred = a guess (off by default) · observed = seen in logs */
+  evidence?: "configured" | "inferred" | "observed";
+  /** Inferred links only: the signals that produced the guess (same RG, same region, env tag, …) */
+  inferenceReasons?: string[];
+  /** i18n keys of what the measured value may include or miss (shown in the edge panel) */
+  caveats?: string[];
   flowType?: DiagramFlowType;   // network flow semantics (ingress/egress/east-west/control/dependency)
   bindings: Record<string, MetricBinding>;
   animation: EdgeAnimationKind;
@@ -125,6 +134,24 @@ export type MetricBinding = {
   aggregation?: MetricAggregation;
   kql?: string;               // logAnalytics source only
   rules?: HealthRule[];        // composite source only
+  /** "complement": the value shown is 100 − the metric (VM "Available Memory Percentage" → memory used %) */
+  transform?: "complement";
+  /** Azure Monitor `$filter` (dimension), server-authored only — e.g. "Direction eq 'In'" */
+  filter?: string;
+  /** Multiplier applied after aggregation and complement: 8/60 bytes per minute → bit/s, 1000 s → ms, 100 0..1 → % */
+  scale?: number;
+  /** Edges only: which end's Azure resource is queried (default: the source) */
+  node?: "source" | "target";
+  /**
+   * `source: "derived"`: from two other bindings of the node. share = a/(a+b)×100, ratio = a/b×100, sum = a+b;
+   * null when an operand is missing or the denominator is under `minDenominator` (default 1)
+   */
+  derive?: { op: "share" | "ratio" | "sum"; of: [string, string]; minDenominator?: number };
+  /**
+   * Not every resource of the kind has this metric (newer platform metric, SKU-dependent). Azure Monitor rejects
+   * the whole request for an unknown name, so an optional metric that fails is dropped instead of the others.
+   */
+  optional?: boolean;
 };
 
 export type MetricSourceKind =
@@ -132,7 +159,9 @@ export type MetricSourceKind =
   | "logAnalytics"
   | "appInsights"
   | "serviceHealth"
-  | "composite";
+  | "composite"
+  /** Computed from two other bindings of the same node (`derive`) — e.g. App Gateway healthy share of backends */
+  | "derived";
 
 export type MetricAggregation = "avg" | "max" | "min" | "total" | "p50" | "p95" | "p99" | "rate" | "count";
 
@@ -141,6 +170,13 @@ export type HealthRule = {
   op: "<" | ">" | "<=" | ">=" | "==";
   threshold: number;
   weight: number;
+  /**
+   * Hard threshold written as a pass condition: when it fails the resource is at least this level. Leveled rules
+   * are never weighted and never treated as "activity" rules.
+   */
+  level?: "warning" | "critical";
+  /** Judge only when another metric reaches a minimum (low-sample guard, e.g. requests ≥ 20 before an error rate) */
+  when?: { metric: string; atLeast: number };
 };
 
 export type AlertCondition = {
@@ -218,7 +254,26 @@ export type LiveDiagramSnapshot = {
     failedBindings: number;
   };
   faultImpacts?: FaultImpact[];
-  heatmap?: TrafficHeatmapData;
+  /** "mock" = sample data (not real Azure resources or traffic); "azure" = read from Azure, possibly partly empty */
+  dataSource?: "azure" | "mock";
+  /** How much of the picture is measured — shown so an empty or static diagram is never read as "no traffic" */
+  coverage?: LiveCoverage;
+};
+
+export type LiveSourceState = "ok" | "empty" | "signin" | "disabled" | "failed";
+
+export type LiveCoverage = {
+  /** Resource nodes with at least one metric value / resource nodes that have metric bindings */
+  nodesWithMetrics: number;
+  nodesWithBindings: number;
+  /** Edges with measured traffic (throughput / requests / latency) / configured edges */
+  edgesWithTraffic: number;
+  configuredEdges: number;
+  sources: {
+    metrics: LiveSourceState;
+    traffic: LiveSourceState;
+    alerts: LiveSourceState;
+  };
 };
 
 export type LiveNode = {
@@ -243,6 +298,8 @@ export type LiveEdge = {
   };
   trafficLevel: EdgeTrafficLevel;
   activeAlertIds: string[];
+  /** Set only when the metrics come from a real source (Traffic Analytics, NSG flow logs, App Insights, Monitor) */
+  metricsSource?: "measured";
 };
 
 export type LiveAlert = {
@@ -280,7 +337,6 @@ export type EdgeTrafficLevel = "none" | "low" | "medium" | "high" | "burst";
 export type AlertSeverity = "info" | "warning" | "critical";
 export type EdgeAnimationKind = "flow" | "pulse" | "dash" | "none";
 export type DiagramLayoutKind = "dagre" | "elk" | "manual" | "force";
-export type VisualizationMode = "2d" | "2d-animated" | "3d";
 
 export type DiagramIconKind =
   | "subscription" | "resourceGroup"
@@ -320,25 +376,14 @@ export type SparklineData = {
   metric: string;
 };
 
+/** A failing resource and the resources one configured hop away from it (impact is possible, not confirmed) */
 export type FaultImpact = {
   sourceNodeId: string;
   severity: AlertSeverity;
+  /** What started it: metric health critical, or an active critical Azure Monitor alert */
+  trigger: "metric" | "alert";
   affectedNodeIds: string[];
   affectedEdgeIds: string[];
-  rippleRadius: number;
-};
-
-export type HeatmapCell = {
-  source: string;
-  target: string;
-  value: number;
-  normalizedValue: number;
-};
-
-export type TrafficHeatmapData = {
-  cells: HeatmapCell[];
-  subnets: string[];
-  maxValue: number;
 };
 
 // ────────────────────────────────────────────
@@ -459,6 +504,9 @@ export type EdgeNetworkDetail = {
   outboundFlows: NetworkFlowRecord[];
   inboundSummary: FlowSummary;
   outboundSummary: FlowSummary;
+  /** false = per-IP flow records are not collected for this edge ("미수집", not "no flows") */
+  flowsCollected?: boolean;
+  /** "mock" = sample detail for the example diagram */
   note?: string;
 };
 
@@ -554,4 +602,98 @@ export type AksPlaneDetail = {
     loadBalancerSku?: string;
   };
   note?: string;
+};
+
+// ────────────────────────────────────────────
+// 10. Private Link usage (who uses a Private Endpoint) — GET /api/live/private-link-usage
+//
+// Observed evidence only: a PaaS access log row (caller IP / identity) or a VNet flow log row (source IP →
+// Private Endpoint IP). Nothing is guessed from names. Never part of the shared spec or the 30 s snapshot.
+// ────────────────────────────────────────────
+
+/** access = the service's own log saw the caller; flow = packets reached the Private Endpoint IP */
+export type PlUsageGrade = "access" | "flow";
+export type PlUsageSource = "kvAudit" | "storageLogs" | "redisClients" | "vnetFlow";
+export type PlSourceReason =
+  | "noDiagSetting" | "notToWorkspace" | "categoryOff"
+  | "noFlowLog" | "nsgFlowLogOnly" | "noTrafficAnalytics"
+  | "noAccess" | "unsupported";
+
+export type PlEvidence = {
+  source: PlUsageSource;
+  grade: PlUsageGrade;
+  firstSeen?: string;
+  lastSeen?: string;
+  requests?: number;
+  failed?: number;
+  clients?: number;
+  bytes?: number;
+  flows?: number;
+  deniedFlows?: number;
+  operations?: string[];
+  ports?: number[];
+};
+
+export type PrivateLinkUsage = {
+  /** `plu:${callerNodeId}>${peNodeId}` */
+  id: string;
+  callerNodeId: string;
+  peNodeId: string;
+  targetNodeId: string;
+  /** RFC 1918 address of the caller (never a public IP) */
+  callerIp?: string;
+  /** How the caller was found: its NIC IP, the only compute in the source subnet, or its managed identity */
+  attribution: "nic" | "subnetOwner" | "identity";
+  /** Resource name owning the managed identity — never an object ID */
+  identityName?: string;
+  grade: PlUsageGrade;
+  lastSeen?: string;
+  evidence: PlEvidence[];
+};
+
+export type PlEndpoint = {
+  peNodeId: string;
+  targetNodeId: string;
+  connectionState?: "Approved" | "Pending" | "Rejected" | "Disconnected";
+  /** used: a usage or PE bytes > 0 · noUseObserved: a source is on and saw nothing · unknown: no evidence either way */
+  activity: "used" | "noUseObserved" | "unknown";
+};
+
+export type PlUnresolved = {
+  targetNodeId: string;
+  peNodeId?: string;
+  ip?: string;
+  reason: "nicNoVm" | "notInDiagram" | "ambiguous" | "peUnconfirmed" | "denied" | "noIp";
+  nicName?: string;
+  candidates?: string[];
+  requests?: number;
+  deniedFlows?: number;
+  lastSeen?: string;
+};
+
+/** Calls over the public path (bypassing the Private Endpoint) — counted, IPs not listed */
+export type PlPublicAccess = { targetNodeId: string; requests: number; distinctIps: number; identityNames?: string[]; lastSeen?: string };
+
+export type PlSourceStatus = {
+  source: PlUsageSource;
+  targetNodeId?: string;
+  state: LiveSourceState;
+  reason?: PlSourceReason;
+  /** Service / category named in the how-to text */
+  service?: string;
+  category?: string;
+  /** Masked workspace name and flow-log interval (minutes) */
+  workspaceName?: string;
+  intervalMin?: number;
+};
+
+export type PrivateLinkUsageResponse = {
+  generatedAt: string;
+  windowHours: number;
+  dataSource: "azure" | "mock";
+  endpoints: PlEndpoint[];
+  usages: PrivateLinkUsage[];
+  unresolved: PlUnresolved[];
+  publicAccess: PlPublicAccess[];
+  sources: PlSourceStatus[];
 };

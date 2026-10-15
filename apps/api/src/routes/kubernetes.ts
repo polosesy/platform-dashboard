@@ -5,7 +5,7 @@ import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview 
 import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
 import { queryLang } from "../infra/lang.js";
-import { assertArmResourceId, queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
+import { HttpError, assertArmResourceId, isSigninRequired, queryArmResourceId, querySubscriptionId, respondWithFallback, safeMessage, sendError } from "../infra/requestParams.js";
 
 /** Minimal cluster info derived from an ARM ID, used when the cluster is not in the listing. */
 function clusterInfoFromId(azureResourceId: string): KubernetesClusterInfo {
@@ -38,6 +38,10 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
   router.get("/api/kubernetes/cluster/:clusterId/overview", async (req: Request, res: Response) => {
     let azureResourceId: string;
     let subscriptionId: string | undefined;
+    // A sample cluster (what anonymous callers are shown) answers with its sample overview
+    const decoded = Buffer.from(req.params.clusterId ?? "", "base64url").toString("utf-8").toLowerCase();
+    const sample = mockClusters.clusters.find((c) => c.id === decoded);
+    if (sample) return void res.json({ ...mockClusterOverview(sample), note: req.auth?.bearerToken ? "mock data" : "signin_required" });
     try {
       azureResourceId = assertArmResourceId(env, Buffer.from(req.params.clusterId ?? "", "base64url").toString("utf-8"), "clusterId");
       subscriptionId = querySubscriptionId(req, env);
@@ -51,11 +55,12 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
         clustersData.clusters.find((c) => c.id === azureResourceId.toLowerCase()) ?? clusterInfoFromId(azureResourceId);
       res.json(await getClusterOverview(env, req.auth?.bearerToken, azureResourceId, clusterInfo));
     } catch (e: unknown) {
-      console.error("[kubernetes] overview error:", e instanceof Error ? e.message : e);
-      // Fall back to mock overview
+      // Sign in → the sample overview; a real refusal (expired sign-in, Entra-only cluster …) stays an error
+      if (e instanceof HttpError && !isSigninRequired(e)) return sendError(res, e, "cluster_overview_failed", "kubernetes");
+      console.error("[kubernetes] overview error:", safeMessage(e));
       res.json({
         ...mockClusterOverview(mockClusters.clusters[0]!),
-        note: e instanceof Error ? e.message : "overview error",
+        note: isSigninRequired(e) ? "signin_required" : safeMessage(e),
       });
     }
   });

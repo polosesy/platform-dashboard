@@ -9,6 +9,8 @@ import { getArmFetcher, getArmFetcherAuto } from "../infra/azureClientFactory.js
 // ────────────────────────────────────────────
 
 const metricCache = new CacheManager<Record<string, number | null>>(200, 60_000);
+/** Metric names Azure Monitor rejected per resource (optional bindings only) — not asked for again */
+const unsupportedMetrics = new Map<string, Set<string>>();
 const edgeMetricCache = new CacheManager<Record<string, number | null>>(200, 60_000);
 
 type MonitorTimeseriesValue = {
@@ -31,18 +33,29 @@ type MonitorMetricsResponse = {
   value?: MonitorMetricValue[];
 };
 
-function pickAggregation(values: MonitorTimeseriesValue[], agg: MetricAggregation): number | null {
-  if (values.length === 0) return null;
-  const last = values[values.length - 1]!;
+/** Value of one bucket for the requested aggregation */
+function bucketValue(b: MonitorTimeseriesValue, agg: MetricAggregation): number | null {
   switch (agg) {
-    case "avg": return last.average ?? null;
-    case "max": return last.maximum ?? null;
-    case "min": return last.minimum ?? null;
-    case "total": return last.total ?? null;
-    case "count": return last.count ?? null;
-    case "rate": return last.count != null && last.count > 0 ? last.count / 60 : null;
-    default: return last.average ?? null;
+    case "avg": return b.average ?? null;
+    case "max": return b.maximum ?? null;
+    case "min": return b.minimum ?? null;
+    case "total": return b.total ?? null;
+    case "count": return b.count ?? null;
+    case "rate": return b.count != null && b.count > 0 ? b.count / 60 : null;
+    default: return b.average ?? null;
   }
+}
+
+/**
+ * Latest bucket that has a value. The newest 1-minute bucket is often still empty when Azure Monitor is
+ * queried, and reading only that bucket turned measured resources into "미측정".
+ */
+function pickAggregation(values: MonitorTimeseriesValue[], agg: MetricAggregation): number | null {
+  for (let i = values.length - 1; i >= 0; i--) {
+    const v = bucketValue(values[i]!, agg);
+    if (v != null) return v;
+  }
+  return null;
 }
 
 function monitorAggParam(agg: MetricAggregation): string {
@@ -57,9 +70,113 @@ function monitorAggParam(agg: MetricAggregation): string {
   }
 }
 
+type MetricSeries = ReadonlyArray<readonly [string, MonitorTimeseriesValue[]]>;
+
+/**
+ * Runs one metrics query for all bindings and reads each value. An unknown metric name fails the whole Azure
+ * Monitor request, so when that happens the required metrics are asked again on their own and every optional
+ * one separately: a resource without "Available Memory Percentage" still shows its CPU. Only a 400 (rejected
+ * name) is reported to `onRejected`; throttling or timeouts are tried again on the next refresh.
+ * Response names are matched without case (Azure echoes its own spelling). Exported for tests.
+ */
+export async function queryMetricsTolerant(
+  list: Array<[string, MetricBinding]>,
+  query: (list: Array<[string, MetricBinding]>) => Promise<MetricSeries>,
+  onRejected: (metric: string) => void,
+): Promise<Record<string, number | null>> {
+  const byName = new Map<string, MonitorTimeseriesValue[]>();
+  const keep = (series: MetricSeries) => { for (const [name, data] of series) byName.set(name.toLowerCase(), data); };
+  try {
+    keep(await query(list));
+  } catch (err) {
+    const optional = list.filter(([, b]) => b.optional);
+    if (optional.length === 0) throw err;
+    const required = list.filter(([, b]) => !b.optional);
+    if (required.length > 0) keep(await query(required));
+    await Promise.all(optional.map(async (entry) => {
+      try {
+        keep(await query([entry]));
+      } catch (e) {
+        if (/ 400:/.test(String(e))) onRejected(entry[1].metric!);
+      }
+    }));
+  }
+  const result: Record<string, number | null> = {};
+  for (const [key, binding] of list) {
+    let v = pickAggregation(byName.get(binding.metric!.toLowerCase()) ?? [], binding.aggregation ?? "avg");
+    // "complement": memory used % from "Available Memory Percentage"; then the unit scale (bytes/min → bit/s, s → ms)
+    if (v != null && binding.transform === "complement") v = Math.max(0, Math.min(100, 100 - v));
+    if (v != null && binding.scale != null) v *= binding.scale;
+    result[key] = v;
+  }
+  return result;
+}
+
+/**
+ * Bindings computed from two others of the same node (`source: "derived"`): share = a/(a+b)×100,
+ * ratio = a/b×100, sum = a+b. Missing operand or a denominator under `minDenominator` (default 1) → null —
+ * no 0 % error rate out of zero requests. Exported for tests.
+ */
+export function applyDerived(bindings: Record<string, MetricBinding>, values: Record<string, number | null>): Record<string, number | null> {
+  const out = { ...values };
+  for (const [key, b] of Object.entries(bindings)) {
+    if (b.source !== "derived" || !b.derive) continue;
+    const [ka, kb] = b.derive.of;
+    const a = out[ka], c = out[kb];
+    const min = b.derive.minDenominator ?? 1;
+    if (a == null || c == null) { out[key] = null; continue; }
+    if (b.derive.op === "sum") out[key] = a + c;
+    else if (b.derive.op === "share") out[key] = a + c >= min ? (a / (a + c)) * 100 : null;
+    else out[key] = c >= min ? (a / c) * 100 : null;
+  }
+  return out;
+}
+
+/** Metrics a resource rejected (optional bindings only), as `metric|filter` per resource — not asked for again */
+const rejectedKey = (b: MetricBinding) => `${b.metric}|${b.filter ?? ""}`;
+
+/**
+ * All monitor bindings of one resource: one request per dimension filter (Azure Monitor takes one `$filter` per
+ * call), each tolerant of unknown optional names, then the derived values. Used for nodes and for edges.
+ */
+export async function queryResourceMetrics(
+  fetcher: { fetchJson<T>(url: string): Promise<T> },
+  azureResourceId: string,
+  bindings: Record<string, MetricBinding>,
+): Promise<Record<string, number | null>> {
+  const skip = unsupportedMetrics.get(azureResourceId);
+  const monitor = Object.entries(bindings).filter(([, b]) => b.source === "monitor" && b.metric && !(b.optional && skip?.has(rejectedKey(b))));
+  const groups = new Map<string, Array<[string, MetricBinding]>>();
+  for (const entry of monitor) (groups.get(entry[1].filter ?? "") ?? groups.set(entry[1].filter ?? "", []).get(entry[1].filter ?? "")!).push(entry);
+  const values: Record<string, number | null> = {};
+  for (const [filter, list] of groups) {
+    const query = async (part: Array<[string, MetricBinding]>) => {
+      const metricNames = [...new Set(part.map(([, b]) => b.metric!))];
+      const aggregations = [...new Set(part.map(([, b]) => monitorAggParam(b.aggregation ?? "avg")))];
+      const url =
+        `https://management.azure.com${azureResourceId}` +
+        `/providers/microsoft.insights/metrics` +
+        `?api-version=2024-02-01` +
+        `&metricnames=${metricNames.map(encodeURIComponent).join(",")}` +
+        `&timespan=PT5M` +
+        `&interval=PT1M` +
+        `&aggregation=${aggregations.join(",")}` +
+        (filter ? `&$filter=${encodeURIComponent(filter)}` : "");
+      const resp = await fetcher.fetchJson<MonitorMetricsResponse>(url);
+      return (resp.value ?? []).map((mv) => [mv.name.value, mv.timeseries?.[0]?.data ?? []] as const);
+    };
+    Object.assign(values, await queryMetricsTolerant(list, query, (metric) => {
+      const set = unsupportedMetrics.get(azureResourceId) ?? new Set<string>();
+      set.add(`${metric}|${filter}`);
+      unsupportedMetrics.set(azureResourceId, set);
+    }));
+  }
+  return applyDerived(bindings, values);
+}
+
 /**
  * Fetches Azure Monitor metrics for a single resource.
- * Returns a map of metricName → value.
+ * Returns a map of binding key → value.
  */
 export async function collectResourceMetrics(
   env: Env,
@@ -71,40 +188,10 @@ export async function collectResourceMetrics(
   const cacheKey = `${prefix}:metrics:${azureResourceId}`;
   const cached = metricCache.get(cacheKey);
   if (cached) return cached;
-
-  // Filter only monitor-source bindings
-  const monitorBindings = Object.entries(bindings).filter(
-    ([, b]) => b.source === "monitor" && b.metric,
-  );
-  if (monitorBindings.length === 0) return {};
-
-  const metricNames = [...new Set(monitorBindings.map(([, b]) => b.metric!))];
-  const aggregations = [...new Set(monitorBindings.map(([, b]) => monitorAggParam(b.aggregation ?? "avg")))];
+  if (!Object.values(bindings).some((b) => b.source === "monitor")) return {};
 
   const fetcher = await getArmFetcher(env, bearerToken);
-  const url =
-    `https://management.azure.com${azureResourceId}` +
-    `/providers/microsoft.insights/metrics` +
-    `?api-version=2024-02-01` +
-    `&metricnames=${metricNames.join(",")}` +
-    `&timespan=PT5M` +
-    `&interval=PT1M` +
-    `&aggregation=${aggregations.join(",")}`;
-
-  const resp = await fetcher.fetchJson<MonitorMetricsResponse>(url);
-
-  const valueByMetricName = new Map<string, MonitorTimeseriesValue[]>();
-  for (const mv of resp.value ?? []) {
-    const data = mv.timeseries?.[0]?.data ?? [];
-    valueByMetricName.set(mv.name.value, data);
-  }
-
-  const result: Record<string, number | null> = {};
-  for (const [key, binding] of monitorBindings) {
-    const data = valueByMetricName.get(binding.metric!) ?? [];
-    result[key] = pickAggregation(data, binding.aggregation ?? "avg");
-  }
-
+  const result = await queryResourceMetrics(fetcher, azureResourceId, bindings);
   metricCache.set(cacheKey, result);
   return result;
 }
@@ -148,55 +235,25 @@ export async function collectBatchMetrics(
 // ────────────────────────────────────────────
 
 /**
- * Build a merged binding set for an edge, using the
- * source node's azureResourceId for "monitor" bindings.
+ * Monitor bindings of an edge, read from one end's Azure resource (`node: "target"` on a binding → the target,
+ * e.g. the Internet → public LB line reads the LB). Same query path as nodes (filters, scale, derived values).
  */
 export async function collectEdgeMonitorMetrics(
   env: Env,
   bearerToken: string,
   edge: DiagramEdgeSpec,
-  sourceNode: DiagramNodeSpec,
+  node: DiagramNodeSpec,
 ): Promise<Record<string, number | null>> {
-  const resourceId = sourceNode.azureResourceId;
-  if (!resourceId) return {};
-
-  const monitorBindings = Object.entries(edge.bindings).filter(
-    ([, b]) => b.source === "monitor" && b.metric,
-  );
-  if (monitorBindings.length === 0) return {};
+  const resourceId = node.azureResourceId;
+  if (!resourceId || !Object.values(edge.bindings).some((b) => b.source === "monitor")) return {};
 
   const prefix = bearerKeyPrefix(bearerToken);
   const cacheKey = `${prefix}:edgemetrics:${edge.id}:${resourceId}`;
   const cached = edgeMetricCache.get(cacheKey);
   if (cached) return cached;
 
-  const metricNames = [...new Set(monitorBindings.map(([, b]) => b.metric!))];
-  const aggregations = [...new Set(monitorBindings.map(([, b]) => monitorAggParam(b.aggregation ?? "avg")))];
-
   const fetcher = await getArmFetcher(env, bearerToken);
-  const url =
-    `https://management.azure.com${resourceId}` +
-    `/providers/microsoft.insights/metrics` +
-    `?api-version=2024-02-01` +
-    `&metricnames=${metricNames.join(",")}` +
-    `&timespan=PT5M` +
-    `&interval=PT1M` +
-    `&aggregation=${aggregations.join(",")}`;
-
-  const resp = await fetcher.fetchJson<MonitorMetricsResponse>(url);
-
-  const valueByMetricName = new Map<string, MonitorTimeseriesValue[]>();
-  for (const mv of resp.value ?? []) {
-    const data = mv.timeseries?.[0]?.data ?? [];
-    valueByMetricName.set(mv.name.value, data);
-  }
-
-  const result: Record<string, number | null> = {};
-  for (const [key, binding] of monitorBindings) {
-    const data = valueByMetricName.get(binding.metric!) ?? [];
-    result[key] = pickAggregation(data, binding.aggregation ?? "avg");
-  }
-
+  const result = await queryResourceMetrics(fetcher, resourceId, edge.bindings);
   edgeMetricCache.set(cacheKey, result);
   return result;
 }
@@ -207,7 +264,7 @@ export async function collectEdgeMonitorMetrics(
 export async function collectBatchEdgeMetrics(
   env: Env,
   bearerToken: string,
-  items: Array<{ edge: DiagramEdgeSpec; sourceNode: DiagramNodeSpec }>,
+  items: Array<{ edge: DiagramEdgeSpec; node: DiagramNodeSpec }>,
 ): Promise<Map<string, Record<string, number | null>>> {
   const CONCURRENCY = 6;
   const results = new Map<string, Record<string, number | null>>();
@@ -218,7 +275,7 @@ export async function collectBatchEdgeMetrics(
       const item = queue.shift();
       if (!item) break;
       try {
-        const metrics = await collectEdgeMonitorMetrics(env, bearerToken, item.edge, item.sourceNode);
+        const metrics = await collectEdgeMonitorMetrics(env, bearerToken, item.edge, item.node);
         results.set(item.edge.id, metrics);
       } catch {
         results.set(item.edge.id, {});

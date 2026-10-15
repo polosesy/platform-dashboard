@@ -3,7 +3,6 @@ import type {
   HealthStatus,
   EdgeStatus,
   EdgeTrafficLevel,
-  DiagramEdgeKind,
   NodeColorToken,
   EdgeColorToken,
 } from "@aud/types";
@@ -89,46 +88,7 @@ export function particleRadius(trafficLevel: EdgeTrafficLevel, tokens = defaultT
   return tokens.dimensions.particleRadius[trafficLevel];
 }
 
-// ── EdgeKind visual tokens ──
-
-export type EdgeKindStyle = {
-  stroke: string;
-  particle: string;
-  dashArray: string;       // SVG stroke-dasharray ("none" = solid)
-  showParticles: boolean;
-};
-
-const EDGE_KIND_STYLES: Record<DiagramEdgeKind, EdgeKindStyle> = {
-  network:       { stroke: rgba("accent", 0.6),   particle: rgba("accent", 0.9),   dashArray: "none",      showParticles: true },
-  peering:       { stroke: rgba("peering", 0.6),  particle: rgba("peering", 0.9),  dashArray: "8 4",       showParticles: false },
-  privateLink:   { stroke: rgba("privateLink", 0.6),  particle: rgba("privateLink", 0.9),  dashArray: "none",      showParticles: true },
-  routes:        { stroke: rgba("accent", 0.6),   particle: rgba("accent", 0.9),   dashArray: "none",      showParticles: true },
-  logging:       { stroke: rgba("neutral", 0.3), particle: rgba("neutral", 0.5), dashArray: "4 6",       showParticles: false },
-  inferred:      { stroke: rgba("neutral", 0.25), particle: rgba("neutral", 0.4), dashArray: "2 4 6 4",   showParticles: false },
-  "attached-to":        { stroke: rgba("subnet", 0.5),   particle: rgba("subnet", 0.7),   dashArray: "none",    showParticles: false },
-  "bound-to":           { stroke: rgba("accent", 0.45),   particle: rgba("accent", 0.7),   dashArray: "4 4",     showParticles: false },
-  // Outbound internet: orange-amber for explicit, dashed handled via animation override for deprecated
-  "outbound-internet":  { stroke: rgba("egress", 0.75),  particle: rgba("egress", 0.95),  dashArray: "none",    showParticles: false },
-  // NAT GW association: subnet → NAT GW card, same orange family, dashed
-  "natgw-association":  { stroke: rgba("egress", 0.6),  particle: rgba("egress", 0.8),  dashArray: "6 4",     showParticles: false },
-};
-
-export function edgeKindStyle(kind: DiagramEdgeKind | undefined): EdgeKindStyle {
-  if (!kind) return EDGE_KIND_STYLES.network; // default for legacy edges
-  return EDGE_KIND_STYLES[kind] ?? EDGE_KIND_STYLES.network;
-}
-
-// ── Flow type tints (subtle color overlay for architecture flow semantics) ──
-
-export type FlowTypeTint = { tint: string; glowWidth: number };
-
-export const FLOW_TYPE_TINTS: Record<string, FlowTypeTint> = {
-  ingress:    { tint: rgba("peering", 0.12),  glowWidth: 4 },
-  egress:     { tint: rgba("fault", 0.1),   glowWidth: 4 },
-  dependency: { tint: rgba("privateLink", 0.1),  glowWidth: 4 },
-  control:    { tint: rgba("neutral", 0.08), glowWidth: 3 },
-  // east-west: no tint (uses default edgeKind styling)
-};
+// Line colours, dashes and widths per relationship live in lib/liveStyle.ts (one table for canvas, toolbar and legend).
 
 // ── GroupNode scope visual tokens ──
 
