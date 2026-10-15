@@ -5,6 +5,8 @@ import type { GatewayFacts } from "@/lib/liveBackends";
 import { useI18n } from "@/lib/i18n";
 import type { NodeProps } from "reactflow";
 import type { HealthRule, HealthStatus, InboundExposure, LiveNode as LiveNodeState, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import type { HybridFacts } from "@/lib/liveHybrid";
+import type { WafChip } from "@/lib/liveWaf";
 import { cardStatus } from "@/lib/liveStatus";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { HiddenHandles } from "./HiddenHandles";
@@ -73,12 +75,16 @@ export type LiveNodeData = {
   impact?: "source" | "affected";
   /** LB / App Gateway: unresolved pool members, created by AKS, outbound only (lib/liveBackends) */
   gateway?: GatewayFacts;
+  /** VPN gateway (S2S connection count, SKU) / on-premises site (address ranges, BGP, connection state at read time) */
+  hybrid?: HybridFacts;
   /** Flexible-mode VM: the scale set it belongs to (catalog VMSS-03) */
   scaleSet?: string;
   /** Generic PaaS card: its ARM type */
   armType?: string;
   /** VM: the NSG verdict on its own public IP (catalog PIP-04, lib/livePip) */
   pipExposure?: InboundExposure;
+  /** Front Door WAF coverage chip (lib/liveWaf.ts, catalog EDGE-10) — configuration, never the card status */
+  waf?: WafChip;
 };
 
 /** Kind as the card's second line names it (product names / CAF abbreviations — not translated) */
@@ -133,6 +139,14 @@ function describe(d: LiveNodeData, t: TFn): string {
       return [abbr, nicIp ?? (d.endpoint && PRIVATE.test(d.endpoint) ? d.endpoint : undefined)].filter(Boolean).join(" · ");
     case "natGateway":
       return `${abbr} · ${t("ld.card.publicIps", { n: publics.length })}`;
+    case "vnetGateway": {
+      const h = d.hybrid?.kind === "gateway" ? d.hybrid : undefined;
+      return [abbr, h?.sku, h?.s2s ? t("ld.card.s2s", { n: h.s2s }) : null].filter(Boolean).join(" · ");
+    }
+    case "onPremSite": {
+      const h = d.hybrid?.kind === "site" ? d.hybrid : undefined;
+      return [t("ld.kind.onPremSite"), h ? t("ld.card.ranges", { n: h.prefixes }) : null].filter(Boolean).join(" · ");
+    }
     default:
       return abbr;
   }
@@ -215,6 +229,10 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
       </button>
     ) });
   }
+  if (data.waf) {
+    const w = data.waf;
+    chips.push({ key: "waf", el: <span className={styles.cardChip} data-tone={w.tone} title={t(w.hint.key, w.hint.vars)}>{t(w.key, w.vars)}</span> });
+  }
   if (data.pipExposure) {
     // What the Internet may do with this VM's own public IP — from the NSG verdict, never from traffic
     const c = pipChip(data.pipExposure, publicIp);
@@ -232,6 +250,11 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
   if (gw?.unresolved) chips.push({ key: "unres", el: <span className={styles.cardChip} data-tone="public" title={t("ld.chip.unresolvedBackends.hint")}>{t("ld.chip.unresolvedBackends", { n: gw.unresolved })}</span> });
   if (gw?.outboundOnly) chips.push({ key: "outOnly", el: <span className={styles.cardChip} title={t("ld.chip.outboundOnly.hint")}>{t("ld.chip.outboundOnly")}</span> });
   if (gw?.aksManaged) chips.push({ key: "aks", el: <span className={styles.cardChip} title={t("ld.chip.aksManaged.hint")}>{t("ld.chip.aksManaged")}</span> });
+  const hy = data.hybrid;
+  if (hy?.kind === "site" && hy.status !== "Connected") chips.push({ key: "s2sState", el: <span className={styles.cardChip} data-tone="public" title={t("ld.hybrid.readTime")}>{t(`ld.hybrid.status.${hy.status}`)}</span> });
+  if (hy?.kind === "gateway" && hy.activeActive) chips.push({ key: "aa", el: <span className={styles.cardChip} title={t("ld.hybrid.activeActive")}>A/A</span> });
+  if (hy?.bgp) chips.push({ key: "bgp", el: <span className={styles.cardChip} title={t("ld.chip.bgp.hint")}>BGP</span> });
+  if (hy?.kind === "site" && hy.nat) chips.push({ key: "nat", el: <span className={styles.cardChip} title={t("ld.chip.s2sNat.hint")}>NAT</span> });
   if (data.scaleSet != null) chips.push({ key: "vmss", el: <span className={styles.cardChip} title={t("ld.chip.scaleSet.hint", { name: data.scaleSet })}>{t("ld.chip.scaleSet", { name: middleEllipsis(data.scaleSet, 12) })}</span> });
 
   const line3 = !cellKeys.length

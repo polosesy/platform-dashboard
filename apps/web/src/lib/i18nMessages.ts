@@ -232,7 +232,11 @@ const CORE: Translations = {
 
   // Translation feature
   "health.translating": { ko: "번역 중...", en: "Translating..." },
-  "health.translateNotConfigured": { ko: "번역 서비스 미설정 (AZURE_TRANSLATOR_KEY 필요)", en: "Translation not configured (AZURE_TRANSLATOR_KEY required)" },
+  "health.translateNotConfigured": { ko: "번역 서비스 미설정 — API 서버에 AZURE_TRANSLATOR_KEY(+ AZURE_TRANSLATOR_REGION)를 설정하세요", en: "Translation not configured — set AZURE_TRANSLATOR_KEY (+ AZURE_TRANSLATOR_REGION) on the API server" },
+  "health.translateNotConfiguredFree": { ko: "번역 키 미설정, 키 없이 쓰는 무료 번역도 응답하지 않음 ({status}) — API 서버에 AZURE_TRANSLATOR_KEY(+ AZURE_TRANSLATOR_REGION)를 설정하세요", en: "No translator key, and the keyless fallback did not answer ({status}) — set AZURE_TRANSLATOR_KEY (+ AZURE_TRANSLATOR_REGION) on the API server" },
+  "health.translateNetwork": { ko: "연결 실패", en: "no connection" },
+  "health.translateAuth": { ko: "번역 키가 거부됨 (HTTP {status}) — 키 값과 AZURE_TRANSLATOR_REGION(리소스 지역, 다중 서비스·지역 리소스는 필수)을 확인하세요", en: "Translator key rejected (HTTP {status}) — check the key and AZURE_TRANSLATOR_REGION (the resource's region, required for multi-service and regional resources)" },
+  "health.translateQuota": { ko: "번역 할당량 초과 (429) — 잠시 후 다시 시도하거나 Translator 가격 계층을 확인하세요", en: "Translator quota exceeded (429) — try again later or check the Translator pricing tier" },
   "health.translateError": { ko: "번역 실패 — 잠시 후 다시 시도하세요", en: "Translation failed — please try again" },
 
   // Fallback / mock data notices

@@ -46,6 +46,8 @@ export const REL = {
   "EDGE-01": { kind: "network", what: "subnet → NAT gateway", spec: { type: "microsoft.network/virtualnetworks/subnets", path: "natGateway" } },
   "EDGE-02": { kind: "peering", what: "VNet ↔ VNet peering", spec: { type: "microsoft.network/virtualnetworks", path: "virtualNetworkPeerings[].remoteVirtualNetwork" } },
   "EDGE-04": { kind: "routes", what: "Front Door origin → resource by host name (exactly one holder)" },
+  "EDGE-08": { kind: "hybrid", what: "S2S connection → VNet gateway (folded into the gateway)", spec: { type: "microsoft.network/connections", path: "virtualNetworkGateway1" } },
+  "EDGE-09": { kind: "hybrid", what: "S2S connection → local network gateway (on-premises site)", spec: { type: "microsoft.network/connections", path: "localNetworkGateway2" } },
   "EDGE-05": { kind: "routes", what: "Front Door origin → owner of the public IP the origin names" },
   "EDGE-06": { kind: "routes", what: "Front Door origin → Azure resource it was picked from", spec: { type: "microsoft.cdn/profiles/origingroups/origins", path: "azureOrigin" } },
   "EDGE-07": { kind: "privateLink", what: "Front Door Premium origin → Private Link target", spec: { type: "microsoft.cdn/profiles/origingroups/origins", path: "sharedPrivateLinkResource.privateLink" } },

@@ -9,6 +9,7 @@ import type {
   NetworkFlowRecord,
   FlowSummary,
   DiagramEdgeSpec,
+  DiagramNodeSpec,
   LiveEdge,
   PowerState,
 } from "@aud/types";
@@ -18,6 +19,7 @@ import { isInferredEdge } from "@/lib/liveScope";
 import { exposurePorts, exposureSources } from "@/lib/livePip";
 import { Notice } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
+import { PeeringEdgeFacts, SiteEdgeFacts, type PeeringPair } from "./detail/EdgeFacts";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
 
@@ -30,6 +32,10 @@ type EdgeDetailPanelProps = {
   sample?: boolean;
   /** Power state of the line's target (Internet → VM: a deallocated VM receives nothing — 0 is expected) */
   targetPower?: PowerState;
+  /** A peering line: both VNets' sides (no edge-detail fetch — everything is configuration) */
+  peering?: PeeringPair | null;
+  /** A VPN gateway → on-premises site line: the site (its connection and local network gateway) */
+  site?: DiagramNodeSpec | null;
   onClose: () => void;
 };
 
@@ -274,6 +280,8 @@ export function EdgeDetailPanel({
   liveEdge,
   sample,
   targetPower,
+  peering,
+  site,
   onClose,
 }: EdgeDetailPanelProps) {
   const { t } = useI18n();
@@ -333,6 +341,17 @@ export function EdgeDetailPanel({
         {isMock && (
           <Notice tone="warning" title={t("common.sampleData")}>{t("ld.sample.hint")}</Notice>
         )}
+
+        {peering ? (
+          <Section title={t("ld.peering.edgeTitle")}>
+            <PeeringEdgeFacts pair={peering} />
+          </Section>
+        ) : null}
+        {site ? (
+          <Section title={t("ld.hybrid.edgeTitle")}>
+            <SiteEdgeFacts site={site} metrics={measured ? liveEdge?.metrics : undefined} />
+          </Section>
+        ) : null}
 
         {detail && (
           <>

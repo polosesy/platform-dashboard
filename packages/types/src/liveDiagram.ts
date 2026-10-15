@@ -79,6 +79,7 @@ export type ArchRole =
 
 export type DiagramEdgeKind =
   | "network"
+  | "hybrid"          // VPN gateway → on-premises site (S2S connection, catalog EDGE-09)
   | "peering"
   | "privateLink"
   | "routes"
@@ -121,6 +122,9 @@ export type DiagramEdgeSpec = {
   /** AGC → AKS (AGC-04): nodeRg = the AGC sits in that cluster's node resource group · sameVnet = the only
    *  cluster in the association's VNet (a rule — drawn dashed) */
   rule?: "nodeRg" | "sameVnet";
+  /** VNet peering line (EDGE-02): the worse of the two sides' states, and whether gateway transit is set up both ways */
+  peeringState?: string;
+  peeringTransit?: boolean;
   /** Front Door → origin resource (EDGE-04..07): the origin, its group and how it was matched */
   origin?: { name: string; group: string; evidence: "cfg" | "ipMatch" | "fqdnMatch"; status?: string };
   /** Internet → VM through an instance-level public IP: the NSG verdict the line is drawn from (PIP-04) */
@@ -128,6 +132,42 @@ export type DiagramEdgeSpec = {
   bindings: Record<string, MetricBinding>;
   animation: EdgeAnimationKind;
   alerts?: AlertCondition[];
+};
+
+/**
+ * Front Door WAF coverage (catalog EDGE-10 / EDGE-11) — Front Door node metadata `wafState`. Per served domain:
+ * prevent / detect / disabled (policy off) / none (read, no WAF) / unknown. Profile: all prevent, all none, all
+ * detect, a mix with a gap (partial), only prevent + unknown (unknown), the security policies unreadable, or no
+ * domain served. Configuration only — never the card status or fault impact.
+ */
+export type AfdWafDomainState = "prevent" | "detect" | "disabled" | "none" | "unknown";
+export type AfdWafState = "prevent" | "detect" | "partial" | "none" | "unknown" | "unreadable" | "noDomains";
+
+/**
+ * One peering of a VNet, its own side (VNet metadata.peerings, JSON). `id` = the remote VNet's diagram node when
+ * the graph has it (no remote ARM id is sent — it may be another subscription / tenant). Unknown flags are null.
+ * `other` = the remote side when the graph sees it. `transit`: this VNet uses the remote gateway ("uses") / lets
+ * the remote use its gateway ("provides") — only when both flags and both states agree (catalog EDGE-02).
+ */
+export type LivePeering = {
+  key: string;
+  link: string;
+  id: string | null;
+  name: string;
+  state: string;
+  sync: string | null;
+  provisioning: string | null;
+  access: boolean | null;
+  forwarded: boolean | null;
+  gatewayTransit: boolean | null;
+  useRemoteGateways: boolean | null;
+  remoteSpace: string[];
+  remoteCurrentSpace: string[] | null;
+  complete: boolean | null;
+  localSubnets?: string[];
+  remoteSubnets?: string[];
+  other?: { state: string; sync: string | null; access: boolean | null; forwarded: boolean | null; gatewayTransit: boolean | null; useRemoteGateways: boolean | null };
+  transit: "uses" | "provides" | null;
 };
 
 export type DiagramGroupSpec = {
@@ -341,6 +381,9 @@ export type LiveEdge = {
     synInPerMin?: number;
     /** Internet → VM public IP: bytes received (bit/s). Drives particles only when replies cannot be in it */
     bytesInBps?: number;
+    /** VPN gateway → on-premises site (S2S connection): bit/s from the site into Azure / from Azure to the site */
+    siteInBps?: number;
+    siteOutBps?: number;
   };
   trafficLevel: EdgeTrafficLevel;
   activeAlertIds: string[];
@@ -395,7 +438,7 @@ export type DiagramIconKind =
   | "functionApp" | "appService" | "serviceBus" | "eventHub"
   | "publicIP"
   | "natGateway"
-  | "agc" | "vnetGateway" | "bastion" | "paas"
+  | "agc" | "vnetGateway" | "bastion" | "paas" | "onPremSite"
   | "internet"
   | "custom";
 
@@ -738,7 +781,10 @@ export type PlPlace =
   | { kind: "otherVnet"; vnetNodeId: string; subnetNodeId: string; ownerNodeId?: string }
   | { kind: "overlap"; matches: number }
   | { kind: "private" }
-  | { kind: "cgnat" };
+  | { kind: "cgnat" }
+  /** In the address space of exactly one on-premises site (its local network gateway prefixes) — routing
+   *  configuration, not an observation (catalog EDGE-09) */
+  | { kind: "onPremSite"; siteNodeId: string; prefix: string; basis: "cfg" };
 
 /** Calls over the public path (bypassing the Private Endpoint) — counted, IPs not listed */
 export type PlPublicAccess = { targetNodeId: string; requests: number; distinctIps: number; identityNames?: string[]; lastSeen?: string };

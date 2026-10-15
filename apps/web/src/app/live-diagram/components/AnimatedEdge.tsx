@@ -34,7 +34,7 @@ export type AnimatedEdgeData = {
 };
 
 /** Kinds that carry traffic worth animating when it is measured */
-const FLOWING = new Set<LiveEdgeStyleKey>(["config", "configWeak", "ingress", "ingressUnknown", "privateLink", "egress", "egressDeprecated"]);
+const FLOWING = new Set<LiveEdgeStyleKey>(["config", "configWeak", "ingress", "ingressUnknown", "privateLink", "egress", "egressDeprecated", "hybrid"]);
 
 export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, markerStart, selected } = props;

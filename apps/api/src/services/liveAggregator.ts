@@ -338,6 +338,8 @@ export async function buildLiveSnapshot(
       gatewayTotalBps: toNumber(merged.gatewayTotal),
       synInPerMin: toNumber(merged.synIn),
       bytesInBps: toNumber(merged.bytesIn),
+      siteInBps: toNumber(merged.bitsIn),
+      siteOutBps: toNumber(merged.bitsOut),
     };
 
     // Merge traffic flow data (Traffic Analytics / NSG Flow Logs)
@@ -566,7 +568,7 @@ export function measuredResources(
 }
 
 /** Configured links an impact may travel along. Guessed (inferred), Internet and NAT-association links never carry it. */
-const IMPACT_EDGE_KINDS = new Set(["network", "routes", "privateLink", "peering"]);
+const IMPACT_EDGE_KINDS = new Set(["network", "routes", "privateLink", "peering", "hybrid"]);
 
 /**
  * A resource whose metric health is critical, or that has an active critical Azure Monitor alert, and the

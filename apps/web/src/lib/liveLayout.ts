@@ -30,6 +30,8 @@ export const LIVE = {
   GAP: 20,
   PAD: 16,
   VNET_HEAD: 46,
+  /** Second header row of a VNet with peerings (one row of chips, never wrapped — lib/livePeering) */
+  PEER_ROW: 24,
   /** Two-line subnet header (name / CIDR · outbound · NICs): 8 + 20 + 4 + 20, then 8 px clear of the cards */
   SUBNET_HEAD: 60,
   LANE_HEAD: 34,
@@ -49,7 +51,7 @@ export const LIVE = {
   VNET_SOFT_MAX_W: 1200,
 } as const;
 
-export type LaneKind = "ingress" | "egress" | "paas" | "outside" | "ghost" | "unused";
+export type LaneKind = "ingress" | "onprem" | "egress" | "paas" | "outside" | "ghost" | "unused";
 
 export type LayoutBox = { id: string; x: number; y: number; w: number; h: number; parent: string | null };
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -161,6 +163,12 @@ export function subnetTier(subnet: DiagramNodeSpec, cards: DiagramNodeSpec[]): n
 }
 
 /** Lines that say how traffic or dependencies flow between places (associations and guesses do not) */
+/** The VNet lists at least one peering (its header gets the peering row) */
+export const hasPeerings = (v: DiagramNodeSpec) => {
+  const raw = v.metadata?.peerings;
+  return !!raw && raw !== "[]";
+};
+
 export function isLayoutEdge(e: DiagramEdgeSpec): boolean {
   if (isInferredEdge(e)) return false;
   // Internet → VM through its own public IP: drawn only — otherwise every subnet with such a VM becomes an entry
@@ -190,7 +198,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   const childrenOf = new Map<string, DiagramNodeSpec[]>();
   const topLevel: DiagramNodeSpec[] = [];
   const laneOf = new Map<string, LaneKind>();
-  const laneMembers: Record<LaneKind, DiagramNodeSpec[]> = { ingress: [], egress: [], paas: [], outside: [], ghost: [], unused: [] };
+  const laneMembers: Record<LaneKind, DiagramNodeSpec[]> = { ingress: [], onprem: [], egress: [], paas: [], outside: [], ghost: [], unused: [] };
   /** Unused public IP, NSG attached to nothing — kept apart from what carries traffic */
   const isUnused = (n: DiagramNodeSpec) => n.metadata?.unused === "true" || n.metadata?.detached === "true";
   const toLane = (n: DiagramNodeSpec, lane: LaneKind) => { laneMembers[lane].push(n); laneOf.set(n.id, lane); };
@@ -221,6 +229,8 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     if (isGroup(n)) continue;
     const k = kindOf(n);
     if (k === "internet") toLane(n, n.metadata?.direction === "ingress" ? "ingress" : "egress");
+    // On-premises sites (S2S, catalog EDGE-09): a lane under the inbound one, on the left
+    else if (k === "onPremSite") toLane(n, "onprem");
     else if (n.metadata?.ghostOf) toLane(n, "ghost");
     else if (k === "natGateway") toLane(n, "egress");
     else {
@@ -244,7 +254,8 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     const lane = laneOf.get(id);
     if (lane === "ingress") return "IN";
     if (lane === "paas" || lane === "outside" || lane === "ghost") return "OUT";
-    if (lane === "egress" || lane === "unused") return null;
+    // On-premises sites are not part of the subnet graph (they would reorder the bands)
+    if (lane === "egress" || lane === "unused" || lane === "onprem") return null;
     const sub = subnetOfCard.get(id);
     if (sub) return sub;
     const n = byId.get(id);
@@ -500,7 +511,8 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
         if (expanded) section.push(rowWrap(`empties:${v.id}`, empties.map((s) => subnetBox(s)), Math.max(maxW, LIVE.CARD_W + 2 * LIVE.PAD)));
         content.push(box({ id: `emptySection:${v.id}`, kind: "wrap" }, section, { head: 0, pad: 0, gap: LIVE.GAP / 2, framed: false, dir: "col", maxW: Infinity }));
       }
-      return box({ id: v.id, kind: "vnet" }, content, { head: LIVE.VNET_HEAD, dir: "col", maxW: Infinity, minW });
+      // A VNet with peerings has a second header row for them (fixed height: chips never wrap)
+      return box({ id: v.id, kind: "vnet" }, content, { head: LIVE.VNET_HEAD + (hasPeerings(v) ? LIVE.PEER_ROW : 0), dir: "col", maxW: Infinity, minW });
     };
 
     const minW = labelWidth(v.label, v.metadata?.addressSpace, 260, 360);
@@ -536,6 +548,18 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     }
     return best ?? vnetFor(Math.max(blockW, LIVE.CARD_W));
   };
+  // Several VNets in view: the one with the most peerings among them first, its peers next (by name), then the
+  // rest in their order — a hub reads before its spokes. Without peering lines nothing moves.
+  const inView = new Set(vnets.map((v) => v.id));
+  const peerLines = spec.edges.filter((e) => e.edgeKind === "peering" && inView.has(e.source) && inView.has(e.target));
+  if (vnets.length > 1 && peerLines.length) {
+    const degree = (id: string) => peerLines.filter((e) => e.source === id || e.target === id).length;
+    const hub = [...vnets].sort((a, b) => degree(b.id) - degree(a.id) || cmp(a.label, b.label) || cmp(a.id, b.id))[0]!;
+    const peersOfHub = new Set(peerLines.flatMap((e) => (e.source === hub.id ? [e.target] : e.target === hub.id ? [e.source] : [])));
+    const spokes = vnets.filter((v) => peersOfHub.has(v.id)).sort((a, b) => cmp(a.label, b.label) || cmp(a.id, b.id));
+    const rest = vnets.filter((v) => v.id !== hub.id && !peersOfHub.has(v.id));
+    vnets.splice(0, vnets.length, hub, ...spokes, ...rest);
+  }
   const vnetBoxes = vnets.map(vnetNode);
 
   // ── Lanes ──
@@ -572,8 +596,10 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     lane("unused", "ld.lane.unused", laneMembers.unused, 2),
   ].filter((x): x is PackNode<Shape> => !!x);
 
+  // On-premises sites under the inbound lane (left: they reach the VNet through its gateway)
+  const onprem = lane("onprem", "ld.lane.onprem", laneMembers.onprem, 1);
   const columns: PackNode<Shape>[] = [];
-  if (ingress) columns.push(wrap("col:ingress", "col", [ingress], 0));
+  if (ingress || onprem) columns.push(wrap("col:ingress", "col", [ingress, onprem].filter((x): x is PackNode<Shape> => !!x), 24));
   if (vnetBoxes.length) columns.push(wrap("col:vnets", "col", vnetBoxes, 48));
   if (right.length) columns.push(wrap("col:right", "col", right, 24));
   const placed = place(measure(wrap("root", "row", columns, LIVE.COLUMN_GAP)));
@@ -636,9 +662,20 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     laneIngress.y = top;
     laneIngress.h = bottom - top;
   }
+  // On-premises lane: the inbound lane just moved and may have grown over it — keep it below (24px), at the height
+  // of the VPN gateways it connects to when that is lower
+  const laneOnprem = at.get("lane:onprem");
+  if (laneOnprem) {
+    const members = placed.filter((m) => m.shape.kind === "node" && within(m, laneOnprem.shape.id));
+    const ids = new Set(members.map((m) => m.shape.id));
+    const nb = [...new Set(members.flatMap((m) => neighbours(m.shape.id, (o) => !ids.has(o) && !inLane(o))))].sort(cmp);
+    const floor = laneIngress ? laneIngress.y + laneIngress.h + 24 : -Infinity;
+    const target = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - laneOnprem.h / 2 : null;
+    stack([{ p: laneOnprem, target, move: (dy: number) => shiftTree(laneOnprem.shape.id, dy) }], 24, floor);
+  }
   const rightCol = at.get("col:right");
   if (rightCol) {
-    const laneBoxes = placed.filter((p) => p.shape.kind === "lane" && p.shape.lane !== "ingress");
+    const laneBoxes = placed.filter((p) => p.shape.kind === "lane" && p.shape.lane !== "ingress" && p.shape.lane !== "onprem");
     stack(laneBoxes.map((p) => {
       const members = placed.filter((m) => m.shape.kind === "node" && within(m, p.shape.id));
       const ids = new Set(members.map((m) => m.shape.id));

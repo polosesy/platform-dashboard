@@ -15,6 +15,7 @@
 6. [보안 (Defender for Cloud)](#6-보안-defender-for-cloud)
 7. [Azure 연결 (Connection)](#7-azure-연결-connection)
 8. [VNet 트래픽 (Flow Log)](#8-vnet-트래픽-flow-log)
+9. [리소스 상태 (Service Health 번역)](#9-리소스-상태-service-health-번역)
 
 ---
 
@@ -256,6 +257,19 @@
 
 ---
 
+## 9. 리소스 상태 (Service Health 번역)
+
+### HEALTH-001: 이벤트 탭의 '한' 번역이 '번역 서비스 미설정' / '키 없이 쓰는 무료 번역도 응답하지 않음 (HTTP 429)'
+- **원인**: Service Health 이벤트(제목·요약)는 Azure가 영어로만 줌(`Accept-Language` 무시) → 번역기가 필요. `AZURE_TRANSLATOR_KEY`가 없으면 키 없는 Google 엔드포인트로 시도하는데, 비공식이라 서버 주소에서는 짧은 글에도 **429로 막히는 경우가 많음**. (인스턴스 탭의 Resource Health 상태 문구는 번역기와 무관 — `/api/health/summary?lang=ko`가 `Accept-Language: ko-KR`로 읽어 Azure가 직접 한국어로 줌. 단 Azure가 현지화하지 않는 문구(실측 약 1/3)는 영어로 남음)
+- **해결**: API 서버 `.env`에 Translator 키를 넣고 API 재시작
+  - 전용 Translator 리소스(F0 무료 계층: 월 200만 자) 또는 기존 **다중 서비스 AI Services / Cognitive Services** 리소스의 키(Portal › 리소스 › 키 및 엔드포인트 › 키 1)
+  - `AZURE_TRANSLATOR_REGION` = 그 리소스의 지역(예 `koreacentral`). **다중 서비스·지역 리소스는 필수**(없으면 401), 전역(global) Translator만 생략 가능
+  - 키는 비밀 값 — 커밋 금지, 로그·응답에 나가지 않음(번역기 오류 본문도 전달하지 않고 상태 코드만)
+- **화면 문구별**: '번역 키가 거부됨 (HTTP 401/403)' = 키 값 또는 지역 불일치 · '할당량 초과 (429)' = 가격 계층 한도 · '번역 실패' = 그 밖(시간 초과 10초 등, `AUD_DEBUG=true`로 `[health]` 로그 확인)
+- 번역 결과는 문장별로 하루 캐시(키 과금 절약). 비로그인 사용자는 키를 쓰지 않음(예시 이벤트는 내장 번역)
+
+---
+
 ## 에러 추가 가이드
 
 새로운 에러 발견 시 아래 포맷으로 추가:
@@ -267,8 +281,8 @@
 - **해결**: 해결 방법 1줄
 ```
 
-도메인 접두사: `HUB` (Hubble), `OBS` (Observability), `AUTH` (인증), `K8S` (Kubernetes), `FE` (프론트엔드), `NET` (Network), `COST` (Cost), `SEC` (Security)
+도메인 접두사: `HUB` (Hubble), `OBS` (Observability), `AUTH` (인증), `K8S` (Kubernetes), `FE` (프론트엔드), `NET` (Network), `COST` (Cost), `SEC` (Security), `HEALTH` (리소스 상태)
 
 ---
 
-*최종 업데이트: 2026-10-08*
+*최종 업데이트: 2026-10-15*

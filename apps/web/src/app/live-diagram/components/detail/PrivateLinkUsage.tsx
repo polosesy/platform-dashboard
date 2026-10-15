@@ -99,6 +99,12 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
         const p = g.place;
         if (p?.kind === "otherVnet") return t("ld.plu.place.otherVnet", { vnet: nameOf(p.vnetNodeId), subnet: nameOf(p.subnetNodeId), owner: p.ownerNodeId ? ` (${nameOf(p.ownerNodeId)})` : "" });
         if (p?.kind === "overlap") return t("ld.plu.place.overlap", { count: p.matches });
+        if (p?.kind === "onPremSite") return (
+          <>
+            {t("ld.plu.place.onPremSite", { prefix: p.prefix })}{" "}
+            <button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(p.siteNodeId)}>{nameOf(p.siteNodeId)}</button>
+          </>
+        );
         if (p?.kind === "private") return t("ld.plu.place.private");
         if (p?.kind === "cgnat") return t("ld.plu.place.cgnat");
         return t("ld.plu.place.unknown");
@@ -110,7 +116,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
   };
   const fixKey = (g: UnresolvedGroup) =>
     g.reason === "ambiguous" ? (g.basis === "identity" ? "ld.plu.fix.identity" : "ld.plu.fix.subnet")
-      : g.reason === "notInDiagram" ? (g.place?.kind === "otherVnet" ? "ld.plu.fix.otherVnet" : g.place?.kind === "private" ? "ld.plu.fix.private" : "ld.plu.fix.unknown")
+      : g.reason === "notInDiagram" ? (g.place?.kind === "otherVnet" ? "ld.plu.fix.otherVnet" : g.place?.kind === "onPremSite" ? "ld.plu.fix.onPremSite" : g.place?.kind === "private" ? "ld.plu.fix.private" : "ld.plu.fix.unknown")
         : g.reason === "peUnconfirmed" ? "ld.plu.fix.peUnconfirmed" : g.reason === "nicNoVm" ? "ld.plu.fix.nicNoVm" : null;
   const groupRow = (g: UnresolvedGroup) => (
     <div key={g.key} className={styles.dpTwoLine} data-plu-group={g.reason}>

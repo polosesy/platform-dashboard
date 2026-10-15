@@ -1,6 +1,8 @@
 "use client";
 
 import { memo } from "react";
+import type { LivePeering } from "@aud/types";
+import { peeringIssue, peeringSummary, sortPeerings } from "@/lib/livePeering";
 import { useI18n } from "@/lib/i18n";
 import { type NodeProps } from "reactflow";
 import { HiddenHandles } from "./HiddenHandles";
@@ -28,7 +30,7 @@ export type EgressInfo = {
   natId?: string;
 };
 
-export type PeeringInfo = { name: string; state: string };
+export type PeeringInfo = LivePeering;
 
 export type GroupNodeData = {
   label: string;
@@ -41,6 +43,10 @@ export type GroupNodeData = {
   /** NICs without a VM in this subnet (folded into a count) */
   nicCount?: number;
   peerings?: PeeringInfo[];
+  /** How many peering name chips fit on the header's peering row (lib/livePeering peeringChipFit) */
+  peerFit?: number;
+  /** A peering chip, the summary or "+n" was clicked (key null = the whole list) */
+  onPeeringSelect?: (vnetId: string, key: string | null) => void;
   /** Subnet name without the words its VNet repeats (full name in a tag while selected) */
   shortLabel?: string;
   /** The full name split into the words the short name kept and dropped */
@@ -49,9 +55,9 @@ export type GroupNodeData = {
   focused?: boolean;
 };
 
-export const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupNodeData>) {
+export const GroupNode = memo(function GroupNode({ id, data }: NodeProps<GroupNodeData>) {
   const { t } = useI18n();
-  const { label, icon, subtitle, region, nsgBadges, onNsgSelect, egress, nicCount, peerings, shortLabel, focused, nameParts } = data;
+  const { label, icon, subtitle, region, nsgBadges, onNsgSelect, egress, nicCount, peerings, shortLabel, focused, nameParts, peerFit = 0, onPeeringSelect } = data;
   const scope = scopeStyle(icon);
   const isSubnet = icon === "subnet";
 
@@ -109,17 +115,34 @@ export const GroupNode = memo(function GroupNode({ data }: NodeProps<GroupNodeDa
             <span className={styles.groupNodeLabel} title={label}>{label}</span>
             {region && <span className={styles.groupNodeRegion}>{formatAzureRegion(region)}</span>}
             {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
-            {peerings && peerings.length > 0 && (
-              <span className={styles.peeringStubs}>
-                {peerings.map((p) => (
-                  <span key={p.name} className={styles.peeringStub} data-state={p.state === "Connected" ? "ok" : "warn"} title={t("ld.peering.hint", { name: p.name, state: p.state })}>
-                    ↔ {p.name}
-                  </span>
-                ))}
-              </span>
-            )}
           </div>
         )}
+        {/* Peerings: one row under the VNet header — summary, the chips that fit (problems first), "+n" */}
+        {!isSubnet && peerings && peerings.length > 0 && (() => {
+          const sorted = sortPeerings(peerings);
+          const sum = peeringSummary(peerings);
+          const shown = sorted.slice(0, peerFit);
+          const pick = (key: string | null) => (e: React.MouseEvent) => { e.stopPropagation(); onPeeringSelect?.(id, key); };
+          return (
+            <div className={`${styles.peeringRow} nodrag nopan`}>
+              <button type="button" className={styles.peeringSummary} data-tone={sum.problems ? "warn" : undefined} onClick={pick(null)} title={t("ld.peering.summaryHint")}>
+                ↔ {t("ld.peering.summary", { n: sum.n })}{sum.problems ? ` · ${t("ld.peering.problems", { n: sum.problems })}` : ""}
+              </button>
+              {shown.map((p) => {
+                const issue = peeringIssue(p);
+                return (
+                  <button key={p.key} type="button" className={styles.peeringStub} data-state={issue.tone} onClick={pick(p.key)}
+                    title={[p.name, t(`ld.peering.state.${p.state}`), ...issue.reasons.map((r) => t(r)), p.transit ? t(`ld.peering.transit.${p.transit}`) : null].filter(Boolean).join(" · ")}>
+                    {p.transit ? "⇄ " : "↔ "}{p.name}
+                  </button>
+                );
+              })}
+              {sorted.length > shown.length ? (
+                <button type="button" className={styles.peeringMore} onClick={pick(null)} title={t("ld.peering.summaryHint")}>+{sorted.length - shown.length}</button>
+              ) : null}
+            </div>
+          );
+        })()}
       </div>
       <HiddenHandles />
       {/* The VNet header already shows its full name; subnets get the tag when their name is shortened */}

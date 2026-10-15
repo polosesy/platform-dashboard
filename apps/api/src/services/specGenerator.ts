@@ -5,6 +5,7 @@ import type {
   GraphNodeKind,
   EdgeKind,
   InboundExposure,
+  LivePeering,
 } from "@aud/types";
 import type {
   DiagramSpec,
@@ -23,6 +24,7 @@ import type {
 } from "@aud/types";
 import { inferImplicitEdges } from "./dependencyInference.js";
 import { backendServerKeys } from "./backendMembers.js";
+import type { AfdWaf } from "./frontDoorConfig.js";
 import ELK from "elkjs";
 import { debug } from "../infra/logger.js";
 
@@ -161,7 +163,24 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
     backend: mon("OriginHealthPercentage", "avg", { optional: true }),
     errorRate: mon("Percentage5XX", "avg", { optional: true }),
     latency: mon("TotalLatency", "avg", { optional: true }),
+    // WAF verdicts over an hour, the whole profile (EDGE-10) — panel only, never a health input: a spike is an attack
+    // or false positives, there is no baseline
+    wafBlock: mon("WebApplicationFirewallRequestCount", "total", { filter: "Action eq 'Block'", window: "PT1H", optional: true }),
+    wafLog: mon("WebApplicationFirewallRequestCount", "total", { filter: "Action eq 'Log'", window: "PT1H", optional: true }),
+    wafTotal: mon("WebApplicationFirewallRequestCount", "total", { window: "PT1H", optional: true }),
     health: health(...atLeast("backend", 90, 10), ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+  },
+  // VPN gateway: S2S bandwidth (AverageBandwidth is bytes/s → bit/s); state comes from Resource Health
+  vnetGateway: {
+    // gateway metrics accept no 1-minute grain (400 "Commonly allowed time grains") — a 15-minute average
+    bandwidth: mon("AverageBandwidth", "avg", { scale: 8, optional: true, window: "PT15M" }),
+    health: health(),
+  },
+  // On-premises site = one S2S connection (EDGE-09): its tunnel traffic (bit/s); traffic is not health
+  onPremSite: {
+    bitsIn: mon("BitsInPerSecond", "avg", { optional: true }),
+    bitsOut: mon("BitsOutPerSecond", "avg", { optional: true }),
+    health: health(),
   },
   // Application Gateway for Containers: metrics are emitted only while requests flow
   // (application-gateway/for-containers/application-gateway-for-containers-metrics)
@@ -321,6 +340,25 @@ export function edgeBindings(
   byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "resourceKind" | "icon" | "subResources" | "metadata" | "parentId">>,
   /** Load balancers that are also an outbound (SNAT) path — their In bytes may include SNAT replies */
   snatLbs: ReadonlySet<string> = new Set(),
+  /** Nodes a Front Door origin line ends at (EDGE-04..07) — a public listener there may also receive Front Door's requests */
+  afdOrigins: ReadonlySet<string> = new Set(),
+): { bindings: Record<string, MetricBinding>; caveats?: string[] } {
+  const out = edgeBindingsOf(e, byId, snatLbs);
+  const kind = (n?: { resourceKind?: string; icon: string }) => n?.resourceKind ?? n?.icon;
+  const tk = kind(byId.get(e.target));
+  // Internet → a gateway that is also a Front Door origin: whether it accepts only Front Door (AzureFrontDoor.Backend
+  // service tag, X-Azure-FDID check) is not read — the line stays (a rule-bound public listener is configuration),
+  // the panel says the bytes cannot be told apart
+  if (kind(byId.get(e.source)) === "internet" && e.flowType === "ingress" && (tk === "appGateway" || tk === "lb") && afdOrigins.has(e.target)) {
+    return { ...out, caveats: [...(out.caveats ?? []), "ld.edge.caveat.viaFrontDoor"] };
+  }
+  return out;
+}
+
+function edgeBindingsOf(
+  e: Pick<DiagramEdgeSpec, "edgeKind" | "flowType" | "source" | "target" | "backend" | "exposure">,
+  byId: ReadonlyMap<string, Pick<DiagramNodeSpec, "resourceKind" | "icon" | "subResources" | "metadata" | "parentId">>,
+  snatLbs: ReadonlySet<string>,
 ): { bindings: Record<string, MetricBinding>; caveats?: string[] } {
   const src = byId.get(e.source), tgt = byId.get(e.target);
   const kindOf = (n?: { resourceKind?: string; icon: string }) => n?.resourceKind ?? n?.icon;
@@ -355,6 +393,16 @@ export function edgeBindings(
         ...(hasPrivate ? { caveats: ["ld.edge.caveat.publicPrivateSum"] } : {}),
       };
     }
+  }
+  // VPN gateway → on-premises site (EDGE-09): the connection's own bit rate, read on the site (= the connection)
+  if (e.edgeKind === "hybrid") {
+    return {
+      bindings: {
+        bitsIn: mon("BitsInPerSecond", "avg", { node: "target", optional: true }),
+        bitsOut: mon("BitsOutPerSecond", "avg", { node: "target", optional: true }),
+        throughput: derived("sum", "bitsIn", "bitsOut"),
+      },
+    };
   }
   // Backend member quality (AGW-06, LB-02): only with a known member address
   const addr = e.backend?.address;
@@ -421,11 +469,12 @@ function publicIpBindings(
 export function normalizeSpecBindings(spec: DiagramSpec): DiagramSpec {
   const byId = new Map(spec.nodes.map((n) => [n.id, n]));
   const snatLbs = new Set(spec.edges.filter((e) => e.edgeKind === "outbound-internet" && e.label === "LB SNAT").map((e) => e.source));
+  const afdOrigins = new Set(spec.edges.filter((e) => e.origin && (byId.get(e.source)?.resourceKind ?? byId.get(e.source)?.icon) === "frontDoor").map((e) => e.target));
   return {
     ...spec,
     nodes: spec.nodes.map((n) => (n.nodeType === "group" ? n : { ...n, bindings: effectiveBindings(n) })),
     edges: spec.edges.map((e) => {
-      const { bindings, caveats } = edgeBindings(e, byId, snatLbs);
+      const { bindings, caveats } = edgeBindings(e, byId, snatLbs, afdOrigins);
       const next: DiagramEdgeSpec = { ...e, bindings };
       if (caveats) next.caveats = caveats;
       else delete next.caveats;
@@ -2773,6 +2822,16 @@ export async function generateDiagramSpec(
         const keys = ["tier", "endpoints", "activeRoutes", "origins", "externalOrigins", "ambiguousOrigins", "configUnreadable", "classic"] as const;
         const out: Record<string, string> = {};
         for (const k of keys) if (meta[k] != null) out[k] = String(meta[k]);
+        // WAF coverage (EDGE-10 / EDGE-11): chip + panel (web lib/liveWaf.ts)
+        const waf = meta.waf as AfdWaf | undefined;
+        if (waf) {
+          out.wafState = waf.state;
+          out.wafCounts = JSON.stringify(waf.counts);
+          out.wafPolicies = JSON.stringify(waf.policies);
+          out.wafDomains = JSON.stringify(waf.domains);
+          if (waf.unserved.length) out.wafUnserved = JSON.stringify(waf.unserved);
+          if (waf.readError) out.wafReadError = waf.readError;
+        }
         if (Array.isArray(meta.endpointHosts)) out.endpointHosts = JSON.stringify(meta.endpointHosts);
         if (Array.isArray(meta.originList)) out.originList = JSON.stringify(meta.originList);
         n.metadata = { ...n.metadata, ...out };
@@ -2848,6 +2907,54 @@ export async function generateDiagramSpec(
     }
   }
 
+  // ── S2S: one on-premises site card per connection of a gateway in view (EDGE-09), gateway → site line ──
+  // The site's resource is the connection: its Resource Health and BitsIn/OutPerSecond are read on it.
+  type S2s = { connectionId: string; name: string; status: string; protocol: string | null; enableBgp: boolean; policyBased: boolean; connectionMode: string | null; dpd: number | null; ingressBytes: number | null; egressBytes: number | null; tunnels: Array<{ tunnel: string; status: string; lastConnected?: string }> | null; nat: boolean; lng: { id: string; name: string; prefixes: string[]; peerIp: string | null; fqdn: string | null; bgp: boolean } | null };
+  for (const gw of [...diagramNodes]) {
+    if (gw.resourceKind !== "vnetGateway" || !gw.azureResourceId) continue;
+    const g = graphNodeByAzureId.get(gw.azureResourceId.toLowerCase());
+    const list = (Array.isArray(g?.metadata?.s2s) ? g!.metadata!.s2s : []) as S2s[];
+    const gm = g?.metadata ?? {};
+    gw.metadata = {
+      ...gw.metadata,
+      ...(typeof gm.sku === "string" ? { sku: gm.sku } : {}),
+      ...(typeof gm.activeActive === "boolean" ? { activeActive: String(gm.activeActive) } : {}),
+      ...(typeof gm.enableBgp === "boolean" ? { enableBgp: String(gm.enableBgp) } : {}),
+      ...(list.length ? { s2sCount: String(list.length) } : {}),
+    };
+    for (const c of list) {
+      const siteId = `site-${shortId(c.connectionId)}`;
+      if (diagramNodes.some((n) => n.id === siteId)) continue;
+      diagramNodes.push({
+        id: siteId,
+        label: c.lng?.name ?? c.name,
+        icon: "onPremSite" as DiagramIconKind,
+        resourceKind: "onPremSite",
+        azureResourceId: c.connectionId,
+        position: { x: 0, y: 0 },
+        bindings: {},
+        metadata: {
+          gatewayNodeId: gw.id,
+          connectionName: c.name,
+          // read with the topology (not live): shown as "at read time" in the panel, never as the card colour
+          connectionStatus: c.status,
+          ...(c.protocol ? { protocol: c.protocol } : {}),
+          bgp: String(!!c.lng?.bgp),
+          policyBased: String(c.policyBased),
+          nat: String(c.nat),
+          ...(c.lng ? { lng: JSON.stringify({ name: c.lng.name, prefixes: c.lng.prefixes, peerIp: c.lng.peerIp, fqdn: c.lng.fqdn }) } : {}),
+          ...(c.tunnels ? { tunnels: JSON.stringify(c.tunnels) } : {}),
+          ...(c.ingressBytes != null ? { ingressBytes: String(c.ingressBytes) } : {}),
+          ...(c.egressBytes != null ? { egressBytes: String(c.egressBytes) } : {}),
+          ...(c.dpd != null ? { dpd: String(c.dpd) } : {}),
+          ...(c.connectionMode ? { connectionMode: c.connectionMode } : {}),
+        },
+      });
+      const edge = makeEdge(gw.id, siteId, "vnetGateway", c.protocol ? `S2S · ${c.protocol}` : "S2S", c.protocol ?? undefined, "hybrid" as DiagramEdgeKind, undefined, "egress");
+      diagramEdges.push(edge);
+    }
+  }
+
   // ── Subnet outbound path (shown as a chip on the subnet header; catalog SEC-07 default outbound access) ──
   // nat > LB outbound rule (SNAT) > default outbound (on / off) > unknown (property not reported; UDR not read yet)
   const snatSources = new Set(outboundSources.filter((s) => s.label === "LB SNAT").map((s) => s.id));
@@ -2872,15 +2979,44 @@ export async function generateDiagramSpec(
     const vShortId = idMap.get(vnet.id);
     const spec = vShortId ? diagramNodes.find((n) => n.id === vShortId) : undefined;
     if (!spec) continue;
-    const peers = graph.edges
-      .filter((e) => e.kind === "peering" && (e.source === vnet.id || e.target === vnet.id))
-      .map((e) => {
+    // This VNet's own side of each peering (azure.ts metadata.vnetPeerings): every peering, also to VNets the
+    // graph cannot see (id null), with its flags; the remote side's gateway use is read from the remote VNet
+    type Own = {
+      name: string; remoteId: string | null; remoteName: string; state: string; sync: string | null; provisioning?: string | null;
+      access: boolean | null; forwarded: boolean | null; gatewayTransit: boolean | null; useRemoteGateways: boolean | null;
+      remoteSpace: string[]; remoteCurrentSpace?: string[] | null; complete?: boolean | null; localSubnets?: string[]; remoteSubnets?: string[];
+    };
+    let own = (Array.isArray(vnet.metadata?.vnetPeerings) ? vnet.metadata!.vnetPeerings : []) as Own[];
+    // Graphs without the per-VNet list (sample data, an older cache): the peering edges, state only
+    if (!own.length) {
+      own = graph.edges.filter((e) => e.kind === "peering" && (e.source === vnet.id || e.target === vnet.id)).map((e) => {
         const remote = e.source === vnet.id ? e.target : e.source;
-        const remoteNode = graph.nodes.find((g) => g.id === remote);
-        return { id: idMap.get(remote) ?? null, name: remoteNode?.name ?? remote.split("/").pop() ?? remote, state: String(e.metadata?.peeringState ?? "Unknown") };
+        return { name: "", remoteId: remote, remoteName: remote.split("/").pop() ?? remote, state: String(e.metadata?.peeringState ?? "Unknown"), sync: null, access: null, forwarded: null, gatewayTransit: null, useRemoteGateways: null, remoteSpace: [] };
       });
-    const unique = [...new Map(peers.map((p) => [p.name, p])).values()];
-    if (unique.length) spec.metadata = { ...spec.metadata, peerings: JSON.stringify(unique) };
+    }
+    const byArm = new Map(graph.nodes.filter((g) => g.kind === "vnet").map((g) => [g.id, g]));
+    const peers: LivePeering[] = own.map((p, i) => {
+      const remote = p.remoteId ? byArm.get(p.remoteId) : undefined;
+      const back = remote ? ((remote.metadata?.vnetPeerings ?? []) as Own[]).find((x) => x.remoteId === vnet.id) : undefined;
+      const both = p.state === "Connected" && back?.state === "Connected";
+      // Gateway transit only when the two sides agree (NET-37): one flag alone decides nothing
+      const transit = both && p.useRemoteGateways === true && back?.gatewayTransit === true ? "uses"
+        : both && p.gatewayTransit === true && back?.useRemoteGateways === true ? "provides" : null;
+      return {
+        // the link name is unique in a VNet; a graph without it keys by position (never by the remote name)
+        key: p.name || `peer-${i}`, link: p.name,
+        id: p.remoteId ? idMap.get(p.remoteId) ?? null : null,
+        name: remote?.name ?? p.remoteName,
+        state: p.state, sync: p.sync ?? null, provisioning: p.provisioning ?? null,
+        access: p.access, forwarded: p.forwarded, gatewayTransit: p.gatewayTransit, useRemoteGateways: p.useRemoteGateways,
+        remoteSpace: p.remoteSpace ?? [], remoteCurrentSpace: p.remoteCurrentSpace ?? null, complete: p.complete ?? null,
+        ...(p.localSubnets ? { localSubnets: p.localSubnets } : {}), ...(p.remoteSubnets ? { remoteSubnets: p.remoteSubnets } : {}),
+        ...(back ? { other: { state: back.state, sync: back.sync ?? null, access: back.access, forwarded: back.forwarded, gatewayTransit: back.gatewayTransit, useRemoteGateways: back.useRemoteGateways } } : {}),
+        transit,
+      };
+    });
+    const unique = [...new Map(peers.map((p) => [p.key, p])).values()];
+    if (unique.length) spec.metadata = { ...spec.metadata, peerings: JSON.stringify(unique.slice(0, 50)), peeringCount: String(unique.length) };
   }
 
   // Build groups

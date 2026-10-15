@@ -9,6 +9,7 @@ import {
   translateTexts,
 } from "../services/health.js";
 import { querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
+import { queryLang } from "../infra/lang.js";
 
 export function registerHealthRoutes(router: Router, env: Env) {
   const enabled = env.AZURE_HEALTH_ENABLED;
@@ -24,7 +25,7 @@ export function registerHealthRoutes(router: Router, env: Env) {
       res,
       async () => {
         const subscriptionId = querySubscriptionId(req, env);
-        return enabled ? tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId }) : null;
+        return enabled ? tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId, lang: queryLang(req) }) : null;
       },
       mockHealthSummary,
       "health",
@@ -58,13 +59,15 @@ export function registerHealthRoutes(router: Router, env: Env) {
     ),
   );
 
-  // Translation proxy — uses AZURE_TRANSLATOR_KEY when available,
-  // falls back to built-in translations for known mock events.
+  // Translation proxy for Service Health event text (services/health.ts translateTexts): Azure Translator when
+  // AZURE_TRANSLATOR_KEY is set, else the keyless endpoint, else the built-in sample translations. A failure is
+  // answered 200 with `error` = why (not_configured · translator_auth · translator_quota · translator_error).
   router.post("/api/health/translate", async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as { texts?: unknown; to?: unknown; from?: unknown };
-    const texts = Array.isArray(body.texts) ? body.texts.map(String).slice(0, 200) : [];
-    const to = typeof body.to === "string" ? body.to : "ko";
-    const from = typeof body.from === "string" ? body.from : "en";
+    const texts = Array.isArray(body.texts) ? body.texts.map(String).slice(0, 200).map((t) => t.slice(0, 5_000)) : [];
+    const lang = (v: unknown, dflt: string) => (typeof v === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(v) ? v : dflt);
+    const to = lang(body.to, "ko");
+    const from = lang(body.from, "en");
 
     if (texts.length === 0) {
       res.status(400).json({ error: "texts_required" });
@@ -73,10 +76,12 @@ export function registerHealthRoutes(router: Router, env: Env) {
 
     try {
       // The Translator key is billed: anonymous callers get the built-in translations (sample events) only
-    const signedIn = !!req.auth?.bearerToken || env.AUD_ANONYMOUS_SP;
-    const translations = await translateTexts(signedIn ? env : { ...env, AZURE_TRANSLATOR_KEY: undefined }, texts, to, from);
+      const signedIn = !!req.auth?.bearerToken || env.AUD_ANONYMOUS_SP;
+      const r = await translateTexts(signedIn ? env : { ...env, AZURE_TRANSLATOR_KEY: undefined }, texts, to, from);
       if (res.writableEnded) return;
-      res.json(translations ? { translations, from, to } : { error: "not_configured", translations: null });
+      res.json(r.ok
+        ? { translations: r.translations, from, to, provider: r.provider }
+        : { error: r.reason, translations: null, ...(r.status ? { status: r.status } : {}), ...(r.freeStatus ? { freeStatus: r.freeStatus } : {}) });
     } catch (e: unknown) {
       sendError(res, e, "translate_error", "health");
     }

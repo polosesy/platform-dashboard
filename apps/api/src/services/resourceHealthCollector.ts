@@ -6,7 +6,7 @@
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { debug } from "../infra/logger.js";
-import { callerSubscriptions } from "../infra/azureClientFactory.js";
+import { callerSubscriptions, getArmFetcherAuto } from "../infra/azureClientFactory.js";
 import { queryResourceGraph } from "./azure.js";
 
 export type RhState = "Available" | "Degraded" | "Unavailable" | "Unknown";
@@ -26,6 +26,14 @@ const armType = (id: string) => {
 export const rhSupported = (id: string | undefined) => !!id && RH_SUPPORTED.has(armType(id));
 
 const cache = new CacheManager<Map<string, RhState>>(200, 3 * 60_000);
+/**
+ * `healthresources` in Resource Graph does not carry every supported type (seen: no network resources at all — VPN
+ * gateways, connections, load balancers), while the per-resource ARM endpoint answers for them. The ids the query
+ * missed are asked one by one: bounded, a few at a time, short timeout; a failure leaves the id unknown.
+ */
+const DIRECT_MAX = 40;
+const DIRECT_PARALLEL = 6;
+const DIRECT_TIMEOUT_MS = 8_000;
 const STATES = new Set<RhState>(["Available", "Degraded", "Unavailable", "Unknown"]);
 
 /** Availability state per resource id (lower-case) for the supported ids among `ids`; failures → empty map */
@@ -50,7 +58,30 @@ export async function collectResourceHealth(env: Env, bearerToken: string | unde
     }
   } catch (e) {
     debug(`[rh] not read: ${String(e).slice(0, 160)}`);
-    return out;
+  }
+  const missing = wanted.filter((id) => !out.has(id));
+  if (missing.length) {
+    const ask = missing.slice(0, DIRECT_MAX);
+    if (missing.length > ask.length) debug(`[rh] ${missing.length - ask.length} resources left unknown (direct limit ${DIRECT_MAX})`);
+    try {
+      const arm = await getArmFetcherAuto(env, bearerToken);
+      for (let i = 0; i < ask.length; i += DIRECT_PARALLEL) {
+        await Promise.all(ask.slice(i, i + DIRECT_PARALLEL).map(async (id) => {
+          try {
+            const r = await arm.fetchJson<{ properties?: { availabilityState?: string } }>(
+              `https://management.azure.com${id}/providers/Microsoft.ResourceHealth/availabilityStatuses/current?api-version=2024-02-01`,
+              { timeoutMs: DIRECT_TIMEOUT_MS },
+            );
+            const state = r.properties?.availabilityState;
+            if (STATES.has(state as RhState)) out.set(id, state as RhState);
+          } catch (e) {
+            debug(`[rh] direct read failed: ${String(e).slice(0, 120)}`);
+          }
+        }));
+      }
+    } catch (e) {
+      debug(`[rh] direct reads not possible: ${String(e).slice(0, 120)}`);
+    }
   }
   cache.set(key, out);
   return out;

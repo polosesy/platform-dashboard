@@ -18,6 +18,7 @@ import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
 import { EdgeDetailPanel } from "./components/EdgeDetailPanel";
 import { formatAzureRegion } from "./utils/regionFormat";
 import { LIVE_EDGE_LOOK, liveStroke, type LiveEdgeStyleKey } from "@/lib/liveStyle";
+import { peeringPairOf, siteOfEdge } from "@/lib/livePeering";
 import styles from "./styles.module.css";
 import { Button, EmptyState, Notice, PageHeader, Select, Toggle } from "@/components/ui";
 
@@ -128,6 +129,7 @@ const LAYER_SWATCH: Record<EdgeLayer, LiveEdgeStyleKey> = {
   privateLinkUsage: "privateLinkUsage",
   ingress: "ingress",
   egress: "egress",
+  hybrid: "hybrid",
   peering: "peering",
   publicIp: "publicIp",
   inferred: "inferred",
@@ -252,10 +254,20 @@ export default function LiveDiagramPage() {
     if (last) setDiagramId(last);
   }, []);
 
+  const [focusPeeringKey, setFocusPeeringKey] = useState<string | null | undefined>(undefined);
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
     setSelectedVmssInstance(null);
+    setFocusPeeringKey(undefined);
     if (nodeId) setSelectedEdgeId(null);
+  }, []);
+
+  // A peering chip on a VNet header: open the VNet's panel with that peering expanded (null = the list)
+  const handlePeeringSelect = useCallback((vnetId: string, key: string | null) => {
+    setSelectedNodeId(vnetId);
+    setSelectedVmssInstance(null);
+    setSelectedEdgeId(null);
+    setFocusPeeringKey(key);
   }, []);
 
   const handleVmssInstanceSelect = useCallback((data: { computerName: string; powerState: string; provisioningState?: string; privateIp?: string; nodePoolName?: string; nodeImageVersion?: string; conditions?: AksNodeCondition[]; parentVmssId: string; label: string }) => {
@@ -567,6 +579,9 @@ export default function LiveDiagramPage() {
   // Edge detail fetch + 1-minute auto-refresh
   useEffect(() => {
     if (!selectedEdgeId || !filteredSpec) { setEdgeDetail(null); return; }
+    // Peering and S2S lines are described from the diagram itself (EdgeDetailPanel peering/site) — no NSG/UDR/flows
+    const kind = filteredSpec.edges.find((e) => e.id === selectedEdgeId)?.edgeKind;
+    if (kind === "peering" || kind === "hybrid") { setEdgeDetail(null); setEdgeDetailLoading(false); return; }
     let cancelled = false;
 
     async function load() {
@@ -801,6 +816,7 @@ export default function LiveDiagramPage() {
             selectedNodeId={selectedNodeId}
             focusNodeId={focusNodeId}
             onVmssInstanceSelect={handleVmssInstanceSelect}
+            onPeeringSelect={handlePeeringSelect}
           />
 
           {/* Right sidebar: edge detail, node detail, or alerts (list / timeline) */}
@@ -813,6 +829,8 @@ export default function LiveDiagramPage() {
                 liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}
                 sample={isSample}
                 targetPower={snapshot?.nodes.find((n) => n.id === filteredSpec.edges.find((e) => e.id === selectedEdgeId)?.target)?.powerState}
+                peering={peeringPairOf(spec, filteredSpec.edges.find((e) => e.id === selectedEdgeId))}
+                site={siteOfEdge(spec, filteredSpec.edges.find((e) => e.id === selectedEdgeId))}
                 onClose={() => handleEdgeSelect(null)}
               />
             ) : (selectedNodeId || selectedVmssInstance) ? (
@@ -831,6 +849,9 @@ export default function LiveDiagramPage() {
                 usage={usage}
                 usageLoading={wantUsage && usageQuery.loading && !usage}
                 onSelectNode={(id) => { handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
+                focusPeeringKey={focusPeeringKey}
+                onOpenVnet={(id) => { setSelectedVnets(new Set([id])); handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
+                onAddVnet={(id) => { setSelectedVnets((prev) => (prev.size ? new Set([...prev, id]) : prev)); handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
                 onBack={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
                 onClose={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
                 vmssInstance={selectedVmssInstance}

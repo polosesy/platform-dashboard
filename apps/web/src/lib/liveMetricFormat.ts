@@ -52,6 +52,13 @@ export const METRIC_META: Record<string, { label: string; unit: MetricUnit }> = 
   reqFailed: { label: "ld.metric.reqFailed", unit: "perMin" },
   dbAlive: { label: "ld.metric.dbAlive", unit: "count" },
   healthyTargets: { label: "ld.metric.healthyTargets", unit: "count" },
+  bandwidth: { label: "ld.metric.bandwidth", unit: "bps" },
+  bitsIn: { label: "ld.metric.bitsIn", unit: "bps" },
+  bitsOut: { label: "ld.metric.bitsOut", unit: "bps" },
+  // Front Door WAF verdicts over one hour, the whole profile (panel only)
+  wafBlock: { label: "ld.metric.wafBlock", unit: "count" },
+  wafLog: { label: "ld.metric.wafLog", unit: "count" },
+  wafTotal: { label: "ld.metric.wafTotal", unit: "count" },
   beTimeouts: { label: "ld.metric.beTimeouts", unit: "perMin" },
   timeoutRate: { label: "ld.metric.timeoutRate", unit: "%" },
 };
@@ -75,7 +82,8 @@ export const CARD_CELLS: Record<string, readonly string[]> = {
   agc: ["requests", "healthyTargets"], dns: ["queries"],
   // Front Door Standard/Premium binding set (the card kind is frontDoor)
   frontDoorAfd: ["requests", "backend"],
-  nsg: [], nic: [], logAnalytics: [], vnetGateway: [], bastion: [], paas: [],
+  nsg: [], nic: [], logAnalytics: [], bastion: [], paas: [],
+  vnetGateway: ["bandwidth"], onPremSite: ["bitsIn", "bitsOut"],
 };
 
 export const isPercent = (key: string) => METRIC_META[key]?.unit === "%";

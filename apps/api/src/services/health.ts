@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Env } from "../env.js";
 import type {
   HealthSummary,
@@ -15,6 +16,9 @@ import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
 import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
+import type { Lang } from "../infra/lang.js";
+
+const ACCEPT_LANGUAGE: Record<Lang, string> = { ko: "ko-KR", en: "en-US" };
 
 // ────────────────────────────────────────────
 // Azure Resource Health — Availability Status
@@ -56,6 +60,7 @@ const HEALTH_PAGE_TIMEOUT_MS = 60_000;
 async function fetchAllAvailabilityStatuses(
   fetcher: ArmFetcher,
   subId: string,
+  lang: Lang,
 ): Promise<ArmAvailabilityStatus[]> {
   const all: ArmAvailabilityStatus[] = [];
   let url: string | undefined =
@@ -67,7 +72,8 @@ async function fetchAllAvailabilityStatuses(
       console.warn(`[health] subscription ${subId}: hit max pagination limit (${MAX_PAGINATION_PAGES} pages, ${all.length} items)`);
       break;
     }
-    const page: ArmAvailabilityStatusPage = await fetcher.fetchJson<ArmAvailabilityStatusPage>(url, { timeoutMs: HEALTH_PAGE_TIMEOUT_MS });
+    // Resource Health writes `summary` in the Accept-Language (ko-KR verified) — no translator needed for this tab
+    const page: ArmAvailabilityStatusPage = await fetcher.fetchJson<ArmAvailabilityStatusPage>(url, { timeoutMs: HEALTH_PAGE_TIMEOUT_MS, language: ACCEPT_LANGUAGE[lang] });
     all.push(...(page.value ?? []));
     url = page.nextLink;
   }
@@ -111,13 +117,14 @@ function mapArmItem(item: ArmAvailabilityStatus, subId: string): ResourceHealthS
 export async function tryGetHealthSummary(
   env: Env,
   bearerToken: string | undefined,
-  opts?: { subscriptionId?: string },
+  opts?: { subscriptionId?: string; lang?: Lang },
 ): Promise<HealthSummary | null> {
   const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
   if (subIds.length === 0) return null;
+  const lang = opts?.lang ?? "ko";
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const key = `${prefix}:health:${subIds.join(",")}`;
+  const key = `${prefix}:health:${lang}:${subIds.join(",")}`;
   const cached = healthCache.get(key);
   if (cached) return cached;
 
@@ -129,7 +136,7 @@ export async function tryGetHealthSummary(
 
   try {
     return await Promise.race([
-      _fetchHealthSummaryCore(env, bearerToken, subIds, key),
+      _fetchHealthSummaryCore(env, bearerToken, subIds, key, lang),
       timeoutPromise,
     ]);
   } finally {
@@ -142,11 +149,12 @@ async function _fetchHealthSummaryCore(
   bearerToken: string | undefined,
   subIds: string[],
   cacheKey: string,
+  lang: Lang,
 ): Promise<HealthSummary> {
   const fetcher = await getArmFetcherAuto(env, bearerToken);
 
   const perSubResults = await Promise.allSettled(
-    subIds.map((subId) => fetchAllAvailabilityStatuses(fetcher, subId)),
+    subIds.map((subId) => fetchAllAvailabilityStatuses(fetcher, subId, lang)),
   );
 
   const resources: ResourceHealthStatus[] = [];
@@ -468,13 +476,35 @@ export async function tryGetServiceHealthEvents(
 }
 
 // ─────────────────────────────────────────────────────────
-// Azure Translator Text — optional batch translation
+// Translation of Service Health event text (the events tab's "한국어" toggle)
+// Service Health events come in English only (Accept-Language is ignored for them), so they need a translator:
+//   1. Azure Translator (AZURE_TRANSLATOR_KEY [+ AZURE_TRANSLATOR_REGION]) — a Translator resource, or a
+//      multi-service AI Services / Cognitive Services key with its region. When a key is set, nothing else is tried:
+//      event text is not sent to another service behind the operator's back.
+//   2. No key: the keyless Google endpoint (best effort — unofficial, often 429 from server addresses)
+//   3. Built-in translations of the sample events
+// Failures carry a reason the page can name (no key, key/region rejected, quota …) instead of one generic message.
 // ─────────────────────────────────────────────────────────
 
 type AzureTranslateItem = { translations: Array<{ text: string; to: string }> };
 
-/** Timeout for translation API calls (ms). */
+export type TranslateFailure = "not_configured" | "translator_auth" | "translator_quota" | "translator_error";
+export type TranslateResult =
+  | { ok: true; translations: string[]; provider: "azure" | "free" | "builtin" | "cache" }
+  /** status: HTTP status of the translator that answered; freeStatus: why the keyless fallback failed (no key) */
+  | { ok: false; reason: TranslateFailure; status?: number; freeStatus?: number | "network" };
+
+/** Timeout for one translation request (ms). */
 const TRANSLATE_TIMEOUT_MS = 10_000;
+/** Translator v3 limits are 1,000 array elements and 50,000 characters per request — stay below both */
+export const AZ_MAX_ITEMS = 100;
+export const AZ_MAX_CHARS = 40_000;
+/** The keyless endpoint takes the text in the URL — keep each request's text short */
+const FREE_MAX_CHARS = 1_800;
+
+/** Translations by (from, to, text) — event text repeats across refreshes and users; the key is billed per character */
+const translationCache = new CacheManager<string>(5_000, 24 * 60 * 60_000);
+const cacheKey = (from: string, to: string, text: string) => `${from}>${to}:${createHash("sha256").update(text).digest("base64url")}`;
 
 /**
  * Built-in Korean translations for mock event strings.
@@ -495,104 +525,124 @@ const BUILTIN_KO: Record<string, string> = {
     "Azure App Service의 관리형 SSL 인증서가 정기 교체됩니다. 인증서 고정(certificate pinning)을 사용하는 고객은 조치가 필요합니다.",
 };
 
-/**
- * Translate a single text via Google Translate free endpoint (no API key).
- * Uses the same endpoint as browser extensions / open-source tools.
- */
-async function googleTranslateFree(text: string, from: string, to: string): Promise<string> {
-  if (!text.trim()) return text;
+/** Indices of `texts` grouped so that no group has more than `maxItems` texts or `maxChars` characters (pure) */
+export function chunkTexts(texts: readonly string[], maxItems: number, maxChars: number): number[][] {
+  const out: number[][] = [];
+  let cur: number[] = [];
+  let chars = 0;
+  texts.forEach((t, i) => {
+    if (cur.length && (cur.length >= maxItems || chars + t.length > maxChars)) { out.push(cur); cur = []; chars = 0; }
+    cur.push(i);
+    chars += t.length;
+  });
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+class TranslatorHttpError extends Error {
+  constructor(readonly status: number) { super(`translator ${status}`); }
+}
+
+async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(text)}`;
-    const resp = await fetch(url, { signal: controller.signal });
-    if (!resp.ok) throw new Error(`Google Translate ${resp.status}`);
-    const data = await resp.json() as Array<unknown>;
-    // Response: [[["translated segment","original segment",...],...], ...]
-    const segments = data[0] as Array<[string, string]> | null;
-    if (!segments) return text;
-    return segments.map((seg) => seg[0]).join("");
-  } finally {
-    clearTimeout(timer);
+  try { return await run(controller.signal); } finally { clearTimeout(timer); }
+}
+
+async function azureTranslate(env: Env, texts: string[], from: string, to: string, doFetch: typeof fetch): Promise<string[]> {
+  const params = new URLSearchParams({ "api-version": "3.0", from, to });
+  const out: string[] = new Array(texts.length);
+  for (const group of chunkTexts(texts, AZ_MAX_ITEMS, AZ_MAX_CHARS)) {
+    const data = await withTimeout(async (signal) => {
+      const resp = await doFetch(`https://api.cognitive.microsofttranslator.com/translate?${params.toString()}`, {
+        method: "POST",
+        headers: {
+          "Ocp-Apim-Subscription-Key": env.AZURE_TRANSLATOR_KEY!,
+          // A regional / multi-service key is rejected (401) without its region; a global Translator needs none
+          ...(env.AZURE_TRANSLATOR_REGION ? { "Ocp-Apim-Subscription-Region": env.AZURE_TRANSLATOR_REGION } : {}),
+          "Content-Type": "application/json; charset=UTF-8",
+        },
+        body: JSON.stringify(group.map((i) => ({ Text: texts[i] }))),
+        signal,
+      });
+      // The error body is not passed on (it may echo request details) — the status says enough
+      if (!resp.ok) throw new TranslatorHttpError(resp.status);
+      return (await resp.json()) as AzureTranslateItem[];
+    });
+    group.forEach((idx, k) => { out[idx] = data[k]?.translations[0]?.text ?? texts[idx]!; });
   }
+  return out;
+}
+
+async function freeTranslate(texts: string[], from: string, to: string, doFetch: typeof fetch): Promise<string[]> {
+  const out: string[] = new Array(texts.length);
+  // One text per request when long, several short ones joined (the endpoint keeps paragraph breaks)
+  for (const group of chunkTexts(texts, 20, FREE_MAX_CHARS)) {
+    const SEP = "\n\n⸻\n\n";
+    const joined = group.map((i) => texts[i]!).join(SEP);
+    const translated = await withTimeout(async (signal) => {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(joined)}`;
+      const resp = await doFetch(url, { signal });
+      if (!resp.ok) throw new TranslatorHttpError(resp.status);
+      const data = (await resp.json()) as Array<unknown>;
+      // Response: [[["translated segment","original segment",...],...], ...]
+      const segments = data[0] as Array<[string, string]> | null;
+      return segments ? segments.map((seg) => seg[0]).join("") : joined;
+    });
+    const parts = translated.split(/\s*⸻\s*/);
+    group.forEach((idx, k) => { out[idx] = parts[k]?.trim() || texts[idx]!; });
+  }
+  return out;
 }
 
 /**
- * Batch-translate texts via Google Translate free endpoint.
- * Joins all texts with a separator, sends as one request, then splits result.
- */
-async function googleTranslateBatch(texts: string[], from: string, to: string): Promise<string[]> {
-  // Use a unique separator that won't appear in Azure health event text
-  const SEP = "\n\n⸻\n\n";
-  const joined = texts.join(SEP);
-  const translated = await googleTranslateFree(joined, from, to);
-  // Split on the separator (Google may slightly alter formatting)
-  const parts = translated.split(/\s*⸻\s*/);
-  // Ensure we have the right count; pad or trim if Google altered separator
-  return texts.map((original, i) => (parts[i]?.trim() || original));
-}
-
-/**
- * Batch-translate an array of English strings to the target language.
- *
- * Strategy order:
- *   1. Azure Translator API (if AZURE_TRANSLATOR_KEY configured) — best quality
- *   2. Google Translate free endpoint (no key needed) — zero cost
- *   3. Built-in translations for known mock event strings — offline fallback
+ * Batch-translate English Service Health text. Empty strings pass through; cached per text for a day.
+ * `doFetch` is injected by the tests.
  */
 export async function translateTexts(
   env: Env,
   texts: string[],
   to = "ko",
   from = "en",
-): Promise<string[] | null> {
-  if (texts.length === 0) return null;
+  doFetch: typeof fetch = fetch,
+): Promise<TranslateResult> {
+  const result = texts.map((t) => (t.trim() ? translationCache.get(cacheKey(from, to, t)) : t));
+  const missing = [...new Set(texts.filter((t, i) => result[i] === undefined))];
+  if (!missing.length) return { ok: true, translations: result as string[], provider: "cache" };
+  const fill = (got: string[], provider: "azure" | "free" | "builtin"): TranslateResult => {
+    const byText = new Map(missing.map((t, i) => [t, got[i] ?? t]));
+    // Only real translations are cached (the built-in table is already in memory)
+    if (provider !== "builtin") for (const [t, v] of byText) translationCache.set(cacheKey(from, to, t), v);
+    return { ok: true, translations: texts.map((t, i) => result[i] ?? byText.get(t) ?? t), provider };
+  };
 
-  // ── Strategy 1: Azure Translator API (subscription key) ──
+  // ── 1. Azure Translator ──
   if (env.AZURE_TRANSLATOR_KEY) {
-    const params = new URLSearchParams({ "api-version": "3.0", from, to });
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
     try {
-      const resp = await fetch(
-        `https://api.cognitive.microsofttranslator.com/translate?${params.toString()}`,
-        {
-          method: "POST",
-          headers: {
-            "Ocp-Apim-Subscription-Key": env.AZURE_TRANSLATOR_KEY,
-            "Ocp-Apim-Subscription-Region": env.AZURE_TRANSLATOR_REGION ?? "global",
-            "Content-Type": "application/json; charset=UTF-8",
-          },
-          body: JSON.stringify(texts.map((t) => ({ Text: t }))),
-          signal: controller.signal,
-        },
-      );
-      if (!resp.ok) throw new Error(`Azure Translator ${resp.status}: ${await resp.text()}`);
-      const data = (await resp.json()) as AzureTranslateItem[];
-      return data.map((item) => item.translations[0]?.text ?? "");
-    } finally {
-      clearTimeout(timer);
+      return fill(await azureTranslate(env, missing, from, to, doFetch), "azure");
+    } catch (e: unknown) {
+      const status = e instanceof TranslatorHttpError ? e.status : undefined;
+      debug(`[health] Azure Translator failed: ${status ?? (e instanceof Error ? e.name : "error")}`);
+      if (status === 401 || status === 403) return { ok: false, reason: "translator_auth", status };
+      if (status === 429) return { ok: false, reason: "translator_quota", status };
+      return { ok: false, reason: "translator_error", ...(status ? { status } : {}) };
     }
   }
 
-  // ── Strategy 2: Google Translate free endpoint (no key, zero cost) ──
+  // ── 3 first when it covers everything: the sample events need no network ──
+  if (to === "ko" && missing.every((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t]!), "builtin");
+
+  // ── 2. Keyless endpoint ──
+  let freeStatus: number | "network" = "network";
   try {
-    const results = await googleTranslateBatch(texts, from, to);
-    // Sanity check: at least one text was actually changed
-    const hasChange = results.some((r, i) => r !== texts[i]);
-    if (hasChange) return results;
+    const got = await freeTranslate(missing, from, to, doFetch);
+    if (got.some((r, i) => r !== missing[i])) return fill(got, "free");
   } catch (e: unknown) {
-    console.warn("[health] Google Translate free failed:", e instanceof Error ? e.message : e);
+    if (e instanceof TranslatorHttpError) freeStatus = e.status;
+    debug(`[health] keyless translation failed: ${freeStatus}`);
   }
-
-  // ── Strategy 3: Built-in translations for known mock event strings ──
-  if (to === "ko") {
-    const results = texts.map((t) => BUILTIN_KO[t] ?? t);
-    const hasTranslation = results.some((r, i) => r !== texts[i]);
-    if (hasTranslation) return results;
-  }
-
-  return null;
+  if (to === "ko" && missing.some((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t] ?? t), "builtin");
+  return { ok: false, reason: "not_configured", freeStatus };
 }
 
 // ─────────────────────────────────────────────────────────

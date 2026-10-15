@@ -17,7 +17,7 @@ import {
 } from "../infra/azureClientFactory.js";
 import { kqlString, parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
-import { isPrivateV4, joinPrivateLinkUsage, type PluAccessRow, type PluCaller, type PluFlowRow, type PluInput, type PluNic, type PluPe, type PluSubnet } from "./privateLinkUsage.js";
+import { isPrivateV4, joinPrivateLinkUsage, type PluAccessRow, type PluCaller, type PluFlowRow, type PluInput, type PluNic, type PluPe, type PluSubnet, type PluSite } from "./privateLinkUsage.js";
 
 const resultCache = new CacheManager<PrivateLinkUsageResponse>(100, 5 * 60_000);
 const inflight = new Map<string, Promise<PrivateLinkUsageResponse>>();
@@ -53,6 +53,8 @@ type Scope = {
   outerSubnets: PluSubnet[];
   /** Every subnet / VNet prefix of the diagram (addresses inside them are internal, RFC 1918 or not) */
   knownCidrs: string[];
+  /** On-premises sites of this VNet's gateway, or of a hub this VNet uses by gateway transit */
+  sites: PluSite[];
 };
 
 /** Everything the join needs that the diagram already knows (no Azure call) */
@@ -125,7 +127,21 @@ export function scopeFromSpec(spec: DiagramSpec, vnetNodeId: string): Scope | nu
     if (cluster) clusterOf.set(n.id, cluster);
   }
   const nsgArmIds = spec.nodes.filter((n) => kindOf(n) === "nsg" && n.azureResourceId && inScope(vnetOf(n))).map((n) => n.azureResourceId!);
-  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)] };
+  // Sites: S2S of a gateway in this VNet, or in a VNet this one uses by gateway transit (peering transit "uses")
+  let transitVnets = new Set<string>();
+  try {
+    transitVnets = new Set((JSON.parse(vnet.metadata?.peerings ?? "[]") as Array<{ id: string | null; transit?: string | null }>).filter((p) => p.transit === "uses" && p.id).map((p) => p.id!));
+  } catch { /* no peerings */ }
+  const sites: PluSite[] = [];
+  for (const n of spec.nodes) {
+    if (kindOf(n) !== "onPremSite") continue;
+    const gwVnet = vnetOf(byId.get(n.metadata?.gatewayNodeId ?? ""));
+    if (!gwVnet || (gwVnet !== vnet.id && !transitVnets.has(gwVnet))) continue;
+    let prefixes: string[] = [];
+    try { prefixes = (JSON.parse(n.metadata?.lng ?? "{}") as { prefixes?: string[] }).prefixes ?? []; } catch { /* none */ }
+    sites.push({ siteNodeId: n.id, prefixes, bgp: n.metadata?.bgp === "true", nat: n.metadata?.nat === "true" });
+  }
+  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)], sites };
 }
 
 async function graph<T>(arm: ArmFetcher, env: Env, query: string): Promise<T[]> {
@@ -361,7 +377,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
   const input: PluInput = {
     callers: scope.callers, subnets: scope.subnets, pes: scope.pes.map((p) => ({ peNodeId: p.peNodeId, targetNodeId: p.targetNodeId, vnetId: p.vnetId, ...(p.ip ? { ip: p.ip } : {}), ...(p.state ? { state: p.state } : {}) })), nics, nodeByArmId: scope.nodeByArmId,
     identities, peerings: scope.peerings, access, flows, peBytes: new Map(), sources,
-    clusterOf: scope.clusterOf, outerSubnets: scope.outerSubnets, knownCidrs: scope.knownCidrs,
+    clusterOf: scope.clusterOf, outerSubnets: scope.outerSubnets, knownCidrs: scope.knownCidrs, sites: scope.sites,
   };
   return { ...joinPrivateLinkUsage(input), sources };
 }

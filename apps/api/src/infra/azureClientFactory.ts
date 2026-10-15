@@ -43,7 +43,8 @@ export function anonymousSpAllowed(env: Env, featureFlag = true): boolean {
 export const signinRequired = signinRequiredError;
 
 export type ArmFetcher = {
-  fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) => Promise<T>;
+  /** `language` = Accept-Language (e.g. "ko-KR") — some providers localise their text (Resource Health summaries) */
+  fetchJson: <T>(url: string, opts?: { timeoutMs?: number; language?: string }) => Promise<T>;
   postJson: <T>(url: string, body: unknown, opts?: { timeoutMs?: number }) => Promise<T>;
 };
 
@@ -132,15 +133,18 @@ export function callerSubscriptions(env: Env, bearerToken: string | undefined): 
 type ArgBody = { subscriptions?: string[]; managementGroups?: string[]; options?: Record<string, unknown> };
 type ArgPage = { data?: unknown[]; $skipToken?: string };
 const isResourceGraph = (url: string) => /\/providers\/Microsoft\.ResourceGraph\/resources\b/i.test(url);
-const jsonHeaders = (t: string) => ({ Authorization: `Bearer ${t}`, "Content-Type": "application/json" });
+const jsonHeaders = (t: string, language?: string) => ({
+  Authorization: `Bearer ${t}`, "Content-Type": "application/json",
+  ...(language && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(language) ? { "Accept-Language": language } : {}),
+});
 
 function userArmFetcher(env: Env, bearerToken: string): ArmFetcher {
-  const viaUrl = async <T>(url: string, init: RequestInit, timeoutMs?: number) => {
+  const viaUrl = async <T>(url: string, init: RequestInit, timeoutMs?: number, language?: string) => {
     const t = await connectionToken(env, bearerToken, connectionFor(env, subscriptionInPath(url)), ARM_SCOPE);
-    return fetchJsonWithTimeout<T>("ARM", url, { ...init, headers: jsonHeaders(t) }, timeoutMs);
+    return fetchJsonWithTimeout<T>("ARM", url, { ...init, headers: jsonHeaders(t, language) }, timeoutMs);
   };
   return {
-    fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) => viaUrl<T>(url, {}, opts?.timeoutMs),
+    fetchJson: <T>(url: string, opts?: { timeoutMs?: number; language?: string }) => viaUrl<T>(url, {}, opts?.timeoutMs, opts?.language),
     postJson: async <T>(url: string, body: unknown, opts?: { timeoutMs?: number }): Promise<T> => {
       const b = (body ?? {}) as ArgBody;
       if (!isResourceGraph(url) || b.managementGroups) return viaUrl<T>(url, { method: "POST", body: JSON.stringify(body) }, opts?.timeoutMs);
@@ -317,8 +321,8 @@ async function fetchJsonWithTimeout<T>(
 
 function buildArmFetcher(token: () => Promise<string>): ArmFetcher {
   return {
-    fetchJson: async <T>(url: string, opts?: { timeoutMs?: number }) =>
-      fetchJsonWithTimeout<T>("ARM", url, { headers: jsonHeaders(await token()) }, opts?.timeoutMs),
+    fetchJson: async <T>(url: string, opts?: { timeoutMs?: number; language?: string }) =>
+      fetchJsonWithTimeout<T>("ARM", url, { headers: jsonHeaders(await token(), opts?.language) }, opts?.timeoutMs),
     postJson: async <T>(url: string, body: unknown, opts?: { timeoutMs?: number }) =>
       fetchJsonWithTimeout<T>("ARM", url, { method: "POST", headers: jsonHeaders(await token()), body: JSON.stringify(body) }, opts?.timeoutMs),
   };

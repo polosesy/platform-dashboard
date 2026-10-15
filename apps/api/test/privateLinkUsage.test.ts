@@ -230,3 +230,29 @@ test("addresses outside the scope: another VNet's subnet is named, overlap is no
   assert.deepEqual(place("172.16.4.4"), { kind: "private" });
   assert.deepEqual(place("100.64.1.1"), { kind: "cgnat" });
 });
+
+test("an address in exactly one S2S site's local network gateway ranges is placed on that site (configuration); BGP / NAT / host routes are not used", () => {
+  const i = base();
+  i.sites = [
+    { siteNodeId: "site-a", prefixes: ["192.168.10.0/24"], bgp: false, nat: false },
+    { siteNodeId: "site-b", prefixes: ["192.168.20.0/24", "192.168.30.5/32"], bgp: false, nat: false },
+    { siteNodeId: "site-bgp", prefixes: ["192.168.40.0/24"], bgp: true, nat: false },
+    { siteNodeId: "site-nat", prefixes: ["192.168.50.0/24"], bgp: false, nat: true },
+    { siteNodeId: "site-wide", prefixes: ["172.0.0.0/7"], bgp: false, nat: false },
+    { siteNodeId: "site-dup", prefixes: ["192.168.20.0/25"], bgp: false, nat: false },
+  ];
+  i.outerSubnets = [{ nodeId: "snet-x", vnetId: "x1", cidr: "192.168.10.0/26", owners: [] }];
+  const ip = (a: string) => ({ targetNodeId: "kv", source: "kvAudit" as const, ip: a, requests: 1 });
+  i.access = ["192.168.10.200", "192.168.10.9", "192.168.20.200", "192.168.20.9", "192.168.30.5", "192.168.40.9", "192.168.50.9", "172.16.9.9"].map(ip);
+  const out = joinPrivateLinkUsage(i);
+  const place = (a: string) => out.unresolved.find((u) => u.ip === a)?.place;
+  assert.equal(out.usages.length, 0, "an on-premises host is never drawn as a card");
+  assert.deepEqual(place("192.168.10.200"), { kind: "onPremSite", siteNodeId: "site-a", prefix: "192.168.10.0/24", basis: "cfg" });
+  assert.deepEqual(place("192.168.10.9"), { kind: "overlap", matches: 2 }, "a VNet subnet and a site both claim it");
+  assert.deepEqual(place("192.168.20.200"), { kind: "onPremSite", siteNodeId: "site-b", prefix: "192.168.20.0/24", basis: "cfg" });
+  assert.deepEqual(place("192.168.20.9"), { kind: "overlap", matches: 2 }, "two sites claim it");
+  assert.equal(place("192.168.30.5")?.kind, "private", "a /32 is a peer address, not a range");
+  assert.equal(place("192.168.40.9")?.kind, "private", "BGP decides the real ranges");
+  assert.equal(place("192.168.50.9")?.kind, "private", "NAT translates the address");
+  assert.equal(place("172.16.9.9")?.kind, "private", "wider than /8 is not used");
+});

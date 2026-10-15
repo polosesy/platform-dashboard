@@ -38,6 +38,7 @@ const ICON_FILE: Record<DiagramIconKind, string> = {
   vnetGateway: "vpn-gateway",
   bastion: "bastion",
   paas: "paas",
+  onPremSite: "onprem-site",
   internet: "custom",  // InternetNode uses inline SVG — no asset needed
   custom: "custom",
 };

@@ -15,7 +15,7 @@ import { relEdge } from "./relationships.js";
 import { buildAddressIndex, parseFrontends, parsePools, resolveMember, type AddressEntry, type Frontend } from "./backendMembers.js";
 import { internetInboundExposure, mostExposed, routesWidenVnetTag, type NsgInput } from "./nsgExposure.js";
 import { agcFacts, resolveAgcCluster, type AgcChildRow } from "./agc.js";
-import { fetchFrontDoorConfig, resolveAfdOrigins } from "./frontDoorConfig.js";
+import { activeRoutes, fetchFrontDoorConfig, resolveAfdOrigins, resolveAfdWaf, wafPolicyFacts } from "./frontDoorConfig.js";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind, InboundExposure } from "@aud/types";
 
 type AzureResourceRow = {
@@ -610,10 +610,21 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     "resources | where type in~ ('microsoft.servicenetworking/trafficcontrollers/associations'," +
     "'microsoft.servicenetworking/trafficcontrollers/frontends','microsoft.servicenetworking/trafficcontrollers/securitypolicies')" +
     " | project id, type, properties";
+  // S2S: connections and local network gateways — folded into the VNet gateway (EDGE-08), the on-premises end
+  // (EDGE-09) drawn by the live diagram as a site card. Not graph nodes.
+  const hybridQuery =
+    "resources | where type in~ ('microsoft.network/connections','microsoft.network/localnetworkgateways')" +
+    " | project id, name, type, properties";
+  // WAF policies (EDGE-10) — mode, state, rule sets; folded into the Front Door that a security policy links them
+  // to, not nodes. The Application Gateway policy type is read for the same vocabulary later (not drawn yet).
+  const wafPolicyQuery =
+    "resources | where type in~ ('microsoft.network/frontdoorwebapplicationfirewallpolicies','microsoft.network/applicationgatewaywebapplicationfirewallpolicies')" +
+    " | project id, name, type, sku, properties";
   // Every type in the subscriptions, to list what no diagram draws
   const typeCountQuery = "resources | summarize count = count() by type = tolower(type)";
 
-  const [subRows, rgRows, resRows, diagRows, exposureRows, agcRows, typeRows] = await Promise.all([
+  type WafRow = { id?: string; name?: string; type?: string; sku?: { name?: string } | null; properties?: Record<string, unknown> };
+  const [subRows, rgRows, resRows, diagRows, exposureRows, agcRows, typeRows, hybridRows, wafFirst] = await Promise.all([
     resourceGraphQueryAll<AzureSubscriptionRow>(bundle, subsQuery),
     resourceGraphQueryAll<AzureResourceGroupRow>(bundle, rgQuery),
     resourceGraphQueryAll<AzureResourceRow>(bundle, resQuery),
@@ -621,7 +632,13 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     resourceGraphQueryAll<AzureResourceRow>(bundle, exposureQuery).catch(() => null),
     resourceGraphQueryAll<AgcChildRow>(bundle, agcChildQuery).catch(() => [] as AgcChildRow[]),
     resourceGraphQueryAll<{ type: string; count: number }>(bundle, typeCountQuery).catch(() => [] as Array<{ type: string; count: number }>),
+    resourceGraphQueryAll<AzureResourceRow>(bundle, hybridQuery).catch(() => [] as AzureResourceRow[]),
+    // null = not readable: every Front Door domain under a WAF is then "unknown", never "none"
+    resourceGraphQueryAll<WafRow>(bundle, wafPolicyQuery).catch(() => null),
   ]);
+  // Nine queries at once can be throttled: one more try on its own before the WAF facts count as unreadable
+  const wafRows = wafFirst ?? await resourceGraphQueryAll<WafRow>(bundle, wafPolicyQuery).catch(() => null);
+  const wafById = wafRows ? new Map(wafRows.filter((r) => r.id).map((r) => [r.id!.toLowerCase(), wafPolicyFacts(r)])) : null;
   for (const r of agcRows) if (r.id) r.id = r.id.toLowerCase();
   const agcByController = agcFacts(agcRows);
 
@@ -713,9 +730,44 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       else nodeMetadata.classic = true; // retires 2027-03-31
     }
     if (kind === "paas") nodeMetadata.armType = rtype;
+    // This VNet's own side of every peering (EDGE-02) — including peerings to VNets this graph cannot see. Each side
+    // has its own flags: the hub allows gateway transit, a spoke uses the remote gateway.
+    if (kind === "vnet") {
+      const list = safePropArray(rprops, "virtualNetworkPeerings").map((pe) => {
+        const pp = ((pe as Record<string, unknown>).properties ?? {}) as Record<string, unknown>;
+        const remoteId = safeId((pp.remoteVirtualNetwork as { id?: unknown } | undefined)?.id);
+        const prefixes = (v: unknown) => { const a = (v as { addressPrefixes?: unknown } | undefined)?.addressPrefixes; return Array.isArray(a) ? a.map(String).slice(0, 20) : null; };
+        // A flag ARM did not return stays null — never a default
+        const flag = (v: unknown) => (typeof v === "boolean" ? v : null);
+        const names = (v: unknown) => (Array.isArray(v) && v.length ? v.map(String).slice(0, 20) : undefined);
+        return {
+          name: safeString((pe as Record<string, unknown>).name) ?? "",
+          remoteId: remoteId ?? null,
+          remoteName: remoteId?.split("/").pop() ?? "",
+          state: safeString(pp.peeringState) ?? "Unknown",
+          sync: safeString(pp.peeringSyncLevel) ?? null,
+          provisioning: safeString(pp.provisioningState) ?? null,
+          access: flag(pp.allowVirtualNetworkAccess),
+          forwarded: flag(pp.allowForwardedTraffic),
+          gatewayTransit: flag(pp.allowGatewayTransit),
+          useRemoteGateways: flag(pp.useRemoteGateways),
+          remoteSpace: prefixes(pp.remoteAddressSpace) ?? [],
+          remoteCurrentSpace: prefixes(pp.remoteVirtualNetworkAddressSpace),
+          complete: flag(pp.peerCompleteVnets),
+          ...(names(pp.localSubnetNames) ? { localSubnets: names(pp.localSubnetNames) } : {}),
+          ...(names(pp.remoteSubnetNames) ? { remoteSubnets: names(pp.remoteSubnetNames) } : {}),
+        };
+      });
+      if (list.length) nodeMetadata.vnetPeerings = list;
+    }
     if (kind === "vnetGateway") {
       const gt = safeString(rprops.gatewayType);
       if (gt) nodeMetadata.gatewayType = gt;
+      const sku = safeString((rprops.sku as { name?: unknown } | undefined)?.name);
+      if (sku) nodeMetadata.sku = sku;
+      if (safeString(rprops.vpnType)) nodeMetadata.vpnType = safeString(rprops.vpnType);
+      if (typeof rprops.activeActive === "boolean") nodeMetadata.activeActive = rprops.activeActive;
+      if (typeof rprops.enableBgp === "boolean") nodeMetadata.enableBgp = rprops.enableBgp;
     }
     // Private Endpoint: every connection's approval state (only Approved carries traffic — private-endpoint-overview)
     if (kind === "privateEndpoint") {
@@ -1217,6 +1269,48 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     if (sn && resourceById.has(sn)) edges.push(relEdge("CT-07", `e:subnet->gw:${sn}:${r.id}`, sn, r.id));
   }
 
+  // ── S2S connections → VNet gateway (EDGE-08) with their local network gateway (EDGE-09) ──
+  {
+    const lngById = new Map(hybridRows.filter((r) => (r.type ?? "").toLowerCase() === "microsoft.network/localnetworkgateways" && r.id).map((r) => [r.id.toLowerCase(), r]));
+    const byGateway = new Map<string, unknown[]>();
+    for (const c of hybridRows) {
+      if ((c.type ?? "").toLowerCase() !== "microsoft.network/connections" || !c.id) continue;
+      const cp = (c.properties ?? {}) as Record<string, unknown>;
+      if (safeString(cp.connectionType) !== "IPsec") continue; // VNet-to-VNet / ExpressRoute: next scope
+      const gw = safeId((cp.virtualNetworkGateway1 as { id?: unknown } | undefined)?.id);
+      const lngId = safeId((cp.localNetworkGateway2 as { id?: unknown } | undefined)?.id);
+      if (!gw) continue;
+      const lng = lngId ? lngById.get(lngId) : undefined;
+      const lp = (lng?.properties ?? {}) as Record<string, unknown>;
+      const prefixes = (lp.localNetworkAddressSpace as { addressPrefixes?: unknown } | undefined)?.addressPrefixes;
+      const tunnels = Array.isArray(cp.tunnelConnectionStatus)
+        ? (cp.tunnelConnectionStatus as Array<Record<string, unknown>>).map((t) => ({ tunnel: safeString(t.tunnel) ?? "", status: safeString(t.connectionStatus) ?? "Unknown", lastConnected: safeString(t.lastConnectionEstablishedUtcTime) }))
+        : null;
+      const nat = (Array.isArray(cp.ingressNatRules) && cp.ingressNatRules.length > 0) || (Array.isArray(cp.egressNatRules) && cp.egressNatRules.length > 0);
+      const list = byGateway.get(gw) ?? byGateway.set(gw, []).get(gw)!;
+      list.push({
+        connectionId: c.id, name: c.name ?? c.id.split("/").pop(), type: "IPsec",
+        // read when the topology was read (Resource Graph) — not live
+        status: safeString(cp.connectionStatus) ?? "Unknown", protocol: safeString(cp.connectionProtocol) ?? null,
+        enableBgp: cp.enableBgp === true, policyBased: cp.usePolicyBasedTrafficSelectors === true,
+        connectionMode: safeString(cp.connectionMode) ?? null, dpd: typeof cp.dpdTimeoutSeconds === "number" ? cp.dpdTimeoutSeconds : null,
+        ingressBytes: typeof cp.ingressBytesTransferred === "number" ? cp.ingressBytesTransferred : null,
+        egressBytes: typeof cp.egressBytesTransferred === "number" ? cp.egressBytesTransferred : null,
+        tunnels, nat,
+        lng: lng ? {
+          id: lng.id, name: lng.name ?? lng.id.split("/").pop(),
+          prefixes: Array.isArray(prefixes) ? prefixes.map(String) : [],
+          peerIp: safeString(lp.gatewayIpAddress) ?? null, fqdn: safeString(lp.fqdn) ?? null,
+          bgp: !!lp.bgpSettings || cp.enableBgp === true,
+        } : null,
+      });
+    }
+    for (const n of nodes) {
+      const list = n.kind === "vnetGateway" ? byGateway.get(n.id) : undefined;
+      if (list?.length) n.metadata = { ...n.metadata, s2s: list };
+    }
+  }
+
   // ── Application Gateway for Containers: children folded in (AGC-02), delegated subnet (AGC-01), cluster (AGC-04) ──
   const clusterFacts = resRows
     .filter((r) => r.id && (r.type ?? "").toLowerCase() === "microsoft.containerservice/managedclusters")
@@ -1263,7 +1357,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           edges.push(relEdge(l.rel, `e:afd->origin:${fd.id}:${l.group}:${l.origin}:${l.targetId}`, fd.id, l.targetId, { evidence: l.evidence, pool: l.group, origin: l.origin, direction: "inbound", ...(l.status ? { status: l.status } : {}) }));
         }
         fd.metadata = {
-          ...fd.metadata, endpoints: cfg.endpoints.length, activeRoutes: cfg.routes.filter((r) => r.enabled).length,
+          ...fd.metadata, endpoints: cfg.endpoints.length, activeRoutes: activeRoutes(cfg).length,
+          // EDGE-10 / EDGE-11: WAF per served domain (security policy → WAF policy); chip + panel, not a node
+          waf: resolveAfdWaf(fd.azureId ?? fd.id, cfg, wafById),
           origins: cfg.origins.length, externalOrigins: res.external, ambiguousOrigins: res.ambiguous,
           endpointHosts: cfg.endpoints.filter((e) => e.enabled).map((e) => e.hostName).slice(0, 10),
           // Every origin by name for the panel: its group, host, state and the resource it was matched to (if any)
@@ -1465,9 +1561,15 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         if (remoteId && resourceById.has(remoteId)) {
           const peerState = safePropString(p, "properties", "peeringState") ?? "Unknown";
           const edgeId = `e:peering:${r.id}:${remoteId}`;
-          // Only add one direction (lower ID → higher ID) to avoid duplicates
+          // Only add one direction (lower ID → higher ID) to avoid duplicates; each side's state is kept and the
+          // line carries the worse one (a peering works only when both sides are Connected)
           if (r.id < remoteId) {
-            edges.push(relEdge("EDGE-02", edgeId, r.id, remoteId, { peeringState: peerState }));
+            const back = safePropArray(resourceById.get(remoteId)?.properties, "virtualNetworkPeerings")
+              .find((x) => safePropString(x, "properties", "remoteVirtualNetwork", "id")?.toLowerCase() === r.id);
+            const stateB = back ? safePropString(back, "properties", "peeringState") ?? "Unknown" : undefined;
+            const rank = (x?: string) => (x === "Connected" ? 0 : x === "Initiated" ? 1 : x === "Disconnected" ? 2 : 3);
+            const worse = stateB != null && rank(stateB) > rank(peerState) ? stateB : peerState;
+            edges.push(relEdge("EDGE-02", edgeId, r.id, remoteId, { peeringState: worse, stateA: peerState, ...(stateB != null ? { stateB } : {}) }));
           }
         }
       }
@@ -1748,7 +1850,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     ...PE_PAAS_TYPES,
     "microsoft.servicenetworking/trafficcontrollers/associations", "microsoft.servicenetworking/trafficcontrollers/frontends",
     "microsoft.servicenetworking/trafficcontrollers/securitypolicies", "microsoft.cdn/profiles/afdendpoints",
-    "microsoft.insights/diagnosticsettings",
+    "microsoft.insights/diagnosticsettings", "microsoft.network/connections", "microsoft.network/localnetworkgateways",
+    // shown on the Front Door it protects (EDGE-10) — the Application Gateway policy type is not shown yet
+    "microsoft.network/frontdoorwebapplicationfirewallpolicies", "microsoft.cdn/profiles/securitypolicies",
   ]);
   const undrawnTypes = typeRows.filter((t) => t.type && !DRAWN.has(t.type)).sort((a, b) => b.count - a.count);
 

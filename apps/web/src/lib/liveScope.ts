@@ -9,15 +9,15 @@ export function isInferredEdge(e: Pick<DiagramEdgeSpec, "edgeKind" | "evidence">
 }
 
 /** What the toolbar's "연결선" menu switches. Every edge belongs to exactly one layer. */
-export type EdgeLayer = "config" | "privateLink" | "privateLinkUsage" | "ingress" | "egress" | "peering" | "publicIp" | "inferred";
+export type EdgeLayer = "config" | "privateLink" | "privateLinkUsage" | "ingress" | "egress" | "hybrid" | "peering" | "publicIp" | "inferred";
 
-export const EDGE_LAYERS: readonly EdgeLayer[] = ["config", "privateLink", "privateLinkUsage", "ingress", "egress", "peering", "publicIp", "inferred"];
+export const EDGE_LAYERS: readonly EdgeLayer[] = ["config", "privateLink", "privateLinkUsage", "ingress", "egress", "hybrid", "peering", "publicIp", "inferred"];
 
 /**
  * Configured links and observed Private Link use are on by default; public IP exposure and guesses are opt-in.
  * (Observed use comes from logs, added after layout — lib/plUsage.ts — never from the spec.)
  */
-export const DEFAULT_EDGE_LAYERS: ReadonlySet<EdgeLayer> = new Set<EdgeLayer>(["config", "privateLink", "privateLinkUsage", "ingress", "egress", "peering"]);
+export const DEFAULT_EDGE_LAYERS: ReadonlySet<EdgeLayer> = new Set<EdgeLayer>(["config", "privateLink", "privateLinkUsage", "ingress", "egress", "hybrid", "peering"]);
 
 const isPublicIp = (n: DiagramNodeSpec | undefined) => n?.resourceKind === "publicIP" || n?.icon === "publicIP";
 
@@ -26,6 +26,8 @@ export function edgeLayer(e: DiagramEdgeSpec, nodeById: ReadonlyMap<string, Diag
   if (e.edgeKind === "privateLinkUsage") return "privateLinkUsage";
   if (e.edgeKind === "privateLink") return "privateLink";
   if (e.edgeKind === "peering") return "peering";
+  // VPN gateway → on-premises site (S2S, catalog EDGE-09)
+  if (e.edgeKind === "hybrid") return "hybrid";
   if (e.edgeKind === "outbound-internet" || e.edgeKind === "natgw-association" || e.flowType === "egress") return "egress";
   if (isPublicIp(nodeById.get(e.source)) || isPublicIp(nodeById.get(e.target))) return "publicIp";
   // Inbound = lines that start at the Internet; LB / App Gateway → backend routing is configuration
@@ -105,7 +107,51 @@ export function scopeSpec(
   const nodes = spec.nodes.flatMap((n) => (core.has(n.id) ? [n] : extra.has(n.id) ? [extra.get(n.id)!] : []));
   const visible = new Set(nodes.map((n) => n.id));
   const edges = spec.edges.filter((e) => visible.has(e.source) && visible.has(e.target));
-  return { ...spec, nodes, edges };
+  return withGlobalInbound(spec, byId, nodes, edges, visible, extra);
+}
+
+const isInboundInternet = (n: DiagramNodeSpec | undefined) => !!n && (n.resourceKind ?? n.icon) === "internet" && n.metadata?.direction === "ingress";
+const cmpId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * A global entry point brought in by one hop (Front Door → an origin in this VNet) keeps its Internet side: its
+ * inbound line comes from `internet-in-external`, two hops away. With exactly one inbound Internet card in view the
+ * line is re-pointed to it (same edge id — the snapshot still joins; one Internet, not two); with none or several
+ * (several VNets selected) the external card is brought in — no choosing between VNets. `entryCount` = the inbound
+ * lines drawn from each Internet card. Deterministic (edges by id); the spec itself is never changed.
+ */
+function withGlobalInbound(
+  spec: DiagramSpec,
+  byId: ReadonlyMap<string, DiagramNodeSpec>,
+  nodes: DiagramNodeSpec[],
+  edges: DiagramEdgeSpec[],
+  visible: ReadonlySet<string>,
+  extra: ReadonlyMap<string, DiagramNodeSpec>,
+): DiagramSpec {
+  const wanted = [...spec.edges].sort(cmpId).filter((e) => {
+    if (visible.has(e.source) || !visible.has(e.target) || !isInboundInternet(byId.get(e.source))) return false;
+    const entry = extra.get(e.target);
+    // a top-level entry brought in as context — not a ghost of another VNet's resource
+    return !!entry && !entry.parentId && !entry.metadata?.ghostOf;
+  });
+  let outNodes = nodes;
+  let outEdges = edges;
+  if (wanted.length) {
+    const inet = nodes.filter(isInboundInternet);
+    if (inet.length === 1) {
+      outEdges = [...edges, ...wanted.map((e) => ({ ...e, source: inet[0]!.id }))];
+    } else {
+      const add = [...new Set(wanted.map((e) => e.source))].sort().map((id) => byId.get(id)!);
+      outNodes = [...nodes, ...add];
+      outEdges = [...edges, ...wanted];
+    }
+  }
+  if (!outNodes.some(isInboundInternet)) return { ...spec, nodes: outNodes, edges: outEdges };
+  // Each Internet card counts the lines it draws in this view, not every entry of the subscription
+  const lines = new Map<string, number>();
+  for (const e of outEdges) if (e.flowType === "ingress") lines.set(e.source, (lines.get(e.source) ?? 0) + 1);
+  outNodes = outNodes.map((n) => (isInboundInternet(n) ? { ...n, metadata: { ...n.metadata, entryCount: String(lines.get(n.id) ?? 0) } } : n));
+  return { ...spec, nodes: outNodes, edges: outEdges };
 }
 
 // ── Coverage of what is on screen ──

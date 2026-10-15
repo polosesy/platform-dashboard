@@ -53,7 +53,7 @@ export type UnresolvedGroup = {
 };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-const placeKey = (p: PlUnresolved["place"]) => !p ? "" : p.kind === "otherVnet" ? `ov:${p.vnetNodeId}:${p.subnetNodeId}:${p.ownerNodeId ?? ""}` : p.kind === "overlap" ? `ol:${p.matches}` : p.kind;
+const placeKey = (p: PlUnresolved["place"]) => !p ? "" : p.kind === "otherVnet" ? `ov:${p.vnetNodeId}:${p.subnetNodeId}:${p.ownerNodeId ?? ""}` : p.kind === "overlap" ? `ol:${p.matches}` : p.kind === "onPremSite" ? `op:${p.siteNodeId}:${p.prefix}` : p.kind;
 
 /**
  * One line per reason instead of one per IP: rows grouped by (reason, basis, candidate set, place, NIC). Groups

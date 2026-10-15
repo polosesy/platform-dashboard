@@ -68,7 +68,24 @@ export const mockArchitectureGraph: ArchitectureGraph = {
     { id: PE_SQL, kind: "privateEndpoint", name: "pe-sql-orders", azureId: PE_SQL, location: LOC, endpoint: "10.20.2.4", resourceGroup: "rg-sample" },
     { id: PG, kind: "postgres", name: "pg-orders", azureId: PG, location: LOC, resourceGroup: "rg-sample", health: "ok" },
     { id: KV, kind: "keyVault", name: "kv-sample", azureId: KV, location: LOC, resourceGroup: "rg-sample" },
-    { id: FD, kind: "frontDoor", name: "fd-sample", azureId: FD, location: "global", resourceGroup: "rg-sample" },
+    {
+      id: FD, kind: "frontDoor", name: "fd-sample", azureId: FD, location: "global", resourceGroup: "rg-sample",
+      // Sample WAF coverage (EDGE-10): one domain blocks, one only detects — example.com names only
+      metadata: {
+        waf: {
+          state: "partial", counts: { served: 2, prevent: 1, detect: 1, disabled: 0, none: 0, unknown: 0 },
+          policies: [
+            { name: "wafsampleprevent", sku: "Premium_AzureFrontDoor", mode: "Prevention", enabled: true, managed: [{ type: "Microsoft_DefaultRuleSet", version: "2.1", action: "Block" }], customRules: 2, domains: ["www.example.com"] },
+            { name: "wafsampledetect", sku: "Premium_AzureFrontDoor", mode: "Detection", enabled: true, managed: [{ type: "Microsoft_DefaultRuleSet", version: "2.1", action: "Block" }], customRules: 0, domains: ["api.example.com"] },
+          ],
+          domains: [
+            { host: "api.example.com", kind: "custom", policy: "wafsampledetect", state: "detect" },
+            { host: "www.example.com", kind: "custom", policy: "wafsampleprevent", state: "prevent" },
+          ],
+          unserved: [],
+        },
+      },
+    },
     { id: DNS, kind: "dns", name: "privatelink.database.windows.net", azureId: DNS, location: "global", resourceGroup: "rg-sample" },
   ],
   edges: [

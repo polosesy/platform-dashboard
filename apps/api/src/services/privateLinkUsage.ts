@@ -59,6 +59,17 @@ export type PluInput = {
   outerSubnets?: PluSubnet[];
   /** Every subnet / VNet prefix of the diagram: an address in them is internal even outside RFC 1918 */
   knownCidrs?: string[];
+  /** On-premises sites reachable from this scope (S2S of its gateway, or of a hub it uses by gateway transit) */
+  sites?: PluSite[];
+};
+
+/** An on-premises site: its local network gateway's prefixes. BGP / NAT sites are not used for inference. */
+export type PluSite = { siteNodeId: string; prefixes: string[]; bgp: boolean; nat: boolean };
+
+/** Prefixes that can name a site: not a single host, not wider than /8, never a default route */
+const siteUsable = (cidr: string) => {
+  const bits = Number(cidr.split("/")[1] ?? "32");
+  return Number.isInteger(bits) && bits >= 8 && bits < 32;
 };
 
 export type PluOutput = {
@@ -122,10 +133,17 @@ export function collapseToCluster(ids: readonly string[], clusterOf: ReadonlyMap
 }
 
 /** Where an address outside the scope is: one subnet of another VNet / overlapping VNets / private / CGNAT */
-export function classifyPlace(ip: string, outer: readonly PluSubnet[], clusterOf?: ReadonlyMap<string, string>): PlPlace | undefined {
+export function classifyPlace(ip: string, outer: readonly PluSubnet[], clusterOf?: ReadonlyMap<string, string>, sites: readonly PluSite[] = []): PlPlace | undefined {
   const hits = outer.filter((s) => ipInCidr(ip, s.cidr));
   const vnets = new Set(hits.map((h) => h.vnetId));
-  if (vnets.size > 1) return { kind: "overlap", matches: vnets.size };
+  // On-premises sites whose address space holds it (exact containment; no longest-prefix pick between sites)
+  const siteHits = sites
+    .filter((s) => !s.bgp && !s.nat)
+    .map((s) => ({ s, prefix: s.prefixes.filter(siteUsable).find((c) => ipInCidr(ip, c)) }))
+    .filter((x): x is { s: PluSite; prefix: string } => !!x.prefix);
+  const siteIds = new Set(siteHits.map((x) => x.s.siteNodeId));
+  if (vnets.size + siteIds.size > 1) return { kind: "overlap", matches: vnets.size + siteIds.size };
+  if (siteHits.length) return { kind: "onPremSite", siteNodeId: siteHits[0]!.s.siteNodeId, prefix: siteHits[0]!.prefix, basis: "cfg" };
   if (hits.length) {
     const h = [...hits].sort((a, b) => cmp(a.nodeId, b.nodeId))[0]!;
     const owner = h.owners.length === 1 ? h.owners[0] : collapseToCluster(h.owners, clusterOf) ?? undefined;
@@ -138,7 +156,7 @@ export function classifyPlace(ip: string, outer: readonly PluSubnet[], clusterOf
 
 /** The one diagram resource behind a source IP (and / or identity), or why there is none */
 export function resolveCaller(
-  input: Pick<PluInput, "callers" | "subnets" | "nics" | "nodeByArmId" | "identities" | "clusterOf" | "outerSubnets" | "knownCidrs">,
+  input: Pick<PluInput, "callers" | "subnets" | "nics" | "nodeByArmId" | "identities" | "clusterOf" | "outerSubnets" | "knownCidrs" | "sites">,
   ip: string | undefined,
   oid?: string,
 ): Resolved {
@@ -187,7 +205,7 @@ export function resolveCaller(
     if (viaIdentity?.ok) return viaIdentity;
     if (owners.length > 1) return { ok: false, reason: "ambiguous", candidates: owners, basis: "subnet" };
     if (viaIdentity) return viaIdentity;
-    const place = classifyPlace(ip, input.outerSubnets ?? [], input.clusterOf);
+    const place = classifyPlace(ip, input.outerSubnets ?? [], input.clusterOf, input.sites);
     return { ok: false, reason: "notInDiagram", ...(place ? { place } : {}) };
   }
   return byIdentity() ?? { ok: false, reason: "notInDiagram" };

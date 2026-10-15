@@ -22,6 +22,9 @@ import { maskGuids } from "@/lib/mask";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { NameParts } from "./NameParts";
 import { PrivateLinkUsageSection } from "./detail/PrivateLinkUsage";
+import { PeeringSection } from "./detail/PeeringSection";
+import { HybridSection } from "./detail/HybridSection";
+import { AfdWafSection, WAF_METRICS } from "./detail/AfdWafSection";
 import { cardCells, formatMetric, METRIC_META, sparkDomain } from "@/lib/liveMetricFormat";
 import { isInferredEdge } from "@/lib/liveScope";
 import { relationLabel } from "@/lib/liveStyle";
@@ -74,6 +77,11 @@ type ResourceDetailPanelProps = {
   usageLoading?: boolean;
   /** Select another resource and bring it into view */
   onSelectNode?: (id: string) => void;
+  /** A VNet's peering to open in its peering list (from a header chip; null = the list only) */
+  focusPeeringKey?: string | null;
+  /** Show only that VNet / add it to the VNets in view (a peer the dashboard sees) */
+  onOpenVnet?: (vnetNodeId: string) => void;
+  onAddVnet?: (vnetNodeId: string) => void;
   onBack?: () => void;
   onClose: () => void;
   vmssInstance?: VmssInstancePanelData | null;
@@ -112,7 +120,7 @@ export function ResourceDetailPanel(props: ResourceDetailPanelProps) {
   return <NodePanel {...props} nodeSpec={nodeSpec} />;
 }
 
-function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, onBack, onClose }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
+function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, focusPeeringKey, onOpenVnet, onAddVnet, onBack, onClose }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
   const { t } = useI18n();
   const ago = useRelativeTime();
   const kind = node.resourceKind ?? node.icon;
@@ -149,7 +157,8 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   const specBound = Object.entries(node.bindings).filter(([, b]) => b.source !== "composite").map(([k]) => k);
   // Plus metrics the API now reads for the kind (diagram saved before memory was added)
   // The card's two metrics first (same order as the card), then the rest the API reads for the kind
-  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))];
+  // WAF verdict counts have their own section (AfdWafSection): "no block recorded" is not "unmeasured"
+  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k));
   const first = cardCells(node.resourceKind ?? node.icon, allBound);
   const bound = [...first.filter((k) => allBound.includes(k)), ...allBound.filter((k) => !first.includes(k))];
   const rules: HealthRule[] = node.bindings.health?.rules ?? [];
@@ -421,8 +430,11 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
           </>
         ) : null}
         {kind === "nsg" ? <NsgRules nsg={nsgDetail.nsg} loading={nsgDetail.loading} failed={nsgDetail.failed} /> : null}
+        {kind === "vnet" ? <PeeringSection key={node.id} node={node} focusKey={focusPeeringKey} onOpenVnet={onOpenVnet} onAddVnet={onAddVnet} /> : null}
+        {kind === "vnetGateway" || kind === "onPremSite" ? <HybridSection node={node} spec={spec} onSelectNode={onSelectNode} /> : null}
         {kind === "agc" ? <AgcFacts node={node} /> : null}
         {kind === "frontDoor" ? <FrontDoorFacts node={node} /> : null}
+        {kind === "frontDoor" ? <AfdWafSection node={node} metrics={liveNode?.metrics} measured={metricsState === "ok"} /> : null}
         {kind === "aks" && archRole === "aks-control-plane" ? <AksApiEndpoint node={node} /> : null}
         {kind === "aks" && archRole !== "aks-control-plane" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}

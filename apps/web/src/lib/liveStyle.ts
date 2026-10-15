@@ -7,7 +7,7 @@ import type { DiagramEdgeSpec, DiagramNodeSpec, EdgeStatus } from "@aud/types";
 import { rgba, type UiColor, type VizColor } from "./palette";
 import { edgeLayer, isInferredEdge, type EdgeLayer } from "./liveScope";
 
-export type LiveEdgeStyleKey = EdgeLayer | "egressDeprecated" | "ingressUnknown" | "configWeak";
+export type LiveEdgeStyleKey = EdgeLayer | "egressDeprecated" | "ingressUnknown" | "configWeak" | "peeringInactive";
 
 export type LiveEdgeLook = { color: UiColor | VizColor; alpha: number; dash?: string; width: number };
 
@@ -24,12 +24,16 @@ export const LIVE_EDGE_LOOK: Record<LiveEdgeStyleKey, LiveEdgeLook> = {
   egress: { color: "egress", alpha: 0.85, width: 1.6 },
   egressDeprecated: { color: "egress", alpha: 0.85, dash: "6 4", width: 1.6 },
   peering: { color: "peering", alpha: 0.85, width: 2 },
+  /** A peering that is not Connected on both sides: grey, solid (configuration, not weak evidence) — never red */
+  peeringInactive: { color: "neutral", alpha: 0.55, width: 1.6 },
+  /** VPN gateway → on-premises site (S2S): its own teal, solid */
+  hybrid: { color: "accent-2", alpha: 0.9, width: 2 },
   publicIp: { color: "warning", alpha: 0.75, width: 1.4 },
   inferred: { color: "neutral", alpha: 0.5, dash: "2 4", width: 1 },
 };
 
 /** Order of the legend and of the toolbar menu */
-export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "ingressUnknown", "config", "configWeak", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "peering", "publicIp", "inferred"];
+export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "ingressUnknown", "config", "configWeak", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "hybrid", "peering", "peeringInactive", "publicIp", "inferred"];
 
 export function liveStroke(key: LiveEdgeStyleKey): string {
   const l = LIVE_EDGE_LOOK[key];
@@ -45,6 +49,7 @@ export function liveEdgeStyleKey(e: DiagramEdgeSpec, byId: ReadonlyMap<string, D
   if (isDeprecatedPath(e)) return "egressDeprecated";
   if (e.exposure?.state === "unknown") return "ingressUnknown";
   if (e.rule === "sameVnet") return "configWeak";
+  if (e.edgeKind === "peering" && e.peeringState && e.peeringState !== "Connected") return "peeringInactive";
   return edgeLayer(e, byId);
 }
 
@@ -79,7 +84,8 @@ export function relationLabel(e: DiagramEdgeSpec, byId: ReadonlyMap<string, Diag
     case "privateLink": return { key: "ld.rel.privateLink", vars: { target: SERVICE_SHORT[tk] ?? tk } };
     // observed use: the service name rides on the line (label), the grade on `protocol` (lib/plUsage.ts)
     case "privateLinkUsage": return { key: e.protocol === "flow" ? "ld.rel.privateLinkUsage.flow" : "ld.rel.privateLinkUsage.access", vars: { target: e.label ?? "" } };
-    case "peering": return { key: "ld.rel.peering" };
+    case "peering": return { key: e.peeringState && e.peeringState !== "Connected" ? "ld.rel.peeringInactive" : e.peeringTransit ? "ld.rel.peeringTransit" : "ld.rel.peering" };
+    case "hybrid": return { key: "ld.rel.s2s", vars: { proto: e.protocol ?? "" } };
     case "natgw-association": return { key: "ld.rel.natAssoc" };
     case "outbound-internet":
       return { key: sk === "natGateway" ? "ld.rel.outNat" : sk === "lb" ? "ld.rel.outSnat" : sk === "subnet" ? "ld.rel.outDefault" : "ld.rel.outPip" };
@@ -125,7 +131,7 @@ export function mergeReversePairs(edges: readonly DiagramEdgeSpec[]): { drop: Se
 // ── Measured-traffic particles ("comets": round head + tapered gradient tail) ──
 
 export type ParticleLevel = "low" | "medium" | "high" | "burst";
-export type ParticleTone = "accent" | "privateLink" | "egress" | "warning";
+export type ParticleTone = "accent" | "privateLink" | "egress" | "warning" | "hybrid";
 
 /**
  * Sizes and pace by traffic level (relative to the busiest line in view). Speed is in px/s so a long line and a
@@ -143,6 +149,7 @@ export const PARTICLE_TONE_VAR: Record<ParticleTone, string> = {
   privateLink: "--private-link-rgb",
   egress: "--egress-rgb",
   warning: "--warning-rgb",
+  hybrid: "--accent-2-rgb",
 };
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
@@ -180,6 +187,7 @@ export function particleTone(styleKey: LiveEdgeStyleKey, status: EdgeStatus, mea
   if (styleKey === "config" || styleKey === "configWeak" || styleKey === "ingress" || styleKey === "ingressUnknown") return "accent";
   if (styleKey === "privateLink") return "privateLink";
   if (styleKey === "egress" || styleKey === "egressDeprecated") return "egress";
+  if (styleKey === "hybrid") return "hybrid";
   return null;
 }
 

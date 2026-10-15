@@ -742,7 +742,8 @@ function ServiceStatusPanel({
   // ── Translation state ──
   const [showKorean, setShowKorean] = useState(false);
   const [translating, setTranslating] = useState(false);
-  const [translateNote, setTranslateNote] = useState<string | null>(null);
+  // Why the translation did not happen (i18n key + vars) — the API names the reason (services/health.ts translateTexts)
+  const [translateNote, setTranslateNote] = useState<{ key: string; vars?: Record<string, string | number> } | null>(null);
   const [translationMap, setTranslationMap] = useState<Map<string, EventTranslation>>(new Map());
 
   const handleTranslateToggle = useCallback(async (toKorean: boolean) => {
@@ -758,15 +759,21 @@ function ServiceStatusPanel({
       const token = await getApiToken().catch(() => null);
       // Flat array: [title0, summary0, title1, summary1, ...]
       const texts = data.events.flatMap((evt) => [evt.title, evt.summary ?? ""]);
-      const resp = await fetchJsonWithBearer<{ translations?: string[]; error?: string }>(
+      const resp = await fetchJsonWithBearer<{ translations?: string[] | null; error?: string; status?: number; freeStatus?: number | "network" }>(
         `${apiBaseUrl()}/api/health/translate`,
         token,
         { method: "POST", body: JSON.stringify({ texts, to: "ko" }) },
       );
       if (resp.error === "not_configured") {
-        setTranslateNote("not_configured");
+        setTranslateNote(resp.freeStatus
+          ? { key: "health.translateNotConfiguredFree", vars: { status: resp.freeStatus === "network" ? t("health.translateNetwork") : `HTTP ${resp.freeStatus}` } }
+          : { key: "health.translateNotConfigured" });
+      } else if (resp.error === "translator_auth") {
+        setTranslateNote({ key: "health.translateAuth", vars: { status: resp.status ?? 401 } });
+      } else if (resp.error === "translator_quota") {
+        setTranslateNote({ key: "health.translateQuota" });
       } else if (resp.error) {
-        setTranslateNote("error");
+        setTranslateNote({ key: "health.translateError" });
       } else if (resp.translations) {
         const newMap = new Map(translationMap);
         data.events.forEach((evt, i) => {
@@ -779,11 +786,11 @@ function ServiceStatusPanel({
         setShowKorean(true);
       }
     } catch {
-      setTranslateNote("error");
+      setTranslateNote({ key: "health.translateError" });
     } finally {
       setTranslating(false);
     }
-  }, [data, translationMap, getApiToken]);
+  }, [data, translationMap, getApiToken, t]);
 
   const eventTypeCounts = [
     { type: "ServiceIssue" as const, key: "serviceIssue" as const },
@@ -834,11 +841,8 @@ function ServiceStatusPanel({
           {translating && (
             <span className={styles.translateSpinner}>{t("health.translating")}</span>
           )}
-          {translateNote === "not_configured" && (
-            <span className={styles.translateNote}>{t("health.translateNotConfigured")}</span>
-          )}
-          {translateNote === "error" && (
-            <span className={styles.translateNote}>{t("health.translateError")}</span>
+          {translateNote && (
+            <span className={styles.translateNote}>{t(translateNote.key, translateNote.vars)}</span>
           )}
         </div>
       )}
@@ -893,8 +897,9 @@ export default function HealthPage() {
 
   // Tab 2 — Instance Health
   const instance = useApiQuery(
-    subsLoaded && visited.has("instance") ? `health-instance:${subscriptionId}` : null,
-    (token) => fetchJsonWithBearer<HealthSummary>(apiUrl("/api/health/summary", { subscriptionId: sub }), token),
+    // Resource Health writes its summaries in the requested language (no translator) — the key follows the app language
+    subsLoaded && visited.has("instance") ? `health-instance:${subscriptionId}:${locale}` : null,
+    (token) => fetchJsonWithBearer<HealthSummary>(apiUrl("/api/health/summary", { subscriptionId: sub, lang: locale }), token),
     { tokenOptional: true },
   );
 

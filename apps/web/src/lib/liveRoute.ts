@@ -63,7 +63,9 @@ export function routeEdges(layout: LiveLayout, edges: readonly DiagramEdgeSpec[]
 
     const sourceHandle: HandleId = backward ? "s-l" : "s-r";
     const targetHandle: HandleId = backward ? "t-r" : "t-l";
-    const toRightLane = (!!tLane && tLane !== "ingress") || (!!sLane && sLane !== "ingress");
+    // The inbound and on-premises lanes are on the left; every other lane is on the right
+    const left = (l: string | undefined) => l === "ingress" || l === "onprem";
+    const toRightLane = (!!tLane && !left(tLane)) || (!!sLane && !left(sLane));
     if (toRightLane || CURVED_KINDS.has(e.edgeKind ?? "") || !!e.exposure || (!forward && !backward)) {
       out.set(e.id, { kind: "bezier", sourceHandle, targetHandle });
       continue;
@@ -76,8 +78,8 @@ export function routeEdges(layout: LiveLayout, edges: readonly DiagramEdgeSpec[]
     } else if (meta.terminals.has(e.source)) {
       // Internet terminal → public LB of the lane, or straight into a VNet entry point
       centerX = meta.laneInnerGapX ?? meta.ingressGapX;
-    } else if (sLane === "ingress" || tLane === "ingress") {
-      // Public LB → its backends: bend in the gap between the inbound lane and the VNet
+    } else if (left(sLane) || left(tLane)) {
+      // Public LB → its backends, gateway → on-premises site: bend in the gap between the left lanes and the VNet
       centerX = meta.ingressGapX;
     } else {
       centerX = forward ? (right(S) + T.x) / 2 : (right(T) + S.x) / 2;

@@ -137,7 +137,7 @@ providers API는 유형마다 허용 위치를 알려 줍니다(구독 1개 기�
 |---|---|
 | NSG | 들어올 때는 서브넷 → NIC, 나갈 때는 NIC → 서브넷(둘 다 통과해야 함). AVNM 보안 관리 규칙이 NSG보다 먼저 평가됩니다 |
 | 아웃바운드 출구 | 유효 경로 0.0.0.0/0의 다음 홉(UDR의 NVA·게이트웨이, 또는 BGP 전파 경로) > NAT 게이트웨이 > 인스턴스 공용 IP > LB 아웃바운드 규칙 > 기본 아웃바운드. 유효 경로는 ARM 속성이 아니라 런타임 API(`effectiveRouteTable`)입니다 |
-| Front Door WAF 정책 | 라우트 > 도메인 > 프로필 |
+| Front Door WAF 정책 | 라우트 > 도메인 > 프로필 (classic 모델 — Standard/Premium은 보안 정책이 **도메인**에 붙음, EDGE-10) |
 | 흐름 로그 | NIC > 서브넷 > VNet |
 
 **수명 달력 — 사라지는 관계**: 아래 항목은 모두 같은 '은퇴 예정' chip 하나로 표시합니다. 날짜가 없는 항목은 영역 페이지의 출처를 따릅니다.
@@ -327,11 +327,15 @@ AKS용 관리형 L7 로드 밸런서(Gateway API·Ingress). 클러스터 안의 
 | ID | 관계 | 의미·방향 | ARM 속성 경로 | 근거 | 표현 | 구현 | 출처 |
 |---|---|---|---|---|---|---|---|
 | EDGE-01 | 서브넷 → NAT 게이트웨이 | 아웃바운드 | `natGateways.properties.subnets[]` | cfg | 출구 선 / 호버 선 | azure.ts | nat-gateway/nat-overview |
-| EDGE-02 | VNet ↔ VNet 피어링 | 양방향 | `virtualNetworkPeerings[].properties.{remoteVirtualNetwork.id, peeringState}` | cfg | line / 피어링 칩 | azure.ts | virtual-network/virtual-network-peering-overview |
+| EDGE-02 | VNet ↔ VNet 피어링 | 양방향 — 각 쪽 피어링이 따로 있고 플래그도 따로(접근·전달·게이트웨이 전송 허용·원격 게이트웨이 사용). 선의 `stateA`/`stateB` = 각 쪽 상태, `peeringState` = 더 나쁜 값. VNet 머리글·패널의 원천은 **각 VNet 자기 쪽 피어링 전체**(그래프 밖 원격 포함, 원격 ARM ID는 웹에 보내지 않음). 게이트웨이 전송 = 내 `useRemoteGateways` ∧ 상대 `allowGatewayTransit` ∧ 양쪽 Connected(영역 NET-37), 동기화 = `peeringSyncLevel`·`remoteAddressSpace`≠`remoteVirtualNetworkAddressSpace`(NET-38) | `virtualNetworkPeerings[].properties.{remoteVirtualNetwork.id, peeringState, peeringSyncLevel, allowGatewayTransit, useRemoteGateways, remoteAddressSpace}` | cfg | line / 피어링 칩(+n)·패널 | azure.ts | virtual-network/virtual-network-peering-overview · virtual-network/virtual-network-manage-peering |
 | EDGE-04 | Front Door → 오리진 (호스트 이름) | 글로벌 → 지역 백엔드. 활성 라우트가 쓰는 그룹의 활성 오리진만 | `originGroups/origins.properties.hostName` = App Service·Container App·AGC 프런트엔드·공용 IP DNS 이름 중 **정확히 하나** (DNS 조회 안 함) | fqdnMatch | line (리전을 넘음) / 패널 오리진 표 | azure.ts | frontdoor/origin · frontdoor/front-door-route-matching |
 | EDGE-05 | Front Door → 오리진 (IP 주소) | 오리진 hostName이 IP 리터럴이고 그 주소를 가진 공용 IP의 소유자(LB·AGW·VM)가 정확히 하나 | `origins.properties.hostName` = `publicIPAddresses.properties.ipAddress` → PIP-01 소유자 | ipMatch | line / 0개면 칩 '외부 오리진 n' | azure.ts | frontdoor/origin |
 | EDGE-06 | Front Door → 오리진 (Azure 리소스 선택) | 오리진을 Azure 리소스에서 고른 경우 | `origins.properties.azureOrigin.id` | cfg | line | azure.ts | frontdoor/origin — "autodiscovery of your application backends" |
 | EDGE-07 | Front Door → Private Link 오리진 (Premium) | Front Door가 대상에 관리형 PE를 만들고 대상 소유자가 승인 (고객 쪽 NIC 없음) | `origins.properties.sharedPrivateLinkResource.privateLink.id` (+ `status`) | cfg | privateLink 선, Approved 아니면 회색 | azure.ts | frontdoor/private-link — "You must approve the private endpoint connection" |
+| EDGE-08 | 연결(S2S) → VNet 게이트웨이 | 게이트웨이 쪽 끝 — 연결은 노드가 아니라 게이트웨이에 흡수('연결 n'), LNG와 함께 `metadata.s2s` | `connections.properties.virtualNetworkGateway1.id` | cfg | 흡수(게이트웨이 패널) | azure.ts | vpn-gateway/vpn-gateway-about-vpn-gateway-settings |
+| EDGE-09 | 연결(S2S) → 로컬 네트워크 게이트웨이 | 온프레미스 쪽 끝 — 라이브 다이어그램은 연결마다 '온프레미스 사이트' 카드(왼쪽 레인)와 게이트웨이 → 사이트 선(`hybrid`, 연결 메트릭 BitsIn/OutPerSecond). LNG `localNetworkAddressSpace` = 라우팅 **구성**(관측 아님): 미확인 사설 IP가 사이트 대역 정확히 하나에 들면 '온프레미스 사이트 대역(구성 기준)', 선 없음 | `connections.properties.localNetworkGateway2.id` | cfg | 사이트 카드 + 선 / 패널 | azure.ts | vpn-gateway/vpn-gateway-howto-site-to-site-resource-manager-portal · vpn-gateway/monitor-vpn-gateway-reference |
+| EDGE-10 | Front Door 보안 정책 → WAF 정책 (도메인별) | Standard/Premium의 WAF는 **도메인(엔드포인트 기본 도메인·사용자 지정 도메인)에 보안 정책으로** 붙음 — 한 프로필 안에서도 도메인마다 다른 정책·모드(방지/탐지). 정책은 노드가 아니라 Front Door 카드 칩('WAF 방지'·'WAF 방지 n/m'·'WAF 탐지'·'WAF 없음'·'WAF 미확인')과 패널. 보안 정책을 못 읽으면 '미확인'(없음 아님), 정책이 Resource Graph에 없으면(다른 구독·권한) 그 도메인만 미확인 | `profiles/securityPolicies.properties.parameters`(`type='WebApplicationFirewall'`, `wafPolicy.id`, `associations[].domains[].id`, `associations[].patternsToMatch`) → `frontdoorwebapplicationfirewallpolicies.properties.policySettings.mode`·`enabledState`·`managedRules.managedRuleSets[]` | cfg | 칩 + 패널(선 없음, 카드 상태·장애 영향에 안 씀). 판정 수 `WebApplicationFirewallRequestCount`(Action) 1시간 합계는 패널만 | azure.ts | web-application-firewall/afds/afds-overview · frontdoor/front-door-security-policy |
+| EDGE-11 | Front Door 라우트 → 도메인 | WAF 범위의 분모 — 활성 엔드포인트의 활성 라우트가 서비스하는 도메인 = 사용자 지정 도메인 + (기본 도메인 연결을 끄지 않았으면) 엔드포인트 도메인. 라우트가 쓰지 않는 도메인은 개수에서 빼고 패널에만 | `afdEndpoints/routes.properties.customDomains[].id`, `linkToDefaultDomain` | cfg | 칩의 n/m · 패널 | azure.ts | frontdoor/front-door-route-matching · frontdoor/standard-premium/how-to-add-custom-domain |
 
 ## §9 Private Link (PL)
 

@@ -36,10 +36,13 @@ import { useReducedMotion } from "@/lib/useReducedMotion";
 import { disconnectedPes, usageChips, usageEdges } from "@/lib/plUsage";
 import { edgeLayer, impactView, isDirectedEdge, isFocusOnlyEdge, type EdgeLayer } from "@/lib/liveScope";
 import { gatewayFacts, withBackendValue } from "@/lib/liveBackends";
+import { hybridFacts } from "@/lib/liveHybrid";
+import { wafChip } from "@/lib/liveWaf";
+import { parsePeerings, peeringChipFit } from "@/lib/livePeering";
 import { pipExposure } from "@/lib/livePip";
 import { PARTICLE_TONE_VAR, clipLabel, legendKeys, liveEdgeStyleKey, liveStroke, mergeReversePairs, relationLabel, type ParticleTone } from "@/lib/liveStyle";
 import { LiveNode, type LiveNodeData } from "./LiveNode";
-import { GroupNode, type EgressInfo, type GroupNodeData, type PeeringInfo } from "./GroupNode";
+import { GroupNode, type EgressInfo, type GroupNodeData } from "./GroupNode";
 import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
 import { VmssInstanceNode, type VmssInstanceNodeData } from "./VmssInstanceNode";
 import { InternetNode, type InternetNodeData } from "./InternetNode";
@@ -55,6 +58,8 @@ type LiveCanvasProps = {
   spec: DiagramSpec;
   snapshot: LiveDiagramSnapshot | null;
   onNodeSelect: (nodeId: string | null) => void;
+  /** A VNet's peering chip / summary was clicked (key null = the whole list) */
+  onPeeringSelect?: (vnetId: string, key: string | null) => void;
   onEdgeSelect?: (edgeId: string | null) => void;
   onSubResourceSelect?: (sr: SubResource) => void;
   /** Edge layers switched on in the toolbar's "연결선" menu */
@@ -98,20 +103,12 @@ function lastSparkTs(lines: LiveNodeState["sparklines"]): string {
   return Object.values(lines ?? {}).map((l) => l.timestamps[l.timestamps.length - 1] ?? "").join("|");
 }
 
-function parsePeerings(raw: string | undefined): PeeringInfo[] | undefined {
-  if (!raw) return undefined;
-  try {
-    const list = JSON.parse(raw) as Array<{ name?: string; state?: string }>;
-    return list.map((p) => ({ name: String(p.name ?? ""), state: String(p.state ?? "Unknown") })).filter((p) => p.name);
-  } catch {
-    return undefined;
-  }
-}
 
 function LiveCanvasInner({
   spec,
   snapshot,
   onNodeSelect,
+  onPeeringSelect,
   onEdgeSelect,
   onSubResourceSelect,
   layers,
@@ -363,6 +360,8 @@ function LiveCanvasInner({
         egress: egressVia ? { via: egressVia, name: n.metadata?.egressName, natId: n.metadata?.natGwBadgeId } : undefined,
         nicCount: layout.nicCount.get(n.id),
         peerings: parsePeerings(n.metadata?.peerings),
+        peerFit: n.icon === "vnet" ? peeringChipFit(box?.w ?? 0, parsePeerings(n.metadata?.peerings).length) : 0,
+        onPeeringSelect,
         shortLabel: n.icon === "subnet" ? names.get(n.id) : undefined,
         nameParts: n.icon === "subnet" ? nameInfo.get(n.id)?.parts : undefined,
         focused: n.id === selectedRef.current,
@@ -443,8 +442,10 @@ function LiveCanvasInner({
         isUnused: n.metadata?.unused === "true",
         ghostOf: n.metadata?.ghostOf,
         gateway: gatewayFacts(n.metadata),
+        hybrid: hybridFacts(n.resourceKind ?? n.icon, n.metadata),
         scaleSet: n.metadata?.scaleSet,
         pipExposure: pipExposure(n.metadata) ?? undefined,
+        waf: wafChip(n.metadata) ?? undefined,
         armType: n.metadata?.armType,
         shortName: names.get(n.id),
         nameParts: nameInfo.get(n.id)?.parts,

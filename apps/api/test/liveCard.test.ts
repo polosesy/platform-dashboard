@@ -175,7 +175,12 @@ test("CARD_CELLS and NODE_BINDINGS agree, and tones follow the leveled rules", (
     for (const k of cells) assert.ok(M.METRIC_META[k], `${k} has a label and unit`);
   }
   for (const kind of Object.keys(NB)) assert.ok(M.CARD_CELLS[kind], `${kind} has card cells`);
-  for (const k of ["nsg", "nic", "logAnalytics", "vnetGateway", "bastion", "paas"]) assert.deepEqual(M.CARD_CELLS[k], [], `${k}: no metric row`);
+  for (const k of ["nsg", "nic", "logAnalytics", "bastion", "paas"]) assert.deepEqual(M.CARD_CELLS[k], [], `${k}: no metric row`);
+  // S2S (catalog EDGE-08/09): the gateway's tunnel bandwidth, each on-premises site's measured in / out
+  assert.deepEqual(M.CARD_CELLS.vnetGateway, ["bandwidth"]);
+  assert.deepEqual(M.CARD_CELLS.onPremSite, ["bitsIn", "bitsOut"]);
+  assert.equal(NB.vnetGateway!.bandwidth!.scale, 8, "AverageBandwidth is bytes/s — the card shows bit/s");
+  assert.equal(M.METRIC_META.bitsIn!.unit, "bps");
   assert.deepEqual(M.CARD_CELLS.dns, ["queries"], "DNS zones: query volume over an hour (activity, not health)");
   assert.ok(M.isUsagePair(M.CARD_CELLS.redis!) && M.isUsagePair(M.CARD_CELLS.postgres!) && M.isUsagePair(M.CARD_CELLS.vm!));
   assert.ok(!M.isUsagePair(M.CARD_CELLS.appGateway!) && !M.isUsagePair(M.CARD_CELLS.lb!));

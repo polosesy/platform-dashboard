@@ -53,7 +53,8 @@ export type EdgeKind =
   | "inferred"    // proximity-based implicit dependency
   | "attached-to" // Subnet → NIC (network infrastructure binding)
   | "bound-to"    // NIC → VM (compute-to-network binding)
-  | "member-of";  // Flexible-mode VM → its scale set (membership, not containment)
+  | "member-of"   // Flexible-mode VM → its scale set (membership, not containment)
+  | "hybrid";     // VNet gateway → on-premises site (S2S connection / local network gateway)
 
 export type ArchitectureNode = {
   id: string;
@@ -79,6 +80,9 @@ export type ArchitectureEdge = {
     protocol?: string;
     diagnosticCategory?: string;
     peeringState?: string;
+    /** Peering: this side's (source) and the other side's (target) state; peeringState is the worse of the two */
+    stateA?: string;
+    stateB?: string;
     /** Catalog row (docs/architecture/azure-resource-relationships.md), e.g. "AGW-04" */
     rel?: string;
     /** Backend membership: how the pool names the member — NIC ip configuration, IP address, FQDN, VMSS model */
