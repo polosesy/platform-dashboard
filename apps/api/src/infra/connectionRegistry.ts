@@ -24,6 +24,12 @@ const ConnectionSchema = z.object({
   key: z.string().regex(/^[a-z0-9-]{2,32}$/, "2–32 characters: a-z 0-9 -"),
   displayName: z.string().min(1).max(80),
   tenantId: GUID,
+  /**
+   * The tenant's directory name, shown next to the connection (optional). Declared here: the platform's read-only
+   * credentials cannot read it (ARM /tenants gives no name to a service principal, Graph needs Organization.Read.All,
+   * and a Lighthouse delegation has no Graph access at all). Not an id — a GUID here is refused.
+   */
+  tenantName: z.string().min(1).max(120).refine((s) => !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(s), "a name, not an id").optional(),
   mode: z.enum(["platform", "lighthouse", "servicePrincipal", "delegated"]),
   subscriptions: z.array(GUID).default([]),
   /** servicePrincipal only: the customer's app (client) id */

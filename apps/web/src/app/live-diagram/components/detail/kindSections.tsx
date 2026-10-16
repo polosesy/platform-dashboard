@@ -32,8 +32,8 @@ export function useNsgDetail(armId: string | undefined, kind: string | undefined
   return { nsg: data ?? null, loading: enabled && loading, failed: enabled && !!error };
 }
 
-export function useAksPlane(armId: string | undefined, kind: string | undefined, archRole: string | undefined) {
-  const enabled = kind === "aks" && !!armId && archRole !== "aks-control-plane";
+export function useAksPlane(armId: string | undefined, kind: string | undefined) {
+  const enabled = kind === "aks" && !!armId;
   const { data, error, loading } = useApiQuery(
     enabled ? `aks-plane:${armId}` : null,
     (token) => fetchJsonWithBearer<AksPlaneDetail>(apiUrl("/api/live/aks-plane", { resourceId: armId }), token),
@@ -222,20 +222,6 @@ export function AksCluster({ detail, loading, failed }: { detail: AksPlaneDetail
       </Section>
       <NodePools pools={detail.nodePools} />
     </>
-  );
-}
-
-export function AksApiEndpoint({ node }: { node: DiagramNodeSpec }) {
-  const { t } = useI18n();
-  const meta = node.metadata ?? {};
-  const isPrivate = meta.isPrivateCluster === "true";
-  return (
-    <Section id="aks-api" title={t("ld.aks.controlPlane")}>
-      {meta.aksClusterName ? <KV label={t("ins.ticket.cluster")}>{meta.aksClusterName}</KV> : null}
-      {meta.fqdn ? <KV label={t("ld.aks.apiFqdn")} mono copy={meta.fqdn}>{meta.fqdn}</KV> : null}
-      <KV label={t("ld.aks.accessType")}>{t(isPrivate ? "ld.aks.access.private" : "ld.aks.access.public")}</KV>
-      <KV label={t("ld.aks.accessPath")}>{t(isPrivate ? "ld.aks.path.private" : "ld.aks.path.public")}</KV>
-    </Section>
   );
 }
 

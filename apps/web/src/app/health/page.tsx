@@ -3,8 +3,8 @@
 import { useCallback, useMemo, useState } from "react";
 import styles from "./styles.module.css";
 import type {
+  HealthCoverage,
   HealthSummary,
-  ResourceHealthStatus,
   GlobalStatusResponse,
   GlobalStatusIncident,
   GlobalStatusIncidentStatus,
@@ -20,26 +20,13 @@ import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { PageHeader, Tabs } from "@/components/ui";
+import { InstanceHealthPanel } from "./InstanceHealthPanel";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { rgba } from "@/lib/palette";
 
 // ── Constants ──
 
 type HealthTab = "global" | "instance" | "service";
-
-const STATE_COLORS: Record<ResourceHealthStatus["availabilityState"], string> = {
-  Available: rgba("ok", 0.8),
-  Degraded: rgba("warning", 0.8),
-  Unavailable: rgba("danger", 0.8),
-  Unknown: rgba("ink", 0.3),
-};
-
-const STATE_STYLE: Record<ResourceHealthStatus["availabilityState"], string> = {
-  Available: styles.stateAvailable ?? "",
-  Degraded: styles.stateDegraded ?? "",
-  Unavailable: styles.stateUnavailable ?? "",
-  Unknown: styles.stateUnknown ?? "",
-};
 
 const INCIDENT_STATUS_STYLE: Record<GlobalStatusIncidentStatus, string> = {
   Active: styles.statusActive ?? "",
@@ -62,7 +49,6 @@ const EVENT_TYPE_COLORS: Record<ServiceHealthEventType, string> = {
   SecurityAdvisory: rgba("violet", 0.82),
 };
 
-type FilterState = "all" | ResourceHealthStatus["availabilityState"];
 
 // ── Helpers ──
 
@@ -337,222 +323,6 @@ function GlobalStatusPanel({
           </div>
         )}
       </section>
-    </div>
-  );
-}
-
-const REASON_TYPE_STYLE: Record<string, string> = {
-  Unplanned: rgba("danger", 0.82),
-  Planned: rgba("accent", 0.82),
-  UserInitiated: rgba("ink", 0.5),
-};
-
-function InstanceHealthPanel({
-  data,
-  loading,
-  error,
-}: {
-  data: HealthSummary | null;
-  loading: boolean;
-  error: string | null;
-}) {
-  const { t } = useI18n();
-  const [filter, setFilter] = useState<FilterState>("all");
-
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    if (filter === "all") return data.resources;
-    return data.resources.filter((r) => r.availabilityState === filter);
-  }, [data, filter]);
-
-  const total = data ? data.available + data.degraded + data.unavailable + data.unknown : 0;
-
-  const segments = useMemo(() => {
-    if (!data || total === 0) return [];
-    const R = 58;
-    const C = 2 * Math.PI * R;
-    const parts = [
-      { state: "Available" as const, count: data.available, color: STATE_COLORS.Available },
-      { state: "Degraded" as const, count: data.degraded, color: STATE_COLORS.Degraded },
-      { state: "Unavailable" as const, count: data.unavailable, color: STATE_COLORS.Unavailable },
-      { state: "Unknown" as const, count: data.unknown, color: STATE_COLORS.Unknown },
-    ].filter((p) => p.count > 0);
-
-    let accumulated = 0;
-    return parts.map((p) => {
-      const frac = p.count / total;
-      const dashLen = frac * C;
-      const dashOffset = -accumulated * C;
-      accumulated += frac;
-      return { ...p, dashLen, dashOffset, circumference: C, R };
-    });
-  }, [data, total]);
-
-  if (loading) return (
-    <div className={styles.loadingSkeleton}>
-      <div className={styles.spinnerRow}>
-        <div className={styles.spinner} />
-        <span className={styles.spinnerLabel}>{t("health.loading")}</span>
-      </div>
-      <div className={styles.shimmerStrip}>
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className={`${styles.shimmerBar} ${styles.shimmerStat}`} />
-        ))}
-      </div>
-      <div className={`${styles.shimmerBar} ${styles.shimmerDonut}`} />
-      <div className={`${styles.shimmerBar} ${styles.shimmerTable}`} />
-    </div>
-  );
-  if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
-
-  const signin = data?.note === "signin_required";
-  const hasFallbackNote = data?.note && (signin || data.note.includes("mock") || data.note.includes("timed out") || data.note.includes("error"));
-
-  return (
-    <div className={styles.grid}>
-      {/* Fallback notice — shown when API returned mock/timeout data */}
-      {hasFallbackNote && (
-        <div className={styles.fallbackNotice}>
-          <div className={styles.fallbackNoticeIcon}>!</div>
-          <div>
-            <div className={styles.fallbackNoticeText}>
-              {signin
-                ? t("common.sampleData")
-                : data.note!.includes("timed out")
-                  ? t("health.timeoutFallback")
-                  : data.note!.includes("mock")
-                    ? t("health.mockFallback")
-                    : t("health.errorFallback")}
-            </div>
-            <div className={styles.fallbackNoticeHint}>{signin ? t("auth.signinForReal") : data.note}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Permissions guidance when showing mock data */}
-      {data?.note?.includes("mock") && (
-        <div className={styles.permissionsBox}>
-          <div className={styles.permissionsTitle}>{t("health.permissionsRequired")}</div>
-          <div className={styles.permissionsBody}>
-            <p>{t("health.permissionsNote")}</p>
-            <ul>
-              <li><code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_CLIENT_SECRET</code></li>
-              <li><code>AZURE_SUBSCRIPTION_IDS</code> — {t("health.perm.subs")}</li>
-              <li>RBAC: <strong>Reader</strong> {t("health.perm.reader")} (<code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* Summary strip */}
-      <div className={styles.summaryStrip}>
-        {([
-          { label: t("health.state.Available"), count: data?.available ?? 0, color: STATE_COLORS.Available },
-          { label: t("health.state.Degraded"), count: data?.degraded ?? 0, color: STATE_COLORS.Degraded },
-          { label: t("health.state.Unavailable"), count: data?.unavailable ?? 0, color: STATE_COLORS.Unavailable },
-          { label: t("health.state.Unknown"), count: data?.unknown ?? 0, color: STATE_COLORS.Unknown },
-        ] as const).map((s) => (
-          <div key={s.label} className={styles.statCard}>
-            <div className={styles.statDot} style={{ background: s.color }} />
-            <div className={styles.statCount} style={{ color: s.color }}>{s.count}</div>
-            <div className={styles.statLabel}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Donut chart */}
-      <div className={styles.donutCard}>
-        <div className={styles.donutWrap}>
-          <svg className={styles.donutSvg} width="140" height="140" viewBox="0 0 140 140">
-            <circle fill="none" stroke={rgba("ink", 0.06)} strokeWidth="12" cx="70" cy="70" r="58" />
-            {segments.map((seg) => (
-              <circle
-                key={seg.state}
-                fill="none"
-                stroke={seg.color}
-                strokeWidth="12"
-                cx="70" cy="70" r={seg.R}
-                strokeDasharray={`${seg.dashLen} ${seg.circumference - seg.dashLen}`}
-                strokeDashoffset={seg.dashOffset}
-                strokeLinecap="butt"
-              />
-            ))}
-          </svg>
-          <div className={styles.donutCenter}>
-            <div className={styles.donutTotal}>{total}</div>
-            <div className={styles.donutLabel}>{t("health.resources")}</div>
-          </div>
-        </div>
-        <div className={styles.donutTitle}>{t("health.healthDistribution")}</div>
-        <div className={styles.donutLegend}>
-          {segments.map((seg) => (
-            <div key={seg.state} className={styles.legendItem}>
-              <div className={styles.legendDot} style={{ background: seg.color }} />
-              {seg.count}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Resource table */}
-      <div className={styles.tableCard}>
-        <div className={styles.cardTitle}>
-          {t("health.resources")}
-          <div className={styles.filterGroup}>
-            {(["all", "Available", "Degraded", "Unavailable", "Unknown"] as FilterState[]).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`${styles.filterBtn} ${filter === f ? styles.filterActive : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === "all" ? `${t("health.filterAll")} (${total})` : f}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className={styles.tableBody}>
-          {filtered.length > 0 ? (
-            filtered.map((r) => (
-              <div key={r.resourceId} className={styles.resourceRow}>
-                <div className={styles.resDot} style={{ background: STATE_COLORS[r.availabilityState] }} />
-                <div className={styles.resInfo}>
-                  <div className={styles.resName}>{r.resourceName}</div>
-                  <div className={styles.resType}>{r.resourceType}</div>
-                  {r.location && (
-                    <div className={styles.resLocation}>{r.location}</div>
-                  )}
-                </div>
-                <div className={styles.resGroup}>{r.resourceGroup}</div>
-                <div className={styles.resRight}>
-                  <div className={`${styles.resState} ${STATE_STYLE[r.availabilityState]}`}>
-                    {["Available", "Degraded", "Unavailable", "Unknown"].includes(r.availabilityState) ? t(`health.state.${r.availabilityState}`) : r.availabilityState}
-                  </div>
-                  {r.reasonType && r.availabilityState !== "Available" && (
-                    <div
-                      className={styles.reasonBadge}
-                      style={{ color: REASON_TYPE_STYLE[r.reasonType] ?? "var(--muted)" }}
-                    >
-                      {r.reasonType}
-                      {r.reasonChronicity ? ` · ${r.reasonChronicity}` : ""}
-                    </div>
-                  )}
-                </div>
-                {r.summary && <div className={styles.resSummary}>{r.summary}</div>}
-                {r.occurredTime && r.availabilityState !== "Available" && (
-                  <div className={styles.resOccurred}>
-                    {t("health.occurred")}: {fmtDate(r.occurredTime)}
-                  </div>
-                )}
-              </div>
-            ))
-          ) : (
-            <div className={styles.empty}>
-              {loading ? t("health.loading") : "No resources match filter."}
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -903,6 +673,13 @@ export default function HealthPage() {
     { tokenOptional: true },
   );
 
+  // Tab 2 supplement — which resources Resource Health gives no status for (counts by type)
+  const coverage = useApiQuery(
+    subsLoaded && visited.has("instance") ? `health-coverage:${subscriptionId}:${locale}` : null,
+    (token) => fetchJsonWithBearer<HealthCoverage>(apiUrl("/api/health/coverage", { subscriptionId: sub, lang: locale }), token),
+    { tokenOptional: true },
+  );
+
   // Tab 3 — Service Events
   const events = useApiQuery(
     subsLoaded && visited.has("service") ? `health-events:${subscriptionId}` : null,
@@ -955,6 +732,7 @@ export default function HealthPage() {
           data={instanceData}
           loading={instance.loading}
           error={instance.error}
+          coverage={coverage.loading ? null : (coverage.data ?? null)}
         />
       )}
       {activeTab === "service" && (

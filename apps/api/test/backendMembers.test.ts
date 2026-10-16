@@ -157,6 +157,13 @@ test("spec: an AGW with public + private frontends is an inbound path read by it
   assert.deepEqual(lb.gatewayFacts(k.metadata), { unresolved: 0, aksManaged: true, outboundOnly: true });
   assert.deepEqual(lb.gatewayFacts(agw.metadata), { unresolved: 1, aksManaged: false, outboundOnly: false });
   assert.equal(lb.unresolvedBackends(agw.metadata)[0]!.address, "192.0.2.9");
+  // Outbound-only = no inbound rule AND an outbound rule; unknown counts or an App Gateway never match
+  assert.equal(lb.isOutboundOnlyLb({ inboundRules: "0", outboundRules: "1" }), true);
+  assert.equal(lb.isOutboundOnlyLb({ inboundRules: "1", outboundRules: "1" }), false);
+  assert.equal(lb.isOutboundOnlyLb({ inboundRules: "0", outboundRules: "0" }), false);
+  assert.equal(lb.isOutboundOnlyLb({ outboundRules: "1" }), false);
+  assert.equal(lb.isOutboundOnlyLb({ inboundRules: "0", outboundRules: "1", privateListeners: "0" }), false);
+  assert.equal(lb.isOutboundOnlyLb(undefined), false);
 });
 
 test("edge bindings: LB member probe by BackendIPAddress; a VMSS-model line gets no member metric", () => {

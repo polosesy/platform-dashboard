@@ -4,6 +4,7 @@ import type {
   CostSummary, CostTrendResponse, BudgetsResponse,
   SecureScoreSummary, SecurityAlertsResponse, SecurityPostureResponse,
   HealthSummary,
+  HealthCoverage,
   GlobalStatusResponse,
   ServiceHealthEventsResponse,
   RegionalStatusResponse,
@@ -455,4 +456,21 @@ export const mockRegionalStatus: RegionalStatusResponse = {
     },
   ],
   note: "mock data — configure AZURE_AD_* and AZURE_SUBSCRIPTION_IDS for real data",
+};
+
+// Sample coverage (anonymous / disabled): what Resource Health would leave out for a small subscription
+export const mockHealthCoverage: HealthCoverage = {
+  generatedAt: new Date().toISOString(),
+  doc: { url: "https://learn.microsoft.com/azure/service-health/resource-health-checks-resource-types", date: "2026-03-11" },
+  inventoryResources: 40,
+  noStatusResources: 24,
+  types: [
+    { type: "microsoft.network/networkinterfaces", count: 8, bucket: "noStatusUnlisted" },
+    { type: "microsoft.network/networksecuritygroups", count: 6, bucket: "noStatusUnlisted" },
+    { type: "microsoft.network/publicipaddresses", count: 4, bucket: "noStatusUnlisted" },
+    { type: "microsoft.compute/disks", count: 4, bucket: "noStatusUnlisted" },
+    { type: "microsoft.network/virtualnetworks", count: 2, bucket: "noStatusUnlisted" },
+  ],
+  checks: {},
+  gaps: [],
 };

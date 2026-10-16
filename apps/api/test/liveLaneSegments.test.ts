@@ -97,16 +97,22 @@ test("unused · detached lane: one badge size for every kind, public IPs first, 
   assert.ok(ids.every((id) => lay.placeMeta.laneOf.get(id) === "unused"));
 });
 
-test("an outbound Internet card linked only to an inbound-lane card (AKS outbound-only LB) sits at that LB's height", () => {
+test("an outbound-only public LB (AKS SNAT) sits in the outbound lane before its Internet card; inbound rules or unknown keep it inbound", () => {
   const s = many();
-  const lbOut = node("lb-kubernetes", { icon: "lb", resourceKind: "lb", parentId: "vnet-a", subResources: [{ kind: "publicIP", id: "pip-out", name: "pip-out", endpoint: "40.0.0.20" }] as DiagramNodeSpec["subResources"] });
+  const lbOf = (metadata: Record<string, string>) => node("lb-kubernetes", { icon: "lb", resourceKind: "lb", parentId: "vnet-a", metadata, subResources: [{ kind: "publicIP", id: "pip-out", name: "pip-out", endpoint: "40.0.0.20" }] as DiagramNodeSpec["subResources"] });
   const inetOut = node("internet-out-vnet-a", { icon: "internet", resourceKind: "internet", metadata: { direction: "egress" } });
-  const lay = L.liveLayout({
+  const run = (metadata: Record<string, string>) => L.liveLayout({
     ...s,
-    nodes: [...s.nodes, lbOut, inetOut],
+    nodes: [...s.nodes, lbOf(metadata), inetOut],
     edges: [...s.edges, edge("lb-kubernetes", "vm-a0", { edgeKind: "routes" }), edge("lb-kubernetes", "internet-out-vnet-a", { edgeKind: "outbound-internet", flowType: "egress", label: "LB SNAT" })],
   });
-  assert.equal(lay.placeMeta.laneOf.get("lb-kubernetes"), "ingress", "a public-only LB is an inbound-lane card");
+  const lay = run({ inboundRules: "0", outboundRules: "1", managedBy: "aks", placement: "public-frontend" });
+  assert.equal(lay.placeMeta.laneOf.get("lb-kubernetes"), "egress", "outbound SNAT only: not an Internet entry point");
   assert.equal(lay.placeMeta.laneOf.get("internet-out-vnet-a"), "egress");
-  assert.ok(Math.abs(cyOf(lay, "internet-out-vnet-a") - cyOf(lay, "lb-kubernetes")) < 400, `${cyOf(lay, "internet-out-vnet-a")} vs ${cyOf(lay, "lb-kubernetes")}`);
+  const lb = lay.abs.get("lb-kubernetes")!, inet = lay.abs.get("internet-out-vnet-a")!;
+  assert.ok(lb.x + lb.w <= inet.x, "reads left to right: LB, then the Internet card");
+  assert.ok(Math.abs(cyOf(lay, "internet-out-vnet-a") - cyOf(lay, "lb-kubernetes")) < L.LIVE.CARD_H, "same row");
+  assert.ok(Math.abs(cyOf(lay, "lb-kubernetes") - cyOf(lay, "vm-a0")) < 400, "beside its backends");
+  assert.equal(run({ inboundRules: "1", outboundRules: "1" }).placeMeta.laneOf.get("lb-kubernetes"), "ingress", "an inbound rule: an entry point");
+  assert.equal(run({ outboundRules: "1" }).placeMeta.laneOf.get("lb-kubernetes"), "ingress", "rule count unknown: unchanged");
 });

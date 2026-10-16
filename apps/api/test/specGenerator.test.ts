@@ -111,3 +111,22 @@ test("spec: a public IP on a NIC no VM uses is unused (reason nicNoVm), not an '
   // the VM's own public IP (its NIC is bound to the VM) stays a chip on the VM, never unused
   assert.ok(!spec.nodes.some((x) => x.resourceKind === "publicIP" && x.metadata?.unused === "true" && x.label !== "pip-orphan"));
 });
+
+test("spec: a managed cluster is never put in a subnet by resource group; its private API is its own Private Endpoint card", async () => {
+  const AKS = id("microsoft.containerservice/managedclusters", "aks-app");
+  const PE = id("microsoft.network/privateendpoints", "pe-kube-apiserver");
+  const PENIC = id("microsoft.network/networkinterfaces", "pe-kube-apiserver-nic");
+  const g = {
+    nodes: [...graph.nodes,
+      n("aks", AKS, { metadata: { isPrivateCluster: true } }),
+      n("privateEndpoint", PE), n("nic", PENIC, { endpoint: "10.0.2.20" })],
+    edges: [...graph.edges,
+      e("connects", SN_DEF, AKS, { rel: "AKS-01" }),
+      e("attached-to", SN_DEF, PENIC), e("bound-to", PENIC, PE), e("private-link", PE, AKS, { groupIds: "management" })],
+  } as unknown as ArchitectureGraph;
+  const { spec } = await generateDiagramSpec(g, "00000000-0000-0000-0000-000000000000", "manual");
+  const aks = spec.nodes.find((x) => x.label === "aks-app")!;
+  assert.equal(aks.parentId, undefined, "the cluster resource has no subnet (only its node pools do)");
+  assert.notEqual(aks.metadata?.placement, "rg-guess");
+  assert.ok(!spec.nodes.some((x) => x.metadata?.archRole === "aks-control-plane"), "no synthetic API server node");
+});

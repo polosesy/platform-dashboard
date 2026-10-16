@@ -89,7 +89,7 @@ az deployment sub create --location koreacentral \
 {
   "connections": [
     { "key": "home", "displayName": "Home", "tenantId": "<HOME_TENANT_ID>", "mode": "platform", "subscriptions": [] },
-    { "key": "custa", "displayName": "Customer A", "tenantId": "<CUSTOMER_A_TENANT_ID>", "mode": "lighthouse",
+    { "key": "custa", "displayName": "Customer A", "tenantName": "Customer A Ltd", "tenantId": "<CUSTOMER_A_TENANT_ID>", "mode": "lighthouse",
       "subscriptions": ["<CUSTOMER_A_SUBSCRIPTION_ID>"] },
     { "key": "custb", "displayName": "Customer B", "tenantId": "<CUSTOMER_B_TENANT_ID>", "mode": "servicePrincipal",
       "subscriptions": ["<CUSTOMER_B_SUBSCRIPTION_ID>"], "clientId": "<CUSTOMER_B_APP_ID>", "secretEnv": "AUD_CONN_CUSTB_SECRET",
@@ -103,6 +103,7 @@ az deployment sub create --location koreacentral \
 | `key` · `displayName` · `tenantId` · `mode` | 예 | 홈은 정확히 하나(`tenantId` = `AZURE_AD_TENANT_ID`, `mode` = `platform` 또는 `delegated`) |
 | `subscriptions` | 예 | 이 연결로 읽는 구독. 구독은 한 연결에만. 홈이 비어 있으면 `AZURE_SUBSCRIPTION_IDS` |
 | `clientId` + (`secretEnv` 또는 `certificatePath`) | B만 | 비밀 값 **이름**(`AUD_CONN_<KEY>_SECRET`) 또는 인증서 **절대 경로** |
+| `tenantName` | 아니요 | 화면에 연결 이름 옆에 보이는 테넌트(디렉터리) 이름. 플랫폼의 읽기 전용 자격 증명으로는 이름을 읽을 수 없어(ARM `/tenants`는 서비스 주체에 이름을 주지 않고, Graph는 `Organization.Read.All`이 필요하며 Lighthouse 위임에는 Graph가 없음) 여기에 적습니다. GUID는 거부. 디렉터리 ID는 끝 4자리만 보이고 전체는 관리자에게만(복사 가능) |
 | `roles` | 아니요 | 이 연결을 쓸 수 있는 플랫폼 역할(기본 전부). 관리자는 항상 포함 |
 | `logAnalyticsWorkspaces` | 아니요 | 이 연결로 쿼리할 작업 영역(customer ID). 목록에 없는 작업 영역은 홈 연결이 읽음 |
 

@@ -88,6 +88,20 @@ export default function ConnectionsPage() {
                         </Button>
                       ) : null}
                     </header>
+                    <dl className={s.tenantRow}>
+                      <dt>{t("conn.tenant")}</dt>
+                      <dd>{c.tenantName ?? <span className={s.meta}>{t("conn.tenantNameUnset")}</span>}</dd>
+                      <dt>{t("conn.tenantId")}</dt>
+                      <dd>
+                        {c.tenantId ? (
+                          <>
+                            <code className={s.key}>{c.tenantId}</code> <CopyId value={c.tenantId} />
+                          </>
+                        ) : (
+                          <span title={t("conn.tenantIdMasked")}><code className={s.key}>…{c.tenantIdTail}</code></span>
+                        )}
+                      </dd>
+                    </dl>
                     {check ? <CheckResult check={check} connKey={c.key} cat={catalog.data ?? null} /> : null}
                   </article>
                 );
@@ -99,6 +113,16 @@ export default function ConnectionsPage() {
       <p className={s.docs}>{t("conn.docs")}</p>
     </div>
   );
+}
+
+/** Copies the full directory id (admins only see it) */
+function CopyId({ value }: { value: string }) {
+  const { t } = useI18n();
+  const [done, setDone] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }).catch(() => undefined);
+  };
+  return <Button size="sm" variant="ghost" onClick={copy} ariaLabel={t("conn.copyTenantId")} title={t("conn.copyTenantId")}>{done ? t("conn.copied") : "⧉"}</Button>;
 }
 
 function CheckResult({ check, connKey, cat }: { check: ConnectionCheckResponse; connKey: string; cat: FeatureCatalogResponse | null }) {

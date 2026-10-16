@@ -101,3 +101,29 @@ export type RegionalStatusResponse = {
   totalAffected: number;
   note?: string;
 };
+
+// ── Tab 2 supplement: what Resource Health covers (GET /api/health/coverage) ──
+
+/**
+ * noStatusListed    on Microsoft's supported list, but Azure returned no status for it
+ * noStatusUnlisted  not on the supported list, and no status returned
+ * statusUnlisted    not on the list, yet Azure returned a status (seen: metric alerts, backup vaults — as Unknown)
+ */
+export type HealthCoverageBucket = "noStatusListed" | "noStatusUnlisted" | "statusUnlisted";
+export type HealthCoverageType = { type: string; count: number; bucket: HealthCoverageBucket };
+
+/** Counts by resource type only — no names, ids or subscriptions */
+export type HealthCoverage = {
+  generatedAt: string;
+  /** Microsoft Learn "Supported Resource Types through Azure Resource Health" — the snapshot's source and ms.date */
+  doc: { url: string; date: string };
+  /** Resources in the inventory (Resource Graph) / of them, with no Resource Health status */
+  inventoryResources: number;
+  noStatusResources: number;
+  types: HealthCoverageType[];
+  /** What Azure checks, per type with a status (Learn "Executed Checks", in the request language) */
+  checks: Record<string, string[]>;
+  /** A part that could not be read — its numbers are left out, never guessed */
+  gaps: ("inventory" | "health")[];
+  note?: string;
+};

@@ -47,9 +47,9 @@
   gap: 12px;
 }
 
-/* ── Summary strip ── */
+/* ── Overview: donut + the four counts, one row ── */
 
-.summaryStrip {
+.overview {
   grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -57,8 +57,27 @@
   backdrop-filter: blur(12px);
   padding: 14px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.overviewDonut {
+  display: flex;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+.overviewStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.statSub {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .statCard {
@@ -93,23 +112,10 @@
 
 /* ── Health Map (donut-style) ── */
 
-.donutCard {
-  grid-column: span 4;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: rgba(var(--paper-rgb), 0.62);
-  backdrop-filter: blur(12px);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
 .donutWrap {
   position: relative;
-  width: 140px;
-  height: 140px;
+  width: 128px;
+  height: 128px;
 }
 
 .donutSvg {
@@ -138,35 +144,10 @@
   font-weight: 700;
 }
 
-.donutTitle {
-  font-weight: 800;
-  font-size: 14px;
-}
-
-.donutLegend {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.legendItem {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.legendDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  flex: none;
-}
-
 /* ── Resource table ── */
 
 .tableCard {
-  grid-column: span 8;
+  grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: rgba(var(--paper-rgb), 0.62);
@@ -187,6 +168,207 @@
 .filterGroup {
   display: inline-flex;
   gap: 4px;
+}
+
+.cardTitleMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Group filter from the heatmap: one chip, click clears */
+.groupChip {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+}
+
+.groupChip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.resourceRowSelected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.18);
+}
+
+/* ── Heatmap (instance tab) ── */
+
+.heatmapPanel {
+  grid-column: span 12;
+}
+
+.heatmapLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.heatmapLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heatmapControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.heatmapLegendHint {
+  color: var(--muted);
+  font-size: 11px;
+  cursor: help;
+}
+
+/* One bordered card per group — the boundary between categories */
+.heatmapGroups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.heatGroupCard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Worst state as a left accent — only for problems (Unknown stays neutral) */
+.heatGroupWorstDanger { box-shadow: inset 3px 0 0 var(--danger); }
+.heatGroupWorstWarning { box-shadow: inset 3px 0 0 var(--warning); }
+
+.heatGroupWide { grid-column: span 2; }
+
+.heatGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(var(--ink-rgb), 0.035);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.heatGroupCounts {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.countDanger { color: var(--danger); }
+.countUser { color: rgba(var(--danger-rgb), 0.6); }
+.countWarning { color: var(--warning); }
+.countMuted { color: var(--muted); }
+.countOk { color: var(--success); }
+
+.heatGroupCard .heatmapTiles {
+  padding: 8px 10px 10px;
+}
+
+.heatmapGroupHead {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.heatmapGroupHead:hover .heatmapGroupName {
+  text-decoration: underline;
+}
+
+.heatmapGroupHead:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.heatmapGroupName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heatmapGroupCount {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.heatmapTiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.heatTile {
+  all: unset;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  /* White glyph on the filled state color (a kept direct color: white text) */
+  color: #fff;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+button.heatTile:hover {
+  transform: scale(1.15);
+}
+
+button.heatTile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.heatTileDashed {
+  border: 1px dashed rgba(var(--ink-rgb), 0.45);
+  color: var(--muted);
+}
+
+.heatTileSelected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.heatmapMore {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: 0 4px;
+  line-height: 16px;
 }
 
 .filterBtn {
@@ -1416,9 +1598,98 @@
 /* ── Responsive ── */
 
 @media (max-width: 1100px) {
-  .donutCard { grid-column: span 12; }
-  .tableCard { grid-column: span 12; }
-  .summaryStrip { grid-template-columns: repeat(2, 1fr); }
+  .overviewStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .heatGroupWide { grid-column: auto; }
   .eventSummaryStrip { grid-template-columns: repeat(2, 1fr); }
   .regionGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 700px) {
+  .overview { grid-template-columns: 1fr; }
+}
+
+/* ── Resource list: Azure's own text ── */
+
+.resSummaryLabel {
+  font-weight: 700;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+/* ── What Resource Health does not cover ── */
+
+.coverageNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.linkBtn {
+  all: unset;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.linkBtn:hover { text-decoration: underline; }
+
+.linkBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.coveragePanel {
+  grid-column: span 12;
+}
+
+.coverageIntro {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.coverageTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.coverageTable th {
+  text-align: left;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.coverageTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.coverageNum {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 80px;
+}
+
+.coverageBucket {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--ink-rgb), 0.06);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.coverageBucketListed {
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
 }

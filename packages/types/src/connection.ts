@@ -1,5 +1,6 @@
 // Platform sign-in (SSO roles) and Azure connections — how the platform reads each customer's Azure.
-// No GUIDs leave the API: connections are named by key and display name only.
+// GUIDs stay in the API: connections are named by key, display name and the tenant's name, the tenant (directory) id
+// by its last 4 characters — the full id only to admins (they hand it to support, consent and Lighthouse offers).
 import type { FeatureRollup, PermissionCell, PermissionKey } from "./featureCatalog.js";
 
 /** Platform role from the token's app roles (AUD.Viewer / AUD.Operator / AUD.Admin) — the highest one wins */
@@ -18,6 +19,12 @@ export type ConnectionCheckStatus = "ok" | "warning" | "failed";
 export type AzureConnectionOption = {
   key: string;
   displayName: string;
+  /** Directory (tenant) name as declared in the connections file — absent when not declared */
+  tenantName?: string;
+  /** Last 4 characters of the tenant (directory) id — "…1a2b" */
+  tenantIdTail: string;
+  /** The full tenant (directory) id — admins only */
+  tenantId?: string;
   mode: ConnectionMode;
   subscriptionCount: number;
   workspaceCount: number;

@@ -69,7 +69,7 @@ export type DiagramFlowType =
 export type ArchRole =
   | "aks-cluster" | "aks-nodepool" | "aks-vmss"
   | "aks-ingress" | "aks-egress"
-  | "aks-control-plane" | "aks-nat-gateway"
+  | "aks-nat-gateway"
   | "nat-gateway"
   | "vm" | "vmss" | "db" | "cache"
   | "private-endpoint" | "gateway" | "load-balancer"

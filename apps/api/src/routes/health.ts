@@ -1,6 +1,6 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env.js";
-import { mockHealthSummary, mockGlobalStatus, mockServiceHealthEvents, mockRegionalStatus } from "../mockData.js";
+import { mockHealthCoverage, mockHealthSummary, mockGlobalStatus, mockServiceHealthEvents, mockRegionalStatus } from "../mockData.js";
 import {
   tryGetHealthSummary,
   tryGetGlobalStatus,
@@ -8,6 +8,7 @@ import {
   tryGetRegionalStatus,
   translateTexts,
 } from "../services/health.js";
+import { tryGetHealthCoverage } from "../services/healthCoverage.js";
 import { querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 
@@ -28,6 +29,20 @@ export function registerHealthRoutes(router: Router, env: Env) {
         return enabled ? tryGetHealthSummary(env, req.auth?.bearerToken, { subscriptionId, lang: queryLang(req) }) : null;
       },
       mockHealthSummary,
+      "health",
+    ),
+  );
+
+  // Tab 2 supplement: which resources Resource Health gives no status for — counts by type, against Microsoft's
+  // supported list (services/healthCoverage.ts)
+  router.get("/api/health/coverage", (req: Request, res: Response) =>
+    respondWithFallback(
+      res,
+      async () => {
+        const subscriptionId = querySubscriptionId(req, env);
+        return enabled ? tryGetHealthCoverage(env, req.auth?.bearerToken, { subscriptionId, lang: queryLang(req) }) : null;
+      },
+      mockHealthCoverage,
       "health",
     ),
   );

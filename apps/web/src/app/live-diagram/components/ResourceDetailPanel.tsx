@@ -34,8 +34,8 @@ import { formatAzureRegion } from "../utils/regionFormat";
 import { cardStatus } from "@/lib/liveStatus";
 import { Spark } from "./Spark";
 import { CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
-import { gatewayFrontends, unresolvedBackends } from "@/lib/liveBackends";
-import { AgcFacts, AksApiEndpoint, AksCluster, AksNodePool, BackendPools, FrontDoorFacts, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
+import { gatewayFrontends, isOutboundOnlyLb, unresolvedBackends } from "@/lib/liveBackends";
+import { AgcFacts, AksCluster, AksNodePool, BackendPools, FrontDoorFacts, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
 import styles from "../styles.module.css";
 
 type ConnectedEdge = {
@@ -199,7 +199,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   // ── kind-specific lookups ──
   const backend = useBackendPool(armId, kind);
   const nsgDetail = useNsgDetail(armId, kind);
-  const aks = useAksPlane(armId, kind, archRole);
+  const aks = useAksPlane(armId, kind);
   const vmss = useVmssInstances(armId, archRole);
 
   // ── connections, grouped by meaning ──
@@ -296,7 +296,8 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
           {kindName}
           {isSubnetParent && subnet ? <> · <button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(subnet.id)}>{nameOf(subnet.id)}</button></> : null}
           {vnet ? <> › {vnet.label}</> : null}
-          {node.metadata?.placement === "public-frontend" ? <> · {t("ld.panel.noSubnetPublic")}</> : null}
+          {node.metadata?.placement === "public-frontend" ? <> · {t(isOutboundOnlyLb(node.metadata) ? "ld.panel.noSubnetOutbound" : "ld.panel.noSubnetPublic")}</> : null}
+          {kind === "aks" && !node.parentId ? <> · {t("ld.panel.aksPlane")}</> : null}
         </div>
         <div className={styles.dpStatusRow}>
           <Badge tone={status.tone}>{status.glyph} {t(status.key)}</Badge>
@@ -455,8 +456,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
         {kind === "agc" ? <AgcFacts node={node} /> : null}
         {kind === "frontDoor" ? <FrontDoorFacts node={node} /> : null}
         {kind === "frontDoor" || kind === "appGateway" ? <WafSummarySection node={node} onWafSelect={onWafSelect} /> : null}
-        {kind === "aks" && archRole === "aks-control-plane" ? <AksApiEndpoint node={node} /> : null}
-        {kind === "aks" && archRole !== "aks-control-plane" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
+        {kind === "aks" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}
         {kind === "privateEndpoint" && peTarget ? (
           <Section id="pe" title={t("ld.panel.peTarget")}>

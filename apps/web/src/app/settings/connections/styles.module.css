@@ -47,6 +47,30 @@
   color: var(--muted);
 }
 
+/* Tenant name and directory id under the connection's name */
+.tenantRow {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+  align-items: center;
+}
+
+.tenantRow dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tenantRow dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .result {
   display: grid;
   gap: 8px;

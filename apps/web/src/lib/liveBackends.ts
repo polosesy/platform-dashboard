@@ -22,12 +22,19 @@ export const unresolvedBackends = (metadata?: Record<string, string>) => parse<U
 export type GatewayFrontend = { name: string; kind: "public" | "private"; ip?: string; listeners: string[]; ruleBound: boolean };
 export const gatewayFrontends = (metadata?: Record<string, string>) => parse<GatewayFrontend>(metadata?.frontends);
 
+/**
+ * A load balancer that only gives its backends outbound SNAT (AKS outboundType loadBalancer, catalog AKS-03): no
+ * inbound rule (LB rules + inbound NAT rules + NAT pools = 0) but an outbound rule. App Gateways carry
+ * privateListeners and never match. A missing rule count is unknown — not outbound-only.
+ */
+export const isOutboundOnlyLb = (metadata?: Record<string, string>) =>
+  !!metadata && metadata.inboundRules === "0" && metadata.privateListeners == null && Number(metadata.outboundRules ?? 0) > 0;
+
 export function gatewayFacts(metadata?: Record<string, string>): GatewayFacts | undefined {
   if (!metadata) return undefined;
   const unresolved = unresolvedBackends(metadata).length;
   const aksManaged = metadata.managedBy === "aks";
-  // LB only (App Gateways carry privateListeners): no inbound rule but an outbound one
-  const outboundOnly = metadata.inboundRules === "0" && metadata.privateListeners == null && Number(metadata.outboundRules ?? 0) > 0;
+  const outboundOnly = isOutboundOnlyLb(metadata);
   return unresolved || aksManaged || outboundOnly ? { unresolved, aksManaged, outboundOnly } : undefined;
 }
 

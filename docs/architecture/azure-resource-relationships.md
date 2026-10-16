@@ -318,9 +318,9 @@ AKS용 관리형 L7 로드 밸런서(Gateway API·Ingress). 클러스터 안의 
 
 | ID | 관계 | 의미·방향 | ARM 속성 경로 | 근거 | 표현 | 구현 | 출처 |
 |---|---|---|---|---|---|---|---|
-| AKS-01 | 서브넷 ← 에이전트 풀 | 노드 서브넷 | `managedClusters.properties.agentPoolProfiles[].vnetSubnetID` | cfg | contain / contain | azure.ts | aks/configure-azure-cni |
+| AKS-01 | 서브넷 ← 에이전트 풀 | 노드 서브넷 (노드 풀만 서브넷에 있다 — 관리형 클러스터 리소스 자체는 서브넷이 없음. 비어 있으면 AKS 관리 VNet) | `managedClusters.properties.agentPoolProfiles[].vnetSubnetID` | cfg | contain(노드 풀) / 노드 풀 카드는 서브넷 안, 클러스터 카드는 VNet 밖(그 VNet 레인) — 리소스 그룹 추측 배치 금지 | azure.ts | aks/configure-azure-cni |
 | AKS-02 | AKS → 노드 풀 VMSS | 노드 리소스 그룹(MC_*)의 VMSS | `managedClusters.properties.nodeResourceGroup` | cfg | absorb(노드풀 n) / aks-vmss 카드 | azure.ts | aks/core-aks-concepts — "node resource group" |
-| AKS-03 | AKS가 만든 LB | 태그 `aks-managed-cluster-name` 또는 노드 리소스 그룹. **이름(`kubernetes`)으로 판단 금지** | `tags`, `resourceGroup` | cfg | — / 칩 'AKS 관리' (+ 규칙 0·아웃바운드 규칙 있음 = '아웃바운드 전용') | azure.ts | aks/load-balancer-standard — "Provide outbound connections to the cluster nodes" |
+| AKS-03 | AKS가 만든 LB | 태그 `aks-managed-cluster-name` 또는 노드 리소스 그룹. **이름(`kubernetes`)으로 판단 금지** | `tags`, `resourceGroup` | cfg | — / 칩 'AKS 관리' (+ 규칙 0·아웃바운드 규칙 있음 = '아웃바운드 전용' → 라이브는 인입 레인이 아닌 송신 레인, 아웃바운드 인터넷 카드 앞) | azure.ts | aks/load-balancer-standard — "Provide outbound connections to the cluster nodes" |
 | AKS-04 | 아웃바운드 유형 | loadBalancer / userDefinedRouting / managedNATGateway | `networkProfile.outboundType` | cfg | — / 출구 칩 | — | aks/egress-outboundtype |
 
 ## §8 엣지·연결 (EDGE)

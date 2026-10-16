@@ -663,20 +663,30 @@ export default function LiveDiagramPage() {
       <div className={styles.selectorBar}>
         <div className={styles.selectorGroup}>
           <span className={styles.selectorLabel}>{t("live.tenant")}</span>
-          <select
-            className={styles.select}
-            value={tenantId}
-            onChange={(e) => setTenantId(e.target.value)}
-            disabled={tenants.length === 0}
-            aria-label={t("live.tenant")}
-          >
-            {tenants.length === 0 ? <option value="">{t("live.selectTenant")}</option> : null}
-            {tenants.map((tn) => (
-              <option key={tn.key} value={tn.key}>
-                {tn.displayName}
-              </option>
-            ))}
-          </select>
+          {(() => {
+            // Name · tenant name (…last 4 of the directory id); the full id only for admins, in the tooltip
+            const cur = tenants.find((tn) => tn.key === tenantId);
+            const hint = cur ? t("live.tenantHint", { name: cur.displayName, tenant: cur.tenantName ?? "—", id: cur.tenantId ?? `…${cur.tenantIdTail}` }) : undefined;
+            return (
+              <select
+                className={styles.select}
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                disabled={tenants.length === 0}
+                aria-label={t("live.tenant")}
+                title={hint}
+              >
+                {tenants.length === 0 ? <option value="">{t("live.selectTenant")}</option> : null}
+                {tenants.map((tn) => (
+                  <option key={tn.key} value={tn.key}>
+                    {tn.tenantName
+                      ? t("live.tenantOption", { name: tn.displayName, tenant: tn.tenantName, tail: tn.tenantIdTail })
+                      : t("live.tenantOptionNoName", { name: tn.displayName, tail: tn.tenantIdTail })}
+                  </option>
+                ))}
+              </select>
+            );
+          })()}
         </div>
         <div className={styles.selectorDivider} />
         <div className={styles.selectorGroup}>

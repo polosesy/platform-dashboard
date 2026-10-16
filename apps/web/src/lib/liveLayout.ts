@@ -15,6 +15,7 @@ import type { DiagramEdgeSpec, DiagramNodeSpec, DiagramSpec } from "@aud/types";
 import { measure, place, type PackNode, type Placed } from "./boxPack";
 import { archCategoryOf, labelWidth, PAAS_ORDER, type PaasCategory } from "./archModel";
 import { isInferredEdge } from "./liveScope";
+import { isOutboundOnlyLb } from "./liveBackends";
 
 export const LIVE = {
   CARD_W: 220,
@@ -227,6 +228,9 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   for (const n of nodes) {
     // NSGs attached to a subnet / NIC / VM are drawn as badges by their owner
     if (n.metadata?.nsgAttachedTo) { hidden.add(n.id); continue; }
+    // A public LB with no inbound rule only gives its backends outbound SNAT (AKS-03): the outbound lane, before its
+    // outbound Internet card — in the inbound lane it read as an Internet entry point
+    if (!isGroup(n) && isPublicOnlyLb(n) && isOutboundOnlyLb(n.metadata)) { toLane(n, "egress"); continue; }
     // Public entry points have no subnet: inbound lane, whatever the generator nested them in
     if (!isGroup(n) && (isPublicOnlyLb(n) || ENTRY_LANE_KINDS.has(kindOf(n)))) { toLane(n, "ingress"); continue; }
     const parent = n.parentId ? byId.get(n.parentId) : undefined;
@@ -783,8 +787,8 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       let nb: string[] = [];
       for (const m of members) {
         const inVnet = anchoredNeighbours(m.shape.id, p.shape.vnetId, (o) => !ids.has(o) && !inLane(o));
-        // Linked only to cards of the left column (the AKS outbound-only LB sits in the inbound lane → its outbound
-        // Internet card): those, already placed — without them the card had no target and fell to the column's end
+        // Linked only to cards of the left column (an inbound-lane LB → its outbound Internet card): those, already
+        // placed — without them the card had no target and fell to the column's end
         nb.push(...(inVnet.length ? inVnet : neighbours(m.shape.id, (o) => !ids.has(o) && (laneOf.get(o) === "ingress" || laneOf.get(o) === "onprem"))));
         // The egress rail sits at the subnets it serves (subnet → NAT associations)
         if (p.shape.lane === "egress") {

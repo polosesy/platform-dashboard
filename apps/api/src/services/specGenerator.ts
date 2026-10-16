@@ -896,6 +896,9 @@ function buildContainmentMap(graph: ArchitectureGraph): ContainmentMap {
     if (node.kind === "frontDoor" || node.kind === "trafficManager") continue;
     // AGC: only its association places it (AGC-01); gateways / Bastion only their dedicated subnet (CT-07)
     if (node.kind === "agc" || node.kind === "vnetGateway" || node.kind === "bastion") continue;
+    // A managed cluster has no subnet: its node pools do (AKS-01 places the pools), a private API server is its own
+    // Private Endpoint card (CMP-21). A resource-group guess put the cluster card in an unrelated subnet.
+    if (node.kind === "aks") continue;
     if (node.kind === "lb" && node.endpoint && !isPrivateAddress(node.endpoint)) continue;
     const rg = node.resourceGroup.toLowerCase();
     const rgSubnets = subnetRgMap.get(rg);
@@ -2421,45 +2424,6 @@ export async function generateDiagramSpec(
     debug(`[force-parentId] Forced ${forceSubnetParent} subnet→VNet + ${forceResourceParent} resource→subnet parentIds`);
   }
 
-  // ── AKS API Endpoint: synthetic external node above VNet (접속면) ──
-  const aksApiEndpointNodes: DiagramNodeSpec[] = [];
-  for (const node of diagramNodes) {
-    if (node.resourceKind !== "aks") continue;
-    const meta = node.metadata ?? {};
-    const fqdn = meta.fqdn;
-    if (!fqdn) continue;
-
-    // Resolve VNet position by following parentId chain
-    let vnetNode: DiagramNodeSpec | undefined;
-    const parentSubnet = diagramNodes.find(n => n.id === node.parentId);
-    if (parentSubnet) {
-      vnetNode = diagramNodes.find(n => n.id === parentSubnet.parentId);
-    }
-
-    const isPrivate = meta.isPrivateCluster === "true";
-    const apiEndpointId = `aks-api-${node.id}`;
-    const vnetX = vnetNode?.position?.x ?? node.position?.x ?? 40;
-    const vnetY = vnetNode?.position?.y ?? node.position?.y ?? 200;
-
-    aksApiEndpointNodes.push({
-      id: apiEndpointId,
-      label: `AKS API (${isPrivate ? "Private" : "Public"})`,
-      icon: "aks",
-      position: { x: vnetX + 40, y: vnetY - NODE_H - EXTERNAL_GAP },
-      bindings: {},
-      metadata: {
-        archRole: "aks-control-plane",
-        aksClusterId: node.id,
-        fqdn,
-        isPrivateCluster: String(isPrivate),
-        aksClusterName: node.label,
-      },
-      resourceKind: "aks",
-      endpoint: fqdn,
-    });
-  }
-  diagramNodes.push(...aksApiEndpointNodes);
-
   // ── Retarget edges from embedded NICs to their parent VMs ──
   // When a NIC is absorbed as a sub-resource of a VM, edges like LB→NIC
   // would be dropped because the NIC is no longer a separate node.
@@ -2611,14 +2575,6 @@ export async function generateDiagramSpec(
     const ft = resolveFlowType(archMetaMap.get(inf.source), archMetaMap.get(inf.target), "inferred");
     diagramEdges.push(makeEdge(cId, dId, srcNode?.kind ?? "unknown", undefined, inf.metadata.protocol, "inferred", inf.confidence, ft, inf.reasons));
     existingPairs.add(`${cId}→${dId}`);
-  }
-
-  // ── AKS API Endpoint → AKS Cluster control flow edges ──
-  for (const apiNode of aksApiEndpointNodes) {
-    const aksClusterId = apiNode.metadata?.aksClusterId;
-    if (!aksClusterId) continue;
-    diagramEdges.push(makeEdge(apiNode.id, aksClusterId, "aks", "control flow", undefined, "network", undefined, "control"));
-    existingPairs.add(`${apiNode.id}→${aksClusterId}`);
   }
 
   // ── Public load balancers belong to the VNet of their backends (they have no subnet) ──

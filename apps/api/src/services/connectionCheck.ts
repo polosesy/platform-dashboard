@@ -137,9 +137,13 @@ const SAMPLE_QUERY =
   " | union (resources | where type =~ 'microsoft.network/networkwatchers/flowlogs' | extend sid = tolower(tostring(properties.storageId))" +
   " | where isnotempty(sid) | distinct sid | project id = sid, type = 'microsoft.storage/storageaccounts')";
 
-export const connectionOption = (c: AzureConnection): AzureConnectionOption => ({
+/** What a caller may see of a connection: the full tenant id only with `fullTenantId` (admins) */
+export const connectionOption = (c: AzureConnection, opts: { fullTenantId?: boolean } = {}): AzureConnectionOption => ({
   key: c.key,
   displayName: c.displayName,
+  ...(c.tenantName ? { tenantName: c.tenantName } : {}),
+  tenantIdTail: c.tenantId.slice(-4),
+  ...(opts.fullTenantId ? { tenantId: c.tenantId } : {}),
   mode: c.mode,
   subscriptionCount: c.subscriptions.length,
   workspaceCount: c.logAnalyticsWorkspaces.length,
@@ -171,14 +175,15 @@ async function getJson<T>(f: Fetch, url: string, token: string, init?: RequestIn
  * every other mode with the connection's credential — never the caller's.
  */
 export async function checkConnection(env: Env, c: AzureConnection, bearerToken: string, f: Fetch = fetch): Promise<ConnectionCheckResponse> {
-  const base = { generatedAt: new Date().toISOString(), connection: connectionOption(c) };
+  // Admin-only route: the full tenant id
+  const base = { generatedAt: new Date().toISOString(), connection: connectionOption(c, { fullTenantId: true }) };
   let arm: string;
   try {
     arm = await credentials().token(env, c, "https://management.azure.com/.default", bearerToken);
   } catch (e) {
     const code = e instanceof HttpError ? e.code : "connection_failed";
     lastChecks.set(c.key, { at: base.generatedAt, status: "failed" });
-    return { ...base, connection: connectionOption(c), status: "failed", token: { ok: false, code }, visible: null, subscriptions: [], workspaces: [] };
+    return { ...base, status: "failed", token: { ok: false, code }, visible: null, subscriptions: [], workspaces: [] };
   }
 
   let visible: ConnectionCheckResponse["visible"] = null;
@@ -267,7 +272,7 @@ export async function checkConnection(env: Env, c: AzureConnection, bearerToken:
   const status: ConnectionCheckStatus = failed ? "failed" : warned ? "warning" : "ok";
   lastChecks.set(c.key, { at: base.generatedAt, status });
   return {
-    ...base, connection: connectionOption(c), status, token: { ok: true }, visible, subscriptions, workspaces,
+    ...base, status, token: { ok: true }, visible, subscriptions, workspaces,
     permissions, readiness, resourceWarnings: [...resourceWarnings],
     workspaceSummary: { n: workspaces.length, ok: workspaces.filter((w) => w.ok).length, failed: workspaces.filter((w) => !w.ok).length },
     clusters: [...(resources?.aksCredential ?? [])].sort().slice(0, 50).map((id) => ({ id, name: maskGuids(id.split("/").pop() ?? "") })),

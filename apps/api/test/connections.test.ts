@@ -13,7 +13,7 @@ import { createCredentialProvider, mapCredentialError, setCredentialProviderForT
 import { callerOf, platformRole, accessibleConnections } from "../src/infra/platformAccess.js";
 import { clearConnectionTokens, getArmFetcherAuto, getLogAnalyticsFetcherAuto } from "../src/infra/azureClientFactory.js";
 import { assertAllowedSubscription, HttpError, parseSubscriptionIds } from "../src/infra/requestParams.js";
-import { featureCoverage, privilegeWarnings } from "../src/services/connectionCheck.js";
+import { connectionOption, featureCoverage, privilegeWarnings } from "../src/services/connectionCheck.js";
 import { createAuthorizeMiddleware, subscriptionsInQuery } from "../src/middleware/authorize.js";
 import { getKubeconfig } from "../src/services/kubernetes.js";
 
@@ -73,6 +73,20 @@ test("the schema refuses secrets, PEM text, bad references and unsafe combinatio
   assert.deepEqual(parseConnections(doc({ ...home, subscriptions: [] }), env())[0]!.subscriptions, [S1], "home defaults to AZURE_SUBSCRIPTION_IDS");
   const ok = parseConnections(doc(home, lh, sp), env());
   assert.deepEqual(ok.map((c) => credentialGroup(env(), c)), ["platform", "platform", "sp:custb"], "Lighthouse uses the home credential");
+});
+
+test("tenant name is declared (never a GUID); the directory id leaves the API as its last 4 characters, in full only for admins", () => {
+  const p = (...c: unknown[]) => () => parseConnections(doc(...c), env());
+  assert.throws(p(home, { ...lh, tenantName: CUST }), /a name, not an id/);
+  assert.throws(p(home, { ...lh, tenantName: "" }));
+  const [h, a] = parseConnections(doc(home, { ...lh, tenantName: "Contoso Ltd" }), env());
+  const viewer = connectionOption(a!);
+  assert.equal(viewer.tenantName, "Contoso Ltd");
+  assert.equal(viewer.tenantIdTail, CUST.slice(-4));
+  assert.equal(viewer.tenantId, undefined);
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-/i.test(JSON.stringify([connectionOption(h!), viewer])), "no full GUID for non-admins");
+  assert.equal(connectionOption(a!, { fullTenantId: true }).tenantId, CUST);
+  assert.equal(connectionOption(h!).tenantName, undefined, "no name declared: none shown");
 });
 
 // ── roles ──
