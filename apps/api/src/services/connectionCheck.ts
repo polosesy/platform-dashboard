@@ -1,15 +1,20 @@
 // "Does this connection work, and what can it read?" — read-only connection test (admin). Run with the CONNECTION's
 // own credential: token → visible subscriptions (counts) → effective permissions per subscription (feature matrix +
-// over-privilege warnings) → `print 1` on each declared workspace. Pure parts unit-tested from
-// apps/api/test/connectionCheck.test.ts.
+// over-privilege warnings) → resource-scope permissions on a few sample resources (clusters, workspaces, Azure
+// Monitor workspaces, flow-log storage) where the subscription does not grant it → `print 1` on each declared
+// workspace → each feature's readiness (services/featureCatalog.ts). Pure parts unit-tested from
+// apps/api/test/connections.test.ts and featureCatalog.test.ts.
 import type {
   AzureConnectionOption,
   ConnectionCheckResponse,
   ConnectionCheckStatus,
   ConnectionFeature,
   FeatureStatus,
+  PermissionCell,
+  PermissionKey,
   PrivilegeWarning,
 } from "@aud/types";
+import { AZURE_PROBES, FEATURES, PERMISSIONS, cellFrom, rollupFeature } from "./featureCatalog.js";
 import type { Env } from "../env.js";
 import type { AzureConnection } from "../infra/connectionRegistry.js";
 import { credentials } from "../infra/connectionCredentials.js";
@@ -17,17 +22,11 @@ import { HttpError, maskGuids, safeMessage } from "../infra/requestParams.js";
 
 export type PermissionSet = { actions?: string[]; notActions?: string[]; dataActions?: string[]; notDataActions?: string[] };
 
-/** One representative operation per feature; `data` = a data-plane action; `scopedBelow` = usually granted on a resource */
-export const FEATURE_ACTIONS: Record<ConnectionFeature, { action: string; data?: boolean; scopedBelow?: boolean }> = {
-  inventory: { action: "Microsoft.Resources/subscriptions/resourceGroups/read" },
-  metrics: { action: "Microsoft.Insights/metrics/read" },
-  logs: { action: "Microsoft.OperationalInsights/workspaces/query/AzureDiagnostics/read", scopedBelow: true },
-  security: { action: "Microsoft.Security/assessments/read" },
-  cost: { action: "Microsoft.CostManagement/query/read" },
-  aksCredential: { action: "Microsoft.ContainerService/managedClusters/listClusterUserCredential/action", scopedBelow: true },
-  flowLogBlobs: { action: "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read", data: true, scopedBelow: true },
-  prometheus: { action: "Microsoft.Monitor/accounts/data/metrics/read", data: true, scopedBelow: true },
-};
+/**
+ * One representative operation per feature (from the catalog); `data` = a data-plane action; `scopedBelow` = usually
+ * granted on a resource — checked on samples below
+ */
+export const FEATURE_ACTIONS: Record<ConnectionFeature, { action: string; data?: boolean; scopedBelow?: boolean }> = AZURE_PROBES;
 
 const toRe = (pattern: string) => new RegExp(`^${pattern.split("*").map((p) => p.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*")}$`, "i");
 const matches = (patterns: string[] | undefined, action: string) => (patterns ?? []).some((p) => toRe(p).test(action));
@@ -60,6 +59,83 @@ export function privilegeWarnings(perms: PermissionSet[]): PrivilegeWarning[] {
   }
   return [...out];
 }
+
+/** Does one effective-permission list allow a probe? */
+export function allows(perms: PermissionSet[], probe: { action: string; data?: boolean }): boolean {
+  return perms.some((p) => probe.data
+    ? matches(p.dataActions, probe.action) && !matches(p.notDataActions, probe.action)
+    : matches(p.actions, probe.action) && !matches(p.notActions, probe.action));
+}
+
+/** Resource-scoped permissions: the ARM type the check samples */
+export const RESOURCE_KEYS = PERMISSIONS.filter((p) => p.plane === "azure" && p.scope.kind === "resource").map((p) => p.key as ConnectionFeature);
+/** Samples per permission and in total (each one GET of Microsoft.Authorization/permissions) */
+export const SAMPLE_CAP: Partial<Record<ConnectionFeature, number>> = { aksCredential: 5 };
+export const SAMPLE_DEFAULT = 3;
+export const SAMPLE_TOTAL = 20;
+
+const subOf = (id: string) => id.split("/")[2]?.toLowerCase() ?? "";
+
+/**
+ * Per permission for the whole connection (pure). Subscription scope: allowed / checked / declared subscriptions.
+ * Resource scope: a resource in a subscription that grants it counts as allowed (inherited); the others are the
+ * sampled answers (true / false; null = the GET failed, not counted). Kubernetes: unknown until a cluster check
+ * runs, or off when its switch is off.
+ */
+export function permissionCells(input: {
+  subs: Array<{ id: string; reachable: boolean; features: Record<ConnectionFeature, FeatureStatus> }>;
+  /** resource ids by permission; null = the sample query failed */
+  resources: Partial<Record<ConnectionFeature, string[]>> | null;
+  probes: ReadonlyMap<string, boolean | null>;
+  gates: { hubbleExec: boolean; podLogs: boolean };
+}): Record<PermissionKey, PermissionCell> {
+  const out = {} as Record<PermissionKey, PermissionCell>;
+  const reachable = input.subs.filter((s) => s.reachable);
+  for (const p of PERMISSIONS) {
+    if (p.plane === "kubernetes") {
+      const on = p.gate === "hubbleExec" ? input.gates.hubbleExec : p.gate === "podLogs" ? input.gates.podLogs : true;
+      out[p.key] = on ? { status: "unknown", at: "cluster", reason: "clusterNotChecked" } : { status: "optInOff", at: "cluster", reason: "gateOff" };
+      continue;
+    }
+    const key = p.key as ConnectionFeature;
+    if (p.scope.kind === "subscription") {
+      out[key] = cellFrom("subscription", reachable.filter((s) => s.features[key] === "ok").length, reachable.length, input.subs.length);
+      continue;
+    }
+    if (!input.resources) { out[key] = { status: "unknown", at: "resource", reason: "readFailed" }; continue; }
+    const ids = input.resources[key] ?? [];
+    const inherit = new Set(reachable.filter((s) => s.features[key] === "ok").map((s) => s.id.toLowerCase()));
+    let ok = 0, checked = 0, inherited = 0;
+    for (const id of ids) {
+      if (inherit.has(subOf(id))) { ok++; checked++; inherited++; continue; }
+      const v = input.probes.get(id);
+      if (v === true) { ok++; checked++; } else if (v === false) checked++;
+    }
+    out[key] = cellFrom("resource", ok, checked, ids.length, ids.length && inherited === ids.length ? "inherited" : undefined);
+  }
+  return out;
+}
+
+/** Which resources to ask about: not covered by its subscription, up to the caps — deterministic (id order) */
+export function pickSamples(
+  resources: Partial<Record<ConnectionFeature, string[]>>,
+  inherited: (key: ConnectionFeature, id: string) => boolean,
+): Array<{ key: ConnectionFeature; id: string }> {
+  const out: Array<{ key: ConnectionFeature; id: string }> = [];
+  for (const key of RESOURCE_KEYS) {
+    const want = [...(resources[key] ?? [])].sort().filter((id) => !inherited(key, id)).slice(0, SAMPLE_CAP[key] ?? SAMPLE_DEFAULT);
+    for (const id of want) if (out.length < SAMPLE_TOTAL) out.push({ key, id });
+  }
+  return out;
+}
+
+// One Resource Graph query for the samples: clusters, workspaces, Azure Monitor workspaces, and the storage
+// accounts that flow logs write to (a flow log's storageId)
+const SAMPLE_QUERY =
+  "resources | where type in~ ('microsoft.containerservice/managedclusters','microsoft.operationalinsights/workspaces','microsoft.monitor/accounts')" +
+  " | project id = tolower(id), type = tolower(type)" +
+  " | union (resources | where type =~ 'microsoft.network/networkwatchers/flowlogs' | extend sid = tolower(tostring(properties.storageId))" +
+  " | where isnotempty(sid) | distinct sid | project id = sid, type = 'microsoft.storage/storageaccounts')";
 
 export const connectionOption = (c: AzureConnection): AzureConnectionOption => ({
   key: c.key,
@@ -143,9 +219,57 @@ export async function checkConnection(env: Env, c: AzureConnection, bearerToken:
     }
   }));
 
+  // ── Resource scope: where the subscription does not grant it, ask a few of the resources themselves ──
+  const subIds = c.subscriptions;
+  const subFeatures = subscriptions.map((s, i) => ({ id: subIds[i]!, reachable: s.reachable, features: s.features }));
+  let resources: Partial<Record<ConnectionFeature, string[]>> | null = null;
+  try {
+    const rows: Array<{ id?: string; type?: string }> = [];
+    let skip: string | undefined;
+    for (let page = 0; page < 5; page++) {
+      const body = { subscriptions: subIds, query: SAMPLE_QUERY, options: { $top: 1000, ...(skip ? { $skipToken: skip } : {}) } };
+      const r = await getJson<{ data?: Array<{ id?: string; type?: string }>; $skipToken?: string }>(f, "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01", arm, { method: "POST", body: JSON.stringify(body) });
+      rows.push(...(r.data ?? []));
+      skip = r.$skipToken;
+      if (!skip) break;
+    }
+    resources = {};
+    for (const key of RESOURCE_KEYS) {
+      const type = (PERMISSIONS.find((p) => p.key === key)!.scope as { armType: string }).armType;
+      resources[key] = [...new Set(rows.filter((x) => x.type === type && x.id).map((x) => x.id!))];
+    }
+  } catch { /* sample query failed: resource-scope permissions stay unknown */ }
+  const inheritedBy = (key: ConnectionFeature, id: string) => subFeatures.some((s) => s.reachable && s.id.toLowerCase() === subOf(id) && s.features[key] === "ok");
+  const samples = resources ? pickSamples(resources, inheritedBy) : [];
+  const probes = new Map<string, boolean | null>();
+  const resourceWarnings = new Set<PrivilegeWarning>();
+  for (let i = 0; i < samples.length; i += 6) {
+    await Promise.all(samples.slice(i, i + 6).map(async ({ key, id }) => {
+      try {
+        const perm = await getJson<{ value?: PermissionSet[] }>(f, `https://management.azure.com${id}/providers/Microsoft.Authorization/permissions?api-version=2022-04-01`, arm);
+        const perms = perm.value ?? [];
+        probes.set(id, allows(perms, FEATURE_ACTIONS[key]));
+        for (const w of privilegeWarnings(perms)) resourceWarnings.add(w);
+      } catch {
+        probes.set(id, null);
+      }
+    }));
+  }
+  const home = c.mode === "platform" || c.mode === "delegated";
+  const hubbleOn = (env.HUBBLE_EXEC_ENABLED ?? env.NODE_ENV !== "production") && (home || c.aks?.hubbleExec === true);
+  const podLogsOn = home || (c.aks?.podLogNamespaces?.length ?? 0) > 0;
+  const permissions = permissionCells({ subs: subFeatures, resources, probes, gates: { hubbleExec: hubbleOn, podLogs: podLogsOn } });
+  const readiness = FEATURES.map((d) => rollupFeature(d, permissions));
+
   const failed = subscriptions.some((s) => !s.reachable) || workspaces.some((w) => !w.ok) || (visible?.missing ?? 0) > 0;
-  const warned = subscriptions.some((s) => s.warnings.length > 0 || Object.values(s.features).includes("missing"));
+  const warned = subscriptions.some((s) => s.warnings.length > 0 || Object.values(s.features).includes("missing"))
+    || resourceWarnings.size > 0 || readiness.some((r) => r.readiness === "blocked" || r.readiness === "partial");
   const status: ConnectionCheckStatus = failed ? "failed" : warned ? "warning" : "ok";
   lastChecks.set(c.key, { at: base.generatedAt, status });
-  return { ...base, connection: connectionOption(c), status, token: { ok: true }, visible, subscriptions, workspaces };
+  return {
+    ...base, connection: connectionOption(c), status, token: { ok: true }, visible, subscriptions, workspaces,
+    permissions, readiness, resourceWarnings: [...resourceWarnings],
+    workspaceSummary: { n: workspaces.length, ok: workspaces.filter((w) => w.ok).length, failed: workspaces.filter((w) => !w.ok).length },
+    clusters: [...(resources?.aksCredential ?? [])].sort().slice(0, 50).map((id) => ({ id, name: maskGuids(id.split("/").pop() ?? "") })),
+  };
 }

@@ -24,7 +24,8 @@ import type {
 } from "@aud/types";
 import { inferImplicitEdges } from "./dependencyInference.js";
 import { backendServerKeys } from "./backendMembers.js";
-import type { AfdWaf } from "./frontDoorConfig.js";
+import { wafMetadata, type WafCoverage } from "./wafCoverage.js";
+import { specJson, type SpecFact } from "./resourceSpec.js";
 import ELK from "elkjs";
 import { debug } from "../infra/logger.js";
 
@@ -2117,6 +2118,14 @@ export async function generateDiagramSpec(
       paasToSubnetPos.set(paasShortId, { subnetX: subnetAbsX, vnetX: vnetSpec.position?.x ?? 0, vnetShortId: vnetSpec.id });
     }
 
+    // A public IP on a NIC that no VM uses (the NIC is only a subnet's count here): it reaches nothing — unused, with
+    // that reason, instead of an "outside the VNet" card with no owner in view (catalog PIP-01)
+    const nicsWithVm = new Set(graph.edges.filter((e) => e.kind === "bound-to").map((e) => e.source.toLowerCase()));
+    const pipOnVmlessNic = (res: ArchitectureNode) => {
+      const owner = typeof res.metadata?.attachedTo === "string" ? res.metadata.attachedTo.toLowerCase() : "";
+      return /\/microsoft\.network\/networkinterfaces\//.test(owner) && !nicsWithVm.has(owner);
+    };
+
     // Split external resources: PE-connected PaaS vs others
     const peConnectedPaaS: ArchitectureNode[] = [];
     const otherExternal: ArchitectureNode[] = [];
@@ -2271,7 +2280,7 @@ export async function generateDiagramSpec(
           const col = i % 4;
           const row = Math.floor(i / 4);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
-          const isUnusedPip = res.kind === "publicIP" && res.metadata?.unused === true;
+          const isUnusedPip = res.kind === "publicIP" && (res.metadata?.unused === true || pipOnVmlessNic(res));
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -2289,7 +2298,7 @@ export async function generateDiagramSpec(
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
-              ...(isUnusedPip ? { unused: "true" } : {}),
+              ...(isUnusedPip ? { unused: "true", unusedReason: res.metadata?.unused === true ? "notAttached" : "nicNoVm" } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -2303,7 +2312,7 @@ export async function generateDiagramSpec(
           const col = i % cols;
           const row = Math.floor(i / cols);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
-          const isUnusedPip = res.kind === "publicIP" && res.metadata?.unused === true;
+          const isUnusedPip = res.kind === "publicIP" && (res.metadata?.unused === true || pipOnVmlessNic(res));
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -2321,7 +2330,7 @@ export async function generateDiagramSpec(
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
-              ...(isUnusedPip ? { unused: "true" } : {}),
+              ...(isUnusedPip ? { unused: "true", unusedReason: res.metadata?.unused === true ? "notAttached" : "nicNoVm" } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -2794,6 +2803,8 @@ export async function generateDiagramSpec(
       const g = n.azureResourceId ? gByAz.get(n.azureResourceId.toLowerCase()) : undefined;
       if (!g) continue;
       const meta = g.metadata ?? {};
+      // The resource's specification (resourceSpec.ts) for the panel
+      if (Array.isArray(meta.spec) && meta.spec.length) n.metadata = { ...n.metadata, spec: specJson(meta.spec as SpecFact[]) };
       if (n.resourceKind === "lb" || n.resourceKind === "appGateway") {
         const out: Record<string, string> = {};
         if (meta.managedBy === "aks") out.managedBy = "aks";
@@ -2804,6 +2815,8 @@ export async function generateDiagramSpec(
         const pub = fes.filter((f) => f.kind === "public" && f.ruleBound).flatMap((f) => f.listeners);
         if (pub.length) out.publicListeners = JSON.stringify(pub);
         if (Array.isArray(meta.unresolvedBackends) && meta.unresolvedBackends.length) out.unresolvedBackends = JSON.stringify(meta.unresolvedBackends);
+        // AGW-08: WAF per rule-bound listener
+        if (n.resourceKind === "appGateway") Object.assign(out, wafMetadata(meta.waf as WafCoverage | undefined));
         n.metadata = { ...n.metadata, ...out };
       }
       // Evidence inputs (healthEvidence.ts): provisioning state, Private Endpoint connection approval states
@@ -2822,16 +2835,8 @@ export async function generateDiagramSpec(
         const keys = ["tier", "endpoints", "activeRoutes", "origins", "externalOrigins", "ambiguousOrigins", "configUnreadable", "classic"] as const;
         const out: Record<string, string> = {};
         for (const k of keys) if (meta[k] != null) out[k] = String(meta[k]);
-        // WAF coverage (EDGE-10 / EDGE-11): chip + panel (web lib/liveWaf.ts)
-        const waf = meta.waf as AfdWaf | undefined;
-        if (waf) {
-          out.wafState = waf.state;
-          out.wafCounts = JSON.stringify(waf.counts);
-          out.wafPolicies = JSON.stringify(waf.policies);
-          out.wafDomains = JSON.stringify(waf.domains);
-          if (waf.unserved.length) out.wafUnserved = JSON.stringify(waf.unserved);
-          if (waf.readError) out.wafReadError = waf.readError;
-        }
+        // WAF coverage (EDGE-10 / EDGE-11): badge + policy sub-cards + panel (web lib/liveWaf.ts)
+        Object.assign(out, wafMetadata(meta.waf as WafCoverage | undefined));
         if (Array.isArray(meta.endpointHosts)) out.endpointHosts = JSON.stringify(meta.endpointHosts);
         if (Array.isArray(meta.originList)) out.originList = JSON.stringify(meta.originList);
         n.metadata = { ...n.metadata, ...out };

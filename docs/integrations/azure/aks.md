@@ -123,6 +123,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 1. 대시보드 › AKS 클러스터 › 클러스터 선택 — 제목 옆 배지: `프라이빗`/`공용 API`, `Entra ID`/`로컬 계정`
 2. 오류가 없으면 객체 목록이 보임. 오류는 아래 코드로 원인을 바로 알려 줌
 3. 고객 쪽 확인: `kubectl auth can-i list pods --as <오브젝트 ID>` → yes, `kubectl auth can-i get secrets --as <오브젝트 ID>` → **no**
+4. 대시보드 쪽 확인(관리자): **설정 › Azure 연결 › 점검 › 클러스터 권한 점검** — 연결의 자격 증명으로 로그인한 뒤 `SelfSubjectAccessReview`로 읽기 범위 규칙 24개·Pod 로그·Hubble exec(켠 경우)를 묻고, Secret 읽기·exec·`*` 권한이 있으면 경고합니다. 로그인 단계에서 막히면 이유가 그대로 나옵니다(`AKS Cluster User Role` 없음 → 자격 증명 권한 없음, 로컬 계정 클러스터 → 거부됨, 네트워크 → API 서버에 닿지 않음)
 
 ## 9. 문제 해결
 
@@ -177,4 +178,4 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | 도달성 | 호스트는 ARM 값만, 상세는 숨김 | DNS→TCP 사전 점검 | **사전 점검 + 호스트 이름 없는 오류 코드** |
 | 빈 클러스터 | — | 전부 실패해도 성공 응답(버그) | **전부 실패 = 오류** |
 
-후속 과제: 연결 점검에 클러스터별 SelfSubjectAccessReview(과도 권한 경고), 에이전트 없는 대체 데이터(Container Insights·kube-state-metrics), ACNS 흐름 로그 수집기, Azure RBAC용 사용자 지정 역할 JSON, 관리 ID + FIC, 사용자 OBO Pod 로그, 아웃바운드 에이전트 Tier.
+후속 과제: ~~연결 점검에 클러스터별 SelfSubjectAccessReview(과도 권한 경고)~~ (완료 — §8 확인 4), 에이전트 없는 대체 데이터(Container Insights·kube-state-metrics), ACNS 흐름 로그 수집기, Azure RBAC용 사용자 지정 역할 JSON, 관리 ID + FIC, 사용자 OBO Pod 로그, 아웃바운드 에이전트 Tier.

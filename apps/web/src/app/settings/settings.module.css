@@ -1,0 +1,231 @@
+/* Shared by /settings/features and /settings/connections: package cards, feature rows, permission table */
+.page {
+  display: grid;
+  gap: 14px;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ── Packages side by side (each adds to the one before) ── */
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.tier {
+  --tier-rgb: var(--accent-rgb);
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--border);
+  border-top: 3px solid rgb(var(--tier-rgb));
+  border-radius: var(--radius-md);
+  background: var(--panel-solid);
+}
+
+.tier[data-tier="pro"],
+.tierBlockTitle[data-tier="pro"] { --tier-rgb: var(--violet-rgb); }
+.tier[data-tier="enterprise"],
+.tierBlockTitle[data-tier="enterprise"] { --tier-rgb: var(--accent-2-rgb); }
+
+.tierName {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tierLink {
+  justify-self: start;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--tier-rgb));
+}
+
+.includes {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.featureList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.featureList li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.check {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(var(--tier-rgb));
+  color: #fff; /* white glyph on the tier colour (any theme) */
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tierRoles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.tierRolesTitle {
+  font-size: 11px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.roleTag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--tier-rgb), 0.35);
+  background: rgba(var(--tier-rgb), 0.07);
+  white-space: nowrap;
+}
+
+/* ── Feature rows ── */
+.tierBlock {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.tierBlockTitle {
+  --tier-rgb: var(--accent-rgb);
+  margin: 6px 0 2px;
+  padding-left: 8px;
+  border-left: 3px solid rgb(var(--tier-rgb));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.feature {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: var(--panel-solid);
+}
+
+.feature[open] {
+  padding-bottom: 10px;
+}
+
+.featureHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.featureName {
+  font-weight: 700;
+}
+
+.screens,
+.pre,
+.reason {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reason {
+  flex-basis: 100%;
+  padding-left: 16px;
+}
+
+/* ── Permission table ── */
+.tableWrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 600;
+  background: var(--panel-sunken);
+  white-space: nowrap;
+}
+
+.role {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.why {
+  min-width: 220px;
+  line-height: 1.45;
+}
+
+.without,
+.sample {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.copy {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  color: var(--accent-strong);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.copy:hover {
+  border-color: rgba(var(--accent-rgb), 0.45);
+}

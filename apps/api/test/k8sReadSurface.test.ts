@@ -12,6 +12,7 @@ import {
   NEVER_GRANTED,
   POD_LOG_RULE,
   readerManifest,
+  SELF_REVIEW_RULE,
 } from "../src/services/k8sReadSurface.js";
 
 const SRC = join(import.meta.dirname, "../src");
@@ -34,7 +35,7 @@ function k8sFiles(): Array<{ path: string; text: string }> {
 }
 
 test("every Kubernetes API call in src/ is on the read surface (or the per-namespace pod-log grant)", () => {
-  const allowed = new Set([...K8S_READ_SURFACE, POD_LOG_RULE].flatMap((r) => r.methods));
+  const allowed = new Set([...K8S_READ_SURFACE, POD_LOG_RULE, SELF_REVIEW_RULE].flatMap((r) => r.methods));
   const custom = new Set(K8S_READ_SURFACE.filter((r) => r.custom).map((r) => `${r.apiGroup}/${r.resource}`));
   const calls: string[] = [];
   for (const { path, text } of k8sFiles()) {
@@ -84,4 +85,8 @@ test("generated manifests in docs/integrations/azure/templates/aks are current",
     try { onDisk = readFileSync(join(TEMPLATES, file), "utf8").replace(/\r\n/g, "\n"); } catch { /* missing */ }
     assert.equal(onDisk, gen(), `${file} is stale — regenerate: npx tsx apps/api/scripts/gen-aks-rbac.ts`);
   }
+});
+
+test("the self-review the connection check uses is never in a generated role (every identity has it)", () => {
+  for (const [file, make] of Object.entries(GENERATED_MANIFESTS)) assert.ok(!make().includes("selfsubjectaccessreviews"), file);
 });

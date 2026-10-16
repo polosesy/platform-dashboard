@@ -96,18 +96,19 @@ test("WAF policy rows: Standard has no managed sets (custom only), an absent arr
   assert.deepEqual(prem.managed, [{ type: "Microsoft_DefaultRuleSet", version: "2.1", action: "Log" }]);
 });
 
-test("card chip: prevention neutral, gaps orange with n/m, unknown never orange, no chip without a served domain", () => {
+test("card badge: prevention neutral, gaps orange with n/m, unknown never orange, no badge without a served unit", () => {
   const meta = (state: string, counts: Partial<wafNs.WafCounts> = {}) => ({ wafState: state, wafCounts: JSON.stringify({ served: 7, prevent: 0, detect: 0, disabled: 0, none: 0, unknown: 0, ...counts }) });
-  assert.deepEqual(W.wafChip(meta("prevent", { prevent: 7 }))?.tone, undefined);
-  assert.equal(W.wafChip(meta("prevent", { prevent: 7 }))?.key, "ld.chip.waf.prevent");
-  const partial = W.wafChip(meta("partial", { prevent: 3, detect: 4 }))!;
-  assert.deepEqual([partial.key, partial.vars, partial.tone], ["ld.chip.waf.ratio", { n: 3, m: 7 }, "public"]);
-  assert.equal(W.wafChip(meta("detect", { detect: 7 }))?.tone, "public");
-  assert.equal(W.wafChip(meta("none", { none: 7 }))?.tone, "public");
-  for (const s of ["unknown", "unreadable"]) assert.notEqual(W.wafChip(meta(s, { unknown: 7 }))?.tone, "public", `${s} is not risk`);
-  assert.equal(W.wafChip(meta("noDomains", { served: 0 })), null);
-  assert.equal(W.wafChip({}), null);
-  assert.equal(W.wafChip({ wafState: "bogus" }), null);
+  assert.deepEqual(W.wafBadge(meta("prevent", { prevent: 7 }))?.tone, "neutral");
+  assert.equal(W.wafBadge(meta("prevent", { prevent: 7 }))?.labelKey, "ld.waf.badge.prevent");
+  const partial = W.wafBadge(meta("partial", { prevent: 3, detect: 4 }))!;
+  assert.deepEqual([partial.labelKey, partial.vars, partial.tone], ["ld.waf.badge.ratio", { n: 3, m: 7 }, "public"]);
+  assert.equal(W.wafBadge(meta("detect", { detect: 7 }))?.tone, "public");
+  assert.equal(W.wafBadge(meta("none", { none: 7 }))?.tone, "public");
+  for (const s of ["unknown", "unreadable"]) assert.equal(W.wafBadge(meta(s, { unknown: 7 }))?.tone, "muted", `${s} is not risk`);
+  assert.equal(W.wafBadge(meta("noDomains", { served: 0 })), null);
+  assert.equal(W.wafBadge({}), null);
+  assert.equal(W.wafBadge({ wafState: "bogus" }), null);
+  assert.equal(W.wafBadge({ ...meta("none", { none: 2 }), wafSkuNoWaf: "true" })?.hint.key, "ld.waf.agw.skuNoWaf");
 });
 
 test("WAF verdict counts are read for the panel only — never a health rule (no baseline: attack or false positives)", () => {
@@ -188,4 +189,54 @@ test("Internet → App Gateway that is also a Front Door origin: the line stays,
   assert.ok(!(edgeBindings(line, byId, new Set(), new Set()).caveats ?? []).includes("ld.edge.caveat.viaFrontDoor"));
   const toAfd = s.edges.find((e) => e.id === "in-afd")!;
   assert.ok(!(edgeBindings(toAfd, byId, new Set(), new Set(["afd"])).caveats ?? []).includes("ld.edge.caveat.viaFrontDoor"), "only gateways");
+});
+
+// ── open WAF sub-cards keep their room in the inbound lane ──
+import * as layoutNs from "../../web/src/lib/liveLayout.ts";
+const La = ((layoutNs as unknown as { default?: typeof layoutNs }).default ?? layoutNs) as typeof layoutNs;
+
+function inboundSpec(): DiagramSpec {
+  const s = afdSpec();
+  return {
+    ...s,
+    nodes: [...s.nodes, node("afd3", { icon: "frontDoor", resourceKind: "frontDoor" })],
+    edges: [...s.edges, edge("in-afd3", "internet-in-external", "afd3", { flowType: "ingress", edgeKind: "network" }), edge("afd3-agw", "afd3", "agw", { edgeKind: "network" })],
+  } as DiagramSpec;
+}
+
+test("layout: room below an open Front Door — the next inbound card moves down by it; an empty map changes nothing", () => {
+  const s = inboundSpec();
+  const base = La.liveLayout(s);
+  assert.deepEqual(La.liveLayout(s, { attachBelow: new Map() }), base, "no option = same layout");
+  const abs = (lay: typeof base, id: string) => lay.abs.get(id)!;
+  const order = ["afd", "afd2", "afd3"].sort((a, b) => abs(base, a).y - abs(base, b).y);
+  const [first, second] = order as [string, string];
+  const reserve = W.wafAttachHeight(3);
+  const open = La.liveLayout(s, { attachBelow: new Map([[first, reserve]]) });
+  assert.ok(abs(open, second).y >= abs(open, first).y + abs(open, first).h + reserve, "the next entry clears the open sub-cards");
+  assert.deepEqual([...open.reservedBelow], [first]);
+  assert.ok(open.bounds.height >= base.bounds.height);
+  // ids outside the inbound lane are ignored
+  const vnetCard = La.liveLayout(s, { attachBelow: new Map([["agw", reserve]]) });
+  assert.equal(vnetCard.reservedBelow.size, 0);
+});
+
+test("WAF sub-cards: non-blocking policies first, at most four then '+k', the none / unknown buckets always kept", () => {
+  const policies = ["a", "b", "c", "d", "e", "f", "g"].map((n, i) => ({ name: n, sku: null, mode: i < 4 ? "Detection" : "Prevention", enabled: true, managed: [], customRules: i, domains: Array.from({ length: i + 1 }, (_, k) => `${n}${k}.example.com`) }));
+  const meta = {
+    wafState: "partial", wafUnit: "domain",
+    wafCounts: JSON.stringify({ served: 33, prevent: 2, detect: 12, disabled: 0, none: 19, unknown: 0 }),
+    wafPolicies: JSON.stringify(policies),
+    wafDomains: JSON.stringify([{ host: "x.azurefd.net", kind: "endpoint", state: "none" }, { host: "y.example.com", kind: "custom", state: "none" }]),
+  };
+  const cards = W.wafSubCards(meta);
+  assert.deepEqual(cards.map((c) => c.key), ["p:d", "p:c", "p:b", "p:a", "more", "none"]);
+  assert.equal(cards[0]!.tone, "public", "detection is orange");
+  assert.equal(cards.find((c) => c.key === "more")!.more, 3);
+  assert.deepEqual([cards.at(-1)!.units, cards.at(-1)!.endpointNone], [19, 1]);
+  const badge = W.wafBadge(meta)!;
+  assert.deepEqual([badge.labelKey, badge.vars, badge.tone], ["ld.waf.badge.ratio", { n: 2, m: 33 }, "public"]);
+  assert.equal(W.wafSubCards({ wafState: "noDomains" }).length, 0);
+  assert.equal(W.wafAttachHeight(0), 0);
+  assert.equal(W.wafAttachHeight(2), 20 + 2 * 58 + 8);
 });

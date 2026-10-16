@@ -255,17 +255,43 @@ export default function LiveDiagramPage() {
   }, []);
 
   const [focusPeeringKey, setFocusPeeringKey] = useState<string | null | undefined>(undefined);
+  // WAF: the cards whose policy sub-cards are open, and the WAF panel in view (key null = overview)
+  const [wafOpen, setWafOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectedWaf, setSelectedWaf] = useState<{ nodeId: string; key: string | null } | null>(null);
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
     setSelectedVmssInstance(null);
+    setSelectedWaf(null);
     setFocusPeeringKey(undefined);
     if (nodeId) setSelectedEdgeId(null);
+  }, []);
+  const handleWafSelect = useCallback((nodeId: string, key: string | null) => {
+    setSelectedWaf({ nodeId, key });
+    setWafOpen((prev) => (prev.has(nodeId) ? prev : new Set([...prev, nodeId])));
+    setSelectedNodeId(null);
+    setSelectedVmssInstance(null);
+    setSelectedEdgeId(null);
+  }, []);
+  // The badge: opening shows the sub-cards and the WAF overview; closing leaves the panel as it is
+  const wafOpenRef = useRef(wafOpen);
+  wafOpenRef.current = wafOpen;
+  const handleWafToggle = useCallback((nodeId: string) => {
+    if (wafOpenRef.current.has(nodeId)) {
+      setWafOpen((prev) => { const next = new Set(prev); next.delete(nodeId); return next; });
+      return;
+    }
+    setWafOpen((prev) => new Set([...prev, nodeId]));
+    setSelectedWaf({ nodeId, key: null });
+    setSelectedNodeId(null);
+    setSelectedVmssInstance(null);
+    setSelectedEdgeId(null);
   }, []);
 
   // A peering chip on a VNet header: open the VNet's panel with that peering expanded (null = the list)
   const handlePeeringSelect = useCallback((vnetId: string, key: string | null) => {
     setSelectedNodeId(vnetId);
     setSelectedVmssInstance(null);
+    setSelectedWaf(null);
     setSelectedEdgeId(null);
     setFocusPeeringKey(key);
   }, []);
@@ -274,11 +300,12 @@ export default function LiveDiagramPage() {
     setSelectedVmssInstance(data);
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
+    setSelectedWaf(null);
   }, []);
 
   const handleEdgeSelect = useCallback((edgeId: string | null) => {
     setSelectedEdgeId(edgeId);
-    if (edgeId) setSelectedNodeId(null);
+    if (edgeId) { setSelectedNodeId(null); setSelectedWaf(null); }
   }, []);
 
   // Toolbar: edge layers, measured traffic, fault impact
@@ -817,6 +844,9 @@ export default function LiveDiagramPage() {
             focusNodeId={focusNodeId}
             onVmssInstanceSelect={handleVmssInstanceSelect}
             onPeeringSelect={handlePeeringSelect}
+            wafOpen={wafOpen}
+            onWafToggle={handleWafToggle}
+            onWafSelect={handleWafSelect}
           />
 
           {/* Right sidebar: edge detail, node detail, or alerts (list / timeline) */}
@@ -833,7 +863,7 @@ export default function LiveDiagramPage() {
                 site={siteOfEdge(spec, filteredSpec.edges.find((e) => e.id === selectedEdgeId))}
                 onClose={() => handleEdgeSelect(null)}
               />
-            ) : (selectedNodeId || selectedVmssInstance) ? (
+            ) : (selectedNodeId || selectedVmssInstance || selectedWaf) ? (
               <ResourceDetailPanel
                 nodeSpec={selectedNodeId ? (filteredSpec.nodes.find((n) => n.id === selectedNodeId) ?? null) : null}
                 liveNode={selectedNodeId ? (snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null) : null}
@@ -853,8 +883,11 @@ export default function LiveDiagramPage() {
                 onOpenVnet={(id) => { setSelectedVnets(new Set([id])); handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
                 onAddVnet={(id) => { setSelectedVnets((prev) => (prev.size ? new Set([...prev, id]) : prev)); handleNodeSelect(id); setFocusNodeId(id + ":" + Date.now()); }}
                 onBack={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
-                onClose={() => { handleNodeSelect(null); setSelectedVmssInstance(null); }}
+                onClose={() => { handleNodeSelect(null); setSelectedVmssInstance(null); setSelectedWaf(null); }}
                 vmssInstance={selectedVmssInstance}
+                waf={selectedWaf}
+                onWafSelect={handleWafSelect}
+                wafLiveNode={selectedWaf ? (snapshot?.nodes.find((n) => n.id === selectedWaf.nodeId) ?? null) : null}
               />
             ) : (
               <AlertSidebar

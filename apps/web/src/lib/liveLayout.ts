@@ -32,6 +32,10 @@ export const LIVE = {
   VNET_HEAD: 46,
   /** Second header row of a VNet with peerings (one row of chips, never wrapped — lib/livePeering) */
   PEER_ROW: 24,
+  /** Sub-cards under a card (VMSS instances, WAF policies): gap above, height, gap between */
+  SUB_TOP: 20,
+  SUB_H: 58,
+  SUB_GAP: 8,
   /** Two-line subnet header (name / CIDR · outbound · NICs): 8 + 20 + 4 + 20, then 8 px clear of the cards */
   SUBNET_HEAD: 60,
   LANE_HEAD: 34,
@@ -99,11 +103,19 @@ export type LiveLayout = {
   abs: Map<string, Rect>;
   placeMeta: PlaceMeta;
   bounds: { x: number; y: number; width: number; height: number };
+  /** Inbound-lane cards with room kept free below them for open sub-cards (WAF policies) — the rest overlay */
+  reservedBelow: ReadonlySet<string>;
 };
 
 export type LiveLayoutOptions = {
   /** VNets whose empty subnets are shown one by one instead of the folded row */
   expandedEmpty?: ReadonlySet<string>;
+  /**
+   * Room to keep free below a card for its open sub-cards (px; lib/liveWaf wafAttachHeight). Honoured for the
+   * inbound lane's entries (Front Door …) — the cards below and the on-premises lane move down; elsewhere the
+   * sub-cards overlay, like the VMSS instances. The card's own box never grows (handles sit at its centre).
+   */
+  attachBelow?: ReadonlyMap<string, number>;
 };
 
 type ShapeKind = "node" | "vnet" | "subnet" | "lane" | "summary" | "wrap" | "spacer" | "section";
@@ -126,9 +138,13 @@ const kindOf = (n: DiagramNodeSpec) => n.resourceKind ?? n.icon;
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Card size as LiveNode draws it */
+/** Unused / detached resources (unattached public IPs, NSGs on nothing): one compact badge each, whatever the kind */
+export const isUnusedBadge = (n: DiagramNodeSpec) => !isGroup(n) && (n.metadata?.unused === "true" || n.metadata?.detached === "true");
+
 export function cardSize(n: DiagramNodeSpec): { w: number; h: number } {
   const k = kindOf(n);
   if (k === "internet") return { w: LIVE.INTERNET_W, h: LIVE.INTERNET_H };
+  if (isUnusedBadge(n)) return { w: LIVE.NSG_W, h: LIVE.NSG_H };
   if (k === "nsg") return { w: LIVE.NSG_W, h: LIVE.NSG_H };
   return { w: LIVE.CARD_W, h: LIVE.CARD_H };
 }
@@ -148,6 +164,8 @@ const cardRank = (n: DiagramNodeSpec) => {
   return i < 0 ? CARD_ORDER.length - 1 : i;
 };
 const byCard = (a: DiagramNodeSpec, b: DiagramNodeSpec) => cardRank(a) - cardRank(b) || cmp(a.label, b.label) || cmp(a.id, b.id);
+const UNUSED_RANK: Record<string, number> = { publicIP: 0, nsg: 1 };
+const byUnused = (a: DiagramNodeSpec, b: DiagramNodeSpec) => (UNUSED_RANK[kindOf(a)] ?? 2) - (UNUSED_RANK[kindOf(b)] ?? 2) || cmp(kindOf(a), kindOf(b)) || cmp(a.label, b.label) || cmp(a.id, b.id);
 
 /** Subnet tie-break order: entry (0) → compute (1) → data / Private Endpoints (2) → management (3) → empty (4) */
 export function subnetTier(subnet: DiagramNodeSpec, cards: DiagramNodeSpec[]): number {
@@ -192,6 +210,8 @@ const spacer = (key: string): PackNode<Shape> => leaf(`spacer:${key}`, LIVE.CARD
 
 export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): LiveLayout {
   const nodes = [...spec.nodes].sort((a, b) => cmp(a.id, b.id));
+  /** Room kept below an inbound entry for its open sub-cards (0 = none) */
+  const reserveOf = (id: string) => Math.max(0, opts.attachBelow?.get(id) ?? 0);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const hidden = new Set<string>();
   const nicCount = new Map<string, number>();
@@ -562,44 +582,105 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   }
   const vnetBoxes = vnets.map(vnetNode);
 
-  // ── Lanes ──
-  const lane = (kind: LaneKind, label: string, members: DiagramNodeSpec[], cols = 1, category?: PaasCategory): PackNode<Shape> | null => {
-    if (!members.length) return null;
-    const cards = members.slice().sort(byCard);
-    return box({ id: `lane:${kind}${category ? ":" + category : ""}`, kind: "lane", lane: kind, label, category }, cards.map((n) => { const s = cardSize(n); return leaf(n.id, s.w, s.h); }), {
-      head: LIVE.LANE_HEAD, maxW: cols * LIVE.CARD_W + (cols - 1) * LIVE.GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD,
+  // ── Lanes, one segment per VNet ──
+  // Lines a card outside the VNets is placed by: drawn configuration (not guesses, not peerings) — including the
+  // Internet → VM public-IP lines and subnet → NAT associations, which do not shape the bands but say where it belongs
+  const alignEdges = [...spec.edges].filter((e) => !isInferredEdge(e) && e.edgeKind !== "peering").sort((a, b) => cmp(a.id, b.id));
+  const vnetOrder = new Map(vnets.map((v, i) => [v.id, i]));
+  /**
+   * Where a linked card sits: "<vnet>#<band>" inside a band of connected subnets (bands are separate blocks down a
+   * VNet, so a lane segment can sit at the block it serves), else its VNet; null outside every VNet
+   */
+  const anchorOf = (id: string): string | null => {
+    let cur = byId.get(id);
+    const seen = new Set<string>();
+    while (cur?.parentId && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      const sm = meta.subnet.get(cur.parentId);
+      if (sm && vnetOrder.has(sm.vnetId)) return `${sm.vnetId}#${sm.band}`;
+      cur = byId.get(cur.parentId);
+    }
+    return cur && vnetOrder.has(cur.id) ? cur.id : null;
+  };
+  const vnetPart = (key: string) => key.split("#")[0]!;
+  const keyRank = (key: string): [number, number] => [vnetOrder.get(vnetPart(key)) ?? Infinity, key.includes("#") ? Number(key.split("#")[1]) : -1];
+  const byKey = (a: string, b: string) => { const [va, ba] = keyRank(a), [vb, bb] = keyRank(b); return va - vb || ba - bb || cmp(a, b); };
+  /**
+   * The VNet a lane card belongs next to (P1: the VNet of what it links to; P2: most links, then VNet order). A card
+   * linked only to other lane cards (the Internet → a public LB / Front Door) follows them; nothing linked → "_".
+   */
+  const home = new Map<string, string>();
+  const laneIds = new Set([...laneOf.keys()]);
+  for (let pass = 0; pass < 3; pass++) {
+    for (const id of [...laneIds].sort(cmp)) {
+      if (home.has(id)) continue;
+      const votes = new Map<string, number>();
+      for (const e of alignEdges) {
+        const other = e.source === id ? e.target : e.target === id ? e.source : null;
+        if (!other || other === id) continue;
+        const v = laneIds.has(other) ? home.get(other) : anchorOf(other);
+        if (v && v !== "_") votes.set(v, (votes.get(v) ?? 0) + 1);
+      }
+      if (!votes.size) continue;
+      const best = [...votes].sort((a, b) => b[1] - a[1] || byKey(a[0], b[0]))[0]![0];
+      home.set(id, best);
+    }
+  }
+  const homeOf = (id: string) => home.get(id) ?? "_";
+  /** Members of one lane by home VNet, in VNet order, unlinked last (P4, P5) */
+  const segments = (members: DiagramNodeSpec[]): Array<[string, DiagramNodeSpec[]]> => {
+    const by = new Map<string, DiagramNodeSpec[]>();
+    for (const n of members) (by.get(homeOf(n.id)) ?? by.set(homeOf(n.id), []).get(homeOf(n.id))!).push(n);
+    return [...by].sort(([a], [b]) => (a === "_" ? 1 : b === "_" ? -1 : byKey(a, b)));
+  };
+  /** One lane box per segment; the id carries the VNet only when the lane is split (one VNet in view = as before) */
+  const laneSegs = (kind: LaneKind, label: string, members: DiagramNodeSpec[], cols: (n: number) => number, category?: PaasCategory): PackNode<Shape>[] => {
+    const segs = kind === "unused" ? [["_", members] as [string, DiagramNodeSpec[]]] : segments(members);
+    return segs.map(([key, list]) => {
+      const base = `lane:${kind}${category ? ":" + category : ""}`;
+      // Unused · detached: public IPs first (billed while unused), then NSGs, then the rest — by name within a kind
+      const cards = list.slice().sort(kind === "unused" ? byUnused : byCard);
+      return box({ id: segs.length > 1 ? `${base}@${key}` : base, kind: "lane", lane: kind, label, category, vnetId: key }, cards.map((n) => { const sz = cardSize(n); return leaf(n.id, sz.w, sz.h); }), {
+        head: LIVE.LANE_HEAD, maxW: cols(list.length) * LIVE.CARD_W + (cols(list.length) - 1) * LIVE.GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD,
+      });
     });
   };
-  // Inbound: [Internet terminal(s)] | [public load balancers / Front Door]
+  // Inbound: [Internet terminal(s)] | [public load balancers / Front Door], one segment per VNet
   const inet = laneMembers.ingress.filter((n) => kindOf(n) === "internet").sort(byCard);
-  const entries = laneMembers.ingress.filter((n) => kindOf(n) !== "internet").sort(byCard);
-  const ingress = laneMembers.ingress.length
-    ? box({ id: "lane:ingress", kind: "lane", lane: "ingress", label: "ld.lane.ingress" }, [
-        ...(inet.length ? [wrap("ingress:inet", "col", inet.map((n) => leaf(n.id, cardSize(n).w, cardSize(n).h)), LIVE.GAP)] : []),
-        ...(entries.length ? [wrap("ingress:lb", "col", entries.map((n) => leaf(n.id, cardSize(n).w, cardSize(n).h)), LIVE.GAP)] : []),
-      ], { head: LIVE.LANE_HEAD, maxW: Infinity, gap: LIVE.INGRESS_INNER_GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD })
-    : null;
-  const paasGroups = PAAS_ORDER
-    .map((cat) => {
-      const members = laneMembers.paas.filter((n) => archCategoryOf(kindOf(n)) === cat);
-      // One column up to six: lines into a second column crossed the cards of the first
-      return lane("paas", `ld.lane.paas.${cat}`, members, members.length > 6 ? 2 : 1, cat);
-    })
-    .filter((x): x is PackNode<Shape> => !!x);
+  const ingressSegs = segments(laneMembers.ingress);
+  const splitIngress = ingressSegs.length > 1;
+  const ingressBoxes: PackNode<Shape>[] = ingressSegs.map(([key, list]) => {
+    const sfx = splitIngress ? `@${key}` : "";
+    const terms = list.filter((n) => kindOf(n) === "internet").sort(byCard);
+    const entries = list.filter((n) => kindOf(n) !== "internet").sort(byCard);
+    return box({ id: `lane:ingress${sfx}`, kind: "lane", lane: "ingress", label: "ld.lane.ingress", vnetId: key }, [
+      // Split lanes keep both columns in every segment (an empty one is a spacer), so the gaps line up for the router
+      ...(terms.length || splitIngress ? [wrap(`ingress:inet${sfx}`, "col", terms.length ? terms.map((n) => leaf(n.id, cardSize(n).w, cardSize(n).h)) : [spacer(`inet${sfx}`)], LIVE.GAP)] : []),
+      ...(entries.length || splitIngress ? [wrap(`ingress:lb${sfx}`, "col", entries.length ? entries.flatMap((n) => {
+        const r = reserveOf(n.id);
+        return [leaf(n.id, cardSize(n).w, cardSize(n).h), ...(r ? [leaf(`spacer:below:${n.id}`, LIVE.CARD_W, Math.max(0, r - LIVE.GAP), "spacer")] : [])];
+      }) : [spacer(`lb${sfx}`)], LIVE.GAP)] : []),
+    ], { head: LIVE.LANE_HEAD, maxW: Infinity, gap: LIVE.INGRESS_INNER_GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD });
+  });
+  const paasGroups = PAAS_ORDER.flatMap((cat) => {
+    const members = laneMembers.paas.filter((n) => archCategoryOf(kindOf(n)) === cat);
+    // One column up to six: lines into a second column crossed the cards of the first
+    return laneSegs("paas", `ld.lane.paas.${cat}`, members, (n) => (n > 6 ? 2 : 1), cat);
+  });
   const right = [
     // Outbound reads left to right: NAT Gateways, then the Internet terminal (lines stay short and straight)
-    lane("egress", "ld.lane.egress", laneMembers.egress, Math.min(3, laneMembers.egress.length)),
+    ...laneSegs("egress", "ld.lane.egress", laneMembers.egress, (n) => Math.min(3, n)),
     ...paasGroups,
-    lane("outside", "ld.lane.outside", laneMembers.outside, 2),
-    lane("ghost", "ld.lane.ghost", laneMembers.ghost, 1),
+    ...laneSegs("outside", "ld.lane.outside", laneMembers.outside, () => 2),
+    ...laneSegs("ghost", "ld.lane.ghost", laneMembers.ghost, () => 1),
     // Last: nothing flows through these (unused public IPs, NSGs attached to nothing), kind → name
-    lane("unused", "ld.lane.unused", laneMembers.unused, 2),
-  ].filter((x): x is PackNode<Shape> => !!x);
+    ...laneSegs("unused", "ld.lane.unused", laneMembers.unused, () => 2),
+  ];
 
   // On-premises sites under the inbound lane (left: they reach the VNet through its gateway)
-  const onprem = lane("onprem", "ld.lane.onprem", laneMembers.onprem, 1);
+  const onpremBoxes = laneMembers.onprem.length ? laneSegs("onprem", "ld.lane.onprem", laneMembers.onprem, () => 1) : [];
   const columns: PackNode<Shape>[] = [];
-  if (ingress || onprem) columns.push(wrap("col:ingress", "col", [ingress, onprem].filter((x): x is PackNode<Shape> => !!x), 24));
+  if (ingressBoxes.length || onpremBoxes.length) columns.push(wrap("col:ingress", "col", [...ingressBoxes, ...onpremBoxes], 24));
   if (vnetBoxes.length) columns.push(wrap("col:vnets", "col", vnetBoxes, 48));
   if (right.length) columns.push(wrap("col:right", "col", right, 24));
   const placed = place(measure(wrap("root", "row", columns, LIVE.COLUMN_GAP)));
@@ -614,15 +695,27 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   const inLane = (id: string) => laneOf.has(id);
   const neighbours = (id: string, accept: (other: string) => boolean): string[] => {
     const out: string[] = [];
-    for (const e of layoutEdges) {
+    for (const e of alignEdges) {
       const other = e.source === id ? e.target : e.target === id ? e.source : null;
       if (other && at.has(other) && accept(other)) out.push(other);
     }
     return out;
   };
   const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  /** Is a linked card at the segment's own place ("_" = anywhere)? Links elsewhere must not pull a segment away */
+  const atAnchor = (other: string, key: string | undefined) => {
+    if (!key || key === "_") return true;
+    const a = anchorOf(other);
+    return !!a && (a === key || (!key.includes("#") && vnetPart(a) === key));
+  };
+  /** Linked cards at the anchor; all links when none is there */
+  const anchoredNeighbours = (id: string, key: string | undefined, accept: (other: string) => boolean) => {
+    const all = neighbours(id, accept);
+    const own = all.filter((o) => atAnchor(o, key));
+    return own.length ? own : all;
+  };
   /** Stack items top-down at their targets without overlap; items without a target follow in their order */
-  const stack = (items: Array<{ p: Placed<Shape>; target: number | null; move: (dy: number) => void }>, gap: number, top: number) => {
+  const stack = (items: Array<{ p: Placed<Shape>; target: number | null; move: (dy: number) => void; below?: number }>, gap: number, top: number) => {
     const withT = items.filter((i) => i.target != null).sort((a, b) => a.target! - b.target! || cmp(a.p.shape.id, b.p.shape.id));
     const without = items.filter((i) => i.target == null);
     let floor = top;
@@ -630,48 +723,56 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       // No target and nothing above yet: stay where the packer put it
       const y = Math.max(it.target ?? (Number.isFinite(floor) ? floor : it.p.y), floor);
       it.move(y - it.p.y);
-      floor = it.p.y + it.p.h + gap;
+      floor = it.p.y + it.p.h + (it.below ?? 0) + gap;
     }
   };
   const shiftTree = (rootId: string, dy: number) => {
     for (const p of placed) if (p.shape.id === rootId || within(p, rootId)) p.y += dy;
   };
   const vnetCol = at.get("col:vnets");
-  const laneIngress = at.get("lane:ingress");
-  if (laneIngress && vnetCol) {
-    const lbs = placed.filter((p) => within(p, "ingress:lb") && p.shape.kind === "node");
-    const terms = placed.filter((p) => within(p, "ingress:inet") && p.shape.kind === "node");
-    // In-VNet targets of the Internet (e.g. a public App Gateway): keep LB cards off their horizontal line
-    const vnetTargets = terms.flatMap((t) => neighbours(t.shape.id, (o) => !inLane(o))).map((id) => at.get(id)!);
-    stack(lbs.map((p) => {
-      const nb = neighbours(p.shape.id, (o) => !inLane(o));
-      let target: number | null = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : null;
-      if (target != null) for (const t of vnetTargets) if (target < cy(t) + 12 && target + p.h > cy(t) - 12) target = cy(t) + 12;
-      return { p, target, move: (dy: number) => { p.y += dy; } };
-    }), LIVE.GAP, vnetCol.y);
-    const lo = vnetCol.y, hi = vnetCol.y + vnetCol.h;
-    stack(terms.map((p) => {
-      const nb = neighbours(p.shape.id, () => true);
-      const raw = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : (lo + hi) / 2 - p.h / 2;
-      return { p, target: Math.min(Math.max(raw, lo), Math.max(lo, hi - p.h)), move: (dy: number) => { p.y += dy; } };
-    }), LIVE.GAP, -Infinity);
-    // The lane box wraps its members again
-    const members = [...lbs, ...terms];
-    const top = Math.min(...members.map((m) => m.y)) - LIVE.LANE_HEAD;
-    const bottom = Math.max(...members.map((m) => m.y + m.h)) + LIVE.PAD;
-    laneIngress.y = top;
-    laneIngress.h = bottom - top;
+  const leftLanes = placed.filter((p) => p.shape.kind === "lane" && (p.shape.lane === "ingress" || p.shape.lane === "onprem"));
+  if (vnetCol) {
+    for (const laneBox of leftLanes.filter((p) => p.shape.lane === "ingress")) {
+      // Within its VNet's height (the whole VNet column for unlinked entries)
+      const v = laneBox.shape.vnetId && laneBox.shape.vnetId !== "_" ? at.get(vnetPart(laneBox.shape.vnetId)) : undefined;
+      const lo = (v ?? vnetCol).y, hi = lo + (v ?? vnetCol).h;
+      const sfx = laneBox.shape.id.slice("lane:ingress".length);
+      const lbs = placed.filter((p) => within(p, `ingress:lb${sfx}`) && p.shape.kind === "node");
+      const terms = placed.filter((p) => within(p, `ingress:inet${sfx}`) && p.shape.kind === "node");
+      if (!lbs.length && !terms.length) continue;
+      // In-VNet targets of the Internet (a public App Gateway, a VM's public IP): keep LB cards off their line
+      const key = laneBox.shape.vnetId;
+      const vnetTargets = terms.flatMap((t) => anchoredNeighbours(t.shape.id, key, (o) => !inLane(o))).map((id) => at.get(id)!);
+      stack(lbs.map((p) => {
+        // Only what it links to in this segment's VNet: a Front Door with origins in many VNets must not stretch it
+        const nb = anchoredNeighbours(p.shape.id, key, (o) => !inLane(o));
+        let target: number | null = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : null;
+        if (target != null) for (const t of vnetTargets) if (target < cy(t) + 12 && target + p.h > cy(t) - 12) target = cy(t) + 12;
+        return { p, target, move: (dy: number) => { p.y += dy; }, below: reserveOf(p.shape.id) };
+      }), LIVE.GAP, lo);
+      stack(terms.map((p) => {
+        const nb = anchoredNeighbours(p.shape.id, key, (o) => !inLane(o) || within(at.get(o)!, laneBox.shape.id));
+        const raw = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : (lo + hi) / 2 - p.h / 2;
+        return { p, target: Math.min(Math.max(raw, lo), Math.max(lo, hi - p.h)), move: (dy: number) => { p.y += dy; } };
+      }), LIVE.GAP, -Infinity);
+      // The lane box wraps its members again
+      const members = [...lbs, ...terms];
+      const top = Math.min(...members.map((m) => m.y)) - LIVE.LANE_HEAD;
+      const bottom = Math.max(...members.map((m) => m.y + m.h + reserveOf(m.shape.id))) + LIVE.PAD;
+      laneBox.y = top;
+      laneBox.h = bottom - top;
+    }
   }
-  // On-premises lane: the inbound lane just moved and may have grown over it — keep it below (24px), at the height
-  // of the VPN gateways it connects to when that is lower
-  const laneOnprem = at.get("lane:onprem");
-  if (laneOnprem) {
-    const members = placed.filter((m) => m.shape.kind === "node" && within(m, laneOnprem.shape.id));
-    const ids = new Set(members.map((m) => m.shape.id));
-    const nb = [...new Set(members.flatMap((m) => neighbours(m.shape.id, (o) => !ids.has(o) && !inLane(o))))].sort(cmp);
-    const floor = laneIngress ? laneIngress.y + laneIngress.h + 24 : -Infinity;
-    const target = nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - laneOnprem.h / 2 : null;
-    stack([{ p: laneOnprem, target, move: (dy: number) => shiftTree(laneOnprem.shape.id, dy) }], 24, floor);
+  // The left column as a whole: inbound segments where they settled, on-premises segments at the height of the VPN
+  // gateways they connect to — no two overlap (24 px), in height order
+  if (leftLanes.length) {
+    stack(leftLanes.map((p) => {
+      if (p.shape.lane === "ingress") return { p, target: p.y, move: (dy: number) => shiftTree(p.shape.id, dy) };
+      const members = placed.filter((m) => m.shape.kind === "node" && within(m, p.shape.id));
+      const ids = new Set(members.map((m) => m.shape.id));
+      const nb = [...new Set(members.flatMap((m) => anchoredNeighbours(m.shape.id, p.shape.vnetId, (o) => !ids.has(o) && !inLane(o))))].sort(cmp);
+      return { p, target: nb.length ? mean(nb.map((id) => cy(at.get(id)!))) - p.h / 2 : null, move: (dy: number) => shiftTree(p.shape.id, dy) };
+    }), 24, -Infinity);
   }
   const rightCol = at.get("col:right");
   if (rightCol) {
@@ -681,7 +782,10 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       const ids = new Set(members.map((m) => m.shape.id));
       let nb: string[] = [];
       for (const m of members) {
-        nb.push(...neighbours(m.shape.id, (o) => !ids.has(o) && !inLane(o)));
+        const inVnet = anchoredNeighbours(m.shape.id, p.shape.vnetId, (o) => !ids.has(o) && !inLane(o));
+        // Linked only to cards of the left column (the AKS outbound-only LB sits in the inbound lane → its outbound
+        // Internet card): those, already placed — without them the card had no target and fell to the column's end
+        nb.push(...(inVnet.length ? inVnet : neighbours(m.shape.id, (o) => !ids.has(o) && (laneOf.get(o) === "ingress" || laneOf.get(o) === "onprem"))));
         // The egress rail sits at the subnets it serves (subnet → NAT associations)
         if (p.shape.lane === "egress") {
           for (const e of spec.edges) if (e.edgeKind === "natgw-association" && e.target === m.shape.id && at.has(e.source)) nb.push(e.source);
@@ -692,7 +796,30 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       return { p, target, move: (dy: number) => shiftTree(p.shape.id, dy) };
     }), 24, -Infinity);
   }
+  orderLaneMembers();
   orderToTargets();
+
+  /**
+   * Inside a lane segment, each card takes the slot nearest the height of what it links to (P3): slots keep their
+   * places (same size cards), the order follows the mean height of the linked cards — ties by id.
+   */
+  function orderLaneMembers() {
+    for (const laneBox of placed.filter((p) => p.shape.kind === "lane" && p.shape.lane !== "ingress" && p.shape.lane !== "unused").sort((a, b) => cmp(a.shape.id, b.shape.id))) {
+      const cards = placed.filter((m) => m.shape.kind === "node" && within(m, laneBox.shape.id));
+      if (cards.length < 2 || cards.some((c) => c.w !== cards[0]!.w || c.h !== cards[0]!.h)) continue;
+      const own = new Set(cards.map((c) => c.shape.id));
+      const key = (p: Placed<Shape>) => {
+        const nb = anchoredNeighbours(p.shape.id, laneBox.shape.vnetId, (o) => !own.has(o) && at.has(o));
+        return nb.length ? mean(nb.map((id) => cy(at.get(id)!))) : Infinity;
+      };
+      // Cards with nothing linked keep their packed (kind → name) order: a stable sort from the slot order
+      const bySlot = [...cards].sort((a, b) => a.y - b.y || a.x - b.x);
+      const slots = bySlot.map((c) => ({ x: c.x, y: c.y }));
+      const keys = new Map(bySlot.map((c) => [c.shape.id, key(c)]));
+      const ordered = [...bySlot].sort((a, b) => { const d = keys.get(a.shape.id)! - keys.get(b.shape.id)!; return Number.isNaN(d) ? 0 : d; });
+      ordered.forEach((c, i) => { c.x = slots[i]!.x; c.y = slots[i]!.y; });
+    }
+  }
 
   /**
    * Right-linked cards of a subnet (Private Endpoints → PaaS lane) take their slots in the vertical order of what
@@ -746,9 +873,11 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       if (a && b) meta.corridorX.set(`${band}:${l}`, (a.x + a.w + b.x) / 2);
     }
   }
-  if (laneIngress && vnetCol) meta.ingressGapX = (laneIngress.x + laneIngress.w + vnetCol.x) / 2;
+  const ingressRight = Math.max(-Infinity, ...leftLanes.filter((p) => p.shape.lane === "ingress").map((p) => p.x + p.w));
+  if (Number.isFinite(ingressRight) && vnetCol) meta.ingressGapX = (ingressRight + vnetCol.x) / 2;
   else if (vnetCol) meta.ingressGapX = vnetCol.x - LIVE.COLUMN_GAP / 2;
-  const inetCol = at.get("ingress:inet"), lbCol = at.get("ingress:lb");
+  const firstSfx = ingressSegs.length > 1 ? `@${ingressSegs[0]![0]}` : "";
+  const inetCol = at.get(`ingress:inet${firstSfx}`), lbCol = at.get(`ingress:lb${firstSfx}`);
   if (inetCol && lbCol) meta.laneInnerGapX = (inetCol.x + inetCol.w + lbCol.x) / 2;
 
   const top = placed.filter((p) => p.shape.kind !== "wrap" && p.shape.kind !== "spacer" && !drawnParent(p));
@@ -756,5 +885,9 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   const minY = Math.min(0, ...top.map((p) => p.y));
   const maxX = Math.max(0, ...top.map((p) => p.x + p.w));
   const maxY = Math.max(0, ...top.map((p) => p.y + p.h));
-  return { items, lanes, sections, summaries, hidden, nicCount, abs, placeMeta: meta, bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY } };
+  return {
+    items, lanes, sections, summaries, hidden, nicCount, abs, placeMeta: meta,
+    bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+    reservedBelow: new Set(laneMembers.ingress.map((n) => n.id).filter((id) => reserveOf(id) > 0)),
+  };
 }

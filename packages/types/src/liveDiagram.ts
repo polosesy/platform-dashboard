@@ -142,6 +142,13 @@ export type DiagramEdgeSpec = {
  */
 export type AfdWafDomainState = "prevent" | "detect" | "disabled" | "none" | "unknown";
 export type AfdWafState = "prevent" | "detect" | "partial" | "none" | "unknown" | "unreadable" | "noDomains";
+/** Same ladder for any protected entry point (Front Door per domain, Application Gateway per listener) */
+export type WafState = AfdWafState;
+/** What one WAF unit is: a served domain (Front Door) or a rule-bound listener (Application Gateway) */
+export type WafUnit = "domain" | "listener";
+export type WafTargetKind = "endpoint" | "custom" | "public" | "private";
+/** Where the policy is attached: a Front Door profile's security policy, an App Gateway gateway / listener / path rule, or the v1 WAF configuration */
+export type WafLevel = "profile" | "gateway" | "listener" | "path" | "legacy";
 
 /**
  * One peering of a VNet, its own side (VNet metadata.peerings, JSON). `id` = the remote VNet's diagram node when

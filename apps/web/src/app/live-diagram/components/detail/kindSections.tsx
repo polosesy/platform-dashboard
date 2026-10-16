@@ -7,7 +7,7 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { Notice, Segmented } from "@/components/ui";
 import { localizeLabel } from "../../utils/localizeLabel";
-import { CopyButton, Group, KV, Section } from "./primitives";
+import { CopyButton, Group, KV, Section, TwoLine } from "./primitives";
 import styles from "../../styles.module.css";
 
 // ── Data hooks: error is reported (a failed lookup is not "none") ──
@@ -278,14 +278,13 @@ export function AgcFacts({ node }: { node: DiagramNodeSpec }) {
     <Section id="agc" title={t("ld.agc.title")}>
       <Group title={t("ld.agc.frontends", { n: frontends.length })}>
         {frontends.length ? frontends.map((f) => (
-          <KV key={f.name} label={f.name} mono copy={f.fqdn}>
-            {[f.fqdn, t(f.public ? "ld.agc.public" : "ld.agc.private"), f.state && f.state !== "Succeeded" ? f.state : null].filter(Boolean).join(" · ")}
-          </KV>
+          <TwoLine key={f.name} main={f.fqdn ?? f.name} mono copy={f.fqdn}
+            sub={[f.name, t(f.public ? "ld.agc.public" : "ld.agc.private"), f.state && f.state !== "Succeeded" ? f.state : null].filter(Boolean).join(" · ")} />
         )) : <div className={styles.dpMuted}>{t("ld.agc.noFrontend")}</div>}
       </Group>
       <Group title={t("ld.agc.association")}>
         {assoc.length ? assoc.map((a) => (
-          <KV key={a.name} label={a.name}>{[a.subnetId?.split("/").pop(), a.state].filter(Boolean).join(" · ")}</KV>
+          <TwoLine key={a.name} main={a.subnetId?.split("/").pop() ?? a.name} sub={[a.name, a.state].filter(Boolean).join(" · ")} />
         )) : <div className={styles.dpMuted}>{t("ld.agc.noAssociation")}</div>}
       </Group>
       {m.clusterCandidates != null ? <div className={styles.dpMuted}>{t(m.clusterCandidates === "0" ? "ld.agc.noCluster" : "ld.agc.candidates", { n: m.clusterCandidates })}</div> : null}
@@ -322,9 +321,8 @@ export function FrontDoorFacts({ node }: { node: DiagramNodeSpec }) {
       {[...groupBy(origins, (o) => o.group)].map(([group, list]) => (
         <Group key={group} title={t("ld.afd.group", { name: group, n: list.length })}>
           {list.map((o) => (
-            <KV key={`${o.group}/${o.name}`} label={o.name} mono copy={o.host}>
-              {[o.host, o.target ? `→ ${o.target}` : null, t(`ld.afd.origin.${o.state}`)].filter(Boolean).join(" · ")}
-            </KV>
+            <TwoLine key={`${o.group}/${o.name}`} main={o.host} mono copy={o.host}
+              sub={[o.name, o.target ? `→ ${o.target}` : null, t(`ld.afd.origin.${o.state}`)].filter(Boolean).join(" · ")} />
           ))}
         </Group>
       ))}

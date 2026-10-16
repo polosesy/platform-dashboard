@@ -59,6 +59,13 @@ export const HUBBLE_EXEC_RULES: ReadRule[] = [
   { apiGroup: "", resource: "services/proxy", verbs: ["get"], methods: [] },
 ];
 
+/**
+ * The connection check asks the API server what the platform's identity may do (SelfSubjectAccessReview): a create
+ * that stores nothing, allowed to every signed-in identity by the built-in system:basic-user role. Never put it in
+ * a generated role — it needs no grant.
+ */
+export const SELF_REVIEW_RULE: ReadRule = { apiGroup: "authorization.k8s.io", resource: "selfsubjectaccessreviews", verbs: ["create"], methods: ["createSelfSubjectAccessReview"] };
+
 /** Never in any generated role */
 export const NEVER_GRANTED = ["*", "secrets", "configmaps", "pods/exec", "pods/attach", "pods/portforward", "services/proxy", "nodes/proxy"];
 

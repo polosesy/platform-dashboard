@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type {
   EdgeNetworkDetail,
   NsgInfo,
@@ -20,6 +19,7 @@ import { exposurePorts, exposureSources } from "@/lib/livePip";
 import { Notice } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
 import { PeeringEdgeFacts, SiteEdgeFacts, type PeeringPair } from "./detail/EdgeFacts";
+import { Group, KV, Section } from "./detail/primitives";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
 
@@ -55,33 +55,6 @@ function fmtBytes(bytes: number | undefined): string {
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)}MB`;
   if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)}KB`;
   return `${bytes}B`;
-}
-
-// ── Collapsible section wrapper ──
-function Section({
-  title,
-  children,
-  defaultOpen = true,
-}: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className={styles.detailSection}>
-      <button
-        type="button"
-        className={styles.detailSectionToggle}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className={styles.toggleChevron}>{open ? "▼" : "▶"}</span>
-        {" "}{title}
-      </button>
-      {open && children}
-    </div>
-  );
 }
 
 // ── NSG Rules display ──
@@ -308,32 +281,22 @@ export function EdgeDetailPanel({
 
   return (
     <aside className={styles.detailPanel}>
-      {/* Header */}
-      <div className={styles.detailHeader}>
-        <span className={styles.edgeHeaderArrow}>→</span>
-        <div className={styles.edgeHeaderTitle} title={`${sourceLabel} → ${targetLabel}`}>
-          {sourceLabel} → {targetLabel}
+      {/* Header — same structure as the resource panel (dpHeader) */}
+      <header className={styles.dpHeader}>
+        <div className={styles.dpTitleRow}>
+          <span className={styles.edgeHeaderArrow} aria-hidden="true">→</span>
+          <h2 className={styles.dpTitle} tabIndex={-1} title={`${sourceLabel} → ${targetLabel}`}>{sourceLabel} → {targetLabel}</h2>
+          <button type="button" className={styles.dpClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
         </div>
-        {protocol && (
-          <span className={styles.edgeProtocolBadge}>{protocol}</span>
-        )}
-        <div
-          className={styles.detailHealthDot}
-          style={{ background: STATUS_COLORS[status] ?? STATUS_COLORS.idle }}
-          title={status}
-        />
-        <button
-          type="button"
-          className={styles.detailCloseBtn}
-          onClick={onClose}
-          aria-label={t("hb.close")}
-        >
-          ×
-        </button>
-      </div>
+        <div className={styles.dpStatusRow}>
+          <span className={styles.detailHealthDot} style={{ background: STATUS_COLORS[status] ?? STATUS_COLORS.idle }} title={status} />
+          {protocol ? <span className={styles.edgeProtocolBadge}>{protocol}</span> : null}
+          {edgeKind ? <span className={styles.dpMuted}>{edgeKind}</span> : null}
+        </div>
+      </header>
 
       {/* Body */}
-      <div className={styles.detailBody}>
+      <div className={styles.dpBody}>
         {loading && !detail && (
           <div className={styles.edgeLoadingNote}>{t("live.loading")}</div>
         )}
@@ -343,12 +306,12 @@ export function EdgeDetailPanel({
         )}
 
         {peering ? (
-          <Section title={t("ld.peering.edgeTitle")}>
+          <Section id="edge-1" title={t("ld.peering.edgeTitle")}>
             <PeeringEdgeFacts pair={peering} />
           </Section>
         ) : null}
         {site ? (
-          <Section title={t("ld.hybrid.edgeTitle")}>
+          <Section id="edge-2" title={t("ld.hybrid.edgeTitle")}>
             <SiteEdgeFacts site={site} metrics={measured ? liveEdge?.metrics : undefined} />
           </Section>
         ) : null}
@@ -361,7 +324,7 @@ export function EdgeDetailPanel({
             </div>
 
             {/* Overview */}
-            <Section title={t("detail.edge.overview")} defaultOpen={true}>
+            <Section id="edge-3" title={t("detail.edge.overview")} defaultOpen={true}>
               <div className={styles.essentialsList}>
                 {edgeKind && (
                   <div className={styles.essentialsRow}>
@@ -459,46 +422,24 @@ export function EdgeDetailPanel({
             </Section>
 
             {/* Endpoints (NIC info) */}
-            <Section title={t("detail.edge.endpoints")} defaultOpen={true}>
-              <div className={styles.edgeEndpointGroup}>
-                <div className={styles.edgeEndpointLabel}>
-                  {t("detail.outbound")}: {detail.sourceNodeLabel}
-                </div>
+            <Section id="edge-4" title={t("detail.edge.endpoints")} defaultOpen={true}>
+              <Group title={`${t("detail.outbound")}: ${detail.sourceNodeLabel}`}>
                 {detail.sourceNics.map((nic, i) => (
-                  <div key={i} className={styles.detailRow}>
-                    <span className={styles.essentialsLabel}>{nic.name}</span>
-                    <span className={styles.essentialsValueMono}>
-                      {nic.privateIp ?? "-"}
-                      {nic.publicIp && ` / ${nic.publicIp}`}
-                    </span>
-                  </div>
+                  <KV key={i} label={t("detail.edge.nic")} mono>{[nic.name, nic.privateIp ?? "-", nic.publicIp].filter(Boolean).join(" · ")}</KV>
                 ))}
-                {detail.sourceNics.length === 0 && (
-                  <div className={styles.edgeEmptyNote}>—</div>
-                )}
-              </div>
-              <div className={styles.edgeEndpointGroup}>
-                <div className={styles.edgeEndpointLabel}>
-                  {t("detail.inbound")}: {detail.targetNodeLabel}
-                </div>
+                {detail.sourceNics.length === 0 ? <div className={styles.dpMuted}>—</div> : null}
+              </Group>
+              <Group title={`${t("detail.inbound")}: ${detail.targetNodeLabel}`}>
                 {detail.targetNics.map((nic, i) => (
-                  <div key={i} className={styles.detailRow}>
-                    <span className={styles.essentialsLabel}>{nic.name}</span>
-                    <span className={styles.essentialsValueMono}>
-                      {nic.privateIp ?? "-"}
-                      {nic.publicIp && ` / ${nic.publicIp}`}
-                    </span>
-                  </div>
+                  <KV key={i} label={t("detail.edge.nic")} mono>{[nic.name, nic.privateIp ?? "-", nic.publicIp].filter(Boolean).join(" · ")}</KV>
                 ))}
-                {detail.targetNics.length === 0 && (
-                  <div className={styles.edgeEmptyNote}>—</div>
-                )}
-              </div>
+                {detail.targetNics.length === 0 ? <div className={styles.dpMuted}>—</div> : null}
+              </Group>
             </Section>
 
             {/* NSG Rules */}
             {(detail.sourceNsg || detail.targetNsg) && (
-              <Section title={t("detail.edge.nsg")} defaultOpen={false}>
+              <Section id="edge-5" title={t("detail.edge.nsg")} defaultOpen={false}>
                 {detail.sourceNsg && (
                   <NsgSection nsg={detail.sourceNsg} label={`${detail.sourceNodeLabel} NSG`} />
                 )}
@@ -510,14 +451,13 @@ export function EdgeDetailPanel({
 
             {/* UDR Routes */}
             {detail.udr && (
-              <Section title={t("detail.edge.udr")} defaultOpen={false}>
+              <Section id="edge-6" title={t("detail.edge.udr")} defaultOpen={false}>
                 <UdrSection udr={detail.udr} />
               </Section>
             )}
 
             {/* Inbound Flows — "미수집" when per-IP flow records are not collected (not "no flows") */}
-            <Section
-              title={flowsUnknown ? t("detail.edge.inboundFlows") : `${t("detail.edge.inboundFlows")} (${detail.inboundSummary.flowCount})`}
+            <Section id="edge-7" title={flowsUnknown ? t("detail.edge.inboundFlows") : `${t("detail.edge.inboundFlows")} (${detail.inboundSummary.flowCount})`}
               defaultOpen={true}
             >
               <FlowList flows={detail.inboundFlows} emptyText={flowsUnknown ? t("ld.edge.flowsNotCollected") : t("detail.edge.noFlows")} />
@@ -527,8 +467,7 @@ export function EdgeDetailPanel({
             </Section>
 
             {/* Outbound Flows */}
-            <Section
-              title={flowsUnknown ? t("detail.edge.outboundFlows") : `${t("detail.edge.outboundFlows")} (${detail.outboundSummary.flowCount})`}
+            <Section id="edge-8" title={flowsUnknown ? t("detail.edge.outboundFlows") : `${t("detail.edge.outboundFlows")} (${detail.outboundSummary.flowCount})`}
               defaultOpen={true}
             >
               <FlowList flows={detail.outboundFlows} emptyText={flowsUnknown ? t("ld.edge.flowsNotCollected") : t("detail.edge.noFlows")} />

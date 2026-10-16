@@ -1,7 +1,7 @@
 "use client";
 
 import { type EdgeProps, getBezierPath, getSmoothStepPath, BaseEdge, EdgeLabelRenderer } from "reactflow";
-import type { Route } from "@/lib/liveRoute";
+import { exitPath, type Route } from "@/lib/liveRoute";
 import type { EdgeStatus, EdgeTrafficLevel } from "@aud/types";
 import { edgeColor, edgeWidth, defaultTokens } from "../utils/designTokens";
 import {
@@ -39,9 +39,13 @@ const FLOWING = new Set<LiveEdgeStyleKey>(["config", "configWeak", "ingress", "i
 export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, markerStart, selected } = props;
   const route = data?.route;
-  const [edgePath, labelX, labelY] = route?.kind === "step"
-    ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8, offset: route.offset ?? 16, centerX: route.centerX, centerY: route.centerY })
-    : getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  // exit: out through the corridor and a free channel to the VNet's edge, then the curve (lib/liveRoute exitPath)
+  const exit = route?.kind === "exit" ? exitPath(sourceX, sourceY, targetX, targetY, route) : null;
+  const [edgePath, labelX, labelY] = exit
+    ? [exit.d, exit.labelX, exit.labelY]
+    : route?.kind === "step"
+      ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8, offset: route.offset ?? 16, centerX: route.centerX, centerY: route.centerY })
+      : getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
 
   const styleKey = data?.styleKey ?? "config";
   const look = LIVE_EDGE_LOOK[styleKey];
@@ -66,7 +70,7 @@ export function AnimatedEdge(props: EdgeProps<AnimatedEdgeData>) {
   const moving = (data?.showParticles ?? false) && measured && !isDimmed && !disconnected && impact !== "path" && FLOWING.has(styleKey)
     && trafficLevel !== "none" && tone !== null;
   const plan = moving
-    ? particlePlan(trafficLevel, estimatePathLength(route?.kind ?? "bezier", targetX - sourceX, targetY - sourceY, route?.offset ?? 16), width)
+    ? particlePlan(trafficLevel, exit ? exit.length : estimatePathLength(route?.kind === "step" ? "step" : "bezier", targetX - sourceX, targetY - sourceY, route?.offset ?? 16), width)
     : null;
   // A tail only says "this way" on one-way lines; two-way (merged) and undirected lines get round dots
   const hasMarker = (m: string | undefined) => !!m && m !== "url('#')";

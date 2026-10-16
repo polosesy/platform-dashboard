@@ -6,7 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import type { NodeProps } from "reactflow";
 import type { HealthRule, HealthStatus, InboundExposure, LiveNode as LiveNodeState, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
 import type { HybridFacts } from "@/lib/liveHybrid";
-import type { WafChip } from "@/lib/liveWaf";
+import type { WafBadge } from "@/lib/liveWaf";
 import { cardStatus } from "@/lib/liveStatus";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { HiddenHandles } from "./HiddenHandles";
@@ -84,7 +84,11 @@ export type LiveNodeData = {
   /** VM: the NSG verdict on its own public IP (catalog PIP-04, lib/livePip) */
   pipExposure?: InboundExposure;
   /** Front Door WAF coverage chip (lib/liveWaf.ts, catalog EDGE-10) — configuration, never the card status */
-  waf?: WafChip;
+  waf?: WafBadge;
+  /** The WAF policy sub-cards are open under this card */
+  wafOpen?: boolean;
+  /** WAF badge clicked: open / close the policy sub-cards (opening also shows the WAF panel) */
+  onWafToggle?: (nodeId: string) => void;
 };
 
 /** Kind as the card's second line names it (product names / CAF abbreviations — not translated) */
@@ -230,14 +234,29 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
     ) });
   }
   if (data.waf) {
+    // WAF badge (catalog EDGE-10 / AGW-08): icon + state word, toggles the policy sub-cards; configuration, not status
     const w = data.waf;
-    chips.push({ key: "waf", el: <span className={styles.cardChip} data-tone={w.tone} title={t(w.hint.key, w.hint.vars)}>{t(w.key, w.vars)}</span> });
+    const open = !!data.wafOpen;
+    chips.push({ key: "waf", el: (
+      <button
+        type="button"
+        className={`${styles.cardChip} ${styles.cardWafBadge}`}
+        data-tone={w.tone === "neutral" ? undefined : w.tone}
+        title={t(w.hint.key, w.hint.vars)}
+        aria-expanded={open}
+        aria-label={`${t(w.ariaKey, w.ariaVars)} - ${t(open ? "ld.waf.collapse" : "ld.waf.expand")}`}
+        onClick={(e) => { e.stopPropagation(); data.onWafToggle?.(nodeId); }}
+      >
+        <img src={getAzureIconUrl("waf")} alt="" width={12} height={12} />
+        {t(w.labelKey, w.vars)} {open ? "\u25B4" : "\u25BE"}
+      </button>
+    ) });
   }
   if (data.pipExposure) {
     // What the Internet may do with this VM's own public IP — from the NSG verdict, never from traffic
     const c = pipChip(data.pipExposure, publicIp);
     chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone={c.tone} title={c.title}>⊕ {t(c.key, c.vars)}</span> });
-  } else if (publicIp && kind !== "lb" && kind !== "natGateway") chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone="public" title={publicIp}>⊕ {t("ld.card.public")}</span> });
+  } else if (publicIp && kind !== "lb" && kind !== "natGateway" && kind !== "appGateway") chips.push({ key: "pip", el: <span className={styles.cardChip} data-tone="public" title={publicIp}>⊕ {t("ld.card.public")}</span> });
   if (nsgBadge) {
     chips.push({ key: "nsg", el: (
       <button type="button" className={styles.cardChip} title={nsgBadge.label} onClick={(e) => { e.stopPropagation(); onNsgSelect?.(nsgBadge.nodeId); }}>NSG</button>
@@ -331,6 +350,7 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         <div className={styles.cardRow1}>
           <img src={getAzureIconUrl(icon)} alt="" width={24} height={24} />
           <span className={styles.cardNameBig}>{middleEllipsis(name, 13)}</span>
+          {data.waf ? <img className={styles.cardWafGlyph} data-tone={data.waf.tone} src={getAzureIconUrl("waf")} alt="" width={16} height={16} title={t(data.waf.ariaKey, data.waf.ariaVars)} /> : null}
           {!glyphQuiet && <span className={styles.cardGlyphBig} style={{ color: status.color }}>{status.glyph}</span>}
         </div>
         {pair && !metricsBlocked ? (

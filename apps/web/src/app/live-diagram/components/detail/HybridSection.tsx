@@ -2,7 +2,7 @@
 
 import type { DiagramNodeSpec, DiagramSpec } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
-import { CopyButton, Group, KV, Section } from "./primitives";
+import { CopyButton, Group, KV, Section, TwoLine } from "./primitives";
 import styles from "../../styles.module.css";
 
 type Lng = { name: string; prefixes: string[]; peerIp: string | null; fqdn: string | null };
@@ -61,7 +61,7 @@ export function HybridSection({ node, spec, onSelectNode }: {
       <KV label={t("ld.hybrid.statusLabel")}>{t(`ld.hybrid.status.${m.connectionStatus ?? "Unknown"}`)}</KV>
       {tunnels?.length ? (
         <Group title={t("ld.hybrid.tunnels", { up: tunnels.filter((x) => x.status === "Connected").length, n: tunnels.length })}>
-          {tunnels.map((x) => <KV key={x.tunnel} label={x.tunnel}>{t(`ld.hybrid.status.${x.status}`)}</KV>)}
+          {tunnels.map((x) => <TwoLine key={x.tunnel} main={x.tunnel} mono sub={t(`ld.hybrid.status.${x.status}`)} />)}
         </Group>
       ) : null}
       {m.ingressBytes || m.egressBytes ? <KV label={t("ld.hybrid.cumulative")}>↓ {bytes(m.ingressBytes) ?? "—"} · ↑ {bytes(m.egressBytes) ?? "—"}</KV> : null}

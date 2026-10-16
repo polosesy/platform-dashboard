@@ -1,5 +1,6 @@
 // Platform sign-in (SSO roles) and Azure connections — how the platform reads each customer's Azure.
 // No GUIDs leave the API: connections are named by key and display name only.
+import type { FeatureRollup, PermissionCell, PermissionKey } from "./featureCatalog.js";
 
 /** Platform role from the token's app roles (AUD.Viewer / AUD.Operator / AUD.Admin) — the highest one wins */
 export type PlatformRole = "viewer" | "operator" | "admin";
@@ -58,4 +59,13 @@ export type ConnectionCheckResponse = {
     error?: string;
   }>;
   workspaces: Array<{ label: string; ok: boolean; code?: string }>;
+  /** Per permission for the whole connection — subscription scope, then resource samples (featureCatalog.ts) */
+  permissions?: Record<PermissionKey, PermissionCell>;
+  /** Every feature's readiness from those permissions */
+  readiness?: FeatureRollup[];
+  /** Over-privilege seen on the sampled resources (e.g. cluster-admin credential granted on a cluster) */
+  resourceWarnings?: PrivilegeWarning[];
+  workspaceSummary?: { n: number; ok: number; failed: number };
+  /** The connection's AKS clusters, for the in-cluster check (ids as the AKS pages show them) */
+  clusters?: Array<{ id: string; name: string }>;
 };

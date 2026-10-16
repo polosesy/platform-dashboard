@@ -8,10 +8,10 @@
 // https://learn.microsoft.com/azure/frontdoor/private-link · WAF on Standard/Premium is attached per domain by a
 // security policy (catalog EDGE-10; coverage over the routes' domains EDGE-11)
 // https://learn.microsoft.com/azure/web-application-firewall/afds/afds-overview
-import type { AfdWafDomainState, AfdWafState } from "@aud/types";
 import { CacheManager } from "../infra/cacheManager.js";
 import { debug } from "../infra/logger.js";
 import type { AddressIndex } from "./backendMembers.js";
+import { policyState, wafAggregate, type WafCoverage, type WafCoverageTarget, type WafPolicyFacts } from "./wafCoverage.js";
 
 const API = "2024-02-01";
 
@@ -213,53 +213,9 @@ export function activeRoutes(cfg: AfdConfig): AfdRoute[] {
   return cfg.routes.filter((r) => r.enabled && !off.has(r.endpoint.toLowerCase()));
 }
 
-/** A WAF policy as Resource Graph shows it (microsoft.network/frontdoorwebapplicationfirewallpolicies) */
-export type WafPolicyFacts = {
-  name: string;
-  sku: string | null;
-  mode: string | null;
-  enabled: boolean | null;
-  /** null = the property was absent (Resource Graph omits empty arrays — not "none") */
-  managed: Array<{ type: string; version: string; action: string | null }> | null;
-  customRules: number;
-};
-
-export type AfdWafDomain = {
-  host: string;
-  kind: "endpoint" | "custom";
-  policy?: string;
-  state: AfdWafDomainState;
-  reason?: "policyUnreadable" | "pathScoped" | "conflict";
-};
-export type AfdWaf = {
-  state: AfdWafState;
-  counts: { served: number; prevent: number; detect: number; disabled: number; none: number; unknown: number };
-  policies: Array<WafPolicyFacts & { domains: string[] }>;
-  domains: AfdWafDomain[];
-  /** associated with a WAF but served by no active route (panel only) */
-  unserved: string[];
-  readError?: "securityPolicies" | "wafPolicies";
-};
-
-/** One Resource Graph row of a WAF policy → facts (Front Door or Application Gateway policy types) */
-export function wafPolicyFacts(row: { name?: string; sku?: { name?: string } | string | null; properties?: Record<string, unknown> }): WafPolicyFacts {
-  const p = (row.properties ?? {}) as {
-    policySettings?: { mode?: string; enabledState?: string; state?: string };
-    managedRules?: { managedRuleSets?: Array<{ ruleSetType?: string; ruleSetVersion?: string; ruleSetAction?: string }> };
-    customRules?: { rules?: unknown[] } | unknown[];
-  };
-  const sets = p.managedRules?.managedRuleSets;
-  const custom = Array.isArray(p.customRules) ? p.customRules : p.customRules?.rules ?? [];
-  const enabledRaw = p.policySettings?.enabledState ?? p.policySettings?.state;
-  return {
-    name: row.name ?? "",
-    sku: typeof row.sku === "string" ? row.sku : row.sku?.name ?? null,
-    mode: p.policySettings?.mode ?? null,
-    enabled: enabledRaw == null ? null : enabledRaw !== "Disabled",
-    managed: Array.isArray(sets) ? sets.map((m) => ({ type: m.ruleSetType ?? "", version: m.ruleSetVersion ?? "", action: m.ruleSetAction ?? null })) : null,
-    customRules: custom.length,
-  };
-}
+export { wafPolicyFacts, type WafPolicyFacts } from "./wafCoverage.js";
+export type AfdWaf = WafCoverage;
+export type AfdWafDomain = WafCoverageTarget;
 
 const byCode = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -269,7 +225,7 @@ const byCode = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  * disabled (policy off) / none (read, no WAF) / unknown (policy not readable, path-scoped association, or in two
  * associations). `securityPolicies` null → unreadable (never "none"); `wafById` null → every policy unknown.
  */
-export function resolveAfdWaf(profileId: string, cfg: AfdConfig, wafById: ReadonlyMap<string, WafPolicyFacts> | null): AfdWaf {
+export function resolveAfdWaf(profileId: string, cfg: AfdConfig, wafById: ReadonlyMap<string, WafPolicyFacts> | null): WafCoverage {
   const base = profileId.toLowerCase();
   const served = new Map<string, { host: string; kind: "endpoint" | "custom" }>();
   for (const r of activeRoutes(cfg)) {
@@ -283,18 +239,18 @@ export function resolveAfdWaf(profileId: string, cfg: AfdConfig, wafById: Readon
   const sorted = [...served].sort(([a], [b]) => byCode(a, b));
   if (cfg.securityPolicies == null) {
     return {
-      state: "unreadable", counts: { ...counts, unknown: served.size }, policies: [], unserved: [], readError: "securityPolicies",
+      unit: "domain", state: "unreadable", counts: { ...counts, unknown: served.size }, policies: [], unserved: [], readError: "securityPolicies",
       domains: sorted.slice(0, 100).map(([, d]) => ({ ...d, state: "unknown" as const })),
     };
   }
   const sps = cfg.securityPolicies;
   const owners = new Map<string, AfdSecurityPolicy[]>();
   for (const sp of sps) for (const d of new Set(sp.domains)) (owners.get(d) ?? owners.set(d, []).get(d)!).push(sp);
-  const domains: AfdWafDomain[] = [];
+  const domains: WafCoverageTarget[] = [];
   for (const [id, d] of sorted) {
     const own = owners.get(id) ?? [];
-    let state: AfdWafDomainState = "unknown";
-    let reason: AfdWafDomain["reason"];
+    let state: WafCoverageTarget["state"] = "unknown";
+    let reason: WafCoverageTarget["reason"];
     let policy: string | undefined;
     if (!own.length) state = "none";
     else if (own.length > 1) reason = "conflict";
@@ -302,13 +258,8 @@ export function resolveAfdWaf(profileId: string, cfg: AfdConfig, wafById: Readon
       const sp = own[0]!;
       const pol = wafById?.get(sp.wafPolicyId);
       policy = pol?.name || lastSeg(sp.wafPolicyId);
-      const mode = pol?.mode?.toLowerCase();
       if (sp.patterns.length !== 1 || sp.patterns[0] !== "/*") reason = "pathScoped";
-      else if (!pol) reason = "policyUnreadable";
-      else if (pol.enabled === false) state = "disabled";
-      else if (pol.enabled && mode === "prevention") state = "prevent";
-      else if (pol.enabled && mode === "detection") state = "detect";
-      else reason = "policyUnreadable";
+      else ({ state, reason } = policyState(pol));
     }
     counts[state]++;
     domains.push({ host: d.host, kind: d.kind, ...(policy ? { policy } : {}), state, ...(reason ? { reason } : {}) });
@@ -316,15 +267,8 @@ export function resolveAfdWaf(profileId: string, cfg: AfdConfig, wafById: Readon
   const policies = [...new Set(sps.map((sp) => sp.wafPolicyId))].sort(byCode).slice(0, 20).map((wid) => {
     const doms = [...new Set(sps.filter((sp) => sp.wafPolicyId === wid).flatMap((sp) => sp.domains))].filter((d) => served.has(d)).map((d) => served.get(d)!.host).sort(byCode);
     const pol = wafById?.get(wid);
-    return { ...(pol ?? { name: lastSeg(wid), sku: null, mode: null, enabled: null, managed: null, customRules: 0 }), domains: doms };
+    return { ...(pol ?? { name: lastSeg(wid), sku: null, mode: null, enabled: null, managed: null, customRules: 0 }), id: wid, level: "profile" as const, domains: doms };
   });
   const unserved = [...new Set(sps.flatMap((sp) => sp.domains))].filter((d) => !served.has(d)).map((d) => cfg.customDomainHosts?.[d] || lastSeg(d)).sort(byCode);
-  const n = counts.served;
-  const state: AfdWafState = n === 0 ? "noDomains"
-    : counts.prevent === n ? "prevent"
-    : counts.none === n ? "none"
-    : counts.detect === n ? "detect"
-    : counts.detect + counts.disabled + counts.none > 0 ? "partial"
-    : "unknown";
-  return { state, counts, policies, domains: domains.slice(0, 100), unserved: unserved.slice(0, 50), ...(wafById ? {} : { readError: "wafPolicies" as const }) };
+  return { unit: "domain", state: wafAggregate(counts), counts, policies, domains: domains.slice(0, 100), unserved: unserved.slice(0, 50), ...(wafById ? {} : { readError: "wafPolicies" as const }) };
 }

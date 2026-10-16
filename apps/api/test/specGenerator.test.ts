@@ -96,3 +96,18 @@ test("spec: a public LB with no load-balancing rule is not an inbound path; the 
   // nodes carry the current table
   assert.ok(byLabel.get("lb-public")!.bindings.backend, "LB card: data path + backend health");
 });
+
+test("spec: a public IP on a NIC no VM uses is unused (reason nicNoVm), not an 'outside the VNet' card", async () => {
+  const PIP = id("microsoft.network/publicipaddresses", "pip-orphan");
+  const NIC2 = id("microsoft.network/networkinterfaces", "nic-orphan");
+  const g = {
+    nodes: [...graph.nodes, n("nic", NIC2, { endpoint: "10.0.1.9", metadata: { publicIPAzureId: PIP } }), n("publicIP", PIP, { endpoint: "52.0.0.10", metadata: { absorbed: true, attachedTo: NIC2 } })],
+    edges: [...graph.edges, e("attached-to", SN_NAT, NIC2)],
+  } as unknown as ArchitectureGraph;
+  const { spec } = await generateDiagramSpec(g, "00000000-0000-0000-0000-000000000000", "manual");
+  const pip = spec.nodes.find((x) => x.label === "pip-orphan");
+  assert.ok(pip, "drawn");
+  assert.deepEqual([pip!.metadata?.unused, pip!.metadata?.unusedReason], ["true", "nicNoVm"]);
+  // the VM's own public IP (its NIC is bound to the VM) stays a chip on the VM, never unused
+  assert.ok(!spec.nodes.some((x) => x.resourceKind === "publicIP" && x.metadata?.unused === "true" && x.label !== "pip-orphan"));
+});

@@ -544,7 +544,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(var(--paper-rgb), 0.62);
+  /* near-opaque: the canvas behind made small text hard to read */
+  background: rgba(var(--paper-rgb), 0.94);
   backdrop-filter: blur(12px);
   display: grid;
   grid-template-rows: auto 1fr;
@@ -2459,6 +2460,10 @@
 
 .dpSection[data-level="1"] { border-top: 1px solid rgba(var(--ink-rgb), 0.08); }
 .dpBody > .dpSection[data-level="1"]:first-child { border-top: 0; }
+/* Anything placed straight in the body (a note, a fetch failure, an action row) gets the sections' 12 px inset —
+   it touched the panel edge and its first letters went under the border */
+.dpBody > :not(.dpSection) { padding: 8px 12px; border-top: 1px solid rgba(var(--ink-rgb), 0.08); }
+.dpBody > :not(.dpSection):first-child { border-top: 0; }
 
 .dpSectionHead {
   all: unset;
@@ -2594,6 +2599,9 @@
   font-weight: 500;
   color: var(--muted);
   line-height: 18px;
+  /* labels are fixed words; should data ever land here it wraps inside the column instead of running under the value */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dpValue {
@@ -2817,7 +2825,8 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 
 /* Relationship labels above every node (VNet / subnet boxes included), like the lines (edge zIndex 1000) */
 .canvasWrap :global(.react-flow__edgelabel-renderer) {
-  z-index: 1001;
+  /* above the cards (10), sub-cards (20) and lifted (selected) lines (~1005-2000) */
+  z-index: 2100;
 }
 
 /* React Flow's default "group" node style adds 10 px padding and a border — our GroupNode draws its own frame,
@@ -2849,3 +2858,39 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 
 /* Front Door WAF panel (detail/AfdWafSection): a configuration that does not block is orange — never red */
 .wafValue[data-tone="warn"] { color: var(--warning); font-weight: 600; }
+
+/* WAF badge on a protected card (Front Door / App Gateway): icon + state word, a button that opens the policy
+   sub-cards. Tones are the chip tones (orange = a configuration that does not block, dashed = unknown) */
+.cardWafBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: inherit;
+  background: rgba(var(--paper-rgb), 0.9);
+}
+.cardWafBadge[data-tone="muted"],
+.cardWafBadge[data-tone="public"] { cursor: pointer; }
+.cardWafBadge:hover { border-color: rgba(var(--accent-rgb), 0.45); }
+.cardWafBadge:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 1px; }
+.cardWafBadge img { flex: none; }
+
+/* Summary zoom: the WAF icon after the name, dimmed when unknown, orange ring when it does not block */
+.cardWafGlyph { flex: none; opacity: 0.9; }
+.cardWafGlyph[data-tone="muted"] { opacity: 0.45; }
+.cardWafGlyph[data-tone="public"] { border-radius: 4px; box-shadow: 0 0 0 2px rgba(var(--warning-rgb), 0.55); }
+
+/* Sub-cards (WAF policies) hang from their card: a tree guide on the left — from the card above to this one's middle */
+.subCardWrap { position: relative; width: 100%; height: 100%; }
+.subCardWrap > .card { height: 100%; }
+.subLink {
+  position: absolute;
+  left: -12px;
+  top: calc(-1 * var(--up));
+  width: 12px;
+  height: calc(var(--up) + var(--mid));
+  border-left: 2px solid rgba(var(--ink-rgb), 0.22);
+  border-bottom: 2px solid rgba(var(--ink-rgb), 0.22);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+.canvasWrap[data-lod="glance"] .subLink { display: none; }

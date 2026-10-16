@@ -126,7 +126,7 @@ for (const [name, make] of [["hub", hub], ["qa", qa]] as const) {
       const e = s.edges.find((x) => x.id === id)!;
       const S = lay.abs.get(e.source)!, T = lay.abs.get(e.target)!;
       if (r.sourceHandle === "s-r" && r.targetHandle === "t-l") assert.ok(T.x >= S.x + S.w, `${id} forward`);
-      if (r.sourceHandle === "s-l") assert.ok(T.x + T.w <= S.x, `${id} backward`);
+      if (r.sourceHandle === "s-l" && r.targetHandle === "t-r") assert.ok(T.x + T.w <= S.x, `${id} backward`);
       if (r.kind !== "step" || r.centerX == null) continue;
       const skip = new Set([...ancestors(lay, e.source), ...ancestors(lay, e.target)]);
       const y0 = Math.min(S.y + S.h / 2, T.y + T.h / 2), y1 = Math.max(S.y + S.h / 2, T.y + T.h / 2);
@@ -206,4 +206,100 @@ test("a PaaS lane sits at the height of the Private Endpoints that reach it (A-8
   const lane = lay.lanes.find((l) => l.id === "lane:paas:data")!;
   const pe = lay.abs.get("pe-sa")!;
   assert.ok(Math.abs(lane.y + lane.h / 2 - (pe.y + pe.h / 2)) <= 1);
+});
+
+// ── A Private Endpoint subnet: a workload card on top, seven PEs under it, each PE → its PaaS lane card; usage
+// lines workload → every PE (same subnet) and from a workload of the next subnet (synthetic names) ──
+function peStack(): { spec: DiagramSpec; usage: DiagramEdgeSpec[] } {
+  const V = "vnet-x";
+  const pes = ["eventhub", "kv", "acr", "mongo", "redis", "psql", "misc"];
+  const paasKind: Record<string, string> = { eventhub: "eventHub", kv: "keyVault", acr: "paas", mongo: "cosmosDb", redis: "redis", psql: "postgres", misc: "storage" };
+  const nodes = [
+    group(V, "vnet"), group("snet-agw", "subnet", V), group("snet-pep", "subnet", V), group("snet-aks", "subnet", V),
+    node("inet-in", { icon: "internet", resourceKind: "internet", metadata: { direction: "ingress" } }),
+    node("agw", { icon: "appGateway", resourceKind: "appGateway", parentId: "snet-agw", subResources: [{ kind: "publicIP", id: "pip", name: "pip", endpoint: "40.0.0.9" }] as DiagramNodeSpec["subResources"] }),
+    node("aks-ops", { parentId: "snet-pep" }),
+    node("aks-app", { icon: "aks", resourceKind: "aks", parentId: "snet-aks" }),
+    node("kube-x", { parentId: "snet-aks" }),
+    ...pes.map((p) => node(`pe-${p}`, { icon: "privateEndpoint", resourceKind: "privateEndpoint", parentId: "snet-pep" })),
+    ...pes.map((p) => node(`paas-${p}`, { icon: paasKind[p] as DiagramNodeSpec["icon"], resourceKind: paasKind[p] })),
+    node("ext-store", { icon: "storage", resourceKind: "storage" }),
+  ];
+  const edges = [
+    edge("inet-in", "agw", { edgeKind: "network", flowType: "ingress" }),
+    edge("agw", "pe-eventhub", { edgeKind: "routes" }),
+    edge("pe-kv", "aks-app", { edgeKind: "network" }),
+    edge("aks-app", "kube-x", { edgeKind: "network" }),
+    edge("aks-ops", "ext-store", { edgeKind: "network" }),
+    ...pes.map((p) => edge(`pe-${p}`, `paas-${p}`, { edgeKind: "privateLink" })),
+  ];
+  const usage = [
+    ...pes.map((p) => edge("aks-ops", `pe-${p}`, { edgeKind: "privateLinkUsage" })),
+    ...pes.map((p) => edge("aks-app", `pe-${p}`, { edgeKind: "privateLinkUsage" })),
+  ];
+  return { spec: spec(nodes, edges), usage };
+}
+
+const cardRects = (lay: ReturnType<typeof liveLayout>) =>
+  [...lay.items.values()].filter((b) => b.parent && !lay.placeMeta.subnetIds.has(b.id)).map((b) => [b.id, lay.abs.get(b.id)!] as [string, Rect]);
+const headerRects = (lay: ReturnType<typeof liveLayout>) =>
+  [...lay.placeMeta.subnetIds].map((id) => { const r = lay.abs.get(id)!; return [`head:${id}`, { ...r, h: LIVE.SUBNET_HEAD }] as [string, Rect]; });
+
+test("stacked same-subnet lines leave on a side and pass no sibling card (no line down through a PE column)", () => {
+  const { spec: s, usage } = peStack();
+  const lay = liveLayout(s);
+  const ops = lay.abs.get("aks-ops")!;
+  const stacked = usage.filter((e) => e.source === "aks-ops").filter((e) => { const T = lay.abs.get(e.target)!; return T.x < ops.x + ops.w && ops.x < T.x + T.w; });
+  assert.ok(stacked.length >= 3, `the fixture stacks PEs under the workload (${stacked.length})`);
+  const routes = R.routeEdges(lay, [...s.edges, ...usage]);
+  const sub = lay.abs.get("snet-pep")!;
+  for (const e of stacked) {
+    const r = routes.get(e.id)!;
+    const sides = `${r.sourceHandle}/${r.targetHandle}`;
+    assert.ok(sides === "s-l/t-l" || sides === "s-r/t-r", `${e.id}: ${sides}`);
+    const pts = R.routePoints(r, lay.abs.get(e.source)!, lay.abs.get(e.target)!);
+    if (sides === "s-l/t-l") assert.ok(pts[1]![0] > sub.x && pts[1]![0] < ops.x, `${e.id}: the trunk runs in the subnet padding`);
+    const hit = R.firstHit(pts, cardRects(lay), new Set([e.source, e.target]));
+    assert.equal(hit, null, `${e.id} passes ${hit}`);
+  }
+});
+
+test("lines from Private Endpoints to the PaaS lanes cross no other card or subnet header (exit through the corridor)", () => {
+  const { spec: s } = peStack();
+  const lay = liveLayout(s);
+  const routes = R.routeEdges(lay, s.edges);
+  const bad: string[] = [];
+  for (const e of s.edges.filter((x) => x.edgeKind === "privateLink")) {
+    const r = routes.get(e.id)!;
+    const pts = R.routePoints(r, lay.abs.get(e.source)!, lay.abs.get(e.target)!);
+    const own = new Set([e.source, e.target, `head:${[...ancestors(lay, e.source)].find((a) => lay.placeMeta.subnetIds.has(a))}`]);
+    const hit = R.firstHit(pts, [...cardRects(lay), ...headerRects(lay)], own);
+    if (hit) bad.push(`${e.id} (${r.kind}) × ${hit}`);
+  }
+  assert.deepEqual(bad, []);
+  // the fixture really needs the detour: at least one Private Endpoint's curve would have crossed a card
+  const kinds = s.edges.filter((x) => x.edgeKind === "privateLink").map((x) => routes.get(x.id)!.kind);
+  assert.ok(kinds.includes("exit"), `kinds ${kinds.join(",")}`);
+  // and the QA VNet keeps its plain curves (nothing in the way there)
+  const q = qa();
+  const qlay = liveLayout(q);
+  assert.equal(R.routeEdges(qlay, q.edges).get("pe-sa->qa-storage")?.kind, "bezier");
+});
+
+test("peStack: layout and routes do not depend on input order", () => {
+  const { spec: s, usage } = peStack();
+  const key = (x: DiagramSpec, u: DiagramEdgeSpec[]) => JSON.stringify([...R.routeEdges(liveLayout(x), [...x.edges, ...u]).entries()].sort());
+  const ref = key(s, usage);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280) - 0.5;
+  for (let i = 0; i < 20; i++) assert.equal(key({ ...s, nodes: [...s.nodes].sort(rnd), edges: [...s.edges].sort(rnd) }, [...usage].sort(rnd)), ref);
+});
+
+test("segmentHitsRect: touching an edge is not a hit; through a corner, crossing or inside is", () => {
+  const r = { x: 0, y: 0, w: 10, h: 10 };
+  assert.equal(R.segmentHitsRect([-5, 0], [15, 0], r), false, "along the top edge");
+  assert.equal(R.segmentHitsRect([-5, 5], [15, 5], r), true);
+  assert.equal(R.segmentHitsRect([-2, 6], [6, -2], r), true, "cuts a corner");
+  assert.equal(R.segmentHitsRect([2, 2], [3, 3], r), true, "inside");
+  assert.equal(R.segmentHitsRect([12, 0], [12, 10], r), false);
 });

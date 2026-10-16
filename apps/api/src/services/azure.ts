@@ -15,6 +15,8 @@ import { relEdge } from "./relationships.js";
 import { buildAddressIndex, parseFrontends, parsePools, resolveMember, type AddressEntry, type Frontend } from "./backendMembers.js";
 import { internetInboundExposure, mostExposed, routesWidenVnetTag, type NsgInput } from "./nsgExposure.js";
 import { agcFacts, resolveAgcCluster, type AgcChildRow } from "./agc.js";
+import { resolveAgwWaf } from "./agwWaf.js";
+import { resourceSpec } from "./resourceSpec.js";
 import { activeRoutes, fetchFrontDoorConfig, resolveAfdOrigins, resolveAfdWaf, wafPolicyFacts } from "./frontDoorConfig.js";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind, InboundExposure } from "@aud/types";
 
@@ -730,6 +732,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       else nodeMetadata.classic = true; // retires 2027-03-31
     }
     if (kind === "paas") nodeMetadata.armType = rtype;
+    // Specification for the panel's "사양" section (SKU, version, capacity, HA, access settings) — resourceSpec.ts
+    const specFacts = resourceSpec(rtype, r);
+    if (specFacts.length) nodeMetadata.spec = specFacts;
     // This VNet's own side of every peering (EDGE-02) — including peerings to VNets this graph cannot see. Each side
     // has its own flags: the hub allows gateway transit, a spoke uses the remote gateway.
     if (kind === "vnet") {
@@ -891,6 +896,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
         const ruleBound = frontends.filter((f) => f.ruleBound);
         nodeMetadata.inboundRules = ruleBound.filter((f) => f.kind === "public").reduce((n, f) => n + f.listeners.length, 0);
         nodeMetadata.privateListeners = ruleBound.filter((f) => f.kind === "private").reduce((n, f) => n + f.listeners.length, 0);
+        // AGW-08: WAF per rule-bound listener (path > listener > gateway policy, or the v1 configuration) — badge + panel
+        const waf = resolveAgwWaf(props, wafById);
+        if (waf) nodeMetadata.waf = waf;
       }
     }
     // Scale set: orchestration mode (Uniform instances are child resources, Flexible instances are ordinary VMs),

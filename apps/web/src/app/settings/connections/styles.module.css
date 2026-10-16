@@ -107,3 +107,40 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Check result sections: feature readiness, cluster check; folded details (matrix, workspaces) */
+.section {
+  display: grid;
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.more {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.more > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sampleRow td {
+  background: var(--panel-sunken);
+}
+
+.k8sCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}

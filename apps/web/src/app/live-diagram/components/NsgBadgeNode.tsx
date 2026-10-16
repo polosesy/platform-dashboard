@@ -13,8 +13,10 @@ export type NsgBadgeData = {
   icon: DiagramIconKind;
   resourceKind?: string;
   azureResourceId?: string;
-  /** Cat 4: standalone/detached NSG — no subnet, NIC, or VM association */
+  /** Unused / detached (an NSG on nothing, an unattached public IP, a public IP on a NIC no VM uses): ✕ + reason */
   detached?: boolean;
+  /** Tooltip i18n key for why it is unused (default: the detached-NSG text) */
+  reasonKey?: string;
 };
 
 export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBadgeData>) {
@@ -33,7 +35,7 @@ export const NsgBadgeNode = memo(function NsgBadgeNode({ data }: NodeProps<NsgBa
         />
         <span className={styles.nsgBadgeLabel}>{data.label}</span>
         <div className={styles.nsgDetachedTooltip}>
-          {t("ld.nsgDetached")}
+          {t(data.reasonKey ?? "ld.nsgDetached")}
         </div>
       </div>
     );

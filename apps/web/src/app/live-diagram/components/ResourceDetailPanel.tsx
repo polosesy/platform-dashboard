@@ -24,7 +24,8 @@ import { NameParts } from "./NameParts";
 import { PrivateLinkUsageSection } from "./detail/PrivateLinkUsage";
 import { PeeringSection } from "./detail/PeeringSection";
 import { HybridSection } from "./detail/HybridSection";
-import { AfdWafSection, WAF_METRICS } from "./detail/AfdWafSection";
+import { SpecSection } from "./detail/SpecSection";
+import { WafPanel, WafSummarySection, WAF_METRICS } from "./detail/WafPanel";
 import { cardCells, formatMetric, METRIC_META, sparkDomain } from "@/lib/liveMetricFormat";
 import { isInferredEdge } from "@/lib/liveScope";
 import { relationLabel } from "@/lib/liveStyle";
@@ -85,6 +86,11 @@ type ResourceDetailPanelProps = {
   onBack?: () => void;
   onClose: () => void;
   vmssInstance?: VmssInstancePanelData | null;
+  /** The WAF panel of a Front Door / Application Gateway (key null = overview, "p:<policy>", "none", "unknown") */
+  waf?: { nodeId: string; key: string | null } | null;
+  onWafSelect?: (nodeId: string, key: string | null) => void;
+  /** Live values of the WAF's card (the Front Door verdict counts) */
+  wafLiveNode?: LiveNode | null;
 };
 
 const PRIVATE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
@@ -114,13 +120,21 @@ function subscriptionOf(id: string | undefined): string | undefined {
 }
 
 export function ResourceDetailPanel(props: ResourceDetailPanelProps) {
-  const { nodeSpec, vmssInstance } = props;
+  const { nodeSpec, vmssInstance, waf } = props;
   if (!nodeSpec && vmssInstance) return <VmssInstancePanel data={vmssInstance} onClose={props.onClose} />;
+  if (!nodeSpec && waf) {
+    const parent = props.spec.nodes.find((n) => n.id === waf.nodeId);
+    if (!parent) return null;
+    return (
+      <WafPanel key={`${waf.nodeId}|${waf.key ?? ""}`} parent={parent} wafKey={waf.key} metrics={props.wafLiveNode?.metrics} measured={props.metricsState === "ok"}
+        onSelectNode={props.onSelectNode} onWafSelect={props.onWafSelect} onClose={props.onClose} />
+    );
+  }
   if (!nodeSpec) return null;
   return <NodePanel {...props} nodeSpec={nodeSpec} />;
 }
 
-function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, focusPeeringKey, onOpenVnet, onAddVnet, onBack, onClose }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
+function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, focusPeeringKey, onOpenVnet, onAddVnet, onBack, onClose, onWafSelect }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
   const { t } = useI18n();
   const ago = useRelativeTime();
   const kind = node.resourceKind ?? node.icon;
@@ -157,7 +171,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   const specBound = Object.entries(node.bindings).filter(([, b]) => b.source !== "composite").map(([k]) => k);
   // Plus metrics the API now reads for the kind (diagram saved before memory was added)
   // The card's two metrics first (same order as the card), then the rest the API reads for the kind
-  // WAF verdict counts have their own section (AfdWafSection): "no block recorded" is not "unmeasured"
+  // WAF verdict counts are shown in the WAF panel: "no block recorded" is not "unmeasured"
   const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k));
   const first = cardCells(node.resourceKind ?? node.icon, allBound);
   const bound = [...first.filter((k) => allBound.includes(k)), ...allBound.filter((k) => !first.includes(k))];
@@ -382,6 +396,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
         {/* Private Link use (observed in logs) */}
         <PrivateLinkUsageSection node={node} spec={spec} usage={usage} loading={usageLoading} nameOf={nameOf} onSelectNode={onSelectNode} />
 
+        {/* Specification: SKU, version, capacity, HA, access settings (resourceSpec.ts) */}
+        <SpecSection node={node} />
+
         {/* Network */}
         {showNetwork ? (
           <Section id="network" title={t("ld.panel.network")}>
@@ -422,7 +439,10 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
               {unresolved.length ? (
                 <Group title={t("ld.chip.unresolvedBackends", { n: unresolved.length })}>
                   {unresolved.map((u, i) => (
-                    <KV key={`${u.pool}-${u.address}-${i}`} label={u.pool} mono>{`${u.address} — ${t(`ld.backend.reason.${u.reason}`)}`}</KV>
+                    <div key={`${u.pool}-${u.address}-${i}`} className={styles.dpTwoLine}>
+                      <span className={styles.dpTwoLineMain} data-mono="true">{u.address}</span>
+                      <span className={styles.dpTwoLineSub}>{u.pool} · {t(`ld.backend.reason.${u.reason}`)}</span>
+                    </div>
                   ))}
                 </Group>
               ) : null}
@@ -434,7 +454,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
         {kind === "vnetGateway" || kind === "onPremSite" ? <HybridSection node={node} spec={spec} onSelectNode={onSelectNode} /> : null}
         {kind === "agc" ? <AgcFacts node={node} /> : null}
         {kind === "frontDoor" ? <FrontDoorFacts node={node} /> : null}
-        {kind === "frontDoor" ? <AfdWafSection node={node} metrics={liveNode?.metrics} measured={metricsState === "ok"} /> : null}
+        {kind === "frontDoor" || kind === "appGateway" ? <WafSummarySection node={node} onWafSelect={onWafSelect} /> : null}
         {kind === "aks" && archRole === "aks-control-plane" ? <AksApiEndpoint node={node} /> : null}
         {kind === "aks" && archRole !== "aks-control-plane" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}
@@ -478,6 +498,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
           {sub ? <KV label={t("ld.panel.subscription")} mono copy={sub}>{maskGuids(sub)}</KV> : null}
           {armId ? <KV label={t("detail.azureId")} mono copy={armId}>{maskGuids(shortArmId(armId))}</KV> : null}
           {node.metadata?.placement === "rg-guess" ? <div className={styles.dpMuted}>{t("ld.panel.rgGuess")}</div> : null}
+          {node.metadata?.unused === "true" || node.metadata?.detached === "true" ? (
+            <KV label={t("ld.unused")}>{t(kind === "nsg" ? "ld.nsgDetached" : node.metadata?.unusedReason === "nicNoVm" ? "ld.unusedPipNicNoVm" : kind === "publicIP" ? "ld.unusedPipHint" : "ld.unusedHint")}</KV>
+          ) : null}
           {tags.length ? (
             <KV label={t("ld.panel.tags", { n: tags.length })}>
               <span className={styles.dpChips}>{tags.map(([k, v]) => <span key={k} className={styles.dpTag}>{k}: {maskGuids(v)}</span>)}</span>

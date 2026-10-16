@@ -88,6 +88,7 @@ const CORE: Translations = {
   // ── Edge Detail Panel ──
   "detail.edge.overview": { ko: "개요", en: "Overview" },
   "detail.edge.endpoints": { ko: "엔드포인트", en: "Endpoints" },
+  "detail.edge.nic": { ko: "NIC", en: "NIC" },
   "detail.edge.nsg": { ko: "NSG 규칙", en: "NSG Rules" },
   "detail.edge.udr": { ko: "UDR 라우트", en: "UDR Routes" },
   "detail.edge.inboundFlows": { ko: "인바운드 플로우", en: "Inbound Flows" },
@@ -288,6 +289,7 @@ const CORE: Translations = {
   "nav.item.clusterSecurity": { ko: "AKS 보안 점검", en: "AKS Security Posture" },
   "nav.item.costManagement": { ko: "비용 관리", en: "Cost Management" },
   "nav.item.connections": { ko: "Azure 연결", en: "Azure Connections" },
+  "nav.item.features": { ko: "기능·권한", en: "Features & Permissions" },
   "nav.desc.overview": { ko: "구독 전체 요약 — 리소스·상태·비용·보안", en: "Subscription summary — resources, health, cost, security" },
   "nav.desc.health": { ko: "Service Health · Resource Health (리전별)", en: "Service Health · Resource Health by region" },
   "nav.desc.liveDiagram": { ko: "VNet 1개 — 실측 메트릭·알림·장애 영향", en: "One VNet — measured metrics, alerts, fault impact" },
@@ -304,7 +306,8 @@ const CORE: Translations = {
   "nav.desc.securityCompliance": { ko: "규정 표준별 통과·실패 컨트롤과 Defender 플랜 보호 범위", en: "Passed and failed controls per standard, Defender plan coverage" },
   "nav.desc.clusterSecurity": { ko: "AKS 위험 개요·공격 경로·네트워크 노출·권한·구성 점검·인벤토리", en: "AKS risk overview, attack paths, exposure, permissions, config checks, inventory" },
   "nav.desc.costManagement": { ko: "비용 추이 · 예산 · 예측 · 예약", en: "Cost trend · budgets · forecast · reservations" },
-  "nav.desc.connections": { ko: "플랫폼이 Azure를 읽는 연결 · 권한 점검", en: "How the platform reads Azure · permission check" },
+  "nav.desc.connections": { ko: "플랫폼이 Azure를 읽는 연결 · 기능별 준비 상태 점검", en: "How the platform reads Azure · feature readiness check" },
+  "nav.desc.features": { ko: "패키지(안)별 기능과 필요한 최소 Azure·Kubernetes 읽기 권한", en: "Features by package (proposal) and the minimum Azure / Kubernetes read permissions they need" },
 
   // ── Infrastructure diagram (/architecture) ──
   "arch.liveHint": { ko: "설정(구성) 기준 구성도입니다. VNet 1개의 실시간 상태는 라이브 다이어그램에서 확인하세요.", en: "Configuration-based diagram. For one VNet's live state, use the Live Diagram." },

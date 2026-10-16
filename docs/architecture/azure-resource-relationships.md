@@ -290,6 +290,7 @@ Azure는 커다란 **아파트 단지**예요. 모든 영역 페이지가 같은
 | AGW-05 | 백엔드 풀 → FQDN | App Service `defaultHostName`·`hostNames`, Container App ingress `fqdn` 정확 일치 (DNS 조회 안 함) | `backendAddresses[].fqdn` | fqdnMatch | line / line, 없으면 미확인 | azure.ts | 〃 — "FQDN" |
 | AGW-06 | 백엔드 멤버 응답·연결 시간 | 멤버별 품질 (바이트는 없음) | 차원 값 `IP:포트`(포트 = 그 풀을 쓰는 규칙의 HTTP 설정) | `tr:BackendResponseStatus[BackendServer]`, `tr:BackendConnectTime[BackendServer]` | — / 선 값 "응답 n/분" | specGenerator.ts | application-gateway/monitor-application-gateway-reference |
 | AGW-07 | 풀별 정상 호스트 | 풀 단위(멤버 단위 아님) | 차원 `BackendSettingsPool` = `pool~settings` | `tr:HealthyHostCount` | — / 카드 지표(멤버 선에 붙이지 않음) | — | 〃 |
+| AGW-08 | AGW → WAF 정책 (게이트웨이·리스너·경로, v1 구성) | WAF_v2만 정책을 받음 — 우선순위 **경로 규칙 > 리스너 > 게이트웨이**, v1은 정책 대신 `webApplicationFirewallConfiguration`. 단위 = 규칙이 쓰는 HTTP 리스너(공용만 집계, 사설은 목록만). 경로 규칙의 정책 상태가 리스너와 다르면 그 리스너는 '미확인'(경로 한정). Standard/Standard_v2는 WAF 불가(`skuNoWaf`). 정책은 노드가 아니라 카드 WAF 배지·정책 하위 카드·패널 (EDG-01) | `properties.firewallPolicy.id` · `httpListeners[].properties.firewallPolicy.id` · `urlPathMaps[].pathRules[].properties.firewallPolicy.id` · `webApplicationFirewallConfiguration.{enabled, firewallMode}` → `applicationgatewaywebapplicationfirewallpolicies.properties.policySettings.{mode, state}` | cfg | 배지 + 하위 카드 + 패널(선 없음, 카드 상태·장애 영향에 안 씀) | azure.ts | web-application-firewall/ag/policy-overview · application-gateway/application-gateway-waf-configuration |
 
 ## §5a Application Gateway for Containers (AGC)
 

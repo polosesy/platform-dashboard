@@ -28,7 +28,7 @@ import type {
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
-import { liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
+import { isUnusedBadge, liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
 import { routeEdges } from "@/lib/liveRoute";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { usageThresholds } from "@/lib/liveMetricFormat";
@@ -37,7 +37,7 @@ import { disconnectedPes, usageChips, usageEdges } from "@/lib/plUsage";
 import { edgeLayer, impactView, isDirectedEdge, isFocusOnlyEdge, type EdgeLayer } from "@/lib/liveScope";
 import { gatewayFacts, withBackendValue } from "@/lib/liveBackends";
 import { hybridFacts } from "@/lib/liveHybrid";
-import { wafChip } from "@/lib/liveWaf";
+import { wafAttachHeight, wafBadge, wafFacts, wafSubCards } from "@/lib/liveWaf";
 import { parsePeerings, peeringChipFit } from "@/lib/livePeering";
 import { pipExposure } from "@/lib/livePip";
 import { PARTICLE_TONE_VAR, clipLabel, legendKeys, liveEdgeStyleKey, liveStroke, mergeReversePairs, relationLabel, type ParticleTone } from "@/lib/liveStyle";
@@ -45,6 +45,7 @@ import { LiveNode, type LiveNodeData } from "./LiveNode";
 import { GroupNode, type EgressInfo, type GroupNodeData } from "./GroupNode";
 import { NsgBadgeNode, type NsgBadgeData } from "./NsgBadgeNode";
 import { VmssInstanceNode, type VmssInstanceNodeData } from "./VmssInstanceNode";
+import { WafPolicyNode, type WafPolicyNodeData } from "./WafPolicyNode";
 import { InternetNode, type InternetNodeData } from "./InternetNode";
 import { LaneNode, type LaneNodeData } from "./LaneNode";
 import { EmptySubnetsNode, type EmptySubnetsNodeData } from "./EmptySubnetsNode";
@@ -80,10 +81,17 @@ type LiveCanvasProps = {
   selectedNodeId?: string | null;
   focusNodeId?: string | null;
   onVmssInstanceSelect?: (data: VmssInstanceNodeData) => void;
+  /** Cards whose WAF policy sub-cards are open (page state: the panel can open them too) */
+  wafOpen?: ReadonlySet<string>;
+  onWafToggle?: (nodeId: string) => void;
+  /** A WAF sub-card: the policy ("p:<name>"), "none", "unknown", or the overview (null) */
+  onWafSelect?: (nodeId: string, key: string | null) => void;
 };
 
+const NO_WAF_OPEN: ReadonlySet<string> = new Set();
+
 const nodeTypes: NodeTypes = {
-  live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode, internet: InternetNode,
+  live: LiveNode, group: GroupNode, nsgBadge: NsgBadgeNode, vmssInstance: VmssInstanceNode, wafPolicy: WafPolicyNode, internet: InternetNode,
   lane: LaneNode, emptySubnets: EmptySubnetsNode,
 };
 const edgeTypes: EdgeTypes = { animated: AnimatedEdge };
@@ -119,6 +127,9 @@ function LiveCanvasInner({
   selectedNodeId,
   focusNodeId,
   onVmssInstanceSelect,
+  wafOpen = NO_WAF_OPEN,
+  onWafToggle,
+  onWafSelect,
 }: LiveCanvasProps) {
   const { t } = useI18n();
   const reduceMotion = useReducedMotion();
@@ -146,8 +157,16 @@ function LiveCanvasInner({
       return next;
     });
   }, []);
-  const layout = useMemo(() => liveLayout(spec, { expandedEmpty }), [spec, expandedEmpty]);
   const nodeById = useMemo(() => new Map(spec.nodes.map((n) => [n.id, n])), [spec.nodes]);
+  // Open WAF sub-cards: room below an inbound card (Front Door), an overlay elsewhere (liveLayout attachBelow)
+  const wafCards = useMemo(() => new Map([...wafOpen].map((id) => [id, wafSubCards(nodeById.get(id)?.metadata)] as const).filter(([, c]) => c.length)), [wafOpen, nodeById]);
+  const attachBelow = useMemo(() => new Map([...wafCards].map(([id, c]) => [id, wafAttachHeight(c.length)] as const)), [wafCards]);
+  const layout = useMemo(() => liveLayout(spec, { expandedEmpty, attachBelow }), [spec, expandedEmpty, attachBelow]);
+  const onWafToggleRef = useRef(onWafToggle);
+  const onWafSelectRef = useRef(onWafSelect);
+  useLayoutEffect(() => { onWafToggleRef.current = onWafToggle; onWafSelectRef.current = onWafSelect; });
+  const stableWafToggle = useCallback((id: string) => onWafToggleRef.current?.(id), []);
+  const stableWafSelect = useCallback((id: string, key: string) => onWafSelectRef.current?.(id, key === "more" ? null : key), []);
   // Short names inside this view (the VNet's own words dropped) — cards and subnet headers
   const nameInfo = useMemo(() => {
     const byId = new Map(spec.nodes.map((n) => [n.id, n]));
@@ -278,6 +297,7 @@ function LiveCanvasInner({
       const instanceNodes: (FlowNode<VmssInstanceNodeData> & { parentNode: string })[] = instances.map((inst, i) => ({
         id: `vmss-inst-${vmssNodeId}-${inst.instanceId}`,
         type: "vmssInstance" as const,
+        zIndex: 20,
         parentNode: vmssNodeId,
         position: { x: instX, y: vmssH + 20 + i * (INST_H + INST_GAP) },
         draggable: false,
@@ -395,7 +415,7 @@ function LiveCanvasInner({
       if (kind === "internet") {
         const direction = n.metadata?.direction === "ingress" ? "ingress" : "egress";
         out.push({
-          id: n.id, type: "internet", ...placeOf(n), draggable: false,
+          id: n.id, type: "internet", ...placeOf(n), draggable: false, zIndex: 10,
           // Exactly the layout size — content height must not move the handles off the line (it drew a jog)
           style: { width: LIVE.INTERNET_W, height: LIVE.INTERNET_H },
           data: {
@@ -407,11 +427,17 @@ function LiveCanvasInner({
         });
         continue;
       }
-      if (kind === "nsg") {
+      // NSGs, and every unused / detached resource (public IPs too): the same compact badge — the "unused" lane reads
+      // as one even list, the reason in the tooltip
+      if (kind === "nsg" || isUnusedBadge(n)) {
+        const unused = isUnusedBadge(n);
         out.push({
           id: n.id, type: "nsgBadge", ...placeOf(n), draggable: false, zIndex: 10,
           style: { width: LIVE.NSG_W, height: LIVE.NSG_H },
-          data: { label: n.label, icon: n.icon, resourceKind: n.resourceKind, azureResourceId: n.azureResourceId, detached: n.metadata?.detached === "true" } satisfies NsgBadgeData,
+          data: {
+            label: n.label, icon: n.icon, resourceKind: n.resourceKind, azureResourceId: n.azureResourceId, detached: unused,
+            ...(unused ? { reasonKey: kind === "nsg" ? "ld.nsgDetached" : n.metadata?.unusedReason === "nicNoVm" ? "ld.unusedPipNicNoVm" : kind === "publicIP" ? "ld.unusedPipHint" : "ld.unusedHint" } : {}),
+          } satisfies NsgBadgeData,
         });
         continue;
       }
@@ -445,7 +471,9 @@ function LiveCanvasInner({
         hybrid: hybridFacts(n.resourceKind ?? n.icon, n.metadata),
         scaleSet: n.metadata?.scaleSet,
         pipExposure: pipExposure(n.metadata) ?? undefined,
-        waf: wafChip(n.metadata) ?? undefined,
+        waf: wafBadge(n.metadata) ?? undefined,
+        wafOpen: wafCards.has(n.id),
+        onWafToggle: stableWafToggle,
         armType: n.metadata?.armType,
         shortName: names.get(n.id),
         nameParts: nameInfo.get(n.id)?.parts,
@@ -458,7 +486,21 @@ function LiveCanvasInner({
         relation: relationOf.get(n.id),
         impact: impactRolesRef.current.get(n.id),
       };
-      out.push({ id: n.id, type: "live", ...placeOf(n), draggable: false, data });
+      out.push({ id: n.id, type: "live", ...placeOf(n), draggable: false, zIndex: 10, data });
+      // WAF policy sub-cards right after their card (React Flow wants parents first): room kept in the inbound
+      // lane, an overlay elsewhere (VMSS instance precedent)
+      const subs = wafCards.get(n.id);
+      if (subs) {
+        const h = pos(n.id)?.h ?? LIVE.CARD_H;
+        const unit = wafFacts(n.metadata)?.unit ?? "domain";
+        subs.forEach((card, i) => out.push({
+          id: `waf:${n.id}:${card.key}`, type: "wafPolicy", parentNode: n.id, draggable: false, selectable: true,
+          position: { x: 0, y: h + LIVE.SUB_TOP + i * (LIVE.SUB_H + LIVE.SUB_GAP) },
+          style: { width: LIVE.CARD_W, height: LIVE.SUB_H },
+          ...(layout.reservedBelow.has(n.id) ? {} : { zIndex: 20 }),
+          data: { card, unit, parentId: n.id, index: i, onSelect: stableWafSelect } satisfies WafPolicyNodeData,
+        }));
+      }
     }
 
     setNodes((prev) => [...out, ...prev.filter((n) => n.type === "vmssInstance" && out.some((o) => o.id === (n.data as VmssInstanceNodeData).parentVmssId))]);
@@ -469,7 +511,7 @@ function LiveCanvasInner({
     lastFitKey.current = fitKey;
     const rafId = requestAnimationFrame(() => rfRef.current.fitBounds(layout.bounds, { padding: 0.06, duration: 300 }));
     return () => cancelAnimationFrame(rafId);
-  }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf]);
+  }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf, wafCards, stableWafToggle, stableWafSelect]);
 
   // ── Selection → full-name tag: only the previously and newly selected nodes get new data ──
   useEffect(() => {
@@ -489,10 +531,11 @@ function LiveCanvasInner({
     onNodesChange(changes);
     for (const c of changes) {
       if (c.type !== "select" || !c.selected) continue;
-      const type = rfRef.current.getNode(c.id)?.type;
-      if (type === "live" || type === "group") onNodeSelect(c.id);
+      const node = rfRef.current.getNode(c.id);
+      if (node?.type === "live" || node?.type === "group") onNodeSelect(c.id);
+      else if (node?.type === "wafPolicy") { const d = node.data as WafPolicyNodeData; stableWafSelect(d.parentId, d.card.key); }
     }
-  }, [onNodesChange, onNodeSelect]);
+  }, [onNodesChange, onNodeSelect, stableWafSelect]);
 
   // ── Effect B: Snapshot update — health/status only, positions untouched ──
   useEffect(() => {
@@ -539,11 +582,15 @@ function LiveCanvasInner({
       let changed = false;
       const next = prev.map((n) => {
         const frame = FRAME_TYPES.has(n.type ?? "");
+        // A sub-card (WAF policy, VMSS instance) is part of its card: it highlights, dims and joins impacts with it
+        const owner = n.type === "wafPolicy" ? (n.data as WafPolicyNodeData).parentId
+          : n.type === "vmssInstance" ? (n.data as VmssInstanceNodeData).parentVmssId
+          : n.id;
         const cls = frame
           ? ""
           : hoveredNodeId && hoverFocus
-            ? (connectedNodeIds.has(n.id) ? "node-highlighted" : "node-dimmed")
-            : impactActive && !impactRoles.has(n.id) ? "node-impact-dimmed" : "";
+            ? (connectedNodeIds.has(owner) ? "node-highlighted" : "node-dimmed")
+            : impactActive && !impactRoles.has(owner) ? "node-impact-dimmed" : "";
         const role = n.type === "live" ? impactRoles.get(n.id) : undefined;
         const roleChanged = n.type === "live" && (n.data as LiveNodeData).impact !== role;
         if ((n.className ?? "") === cls && !roleChanged) return n;
@@ -572,7 +619,8 @@ function LiveCanvasInner({
     return { list: visibleEdgeSpecs.filter((e) => !drop.has(e.id)), both };
   }, [visibleEdgeSpecs]);
   // Handles and path of every line (lib/liveRoute) — right angles through the corridors between boxes
-  const routes = useMemo(() => routeEdges(layout, merged.list), [layout, merged.list]);
+  // Routed once per layout — every line is routed on its own, so hover (which changes merged.list) does not re-route
+  const routes = useMemo(() => routeEdges(layout, allEdges), [layout, allEdges]);
 
   const edges: FlowEdge<AnimatedEdgeData>[] = useMemo(() => {
     const liveById = new Map((snapshot?.edges ?? []).map((e) => [e.id, e]));
@@ -593,9 +641,10 @@ function LiveCanvasInner({
         source: e.source,
         target: e.target,
         type: "animated",
-        // Lines and their labels draw above the VNet / subnet boxes (React Flow puts edges under nodes by default);
-        // routing keeps them off the cards, so nothing is hidden by drawing them on top
-        zIndex: 1000,
+        // Lines draw above the VNet / subnet boxes (0) and UNDER the cards (10): a line that still has to cross a
+        // card passes behind it instead of over its text (draw.io convention). A selected line / the lines of a
+        // selected card are lifted above the cards by React Flow (elevateEdgesOnSelect); labels sit on top (2100)
+        zIndex: 5,
         sourceHandle: route?.sourceHandle ?? "s-r",
         targetHandle: route?.targetHandle ?? "t-l",
         markerEnd: isDirectedEdge(e) || both.has(e.id) ? arrow : undefined,
@@ -659,6 +708,9 @@ function LiveCanvasInner({
   // ── Hover handlers ──
   const handleNodeMouseEnter = useCallback((_e: React.MouseEvent, node: FlowNode) => {
     if (node.type === "group") setHoveredGroupId(node.id);
+    // a sub-card stands for its card (VMSS instance, WAF policy)
+    else if (node.type === "wafPolicy") setHoveredNodeId((node.data as WafPolicyNodeData).parentId);
+    else if (node.type === "vmssInstance") setHoveredNodeId((node.data as VmssInstanceNodeData).parentVmssId);
     else if (!FRAME_TYPES.has(node.type ?? "")) setHoveredNodeId(node.id);
   }, [setHoveredGroupId, setHoveredNodeId]);
   const handleNodeMouseLeave = useCallback(() => { setHoveredNodeId(null); setHoveredGroupId(null); }, [setHoveredGroupId, setHoveredNodeId]);
@@ -685,6 +737,7 @@ function LiveCanvasInner({
         edgeTypes={edgeTypes}
         onNodeClick={(_e, node) => {
           if (node.type === "vmssInstance") onVmssInstanceSelect?.(node.data as VmssInstanceNodeData);
+          else if (node.type === "wafPolicy") { const d = node.data as WafPolicyNodeData; stableWafSelect(d.parentId, d.card.key); }
           else if (node.type !== "lane" && node.type !== "emptySubnets") onNodeSelect(node.id);
         }}
         onEdgeClick={(_e, edge) => onEdgeSelect?.(edge.id)}

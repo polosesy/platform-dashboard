@@ -15,3 +15,4 @@ export * from "./observability.js";
 export * from "./hubble.js";
 export * from "./policy.js";
 export * from "./policyInsights.js";
+export * from "./featureCatalog.js";

@@ -90,7 +90,11 @@ export function StaticSection({ title, note, children }: { title: ReactNode; not
   );
 }
 
-/** Label | value row (84 px label column, value wraps instead of scrolling) */
+/**
+ * Label | value row (84 px label column, value wraps instead of scrolling). The label is a fixed i18n word — data
+ * (host names, pool names) goes in a two-line row (styles.dpTwoLine), never in the 84 px column
+ * (apps/api/test/livePanelText.test.ts).
+ */
 export function KV({ label, children, mono, copy }: { label: ReactNode; children: ReactNode; mono?: boolean; copy?: string }) {
   return (
     <div className={styles.dpRow}>
@@ -101,6 +105,21 @@ export function KV({ label, children, mono, copy }: { label: ReactNode; children
       </span>
     </div>
   );
+}
+
+/** Data row: the name (host, origin, listener …) on the first line, what it is / its state under it — never overlaps */
+export function TwoLine({ main, sub, mono, copy, onClick }: { main: ReactNode; sub?: ReactNode; mono?: boolean; copy?: string; onClick?: () => void }) {
+  const body = (
+    <>
+      <span className={styles.dpTwoLineMain} data-mono={mono || undefined}>
+        {main}{copy ? <> <CopyButton value={copy} /></> : null}
+      </span>
+      {sub != null && sub !== "" ? <span className={styles.dpTwoLineSub}>{sub}</span> : null}
+    </>
+  );
+  return onClick
+    ? <button type="button" className={styles.dpTwoLine} onClick={onClick}>{body}</button>
+    : <div className={styles.dpTwoLine}>{body}</div>;
 }
 
 /** Copies the full value (the screen may show a masked or shortened form) */
