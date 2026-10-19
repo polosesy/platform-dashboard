@@ -15,3 +15,8 @@ docs/nexsrm-infra-diagram.md
 docs/resource-inventory-diagram.md
 # Local read-only probes against real tenants (print tenant facts) — never committed
 apps/api/.probe/
+
+# On-prem container deployment: filled env files, connections, certificates — never committed
+deploy/docker/*.env
+deploy/docker/config/
+deploy/docker/tls/

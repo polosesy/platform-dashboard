@@ -4,7 +4,9 @@ import { EventType, PublicClientApplication, type AuthenticationResult, type Eve
 import { broadcastResponseToMainFrame } from "@azure/msal-browser/redirect-bridge";
 import { MsalProvider } from "@azure/msal-react";
 import { useMemo } from "react";
-import { isAuthPopupResponse, msalConfig } from "@/lib/msal";
+import { isAuthPopupResponse, msalConfigFor } from "@/lib/msal";
+import type { WebRuntimeConfig } from "@/lib/runtimeConfig";
+import { WebConfigProvider } from "@/lib/webConfig";
 import { I18nProvider, useI18n } from "@/lib/i18n";
 
 /*
@@ -20,10 +22,10 @@ const popupBridge: Promise<void> | null = popupResponse
     })
   : null;
 
-function createMsal(): PublicClientApplication | null {
+function createMsal(config: WebRuntimeConfig): PublicClientApplication | null {
   // PublicClientApplication requires the Web Crypto API (secure contexts only — HTTPS or localhost).
   try {
-    const pca = new PublicClientApplication(msalConfig);
+    const pca = new PublicClientApplication(msalConfigFor(config));
     // Keep an active account so token calls never depend on accounts[] ordering
     pca.addEventCallback((ev: EventMessage) => {
       if ((ev.eventType === EventType.LOGIN_SUCCESS || ev.eventType === EventType.ACQUIRE_TOKEN_SUCCESS) && ev.payload) {
@@ -59,8 +61,9 @@ function InsecureContextNotice() {
   );
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
-  const instance = useMemo(() => (popupResponse ? null : createMsal()), []);
+/** `config` = the sign-in settings the server read for this page (one image, any host — lib/runtimeConfig.ts) */
+export function Providers({ children, config }: { children: React.ReactNode; config: WebRuntimeConfig }) {
+  const instance = useMemo(() => (popupResponse ? null : createMsal(config)), [config]);
 
   if (popupBridge) {
     // This window only relays the response and closes itself; never start the app inside it.
@@ -80,8 +83,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <MsalProvider instance={instance}>
-      <I18nProvider>{children}</I18nProvider>
-    </MsalProvider>
+    <WebConfigProvider value={config}>
+      <MsalProvider instance={instance}>
+        <I18nProvider>{children}</I18nProvider>
+      </MsalProvider>
+    </WebConfigProvider>
   );
 }

@@ -239,6 +239,10 @@
 - **원인**: 연결의 자격 증명에 그 기능의 역할이 없음
 - **해결**: [permissions.md](../integrations/azure/permissions.md)의 역할 부여 → 연결 점검의 기능 표가 `가능`인지 확인
 
+### CONN-009: 503 `connection_federation_mismatch`
+- **원인**: 페더레이션 연결(`federation: {kind: "kubernetes"}`)인데 고객 앱의 페더레이션 자격 증명이 플랫폼 서비스 계정 토큰의 발급자·주체와 맞지 않음(AADSTS70021·700211 발급자·700213 주체). 방금 만든 자격 증명은 디렉터리 캐시 때문에 몇 분간 실패할 수 있음
+- **해결**: 연결 점검에 나오는 발급자·주체(`AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT`)와 고객 앱의 자격 증명을 대소문자까지 비교, 대상 `api://AzureADTokenExchange` 확인 — [connect-tenant.md](../integrations/azure/connect-tenant.md) B-2
+
 ---
 
 ## 8. VNet 트래픽 (Flow Log)

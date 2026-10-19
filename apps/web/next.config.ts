@@ -26,6 +26,9 @@ const apiUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000")
 
 const nextConfig: NextConfig = {
   env: publicEnv,
+  // Container build (Dockerfile sets NEXT_OUTPUT=standalone): a self-contained server with only the traced files.
+  // The trace root is the monorepo root so workspace packages (@aud/types) are found
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const, outputFileTracingRoot: rootDir } : {}),
   experimental: {
     // The /api rewrite proxy drops a request after 30 s by default ("ECONNRESET"): generating a live diagram for a
     // large subscription reads the whole topology first, so allow it longer (the API keeps snapshots within 20 s)

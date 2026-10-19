@@ -1,3 +1,4 @@
+import { decodeJwt } from "jose";
 // "Does this connection work, and what can it read?" — read-only connection test (admin). Run with the CONNECTION's
 // own credential: token → visible subscriptions (counts) → effective permissions per subscription (feature matrix +
 // over-privilege warnings) → resource-scope permissions on a few sample resources (clusters, workspaces, Azure
@@ -16,7 +17,7 @@ import type {
 } from "@aud/types";
 import { AZURE_PROBES, FEATURES, PERMISSIONS, cellFrom, rollupFeature } from "./featureCatalog.js";
 import type { Env } from "../env.js";
-import type { AzureConnection } from "../infra/connectionRegistry.js";
+import { credentialKind, platformCredentialKind, type AzureConnection } from "../infra/connectionRegistry.js";
 import { credentials } from "../infra/connectionCredentials.js";
 import { HttpError, maskGuids, safeMessage } from "../infra/requestParams.js";
 
@@ -138,19 +139,40 @@ const SAMPLE_QUERY =
   " | where isnotempty(sid) | distinct sid | project id = sid, type = 'microsoft.storage/storageaccounts')";
 
 /** What a caller may see of a connection: the full tenant id only with `fullTenantId` (admins) */
-export const connectionOption = (c: AzureConnection, opts: { fullTenantId?: boolean } = {}): AzureConnectionOption => ({
+export const connectionOption = (env: Env, c: AzureConnection, opts: { fullTenantId?: boolean } = {}): AzureConnectionOption => ({
   key: c.key,
   displayName: c.displayName,
   ...(c.tenantName ? { tenantName: c.tenantName } : {}),
   tenantIdTail: c.tenantId.slice(-4),
   ...(opts.fullTenantId ? { tenantId: c.tenantId } : {}),
   mode: c.mode,
+  credentialKind: credentialKind(env, c),
   subscriptionCount: c.subscriptions.length,
   workspaceCount: c.logAnalyticsWorkspaces.length,
   ...(lastChecks.get(c.key) ? { lastCheck: lastChecks.get(c.key)! } : {}),
 });
 
 const lastChecks = new Map<string, { at: string; status: ConnectionCheckStatus }>();
+
+/**
+ * Admin-only: the object id the token was issued to (oid — what a ClusterRoleBinding names), the advice to drop a
+ * secret, and this platform's federation issuer/subject when the deployment declares them
+ */
+function identityOf(env: Env, c: AzureConnection, armToken?: string): NonNullable<ConnectionCheckResponse["identity"]> {
+  let objectId: string | undefined;
+  if (armToken && c.mode !== "delegated") {
+    try { const oid = decodeJwt(armToken).oid; if (typeof oid === "string" && /^[0-9a-f-]{36}$/i.test(oid)) objectId = oid.toLowerCase(); } catch { /* opaque */ }
+  }
+  const kind = credentialKind(env, c);
+  const platform = kind === "platform" ? platformCredentialKind(env) : null;
+  const federation = env.AUD_PLATFORM_OIDC_ISSUER && env.AUD_PLATFORM_FEDERATION_SUBJECT ? { issuer: env.AUD_PLATFORM_OIDC_ISSUER, subject: env.AUD_PLATFORM_FEDERATION_SUBJECT } : undefined;
+  return {
+    ...(objectId ? { objectId } : {}),
+    ...(kind === "secret" || platform === "secret" ? { advice: "preferFederation" as const } : {}),
+    ...(platform ? { platformCredential: platform } : {}),
+    ...(federation && c.mode === "servicePrincipal" ? { federation } : {}),
+  };
+}
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -176,15 +198,16 @@ async function getJson<T>(f: Fetch, url: string, token: string, init?: RequestIn
  */
 export async function checkConnection(env: Env, c: AzureConnection, bearerToken: string, f: Fetch = fetch): Promise<ConnectionCheckResponse> {
   // Admin-only route: the full tenant id
-  const base = { generatedAt: new Date().toISOString(), connection: connectionOption(c, { fullTenantId: true }) };
+  const base = { generatedAt: new Date().toISOString(), connection: connectionOption(env, c, { fullTenantId: true }) };
   let arm: string;
   try {
     arm = await credentials().token(env, c, "https://management.azure.com/.default", bearerToken);
   } catch (e) {
     const code = e instanceof HttpError ? e.code : "connection_failed";
     lastChecks.set(c.key, { at: base.generatedAt, status: "failed" });
-    return { ...base, status: "failed", token: { ok: false, code }, visible: null, subscriptions: [], workspaces: [] };
+    return { ...base, status: "failed", token: { ok: false, code }, visible: null, subscriptions: [], workspaces: [], identity: identityOf(env, c) };
   }
+  const identity = identityOf(env, c, arm);
 
   let visible: ConnectionCheckResponse["visible"] = null;
   try {
@@ -272,7 +295,7 @@ export async function checkConnection(env: Env, c: AzureConnection, bearerToken:
   const status: ConnectionCheckStatus = failed ? "failed" : warned ? "warning" : "ok";
   lastChecks.set(c.key, { at: base.generatedAt, status });
   return {
-    ...base, status, token: { ok: true }, visible, subscriptions, workspaces,
+    ...base, status, token: { ok: true }, visible, subscriptions, workspaces, identity,
     permissions, readiness, resourceWarnings: [...resourceWarnings],
     workspaceSummary: { n: workspaces.length, ok: workspaces.filter((w) => w.ok).length, failed: workspaces.filter((w) => !w.ok).length },
     clusters: [...(resources?.aksCredential ?? [])].sort().slice(0, 50).map((id) => ({ id, name: maskGuids(id.split("/").pop() ?? "") })),

@@ -13,6 +13,7 @@ import { cellFrom } from "./featureCatalog.js";
 import { HUBBLE_EXEC_RULES, K8S_READ_SURFACE, POD_LOG_RULE, type ReadRule } from "./k8sReadSurface.js";
 import { hubbleExecSwitch } from "./aksAccess.js";
 import { loadKubeConfig } from "./kubernetes.js";
+import { collectAksReadiness } from "./aksReadiness.js";
 
 /** One review: true / false, null = the review itself failed */
 export type Review = { rule: string; allowed: boolean | null };
@@ -56,12 +57,15 @@ export async function checkClusterAccess(env: Env, bearerToken: string, clusterI
   const home = connection.mode === "platform" || connection.mode === "delegated";
   const hubbleOn = hubbleExecSwitch(env) && (home || connection.aks?.hubbleExec === true);
   const podNamespaces = connection.aks?.podLogNamespaces ?? (home ? [undefined] : []);
+  // Azure-side readiness first: it answers for a private cluster the platform cannot reach
+  const ready = await collectAksReadiness(env, bearerToken, clusterId).catch(() => null);
+  const extra = ready ? { readiness: ready.items, snippets: ready.snippets } : {};
   let kc: k8s.KubeConfig;
   try {
     kc = await loadKubeConfig(env, bearerToken, clusterId);
   } catch (e) {
     const code = e instanceof HttpError ? e.code : "failed";
-    return { ...base, access: ACCESS[code] ?? "failed", code, permissions: {}, missingRules: [], warnings: [] };
+    return { ...base, access: ACCESS[code] ?? "failed", code, permissions: {}, missingRules: [], warnings: [], ...extra };
   }
   const access = kc.getCurrentUser()?.token ? "entra" : "localAccount";
   const api = kc.makeApiClient(k8s.AuthorizationV1Api);
@@ -91,5 +95,5 @@ export async function checkClusterAccess(env: Env, bearerToken: string, clusterI
     review("", "pods/exec", "create", "kube-system"),
     review("*", "*", "*"),
   ]);
-  return { ...base, access, ...rollupClusterRules({ read, podLogs, hubble, over: { secrets, exec, wildcard }, hubbleOn }) };
+  return { ...base, access, ...rollupClusterRules({ read, podLogs, hubble, over: { secrets, exec, wildcard }, hubbleOn }), ...extra };
 }

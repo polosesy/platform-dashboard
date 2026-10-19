@@ -1,32 +1,28 @@
 import type { Configuration, PopupRequest } from "@azure/msal-browser";
+import type { WebRuntimeConfig } from "./runtimeConfig";
 
-const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID ?? "";
-const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID ?? "";
-const redirectUri = process.env.NEXT_PUBLIC_AZURE_AD_REDIRECT_URI ?? "http://localhost:3000";
+/** The redirect when none is configured: the origin the user opened (on-prem host, cluster host, localhost) */
+const ownOrigin = () => (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 
-/** Sign-in is possible only when the SPA app registration is configured. */
-export const msalConfigured = clientId.length > 0;
+/** MSAL settings from the page's runtime config (lib/runtimeConfig.ts) */
+export function msalConfigFor(cfg: WebRuntimeConfig): Configuration {
+  const redirectUri = cfg.redirectUri ?? ownOrigin();
+  return {
+    auth: {
+      clientId: cfg.clientId,
+      authority: cfg.tenantId ? `https://login.microsoftonline.com/${cfg.tenantId}` : "https://login.microsoftonline.com/common",
+      redirectUri,
+      postLogoutRedirectUri: redirectUri,
+    },
+    cache: {
+      cacheLocation: "sessionStorage",
+    },
+  };
+}
 
-export const msalConfig: Configuration = {
-  auth: {
-    clientId,
-    authority: tenantId ? `https://login.microsoftonline.com/${tenantId}` : "https://login.microsoftonline.com/common",
-    redirectUri,
-    postLogoutRedirectUri: redirectUri,
-  },
-  cache: {
-    cacheLocation: "sessionStorage",
-  },
-};
-
-export const loginRequest: PopupRequest = {
-  scopes: [
-    "openid",
-    "profile",
-    "email",
-    ...(process.env.NEXT_PUBLIC_AZURE_AD_API_SCOPE ? [process.env.NEXT_PUBLIC_AZURE_AD_API_SCOPE] : []),
-  ],
-};
+export const loginRequestFor = (cfg: WebRuntimeConfig): PopupRequest => ({
+  scopes: ["openid", "profile", "email", ...(cfg.apiScope ? [cfg.apiScope] : [])],
+});
 
 /**
  * True when this window is the MSAL popup that Entra redirected back to (auth response in the URL).

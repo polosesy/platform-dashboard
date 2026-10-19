@@ -3,14 +3,16 @@
 //
 //   platform / lighthouse → the platform identity: AZURE_AD_CLIENT_ID in the home tenant, certificate
 //                           (AUD_PLATFORM_CERT_PATH) or AZURE_AD_CLIENT_SECRET — one pooled credential
-//   servicePrincipal      → the connection's own app in its own tenant, secret from the env var it names or a certificate
+//   servicePrincipal      → the connection's own app in its own tenant, secret from the env var it names, a certificate,
+//                           or workload identity federation (our pod's service-account token as the client assertion)
 //   delegated             → the signed-in user's OBO token (oboTokenPool) — no user, no token
 //
 // A failing connection never falls back to another connection, credential or mode.
 import { decodeJwt } from "jose";
-import { ClientCertificateCredential, ClientSecretCredential, type TokenCredential } from "@azure/identity";
+import { readFile } from "node:fs/promises";
+import { ClientAssertionCredential, ClientCertificateCredential, ClientSecretCredential, type TokenCredential } from "@azure/identity";
 import type { Env } from "../env.js";
-import { credentialGroup, homeConnection, type AzureConnection } from "./connectionRegistry.js";
+import { credentialGroup, federatedTokenFile, homeConnection, platformClientId, platformCredentialKind, type AzureConnection } from "./connectionRegistry.js";
 import { getOBOCredential } from "./oboTokenPool.js";
 import { mapOboError } from "./oboErrors.js";
 import { HttpError, maskGuids } from "./requestParams.js";
@@ -20,6 +22,9 @@ const TOKEN_TIMEOUT_MS = 10_000;
 export type CredentialDeps = {
   makeSecret: (tenantId: string, clientId: string, secret: string) => TokenCredential;
   makeCert: (tenantId: string, clientId: string, certificatePath: string) => TokenCredential;
+  /** Federation: the assertion (a service-account JWT) is fetched on every token request */
+  makeAssertion: (tenantId: string, clientId: string, getAssertion: () => Promise<string>) => TokenCredential;
+  readFile: (path: string) => Promise<string>;
   oboCredential: (env: Env, bearerToken: string) => TokenCredential;
   getEnv: (name: string) => string | undefined;
 };
@@ -27,6 +32,8 @@ export type CredentialDeps = {
 const defaultDeps: CredentialDeps = {
   makeSecret: (t, c, s) => new ClientSecretCredential(t, c, s),
   makeCert: (t, c, path) => new ClientCertificateCredential(t, c, { certificatePath: path }),
+  makeAssertion: (t, c, get) => new ClientAssertionCredential(t, c, get),
+  readFile: (path) => readFile(path, "utf8"),
   oboCredential: getOBOCredential,
   getEnv: (name) => process.env[name],
 };
@@ -42,6 +49,9 @@ export function mapCredentialError(e: unknown): HttpError {
     case "700016": return new HttpError(403, "connection_not_consented", "The platform app is not consented in the connection's tenant");
     case "7000215": case "7000222": case "700027": return new HttpError(503, "connection_credential_invalid", "The connection's secret or certificate is invalid or expired");
     case "90002": case "50020": return new HttpError(502, "connection_tenant_mismatch", "The connection's tenant cannot issue this token");
+    // Federation: the app has no federated credential matching our token (issuer / subject) — see Azure Pipelines'
+    // workload identity troubleshooting table; a credential just created can also fail for a few minutes (cache)
+    case "70021": case "700211": case "700213": return new HttpError(503, "connection_federation_mismatch", "The app's federated credential does not match this platform's issuer or subject");
   }
   if (/timed out/i.test(raw)) return new HttpError(504, "connection_timeout", "Token request timed out");
   return new HttpError(502, "connection_failed", maskGuids(raw.replace(/Trace ID:.*$/is, "")).slice(0, 200));
@@ -59,25 +69,50 @@ async function withTimeout<T>(p: Promise<T>): Promise<T> {
 export function createCredentialProvider(deps: CredentialDeps = defaultDeps) {
   const pool = new Map<string, TokenCredential>();
 
+  /** A projected service-account token as the client assertion — read on every request (the kubelet rotates it) */
+  function fileAssertion(file: string, who: string): () => Promise<string> {
+    return async () => {
+      try {
+        const jwt = (await deps.readFile(file)).trim();
+        if (!jwt) throw new Error("empty");
+        return jwt;
+      } catch {
+        // Names the variable, never the path
+        throw new HttpError(503, "connection_unconfigured", `The federated token file (AUD_FEDERATED_TOKEN_FILE) cannot be read for ${who}`);
+      }
+    };
+  }
+
   function platformCredential(env: Env): TokenCredential {
     const hit = pool.get("platform");
     if (hit) return hit;
-    const tenant = env.AZURE_AD_TENANT_ID, client = env.AZURE_AD_CLIENT_ID;
-    if (!tenant || !client) throw new HttpError(503, "connection_unconfigured", "AZURE_AD_TENANT_ID / AZURE_AD_CLIENT_ID are not set");
+    const kind = platformCredentialKind(env);
+    const tenant = env.AZURE_AD_TENANT_ID, client = platformClientId(env);
+    if (!tenant || !client) throw new HttpError(503, "connection_unconfigured", kind === "workloadIdentity" ? "AZURE_AD_TENANT_ID / AUD_PLATFORM_CLIENT_ID (managed identity) are not set" : "AZURE_AD_TENANT_ID / AZURE_AD_CLIENT_ID are not set");
     let cred: TokenCredential;
-    if (env.AUD_PLATFORM_CERT_PATH) cred = deps.makeCert(tenant, client, env.AUD_PLATFORM_CERT_PATH);
-    else if (env.AZURE_AD_CLIENT_SECRET) cred = deps.makeSecret(tenant, client, env.AZURE_AD_CLIENT_SECRET);
-    else throw new HttpError(503, "connection_unconfigured", "Set AUD_PLATFORM_CERT_PATH or AZURE_AD_CLIENT_SECRET");
+    if (kind === "certificate" && env.AUD_PLATFORM_CERT_PATH) cred = deps.makeCert(tenant, client, env.AUD_PLATFORM_CERT_PATH);
+    else if (kind === "secret" && env.AZURE_AD_CLIENT_SECRET) cred = deps.makeSecret(tenant, client, env.AZURE_AD_CLIENT_SECRET);
+    else if (kind === "workloadIdentity" && federatedTokenFile(env)) {
+      // A user-assigned managed identity through workload identity: our pod's token is the assertion for the MI's
+      // client id in the home tenant — no secret anywhere (the MI's federated credential trusts this service account)
+      cred = deps.makeAssertion(tenant, client, fileAssertion(federatedTokenFile(env)!, "the platform identity"));
+    } else throw new HttpError(503, "connection_unconfigured", "Set AUD_PLATFORM_CERT_PATH, AZURE_AD_CLIENT_SECRET or AUD_PLATFORM_CREDENTIAL=workloadIdentity");
     pool.set("platform", cred);
     return cred;
   }
 
-  function servicePrincipalCredential(c: AzureConnection): TokenCredential {
+  function servicePrincipalCredential(env: Env, c: AzureConnection): TokenCredential {
     const id = `sp:${c.key}`;
     const hit = pool.get(id);
     if (hit) return hit;
     let cred: TokenCredential;
-    if (c.certificatePath) cred = deps.makeCert(c.tenantId, c.clientId!, c.certificatePath);
+    if (c.federation) {
+      const file = federatedTokenFile(env);
+      if (!file) throw new HttpError(503, "connection_unconfigured", `AUD_FEDERATED_TOKEN_FILE is not set for connection "${c.key}"`);
+      // The kubelet rotates the projected token: read it on every request. The connection's own tenant and app —
+      // never the webhook's AZURE_CLIENT_ID / AZURE_TENANT_ID (those name our own identity, not the customer's app)
+      cred = deps.makeAssertion(c.tenantId, c.clientId!, fileAssertion(file, `connection "${c.key}"`));
+    } else if (c.certificatePath) cred = deps.makeCert(c.tenantId, c.clientId!, c.certificatePath);
     else {
       const secret = deps.getEnv(c.secretEnv!);
       // Names the variable, never a value
@@ -95,7 +130,7 @@ export function createCredentialProvider(deps: CredentialDeps = defaultDeps) {
       if (!bearerToken) throw signinRequiredError();
       return deps.oboCredential(env, bearerToken);
     }
-    return group === "platform" ? platformCredential(env) : servicePrincipalCredential(c);
+    return group === "platform" ? platformCredential(env) : servicePrincipalCredential(env, c);
   }
 
   /** The tenant the token must come from: home for the platform identity, the connection's tenant for its own SP */

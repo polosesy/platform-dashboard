@@ -1,6 +1,7 @@
 // Translation table (pure data — importable by tests and non-React code).
 import { OPS_T } from "./i18nOps";
 import { PLATFORM_T } from "./i18nPlatform";
+import { AZTYPE_T } from "./i18nAzureTypes";
 import { POLICIES_T } from "./i18nPolicies";
 
 export type Locale = "ko" | "en";
@@ -223,7 +224,17 @@ const CORE: Translations = {
   "health.heatmap.scopeAll": { ko: "전체 ({n})", en: "All ({n})" },
   "health.heatmap.scopeOption": { ko: "{label} ({n})", en: "{label} ({n})" },
   "health.heatmap.checksTitle": { ko: "Azure가 점검하는 항목 (Microsoft Learn):", en: "What Azure checks (Microsoft Learn):" },
-  "health.heatmap.stateCounts": { ko: "사용 불가 {unavailable}, 사용자 시작 {user}, 성능 저하 {degraded}, 알 수 없음 {unknown}, 사용 가능 {available}", en: "Unavailable {unavailable}, user-initiated {user}, degraded {degraded}, unknown {unknown}, available {available}" },
+  "health.heatmap.stateCounts": { ko: "사용 불가 {unavailable}, 사용자 시작 {user}, 성능 저하 {degraded}, 알 수 없음 {unknown}, 지원 목록 외 {unlisted}, 사용 가능 {available}", en: "Unavailable {unavailable}, user-initiated {user}, degraded {degraded}, unknown {unknown}, not on the supported list {unlisted}, available {available}" },
+  "health.unlisted": { ko: "지원 목록 외 유형", en: "Type not on the supported list" },
+  "health.unlisted.sub": { ko: "그중 지원 목록 외 {n}", en: "{n} on unlisted types" },
+  "health.unlisted.hint": { ko: "Microsoft의 Resource Health 지원 유형 목록(기준일 {date})에 없는 유형의 '알 수 없음' — 예: 메트릭 경고 규칙. 상태를 알 수 없는 문제가 아니라 Azure가 이 유형의 상태를 판정하지 않는 경우라 '–'로 표시. 개수는 Azure의 '알 수 없음'에 그대로 포함", en: "Unknown on a type not on Microsoft's Resource Health supported list (as of {date}) — e.g. metric alert rules. Not a missing signal but a type Azure does not assess, so shown as '–'. Still counted in Azure's Unknown" },
+  "health.typeName.source": { ko: "Azure Portal 서비스 이름 (직접 정리한 표)", en: "Azure portal service name (curated table)" },
+  "health.typeName.arm": { ko: "ARM 유형: {type}", en: "ARM type: {type}" },
+  "health.selected.title": { ko: "선택한 리소스", en: "Selected resource" },
+  "health.selected.pill": { ko: "선택됨", en: "Selected" },
+  "health.selected.clear": { ko: "선택 해제 (Esc)", en: "Clear (Esc)" },
+  "health.selected.live": { ko: "{name} 선택됨 — {state}", en: "{name} selected — {state}" },
+  "health.selected.hidden": { ko: "현재 목록 필터에 가려져 아래 목록에는 없습니다", en: "Hidden from the list below by the current filter" },
   "health.userInitiated": { ko: "사용자 시작", en: "User-initiated" },
   "health.userInitiated.sub": { ko: "그중 사용자 시작 {n}", en: "{n} user-initiated" },
   "health.userInitiated.hint": { ko: "Azure가 사유를 사용자 시작(Customer/User Initiated)으로 보고한 사용 불가 — 예: 사용자가 VM을 중지·할당 해제 (Microsoft Learn: 플랫폼 외 이벤트). 상태와 개수는 Azure 값 그대로", en: "Unavailable with Azure's reason type Customer/User Initiated — e.g. a user stopped and deallocated a VM (Microsoft Learn: non-platform event). State and counts are Azure's" },
@@ -816,7 +827,7 @@ const CORE: Translations = {
 };
 
 /** Every module, in merge order — tests check that no key appears twice */
-export const MODULES: Record<string, Translations> = { core: CORE, policies: POLICIES_T, ops: OPS_T, platform: PLATFORM_T };
+export const MODULES: Record<string, Translations> = { core: CORE, policies: POLICIES_T, ops: OPS_T, platform: PLATFORM_T, aztype: AZTYPE_T };
 export const T: Translations = Object.assign({}, ...Object.values(MODULES));
 
 /** True when `key` has a non-empty value in every locale. */

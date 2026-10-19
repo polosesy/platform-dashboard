@@ -71,6 +71,29 @@ test("type labels keep the namespace (KeyVault vs RecoveryServices vaults); user
   assert.equal(H.stateTone("Unavailable", true).color, "danger");
   assert.ok(H.stateTone("Unavailable", true).alpha < H.stateTone("Unavailable").alpha);
   const g = H.groupResources([stopped, r("vm-x", "Unavailable", VM, "rg")], "type")[0]!;
-  assert.deepEqual(H.groupStateCounts(g), { unavailable: 1, user: 1, degraded: 0, unknown: 0, available: 0 });
+  assert.deepEqual(H.groupStateCounts(g), { unavailable: 1, user: 1, degraded: 0, unknown: 0, unlisted: 0, available: 0 });
   assert.deepEqual(H.scopeOptions(H.groupResources(list, "type")).map((o) => o.label), ["Sql · servers/databases", "Compute · virtualMachines", "KeyVault · vaults"]);
+});
+
+test("Unknown on a type not on the supported list is '–' (hatched), after Available; Azure's counts unchanged", () => {
+  const MA = "Microsoft.Insights/metricAlerts";
+  const unlisted = new Set([MA.toLowerCase()]);
+  const alert = r("alert-1", "Unknown", MA, "rg-mon");
+  const lb = r("lb-1", "Unknown", "Microsoft.Network/loadBalancers", "rg-mon");
+  assert.ok(H.isUnlistedUnknown(alert, unlisted));
+  assert.ok(!H.isUnlistedUnknown(lb, unlisted), "Unknown on a listed type stays '?'");
+  assert.ok(!H.isUnlistedUnknown({ ...alert, availabilityState: "Unavailable" }, unlisted), "another state on an unlisted type is Azure's value");
+  const tone = H.stateTone("Unknown", false, true);
+  assert.deepEqual([tone.glyph, tone.hatched, tone.dashed], ["–", true, false]);
+  assert.ok(tone.color !== "danger" && tone.color !== "warning");
+  const ok = r("alert-0", "Available", MA, "rg-mon");
+  const g = H.groupResources([alert, ok, lb], "rg", { unlisted })[0]!;
+  assert.deepEqual(g.resources.map((x) => x.resourceName), ["lb-1", "alert-0", "alert-1"], "after Available");
+  assert.equal(g.counts.Unknown, 2, "Azure's Unknown count keeps both");
+  assert.deepEqual(H.groupStateCounts(g), { unavailable: 0, user: 0, degraded: 0, unknown: 1, unlisted: 1, available: 1 });
+  // A group with only unlisted-Unknown goes last, even after an all-Available group
+  const groups = H.groupResources([alert, r("vm-1", "Available", VM, "rg-app")], "type", { unlisted });
+  assert.equal(groups.at(-1)!.key, MA.toLowerCase());
+  // No coverage known: nothing changes
+  assert.deepEqual(H.groupResources(list, "type").map((x) => x.key), H.groupResources(list, "type", { unlisted: new Set() }).map((x) => x.key));
 });

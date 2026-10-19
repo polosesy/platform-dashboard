@@ -6,7 +6,9 @@
 //   lighthouse        a customer tenant delegated to the home tenant with Azure Lighthouse — the home credential reads it
 //                     (the delegation names the platform's service principal)
 //   servicePrincipal  a service principal the customer created in their tenant; the file names the env var holding
-//                     its secret (`secretEnv`) or an absolute certificate path — never the secret itself
+//                     its secret (`secretEnv`), an absolute certificate path, or `federation` — no secret at all: the
+//                     customer's app trusts this platform's Kubernetes service account (workload identity federation,
+//                     a federated credential with our cluster's OIDC issuer + our SA as subject)
 //   delegated         each signed-in user's own Azure permissions (OBO) — opt-in; a request never falls back to another mode
 //
 // The file holds IDs, names and references only. Unknown keys (clientSecret, password …) and PEM text are refused.
@@ -38,6 +40,11 @@ const ConnectionSchema = z.object({
   secretEnv: z.string().regex(/^AUD_CONN_[A-Z0-9_]+_SECRET$/, "an env var name like AUD_CONN_CUSTA_SECRET").optional(),
   /** servicePrincipal only: absolute path of a PEM (certificate + private key) */
   certificatePath: z.string().refine((p) => isAbsolute(p), "must be an absolute path").optional(),
+  /**
+   * servicePrincipal only: no secret — the app's federated credential trusts this platform's Kubernetes service
+   * account. The token file comes from AUD_FEDERATED_TOKEN_FILE / AZURE_FEDERATED_TOKEN_FILE, never from this file.
+   */
+  federation: z.object({ kind: z.literal("kubernetes") }).strict().optional(),
   /** Platform roles that may read through this connection (default: all) */
   roles: z.array(z.enum(ROLES)).min(1).optional(),
   /** Log Analytics workspaces (customer id GUIDs) read through this connection */
@@ -103,8 +110,9 @@ export function parseConnections(doc: unknown, env: Env): AzureConnection[] {
     if ((c.mode === "platform" || c.mode === "delegated") && c.tenantId !== homeTid) fail(`"${c.key}": mode ${c.mode} is for the home tenant only`);
     const sp = c.mode === "servicePrincipal";
     if (sp && !c.clientId) fail(`"${c.key}": servicePrincipal needs clientId`);
-    if (sp && !!c.secretEnv === !!c.certificatePath) fail(`"${c.key}": servicePrincipal needs exactly one of secretEnv or certificatePath`);
-    if (!sp && (c.clientId || c.secretEnv || c.certificatePath)) fail(`"${c.key}": clientId / secretEnv / certificatePath are for servicePrincipal only`);
+    if (sp && [c.secretEnv, c.certificatePath, c.federation].filter(Boolean).length !== 1) fail(`"${c.key}": servicePrincipal needs exactly one of secretEnv, certificatePath or federation`);
+    if (!sp && (c.clientId || c.secretEnv || c.certificatePath || c.federation)) fail(`"${c.key}": clientId / secretEnv / certificatePath / federation are for servicePrincipal only`);
+    if (c.federation && !federatedTokenFile(env)) fail(`"${c.key}": federation needs AUD_FEDERATED_TOKEN_FILE (or AZURE_FEDERATED_TOKEN_FILE from the workload identity webhook)`);
     for (const s of c.subscriptions) {
       if (subs.has(s)) fail(`a subscription is listed under "${subs.get(s)}" and "${c.key}"`);
       subs.set(s, c.key);
@@ -180,6 +188,34 @@ export function connectionForWorkspace(env: Env, workspaceId: string): AzureConn
  * How a connection's token is obtained. Lighthouse follows home (the delegation is to the home identity):
  * "platform" = the platform credential · "delegated" = the user's OBO · "sp:<key>" = that connection's own principal
  */
+/** The projected service-account token file for federation — env only */
+export const federatedTokenFile = (env: Env): string | undefined => env.AUD_FEDERATED_TOKEN_FILE ?? env.AZURE_FEDERATED_TOKEN_FILE;
+
+/**
+ * The platform identity's credential: an explicit AUD_PLATFORM_CREDENTIAL, else certificate > secret > workload
+ * identity (a token file) — null when nothing is configured
+ */
+export type PlatformCredentialKind = "certificate" | "secret" | "workloadIdentity";
+export function platformCredentialKind(env: Env): PlatformCredentialKind | null {
+  if (env.AUD_PLATFORM_CREDENTIAL) return env.AUD_PLATFORM_CREDENTIAL;
+  if (env.AUD_PLATFORM_CERT_PATH) return "certificate";
+  if (env.AZURE_AD_CLIENT_SECRET) return "secret";
+  if (federatedTokenFile(env)) return "workloadIdentity";
+  return null;
+}
+/** The client id the platform credential signs in as — workload identity: the managed identity, never the SSO app */
+export const platformClientId = (env: Env): string | undefined =>
+  platformCredentialKind(env) === "workloadIdentity" ? env.AUD_PLATFORM_CLIENT_ID ?? env.AZURE_CLIENT_ID : env.AUD_PLATFORM_CLIENT_ID ?? env.AZURE_AD_CLIENT_ID;
+
+export type CredentialKind = "platform" | "delegated" | "secret" | "certificate" | "federatedKubernetes";
+/** How a connection proves who it is — shown by the connection check (federation = no secret anywhere) */
+export function credentialKind(env: Env, c: AzureConnection): CredentialKind {
+  const group = credentialGroup(env, c);
+  if (group === "delegated") return "delegated";
+  if (group === "platform") return "platform";
+  return c.federation ? "federatedKubernetes" : c.certificatePath ? "certificate" : "secret";
+}
+
 export function credentialGroup(env: Env, c: AzureConnection): "platform" | "delegated" | `sp:${string}` {
   if (c.mode === "servicePrincipal") return `sp:${c.key}`;
   if (c.mode === "lighthouse") return homeConnection(env).mode === "delegated" ? "delegated" : "platform";

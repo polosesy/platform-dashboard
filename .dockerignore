@@ -1,0 +1,18 @@
+# Never in the image or the build context: secrets, tenant data, local probes, build outputs
+.git
+**/node_modules
+**/.next
+**/dist
+*.tsbuildinfo
+.env
+.env.*
+config/
+deploy/docker/config/
+deploy/docker/*.env
+.claude/
+apps/api/.probe/
+docs/
+SESSION_SUMMARY.md
+skill.md
+**/*.pem
+**/*.pfx

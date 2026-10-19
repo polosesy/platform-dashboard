@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HealthCoverage, HealthSummary, ResourceHealthStatus } from "@aud/types";
 import { Panel } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
-import { groupKey, isUserInitiated, typeLabel, type HeatmapGroupBy } from "@/lib/healthHeatmap";
+import { groupKey, isUnlistedUnknown, isUserInitiated, type HeatmapGroupBy } from "@/lib/healthHeatmap";
+import { armType, typeName } from "@/lib/azureTypes";
 import { HealthHeatmap, type HeatmapGroupFilter } from "./HealthHeatmap";
 import styles from "./styles.module.css";
 
@@ -57,6 +58,18 @@ export function InstanceHealthPanel({
   const [groupFilter, setGroupFilter] = useState<HeatmapGroupFilter | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [coverageOpen, setCoverageOpen] = useState(false);
+  // Bumped on every tile click: the selected row replays its flash even when the same tile is clicked again
+  const [flashSeq, setFlashSeq] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Types not on Microsoft's supported list — only when coverage was read whole (else every Unknown stays "?")
+  const unlisted = useMemo<ReadonlySet<string>>(
+    () => new Set(coverage && !coverage.gaps.length ? coverage.types.filter((x) => x.bucket === "statusUnlisted").map((x) => x.type) : []),
+    [coverage],
+  );
+  const unlistedCount = useMemo(() => (data?.resources ?? []).filter((r) => isUnlistedUnknown(r, unlisted)).length, [data, unlisted]);
+  const selected = selectedId ? data?.resources.find((x) => x.resourceId === selectedId) ?? null : null;
 
   const userCount = useMemo(() => (data?.resources ?? []).filter(isUserInitiated).length, [data]);
   const filtered = useMemo(() => {
@@ -75,12 +88,24 @@ export function InstanceHealthPanel({
     if (excludeUser && isUserInitiated(r)) setExcludeUser(false);
     if (groupFilter && groupKey(r, groupFilter.by) !== groupFilter.key) setGroupFilter(null);
     setSelectedId(resourceId);
+    setFlashSeq((n) => n + 1);
   };
+  // The row is centred inside the list's own scroll box (the page does not jump); the pinned card only comes into view
   useEffect(() => {
     if (!selectedId) return;
-    const row = document.querySelector<HTMLElement>(`[data-rid="${CSS.escape(selectedId)}"]`);
-    row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [selectedId, filtered]);
+    const box = listRef.current;
+    const row = box?.querySelector<HTMLElement>(`[data-rid="${CSS.escape(selectedId)}"]`);
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (box && row) box.scrollTo({ top: row.offsetTop - (box.clientHeight - row.offsetHeight) / 2, behavior: reduced ? "auto" : "smooth" });
+    cardRef.current?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  }, [selectedId, flashSeq]);
+  // Esc clears the selection
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelectedId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
 
   const total = data ? data.available + data.degraded + data.unavailable + data.unknown : 0;
   const counts: Record<HealthState, number> = { Available: data?.available ?? 0, Degraded: data?.degraded ?? 0, Unavailable: data?.unavailable ?? 0, Unknown: data?.unknown ?? 0 };
@@ -190,7 +215,9 @@ export function InstanceHealthPanel({
               {s === "Unavailable" && userCount > 0 ? (
                 <div className={styles.statSub} title={t("health.userInitiated.hint")}>{t("health.userInitiated.sub", { n: userCount })}</div>
               ) : null}
-              {s === "Unknown" && counts.Unknown > 0 ? (
+              {s === "Unknown" && unlistedCount > 0 ? (
+                <div className={styles.statSub} title={t("health.unlisted.hint", { date: coverage?.doc.date ?? "" })}>{t("health.unlisted.sub", { n: unlistedCount })}</div>
+              ) : s === "Unknown" && counts.Unknown > 0 ? (
                 <div className={styles.statSub} title={t("health.unknown.hint")}>{t("health.unknown.sub")}</div>
               ) : null}
             </div>
@@ -208,6 +235,8 @@ export function InstanceHealthPanel({
           selectedId={selectedId}
           onSelect={selectTile}
           checks={coverage?.checks ?? {}}
+          unlisted={unlisted}
+          unlistedDate={coverage?.doc.date}
           footer={coverageFooter}
         />
       ) : null}
@@ -235,22 +264,57 @@ export function InstanceHealthPanel({
             ) : null}
           </div>
         </div>
-        <div className={styles.tableBody}>
+        {/* Selected from the heatmap: pinned above the list (outside its scroll box), Azure's fields only */}
+        <div className={styles.srOnly} aria-live="polite">
+          {selected ? t("health.selected.live", { name: selected.resourceName, state: t(`health.state.${selected.availabilityState}`) }) : ""}
+        </div>
+        {selected ? (
+          <div ref={cardRef} className={styles.selectedCard}>
+            <div className={styles.selectedCardHead}>
+              <span className={styles.selectedPill}>{t("health.selected.title")}</span>
+              <strong className={styles.selectedName}>{selected.resourceName}</strong>
+              <span className={`${styles.resState} ${STATE_STYLE[selected.availabilityState]}`}>{t(`health.state.${selected.availabilityState}`)}</span>
+              {isUserInitiated(selected) ? <span className={styles.reasonBadge}>{t("health.userInitiated")}</span> : null}
+              {isUnlistedUnknown(selected, unlisted) ? <span className={styles.reasonBadge}>{t("health.unlisted")}</span> : null}
+              <button type="button" className={styles.linkBtn} onClick={() => setSelectedId(null)}>{t("health.selected.clear")}</button>
+            </div>
+            <div className={styles.selectedMeta}>
+              <span title={armType(selected.resourceType)}>{typeName(selected.resourceType, t)}</span>
+              <span>{selected.resourceGroup}</span>
+              {selected.location ? <span>{selected.location}</span> : null}
+              {selected.occurredTime && selected.availabilityState !== "Available" ? <span>{t("health.occurred")}: {new Date(selected.occurredTime).toLocaleString(dateLocale(locale))}</span> : null}
+            </div>
+            {selected.summary ? <div className={styles.selectedSummary}><span className={styles.resSummaryLabel}>{t("health.azureSummary")}</span> {selected.summary}</div> : null}
+            {!filtered.some((r) => r.resourceId === selected.resourceId) ? <div className={styles.statSub}>{t("health.selected.hidden")}</div> : null}
+          </div>
+        ) : null}
+        <div ref={listRef} className={styles.tableBody}>
           {filtered.length > 0 ? (
             filtered.map((r) => {
               const user = isUserInitiated(r);
+              const off = isUnlistedUnknown(r, unlisted);
+              const isSel = selectedId === r.resourceId;
               return (
-                <div key={r.resourceId} data-rid={r.resourceId} className={`${styles.resourceRow} ${selectedId === r.resourceId ? styles.resourceRowSelected : ""}`}>
-                  <div className={styles.resDot} style={{ background: user ? rgba("danger", 0.4) : STATE_COLORS[r.availabilityState] }} />
+                <div
+                  key={isSel ? `${r.resourceId}#${flashSeq}` : r.resourceId}
+                  data-rid={r.resourceId}
+                  aria-current={isSel ? "true" : undefined}
+                  className={`${styles.resourceRow} ${isSel ? styles.resourceRowSelected : ""}`}
+                >
+                  <div className={styles.resDot} style={{ background: user ? rgba("danger", 0.4) : off ? rgba("ink", 0.12) : STATE_COLORS[r.availabilityState] }} />
                   <div className={styles.resInfo}>
-                    <div className={styles.resName}>{r.resourceName}</div>
-                    <div className={styles.resType} title={r.resourceType}>{typeLabel(r.resourceType)}</div>
+                    <div className={styles.resName}>
+                      {r.resourceName}
+                      {isSel ? <span className={styles.selectedPill}>{t("health.selected.pill")}</span> : null}
+                    </div>
+                    <div className={styles.resType} title={armType(r.resourceType)}>{typeName(r.resourceType, t)}</div>
                     {r.location && <div className={styles.resLocation}>{r.location}</div>}
                   </div>
                   <div className={styles.resGroup}>{r.resourceGroup}</div>
                   <div className={styles.resRight}>
                     <div className={`${styles.resState} ${STATE_STYLE[r.availabilityState]}`}>{t(`health.state.${r.availabilityState}`)}</div>
-                    {r.reasonType && r.availabilityState !== "Available" && (
+                    {off ? <div className={styles.reasonBadge}>{t("health.unlisted")}</div> : null}
+                  {r.reasonType && r.availabilityState !== "Available" && !off && (
                       <div className={styles.reasonBadge} style={{ color: REASON_TYPE_STYLE[r.reasonType] ?? "var(--muted)" }}>
                         {user ? t("health.userInitiated") : r.reasonType}
                         {r.reasonChronicity ? ` · ${r.reasonChronicity}` : ""}
@@ -287,7 +351,7 @@ export function InstanceHealthPanel({
             <tbody>
               {coverage.types.map((x) => (
                 <tr key={x.type}>
-                  <td title={x.type}>{typeLabel(x.type)}</td>
+                  <td title={armType(x.type)}>{typeName(x.type, t)}</td>
                   <td className={styles.coverageNum}>{x.count}</td>
                   <td><span className={`${styles.coverageBucket} ${x.bucket === "noStatusListed" ? styles.coverageBucketListed : ""}`}>{t(`health.coverage.bucket.${x.bucket}`)}</span></td>
                 </tr>

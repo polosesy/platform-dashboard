@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { loadEnv } from "../src/env.js";
-import { connectionForSubscription, credentialGroup, getConnections, parseConnections, connectionsPath } from "../src/infra/connectionRegistry.js";
+import { connectionForSubscription, credentialGroup, credentialKind, getConnections, parseConnections, connectionsPath } from "../src/infra/connectionRegistry.js";
 import { createCredentialProvider, mapCredentialError, setCredentialProviderForTests } from "../src/infra/connectionCredentials.js";
 import { callerOf, platformRole, accessibleConnections } from "../src/infra/platformAccess.js";
 import { clearConnectionTokens, getArmFetcherAuto, getLogAnalyticsFetcherAuto } from "../src/infra/azureClientFactory.js";
@@ -80,13 +80,13 @@ test("tenant name is declared (never a GUID); the directory id leaves the API as
   assert.throws(p(home, { ...lh, tenantName: CUST }), /a name, not an id/);
   assert.throws(p(home, { ...lh, tenantName: "" }));
   const [h, a] = parseConnections(doc(home, { ...lh, tenantName: "Contoso Ltd" }), env());
-  const viewer = connectionOption(a!);
+  const viewer = connectionOption(env(), a!);
   assert.equal(viewer.tenantName, "Contoso Ltd");
   assert.equal(viewer.tenantIdTail, CUST.slice(-4));
   assert.equal(viewer.tenantId, undefined);
-  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-/i.test(JSON.stringify([connectionOption(h!), viewer])), "no full GUID for non-admins");
-  assert.equal(connectionOption(a!, { fullTenantId: true }).tenantId, CUST);
-  assert.equal(connectionOption(h!).tenantName, undefined, "no name declared: none shown");
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-/i.test(JSON.stringify([connectionOption(env(), h!), viewer])), "no full GUID for non-admins");
+  assert.equal(connectionOption(env(), a!, { fullTenantId: true }).tenantId, CUST);
+  assert.equal(connectionOption(env(), h!).tenantName, undefined, "no name declared: none shown");
 });
 
 // ── roles ──
@@ -109,11 +109,46 @@ function fake(calls: string[], secrets: Record<string, string> = {}) {
   setCredentialProviderForTests(createCredentialProvider({
     makeSecret: (t, c) => cred(`secret:${c}`, t),
     makeCert: (t, c) => cred(`cert:${c}`, t),
+    makeAssertion: (t, c, get) => ({ getToken: async () => { calls.push(`assertion:${c}:${await get()}`); return { token: jwt({ tid: t }), expiresOnTimestamp: Date.now() + 3600_000 }; } }),
+    readFile: async (p) => { if (!(p in files)) throw new Error("ENOENT"); return files[p]!; },
     oboCredential: () => cred("obo", HOME),
     getEnv: (n) => secrets[n],
   }));
   clearConnectionTokens();
 }
+/** Federation token files the fake credential provider can read (path → content) */
+const files: Record<string, string> = {};
+
+test("federation: no secret anywhere — the connection names no path, the env does; exactly one credential kind", () => {
+  const p = (e: Record<string, string>, ...c: unknown[]) => () => parseConnections(doc(...c), env(e));
+  const fed = { ...sp, secretEnv: undefined, federation: { kind: "kubernetes" } };
+  assert.throws(p({}, home, fed), /AUD_FEDERATED_TOKEN_FILE/, "no token file: refused at start");
+  assert.throws(p({ AUD_FEDERATED_TOKEN_FILE: "/var/run/secrets/azure/tokens/azure-identity-token" }, home, { ...fed, secretEnv: "AUD_CONN_CUSTB_SECRET" }), /exactly one of/);
+  assert.throws(p({ AUD_FEDERATED_TOKEN_FILE: "/t" }, home, { ...fed, federation: { kind: "kubernetes", tokenFile: "/etc/x" } }), /Unrecognized key/, "no path in the file");
+  assert.throws(p({ AUD_FEDERATED_TOKEN_FILE: "/t" }, home, { ...lh, federation: { kind: "kubernetes" } }), /servicePrincipal only/);
+  assert.throws(() => env({ AUD_FEDERATED_TOKEN_FILE: "tokens/azure-identity-token" }), /absolute/);
+  const e = env({ AZURE_FEDERATED_TOKEN_FILE: "/var/run/secrets/azure/tokens/azure-identity-token" });
+  const list = parseConnections(doc(home, lh, sp, { ...fed, key: "custc", tenantId: "77777777-7777-7777-7777-777777777777", subscriptions: [], logAnalyticsWorkspaces: [] }), e);
+  assert.deepEqual(list.map((c) => credentialKind(e, c)), ["platform", "platform", "secret", "federatedKubernetes"]);
+});
+
+test("federation: the service-account token is read on every request and used as the assertion of the connection's own app", async () => {
+  const calls: string[] = [];
+  const TOKEN = "/var/run/secrets/azure/tokens/azure-identity-token";
+  fake(calls);
+  const provider = (await import("../src/infra/connectionCredentials.js")).credentials();
+  const e = env({ AUD_FEDERATED_TOKEN_FILE: TOKEN });
+  const c = parseConnections(doc(home, { ...sp, secretEnv: undefined, federation: { kind: "kubernetes" } }), e)[1]!;
+  files[TOKEN] = "sa-token-1\n";
+  await provider.token(e, c, "https://management.azure.com/.default");
+  files[TOKEN] = "sa-token-2";
+  await provider.token(e, c, "https://management.azure.com/.default");
+  assert.deepEqual(calls, [`assertion:${APP}:sa-token-1`, `assertion:${APP}:sa-token-2`], "rotated token picked up; the customer's app id, not ours");
+  delete files[TOKEN];
+  await assert.rejects(provider.token(e, c, "https://management.azure.com/.default"), (x: { code?: string; message: string }) => x.code === "connection_unconfigured" && !x.message.includes(TOKEN));
+  assert.equal(mapCredentialError(new Error("AADSTS700213: No matching federated identity record found for presented assertion subject 'system:serviceaccount:aud:aud-api'")).code, "connection_federation_mismatch");
+  assert.equal(mapCredentialError(new Error("AADSTS70021: No matching federated identity record found for presented assertion.")).code, "connection_federation_mismatch");
+});
 
 test("credential errors are coded and masked; a missing secret names the variable, never a value", async () => {
   const code = (m: string) => mapCredentialError(new Error(m));

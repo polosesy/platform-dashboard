@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { InteractionStatus } from "@azure/msal-browser";
 import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
-import { loginErrorMessage, loginRequest, msalConfigured } from "@/lib/msal";
+import { loginErrorMessage, loginRequestFor } from "@/lib/msal";
+import { signInConfigured } from "@/lib/runtimeConfig";
+import { useWebConfig } from "@/lib/webConfig";
 import { useI18n } from "@/lib/i18n";
 import { useMe } from "@/lib/useMe";
 import { Badge } from "@/components/ui";
@@ -13,6 +15,8 @@ import styles from "./TopNav.module.css";
 export function AuthControls() {
   const { instance, accounts, inProgress } = useMsal();
   const { t } = useI18n();
+  const config = useWebConfig();
+  const msalConfigured = signInConfigured(config);
   const [error, setError] = useState<string | null>(null);
   const user = instance.getActiveAccount() ?? accounts[0];
   const busy = inProgress !== InteractionStatus.None;
@@ -22,7 +26,7 @@ export function AuthControls() {
   const login = async () => {
     setError(null);
     try {
-      const result = await instance.loginPopup(loginRequest);
+      const result = await instance.loginPopup(loginRequestFor(config));
       if (result.account) instance.setActiveAccount(result.account);
     } catch (e) {
       setError(loginErrorMessage(e, t));

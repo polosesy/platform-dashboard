@@ -3,6 +3,7 @@ import type { WorkloadHealth, ResourceUsage, NodeResourceSummary } from "@aud/ty
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
 import { getArmFetcherAuto, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory.js";
 import { debug } from "../infra/logger.js";
+import { clusterMonitorAccounts, prometheusQueryEndpoint } from "./clusterMonitoring.js";
 
 // ──────────────────────────────────────────────────────────────
 // Azure Managed Prometheus Collector
@@ -57,91 +58,22 @@ export async function resolvePrometheusEndpoint(
 
   try {
     const fetcher = await getArmFetcherAuto(env, bearerToken);
-
-    // AKS 클러스터의 subscription + resource group 추출
-    const parts = clusterId.toLowerCase().split("/");
-    const subIdx = parts.indexOf("subscriptions");
-    const subscriptionId = subIdx >= 0 ? parts[subIdx + 1] : null;
-    if (!subscriptionId) return null;
-
-    // Azure Monitor accounts (Microsoft.Monitor/accounts) 조회
-    // — 같은 구독 내 모든 Azure Monitor workspace를 검색
-    const accountsUrl = `https://management.azure.com/subscriptions/${subscriptionId}/providers/Microsoft.Monitor/accounts?api-version=2023-04-03`;
-    const accountsResp = await fetcher.fetchJson<{
-      value?: Array<{
-        id: string;
-        name: string;
-        properties?: {
-          metrics?: {
-            prometheusQueryEndpoint?: string;
-          };
-        };
-      }>;
-    }>(accountsUrl);
-
-    const accounts = accountsResp.value ?? [];
-    debug(`[prometheus] Found ${accounts.length} Azure Monitor account(s) in subscription ${subscriptionId}`);
-
-    if (accounts.length > 0) {
-      // 첫 번째 account의 query endpoint 사용 (대부분 구독당 1개)
-      const endpoint = accounts[0]!.properties?.metrics?.prometheusQueryEndpoint;
-      if (endpoint) {
-        debug(`[prometheus] Auto-discovered endpoint: ${endpoint}`);
-        endpointCache.set(cacheKey, endpoint);
-        return endpoint;
+    // The cluster's own workspace(s) — DCR associations → rules → monitoring accounts (clusterMonitoring.ts).
+    // Several: the first that has a query endpoint (sorted ids — deterministic); none → no Prometheus, never another
+    // environment's workspace from the same subscription.
+    const accounts = await clusterMonitorAccounts(fetcher, clusterId);
+    debug(`[prometheus] ${accounts.length} Azure Monitor workspace(s) associated with the cluster`);
+    for (const id of accounts) {
+      const ep = await prometheusQueryEndpoint(fetcher, id).catch(() => null);
+      if (ep) {
+        endpointCache.set(cacheKey, ep);
+        return ep;
       }
-
-      // prometheusQueryEndpoint가 없으면 account ID로 구성
-      // 형식: https://<account-name>-<id>.prometheus.monitor.azure.com (or region-based)
-      console.warn("[prometheus] Account found but no prometheusQueryEndpoint property");
     }
-
-    // DCR (Data Collection Rule) 기반 탐색 — AKS linked DCR에서 workspace 추출
-    const dcrUrl = `https://management.azure.com/subscriptions/${subscriptionId}/providers/Microsoft.Insights/dataCollectionRules?api-version=2022-06-01`;
-    try {
-      const dcrResp = await fetcher.fetchJson<{
-        value?: Array<{
-          id: string;
-          name: string;
-          properties?: {
-            destinations?: {
-              monitoringAccounts?: Array<{
-                accountResourceId?: string;
-              }>;
-            };
-          };
-        }>;
-      }>(dcrUrl);
-
-      const dcrs = dcrResp.value ?? [];
-      for (const dcr of dcrs) {
-        const monAccounts = dcr.properties?.destinations?.monitoringAccounts ?? [];
-        for (const ma of monAccounts) {
-          if (ma.accountResourceId) {
-            // Azure Monitor workspace의 properties에서 endpoint 조회
-            const wsUrl = `https://management.azure.com${ma.accountResourceId}?api-version=2023-04-03`;
-            try {
-              const ws = await fetcher.fetchJson<{
-                properties?: { metrics?: { prometheusQueryEndpoint?: string } };
-              }>(wsUrl);
-              const ep = ws.properties?.metrics?.prometheusQueryEndpoint;
-              if (ep) {
-                debug(`[prometheus] Discovered endpoint via DCR ${dcr.name}: ${ep}`);
-                endpointCache.set(cacheKey, ep);
-                return ep;
-              }
-            } catch { /* DCR workspace 조회 실패 — 다음 DCR 시도 */ }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[prometheus] DCR discovery failed:", err instanceof Error ? err.message : err);
-    }
-
-    console.warn("[prometheus] No Prometheus endpoint found for cluster:", clusterId);
+    debug("[prometheus] no associated workspace with a query endpoint");
     return null;
   } catch (err) {
-    console.error("[prometheus] endpoint resolve error:", err instanceof Error ? err.message : err);
+    debug(`[prometheus] endpoint resolve error: ${err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160)}`);
     return null;
   }
 }

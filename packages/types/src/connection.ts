@@ -16,6 +16,13 @@ export type ConnectionMode = "platform" | "lighthouse" | "servicePrincipal" | "d
 
 export type ConnectionCheckStatus = "ok" | "warning" | "failed";
 
+/**
+ * How a connection proves who it is: the platform identity, each user (OBO), or — servicePrincipal — a secret, a
+ * certificate, or workload identity federation (no secret: the customer's app trusts this platform's Kubernetes
+ * service account)
+ */
+export type CredentialKind = "platform" | "delegated" | "secret" | "certificate" | "federatedKubernetes";
+
 export type AzureConnectionOption = {
   key: string;
   displayName: string;
@@ -26,6 +33,7 @@ export type AzureConnectionOption = {
   /** The full tenant (directory) id — admins only */
   tenantId?: string;
   mode: ConnectionMode;
+  credentialKind: CredentialKind;
   subscriptionCount: number;
   workspaceCount: number;
   lastCheck?: { at: string; status: ConnectionCheckStatus };
@@ -54,6 +62,13 @@ export type ConnectionCheckResponse = {
   generatedAt: string;
   connection: AzureConnectionOption;
   status: ConnectionCheckStatus;
+  /**
+   * Who the connection signs in as (admin route): the service principal's object id from the issued token — what a
+   * Kubernetes ClusterRoleBinding names — and, for a secret, the advice to move to federation (not a warning: the
+   * check cannot read the secret's expiry without Graph). `federation` = this platform's issuer and subject, when the
+   * deployment declares them, to write the customer's federated credential.
+   */
+  identity?: { objectId?: string; advice?: "preferFederation"; federation?: { issuer: string; subject: string }; platformCredential?: "certificate" | "secret" | "workloadIdentity" };
   token: { ok: boolean; code?: string };
   /** Declared subscriptions vs what the credential can see (counts only) */
   visible: { declared: number; visible: number; missing: number; extra: number } | null;

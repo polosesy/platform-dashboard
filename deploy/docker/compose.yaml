@@ -1,0 +1,87 @@
+# On-prem Docker host: the same topology as the AKS pod (deploy/kubernetes) — one network namespace (`pod`, like
+# Kubernetes' pause container) shared by the API (127.0.0.1:4000, never published) and the web (:3000).
+#
+#   cp api.env.example api.env && cp web.env.example web.env      # fill in; both files are gitignored
+#   mkdir -p config && cp <connections.json> config/              # optional (no file = one home connection)
+#   docker compose up -d                                          # http://<AUD_HTTP_BIND>:3000
+#   docker compose --profile tls up -d                            # + HTTPS on :8443 (needed to sign in from other PCs)
+#
+# Sign-in (MSAL) works only on https:// or http://localhost — over plain http from another PC the dashboard shows
+# sample data only. Every container runs as 65532 with a read-only root, no capabilities, no new privileges: the
+# rules the AKS cluster enforces, tried here first.
+name: aud-dashboard
+
+x-hardening: &hardening
+  image: ${AUD_IMAGE:-aud-dashboard:dev}
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 15s
+  tmpfs:
+    - /tmp:mode=1777,size=64m
+
+services:
+  # Owns the network namespace and the published port (a restart of api or web never orphans the other)
+  pod:
+    <<: *hardening
+    command: ["node", "-e", "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},3.6e6)"]
+    ports:
+      - "${AUD_HTTP_BIND:-127.0.0.1}:${AUD_HTTP_PORT:-3000}:3000"
+
+  api:
+    <<: *hardening
+    network_mode: "service:pod"
+    depends_on: [pod]
+    command: ["node", "/app/apps/api/dist/index.js"]
+    env_file: [api.env]
+    environment:
+      PORT: "4000"
+      API_BIND_HOST: 127.0.0.1
+    volumes:
+      - ./config:/etc/aud:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  web:
+    <<: *hardening
+    network_mode: "service:pod"
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file: [web.env]
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+      - /app/web/apps/web/.next/cache:mode=1777,size=128m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Optional HTTPS in front (profile tls): an internal certificate in ./tls (server.crt, server.key)
+  proxy:
+    profiles: [tls]
+    image: ${AUD_PROXY_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    depends_on: [web]
+    ports:
+      - "${AUD_HTTPS_BIND:-0.0.0.0}:${AUD_HTTPS_PORT:-8443}:8443"
+    tmpfs:
+      - /tmp:mode=1777,size=32m
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./tls:/etc/nginx/tls:ro

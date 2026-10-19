@@ -3,6 +3,7 @@
 import { InteractionRequiredAuthError } from "@azure/msal-browser";
 import { useMsal } from "@azure/msal-react";
 import { useCallback } from "react";
+import { useWebConfig } from "./webConfig";
 
 /**
  * Bearer token for the API (OBO on the server). Returns null when signed out or when the
@@ -10,9 +11,9 @@ import { useCallback } from "react";
  */
 export function useApiToken() {
   const { instance, accounts } = useMsal();
+  const scope = useWebConfig().apiScope;
 
   return useCallback(async () => {
-    const scope = process.env.NEXT_PUBLIC_AZURE_AD_API_SCOPE;
     if (!scope) return null;
     // Calls before MsalProvider finished initializing would throw uninitialized_public_client_application
     await instance.initialize();
@@ -29,5 +30,5 @@ export function useApiToken() {
       }
       throw e;
     }
-  }, [accounts, instance]);
+  }, [accounts, instance, scope]);
 }

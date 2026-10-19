@@ -24,7 +24,7 @@ export function registerAzureRoutes(router: Router, env: Env) {
       name: auth.principal.name,
       role,
       ...(fromDefault ? { roleFromDefault: true } : {}),
-      connections: accessibleConnections(env, role).map((c) => connectionOption(c, { fullTenantId: role === "admin" })),
+      connections: accessibleConnections(env, role).map((c) => connectionOption(env, c, { fullTenantId: role === "admin" })),
     };
     res.json(resp);
   });
@@ -35,7 +35,7 @@ export function registerAzureRoutes(router: Router, env: Env) {
     const role = req.auth?.bearerToken ? callerOf(env, req.auth.bearerToken)?.role ?? null : "viewer";
     const resp: AzureConnectionsResponse = {
       generatedAt: new Date().toISOString(),
-      connections: accessibleConnections(env, role).map((c) => connectionOption(c, { fullTenantId: role === "admin" })),
+      connections: accessibleConnections(env, role).map((c) => connectionOption(env, c, { fullTenantId: role === "admin" })),
     };
     res.json(resp);
   });

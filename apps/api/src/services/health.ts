@@ -212,11 +212,16 @@ function parseResourceId(id: string): { name: string; type: string; resourceGrou
 
 const globalStatusCache = new CacheManager<GlobalStatusResponse>(10);
 
-/** Azure Status RSS feed URLs — try in order until one succeeds. */
+/** Azure Status RSS feed URLs — try in order until one succeeds (AZURE_STATUS_FEED_URLS overrides) */
 const AZURE_STATUS_RSS_URLS = [
   "https://azure.status.microsoft/en-us/status/feed/",
   "https://rssfeed.azure.status.microsoft/en-us/status/feed/",
 ];
+export const statusFeedUrls = (env: Pick<Env, "AZURE_STATUS_FEED_URLS">): string[] =>
+  env.AZURE_STATUS_FEED_URLS ? env.AZURE_STATUS_FEED_URLS.split(",").map((u) => u.trim()).filter(Boolean) : AZURE_STATUS_RSS_URLS;
+
+/** The keyless translate endpoint: explicit switch, else on outside production */
+export const translatorKeyless = (env: Pick<Env, "AUD_TRANSLATOR_KEYLESS" | "NODE_ENV">): boolean => env.AUD_TRANSLATOR_KEYLESS ?? env.NODE_ENV !== "production";
 
 /** Timeout for RSS feed fetch (ms). */
 const RSS_FETCH_TIMEOUT_MS = 10_000;
@@ -343,7 +348,7 @@ export async function tryGetGlobalStatus(
   let xml: string | null = null;
   let lastError: Error | null = null;
 
-  for (const url of AZURE_STATUS_RSS_URLS) {
+  for (const url of statusFeedUrls(env)) {
     try {
       xml = await fetchRssXml(url);
       break;
@@ -632,7 +637,11 @@ export async function translateTexts(
   // ── 3 first when it covers everything: the sample events need no network ──
   if (to === "ko" && missing.every((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t]!), "builtin");
 
-  // ── 2. Keyless endpoint ──
+  // ── 2. Keyless endpoint (off in production unless AUD_TRANSLATOR_KEYLESS=true) ──
+  if (!translatorKeyless(env)) {
+    if (to === "ko" && missing.some((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t] ?? t), "builtin");
+    return { ok: false, reason: "not_configured" };
+  }
   let freeStatus: number | "network" = "network";
   try {
     const got = await freeTranslate(missing, from, to, doFetch);

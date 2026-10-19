@@ -68,6 +68,22 @@ bash onboard.sh <CUSTOMER_SUBSCRIPTION_ID> custa          # 구독, 연결 키
 AUD_CONN_CUSTA_SECRET=<받은 비밀 값>      # 이름 규칙: AUD_CONN_<KEY 대문자>_SECRET
 ```
 
+### B-2. 비밀 없는 고객 서비스 주체 — 워크로드 ID 페더레이션 (권장)
+
+ArgoCD가 Entra SSO의 클라이언트 비밀을 없앤 방식과 같습니다. 고객 앱이 **플랫폼 API 파드의 Kubernetes 서비스 계정**을 믿게 하면, 플랫폼은 그 서비스 계정 토큰을 고객 테넌트의 Entra 토큰으로 바꿉니다 — 비밀이 어디에도 없습니다.
+
+| 누가 | 무엇을 |
+|---|---|
+| 플랫폼 | API를 OIDC 발급자가 있는 Kubernetes에서 실행(AKS `--enable-oidc-issuer`), 서비스 계정 토큰을 대상 `api://AzureADTokenExchange`로 투영 — [`templates/aks/aud-api-serviceaccount.yaml`](./templates/aks/aud-api-serviceaccount.yaml). `AUD_FEDERATED_TOKEN_FILE`(없으면 워크로드 ID 웹후크의 `AZURE_FEDERATED_TOKEN_FILE`) + 표시용 `AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT` |
+| 고객 (Application Administrator · Cloud Application Administrator · 앱 소유자) | 연결 앱에 페더레이션 자격 증명 추가: 발급자 = 플랫폼 클러스터 OIDC 발급자, 주체 = `system:serviceaccount:<namespace>:<sa>`, 대상 = `api://AzureADTokenExchange` — [`fic.sh`](./templates/service-principal/fic.sh) · [`fic.tf`](./templates/service-principal/fic.tf) · [`fic-kubernetes.json`](./templates/service-principal/fic-kubernetes.json). 이름 예 `fed-common-aud-dashboard` |
+| 플랫폼 관리자 | 연결 파일에서 `secretEnv` 대신 `"federation": { "kind": "kubernetes" }` (경로는 파일에 쓰지 않음 — env만). 설정 › Azure 연결 › 점검이 자격 증명 `페더레이션 (비밀 없음)`이면 고객이 옛 비밀을 삭제 |
+
+- 다른 테넌트에서도 됩니다: Microsoft Learn — 워크로드 ID 페더레이션은 "어느 Kubernetes 클러스터에서 실행되는 워크로드"든 지원하고, 발급자는 외부 IdP입니다. 앱 하나에 페더레이션 자격 증명은 최대 20개.
+- 발급자·주체·대상은 **대소문자까지 정확히** 같아야 합니다. 틀려도 생성은 성공하고, 토큰 교환 때 `connection_federation_mismatch`(AADSTS70021·700211·700213)로 실패합니다. 방금 만든 자격 증명은 몇 분간 실패할 수 있습니다(디렉터리 캐시).
+- 해제: 고객이 페더레이션 자격 증명을 지우면 즉시 끊깁니다.
+- 관리 ID를 자격 증명으로 쓰는 방식(App Service·Container Apps의 사용자 할당 MI)은 **앱과 MI가 같은 테넌트**여야 해서(Learn), 고객 앱에는 쓸 수 없습니다 — 플랫폼의 다중 테넌트 앱을 고객 테넌트에 동의시키는 별도 방식이 필요해 이번 범위 밖입니다.
+- 개발 PC처럼 OIDC 발급자가 없는 곳은 **인증서**(90일 이하)를 씁니다.
+
 ### C. Lighthouse (`lighthouse`) — 고객 테넌트 관리자가 배포
 
 [`templates/lighthouse/aud-delegation.json`](./templates/lighthouse/aud-delegation.json) + 매개변수 예시. `principalId`는 **플랫폼 서비스 주체 개체 ID**입니다(사용자 그룹이 아님 — 사용자는 Azure 권한이 필요 없습니다).
@@ -102,7 +118,7 @@ az deployment sub create --location koreacentral \
 |---|---|---|
 | `key` · `displayName` · `tenantId` · `mode` | 예 | 홈은 정확히 하나(`tenantId` = `AZURE_AD_TENANT_ID`, `mode` = `platform` 또는 `delegated`) |
 | `subscriptions` | 예 | 이 연결로 읽는 구독. 구독은 한 연결에만. 홈이 비어 있으면 `AZURE_SUBSCRIPTION_IDS` |
-| `clientId` + (`secretEnv` 또는 `certificatePath`) | B만 | 비밀 값 **이름**(`AUD_CONN_<KEY>_SECRET`) 또는 인증서 **절대 경로** |
+| `clientId` + (`secretEnv` · `certificatePath` · `federation` 중 하나) | B만 | 비밀 값 **이름**(`AUD_CONN_<KEY>_SECRET`), 인증서 **절대 경로**, 또는 `{"kind": "kubernetes"}`(비밀 없음 — B-2, 토큰 파일 경로는 env `AUD_FEDERATED_TOKEN_FILE`) |
 | `tenantName` | 아니요 | 화면에 연결 이름 옆에 보이는 테넌트(디렉터리) 이름. 플랫폼의 읽기 전용 자격 증명으로는 이름을 읽을 수 없어(ARM `/tenants`는 서비스 주체에 이름을 주지 않고, Graph는 `Organization.Read.All`이 필요하며 Lighthouse 위임에는 Graph가 없음) 여기에 적습니다. GUID는 거부. 디렉터리 ID는 끝 4자리만 보이고 전체는 관리자에게만(복사 가능) |
 | `roles` | 아니요 | 이 연결을 쓸 수 있는 플랫폼 역할(기본 전부). 관리자는 항상 포함 |
 | `logAnalyticsWorkspaces` | 아니요 | 이 연결로 쿼리할 작업 영역(customer ID). 목록에 없는 작업 영역은 홈 연결이 읽음 |

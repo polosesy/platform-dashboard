@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ClusterCheckResponse, ConnectionCheckResponse, ConnectionCheckStatus, ConnectionFeature, FeatureCatalogResponse, FeatureStatus, PermissionCell, PermissionKey } from "@aud/types";
+import type { AksAskKind, AksReadinessItem, ClusterCheckResponse, ConnectionCheckResponse, ConnectionCheckStatus, ConnectionFeature, FeatureCatalogResponse, FeatureStatus, PermissionCell, PermissionKey } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useMe } from "@/lib/useMe";
@@ -76,6 +76,7 @@ export default function ConnectionsPage() {
                         <code className={s.key}>{c.key}</code>
                       </div>
                       <Badge tone="info">{t(`conn.mode.${c.mode}`)}</Badge>
+                      <Badge tone={c.credentialKind === "secret" ? "medium" : c.credentialKind === "federatedKubernetes" ? "success" : "neutral"}>{t(`conn.cred.kind.${c.credentialKind}`)}</Badge>
                       <span className={s.meta}>{t("conn.col.subs")} {c.subscriptionCount}</span>
                       <span className={s.meta}>{t("conn.col.workspaces")} {c.workspaceCount}</span>
                       <span className={s.meta}>
@@ -116,13 +117,86 @@ export default function ConnectionsPage() {
 }
 
 /** Copies the full directory id (admins only see it) */
-function CopyId({ value }: { value: string }) {
+function CopyId({ value, label }: { value: string; label?: string }) {
   const { t } = useI18n();
   const [done, setDone] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); }).catch(() => undefined);
   };
-  return <Button size="sm" variant="ghost" onClick={copy} ariaLabel={t("conn.copyTenantId")} title={t("conn.copyTenantId")}>{done ? t("conn.copied") : "⧉"}</Button>;
+  const name = label ?? t("conn.copyTenantId");
+  return <Button size="sm" variant="ghost" onClick={copy} ariaLabel={name} title={name}>{done ? t("conn.copied") : "⧉"}</Button>;
+}
+
+/** The federated credential the customer adds to their app (placeholders when this deployment does not declare them) */
+const ficJson = (f?: { issuer: string; subject: string }) => JSON.stringify({
+  name: "fed-common-aud-dashboard",
+  issuer: f?.issuer ?? "<PLATFORM_OIDC_ISSUER_URL>",
+  subject: f?.subject ?? "system:serviceaccount:<PLATFORM_NAMESPACE>:<PLATFORM_SERVICE_ACCOUNT>",
+  audiences: ["api://AzureADTokenExchange"],
+}, null, 2);
+
+/** How the connection signs in: kind, the object id a ClusterRoleBinding names, and the way off a secret */
+function IdentityLine({ check }: { check: ConnectionCheckResponse }) {
+  const { t } = useI18n();
+  const kind = check.connection.credentialKind;
+  const id = check.identity;
+  return (
+    <div className={s.identity}>
+      <div className={s.line}>
+        <span className={s.meta}>{t("conn.cred.title")}</span>
+        <Badge tone={kind === "secret" ? "medium" : kind === "federatedKubernetes" ? "success" : "info"}>{t(`conn.cred.kind.${kind}`)}</Badge>
+        {id?.objectId ? (
+          <span className={s.meta}>
+            {t("conn.cred.objectId")} <code className={s.key}>{id.objectId}</code> <CopyId value={id.objectId} label={t("conn.cred.copyObjectId")} />
+          </span>
+        ) : null}
+      </div>
+      {id?.advice === "preferFederation" ? (
+        <details className={s.more}>
+          <summary>{t("conn.cred.advice")}</summary>
+          <p className={ss.muted}>{t("conn.cred.adviceBody")}</p>
+          {!id.federation ? <p className={ss.muted}>{t("conn.cred.placeholders")}</p> : null}
+          <div className={s.snippetHead}><span>{t("conn.cred.ficTitle")}</span><CopyId value={ficJson(id.federation)} label={t("conn.copy")} /></div>
+          <pre className={s.snippet}>{ficJson(id.federation)}</pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** Azure-side readiness of one cluster — answers even when the API server is private and unreachable */
+function ReadinessList({ items, snippets }: { items: AksReadinessItem[]; snippets: Partial<Record<AksAskKind, string>> }) {
+  const { t } = useI18n();
+  const TONE: Record<AksReadinessItem["state"], BadgeTone> = { ok: "success", missing: "high", unknown: "neutral", info: "info" };
+  return (
+    <div className={s.readiness}>
+      <h4 className={s.readinessTitle}>{t("conn.aksReady.title")}</h4>
+      <p className={ss.muted}>{t("conn.aksReady.hint")}</p>
+      {([0, 1] as const).map((tier) => (
+        <div key={tier} className={s.readinessTier}>
+          <h5 className={s.readinessTierTitle}>{t(`conn.aksReady.tier.${tier}`)}</h5>
+          <ul className={s.readinessItems}>
+            {items.filter((i) => i.tier === tier).map((i) => (
+              <li key={i.key} className={s.readinessItem}>
+                <div className={s.readinessRow}>
+                  <Badge tone={TONE[i.state]}>{t(`conn.aksReady.state.${i.state}`)}</Badge>
+                  <span className={s.readinessName}>{t(`conn.aksReady.key.${i.key}`)}</span>
+                  {i.detail ? <span className={ss.muted}>{t(`conn.aksReady.detail.${i.detail}`)}</span> : null}
+                </div>
+                {i.ask && snippets[i.ask] ? (
+                  <details className={s.askBox}>
+                    <summary>{t(`conn.aksReady.ask.${i.ask}`)}</summary>
+                    <div className={s.snippetHead}><span className={ss.muted}>{t("conn.aksReady.copyHint")}</span><CopyId value={snippets[i.ask]!} label={t("conn.copy")} /></div>
+                    <pre className={s.snippet}>{snippets[i.ask]}</pre>
+                  </details>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function CheckResult({ check, connKey, cat }: { check: ConnectionCheckResponse; connKey: string; cat: FeatureCatalogResponse | null }) {
@@ -130,7 +204,12 @@ function CheckResult({ check, connKey, cat }: { check: ConnectionCheckResponse; 
   const [cluster, setCluster] = useState<ClusterCheckResponse | null>(null);
   // The Kubernetes cells come from a cluster check, when one has run
   const cells = useMemo<Partial<Record<PermissionKey, PermissionCell>>>(() => ({ ...(check.permissions ?? {}), ...(cluster?.permissions ?? {}) }), [check.permissions, cluster]);
-  if (!check.token.ok) return <Notice tone="danger">{t("conn.token.failed", { code: check.token.code ?? "-" })}</Notice>;
+  if (!check.token.ok) return (
+    <>
+      <Notice tone="danger">{t("conn.token.failed", { code: check.token.code ?? "-" })}</Notice>
+      {check.token.code === "connection_federation_mismatch" ? <p className={ss.muted}>{t("conn.cred.federationMismatch")}</p> : null}
+    </>
+  );
   const warnings = [...new Set([...check.subscriptions.flatMap((x) => x.warnings), ...(check.resourceWarnings ?? [])])];
   const ws = check.workspaceSummary ?? { n: check.workspaces.length, ok: check.workspaces.filter((w) => w.ok).length, failed: check.workspaces.filter((w) => !w.ok).length };
   const resourceKeys = SUB_FEATURES.filter((f) => cat && permOf(cat, f)?.scope.kind === "resource");
@@ -141,6 +220,7 @@ function CheckResult({ check, connKey, cat }: { check: ConnectionCheckResponse; 
         <span>{check.visible ? t("conn.visible", { ...check.visible }) : t("conn.visibleUnknown")}</span>
         <span className={s.meta}>{t("conn.ws.summary", { n: ws.n, ok: ws.ok, failed: ws.failed })}</span>
       </div>
+      <IdentityLine check={check} />
       {warnings.length ? (
         <Notice tone="warning" title={t("conn.warnTitle")}>
           <ul className={s.warnList}>{warnings.map((w) => <li key={w}>{t(`conn.warn.${w}`)}</li>)}</ul>
@@ -296,6 +376,7 @@ function ClusterCheck({ connKey, clusters, result, onResult }: {
               <ul className={s.warnList}>{result.warnings.map((w) => <li key={w}>{t(`conn.warn.${w}`)}</li>)}</ul>
             </Notice>
           ) : null}
+          {result.readiness?.length ? <ReadinessList items={result.readiness} snippets={result.snippets ?? {}} /> : null}
         </div>
       ) : null}
     </section>

@@ -1,0 +1,8 @@
+# Reference only — the customer's GitOps (ArgoCD, exact tags) renders its own chart from these files.
+# The ClusterRole + ClusterRoleBinding (list only) are in docs/integrations/azure/templates/aks/aud-dashboard-reader.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: aud-dashboard
+resources:
+  - deployment.yaml
+  - ciliumnetworkpolicy.yaml

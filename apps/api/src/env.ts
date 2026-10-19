@@ -49,6 +49,28 @@ const EnvSchema = z.object({
   AUD_HOME_CONNECTION_MODE: z.enum(["platform", "delegated"]).default("platform"),
   /** Platform credential as a certificate (absolute PEM path) instead of AZURE_AD_CLIENT_SECRET */
   AUD_PLATFORM_CERT_PATH: z.string().optional(),
+  /**
+   * How the platform identity proves itself: certificate | secret | workloadIdentity (a user-assigned managed
+   * identity through a federated service-account token — no secret; AKS). Unset = certificate if
+   * AUD_PLATFORM_CERT_PATH, else secret if AZURE_AD_CLIENT_SECRET, else workloadIdentity if a token file is set.
+   */
+  AUD_PLATFORM_CREDENTIAL: z.enum(["certificate", "secret", "workloadIdentity"]).optional(),
+  /** Client id the platform credential signs in as. workloadIdentity: the managed identity (default AZURE_CLIENT_ID,
+   *  set by the AKS webhook) — NOT the SSO app (AZURE_AD_CLIENT_ID stays the token audience) */
+  AUD_PLATFORM_CLIENT_ID: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a GUID").optional(),
+  AZURE_CLIENT_ID: z.string().optional(),
+  /** Build / image version shown by /healthz and the startup log */
+  AUD_VERSION: z.string().max(64).optional(),
+  /**
+   * Workload identity federation (servicePrincipal connections with `federation: {kind: "kubernetes"}`): the projected
+   * service-account token file of the pod the API runs in (audience api://AzureADTokenExchange). Falls back to
+   * AZURE_FEDERATED_TOKEN_FILE, which the AKS workload identity webhook sets. Absolute path.
+   */
+  AUD_FEDERATED_TOKEN_FILE: z.string().optional(),
+  AZURE_FEDERATED_TOKEN_FILE: z.string().optional(),
+  /** Shown to admins only, to write the customer's federated credential: this platform's OIDC issuer and subject */
+  AUD_PLATFORM_OIDC_ISSUER: z.string().url().optional(),
+  AUD_PLATFORM_FEDERATION_SUBJECT: z.string().regex(/^system:serviceaccount:[a-z0-9-]+:[a-z0-9.-]+$/, "system:serviceaccount:<namespace>:<name>").optional(),
   /** One JSON audit line per signed-in API request (who · role · connection · route · status), never tokens or IDs */
   AUD_AUDIT_LOG: z.enum(["off", "stdout"]).optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
@@ -101,6 +123,16 @@ const EnvSchema = z.object({
   // Azure Translator (optional — for Service Events translation feature)
   AZURE_TRANSLATOR_KEY: z.string().optional(),
   AZURE_TRANSLATOR_REGION: z.string().optional(),
+  /**
+   * The keyless public translate endpoint when no AZURE_TRANSLATOR_KEY is set. Unset = on in development, OFF in
+   * production: event text is not sent to an unauthenticated third-party endpoint from a server (and a container's
+   * egress policy would block it anyway)
+   */
+  AUD_TRANSLATOR_KEYLESS: z.union([z.boolean(), z.string()]).optional()
+    .transform((v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? undefined : typeof v === "boolean" ? v : ["1", "true", "yes", "on"].includes(v.trim().toLowerCase()))),
+  /** Azure status RSS feeds, tried in order (comma list, https only) — default the two public Azure status feeds */
+  AZURE_STATUS_FEED_URLS: z.string().optional()
+    .refine((v) => !v || v.split(",").every((u) => /^https:\/\/[a-z0-9.-]+(\/\S*)?$/i.test(u.trim())), "a comma list of https URLs"),
 
   // Live Diagram — Azure Monitor real integration
   AZURE_LIVE_DIAGRAM_ENABLED: envBool(false),
@@ -178,6 +210,16 @@ export function assertSafeEnv(env: Env): Env {
   }
   if (env.AUD_PLATFORM_CERT_PATH && !isAbsolute(env.AUD_PLATFORM_CERT_PATH)) {
     throw new Error("AUD_PLATFORM_CERT_PATH must be an absolute path");
+  }
+  // An explicit platform credential needs its input — fail at start, not on the first Azure call
+  if (env.AUD_PLATFORM_CREDENTIAL === "certificate" && !env.AUD_PLATFORM_CERT_PATH) throw new Error("AUD_PLATFORM_CREDENTIAL=certificate needs AUD_PLATFORM_CERT_PATH");
+  if (env.AUD_PLATFORM_CREDENTIAL === "secret" && !env.AZURE_AD_CLIENT_SECRET) throw new Error("AUD_PLATFORM_CREDENTIAL=secret needs AZURE_AD_CLIENT_SECRET");
+  if (env.AUD_PLATFORM_CREDENTIAL === "workloadIdentity") {
+    if (!(env.AUD_FEDERATED_TOKEN_FILE ?? env.AZURE_FEDERATED_TOKEN_FILE)) throw new Error("AUD_PLATFORM_CREDENTIAL=workloadIdentity needs AUD_FEDERATED_TOKEN_FILE (or the webhook's AZURE_FEDERATED_TOKEN_FILE)");
+    if (!(env.AUD_PLATFORM_CLIENT_ID ?? env.AZURE_CLIENT_ID)) throw new Error("AUD_PLATFORM_CREDENTIAL=workloadIdentity needs AUD_PLATFORM_CLIENT_ID (the managed identity's client id) or the webhook's AZURE_CLIENT_ID");
+  }
+  for (const name of ["AUD_FEDERATED_TOKEN_FILE", "AZURE_FEDERATED_TOKEN_FILE"] as const) {
+    if (env[name] && !isAbsolute(env[name]!)) throw new Error(`${name} must be an absolute path`);
   }
   if (env.CORS_ORIGIN.split(",").some((o) => o.trim() === "*")) {
     throw new Error("CORS_ORIGIN must list origins, not *");

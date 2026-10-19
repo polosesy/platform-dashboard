@@ -62,6 +62,8 @@ function fakeCredentials(calls: string[]) {
   setCredentialProviderForTests(createCredentialProvider({
     makeSecret: (t) => cred("platform-secret", t),
     makeCert: (t) => cred("platform-cert", t),
+    makeAssertion: (t) => cred("platform-assertion", t),
+    readFile: async () => "",
     oboCredential: () => ({ getToken: async () => { calls.push("obo"); throw new Error("AADSTS65001: consent for app 'x' Trace ID: 1"); } }),
     getEnv: () => undefined,
   }));
@@ -187,7 +189,7 @@ test("static: credentials are constructed only in connectionCredentials.ts / obo
   for (const f of files) {
     const s = readFileSync(f, "utf8");
     if (!f.endsWith("connectionCredentials.ts") && !f.endsWith("oboTokenPool.ts")) {
-      assert.ok(!/new (ClientSecretCredential|ClientCertificateCredential|OnBehalfOfCredential)\(/.test(s), `${f} constructs a credential`);
+      assert.ok(!/new (ClientSecretCredential|ClientCertificateCredential|ClientAssertionCredential|WorkloadIdentityCredential|ManagedIdentityCredential|OnBehalfOfCredential)\(/.test(s), `${f} constructs a credential`);
     }
     if (f.includes(`${join("src", "services")}`) || f.includes(`${join("src", "routes")}`)) {
       assert.ok(!/oboTokenPool/.test(s), `${f} reaches OBO directly`);

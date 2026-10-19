@@ -77,6 +77,21 @@ export type FeatureRollup = {
   unknown: PermissionKey[];
 };
 
+/**
+ * AKS integration readiness — from Azure facts only, so it answers when the API server is unreachable (private).
+ * tier 0 = Azure only, tier 1 = inside the cluster. `ask` = what to request from the customer (snippets in the
+ * response), `detail` = why, for the sentence.
+ */
+export type AksReadinessKey = "defender" | "policyAddon" | "prometheus" | "containerInsights" | "entra" | "localAccounts" | "authz" | "clusterUserRole" | "reach" | "credential";
+export type AksAskKind = "clusterUserRole" | "clusterRoleBinding" | "azureRbacRole" | "amwDataReader" | "privateEndpoint" | "allowedIp" | "federation";
+export type AksReadinessItem = {
+  key: AksReadinessKey;
+  tier: 0 | 1;
+  state: "ok" | "missing" | "unknown" | "info";
+  ask?: AksAskKind;
+  detail?: string;
+};
+
 /** Kubernetes over-privilege seen by the cluster check — reported, never blocked */
 export type ClusterPrivilegeWarning = "k8s_secrets_read" | "k8s_exec" | "k8s_wildcard";
 
@@ -91,4 +106,7 @@ export type ClusterCheckResponse = {
   /** read rules the role lacks (apiGroup/resource) */
   missingRules: string[];
   warnings: ClusterPrivilegeWarning[];
+  /** Azure-side readiness (before any Kubernetes call) and the copy-ready requests it names */
+  readiness?: AksReadinessItem[];
+  snippets?: Partial<Record<AksAskKind, string>>;
 };

@@ -3,7 +3,7 @@ export function apiBaseUrl() {
   // In the browser, use same-origin relative path (Next.js rewrites /api/* → API server).
   // On the server (SSR), call the API directly.
   if (typeof window !== "undefined") return "";
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000";
 }
 
 /**
@@ -11,7 +11,7 @@ export function apiBaseUrl() {
  * (unlike apiBaseUrl(), which is "" in the browser) so it cannot cause a hydration mismatch.
  */
 export function apiTargetLabel(): string {
-  return `/api → ${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000"}`;
+  return `/api → ${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000"}`;
 }
 
 /**

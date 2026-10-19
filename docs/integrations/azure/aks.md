@@ -123,7 +123,22 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 1. 대시보드 › AKS 클러스터 › 클러스터 선택 — 제목 옆 배지: `프라이빗`/`공용 API`, `Entra ID`/`로컬 계정`
 2. 오류가 없으면 객체 목록이 보임. 오류는 아래 코드로 원인을 바로 알려 줌
 3. 고객 쪽 확인: `kubectl auth can-i list pods --as <오브젝트 ID>` → yes, `kubectl auth can-i get secrets --as <오브젝트 ID>` → **no**
-4. 대시보드 쪽 확인(관리자): **설정 › Azure 연결 › 점검 › 클러스터 권한 점검** — 연결의 자격 증명으로 로그인한 뒤 `SelfSubjectAccessReview`로 읽기 범위 규칙 24개·Pod 로그·Hubble exec(켠 경우)를 묻고, Secret 읽기·exec·`*` 권한이 있으면 경고합니다. 로그인 단계에서 막히면 이유가 그대로 나옵니다(`AKS Cluster User Role` 없음 → 자격 증명 권한 없음, 로컬 계정 클러스터 → 거부됨, 네트워크 → API 서버에 닿지 않음)
+4. **연동 준비 상태**(같은 점검의 위쪽, 클러스터에 닿지 않아도 나옴 — `services/aksReadiness.ts`): Azure 정보만으로 항목마다 준비됨/필요/확인 못 함과 **고객에게 보낼 요청**(복사만)을 보여 줍니다
+
+   | 단계 | 항목 | 근거(ARM·권한) | 필요할 때 요청 |
+   |---|---|---|---|
+   | Azure만 | Defender for Containers | `securityProfile.defender.securityMonitoring.enabled` | — |
+   | Azure만 | Azure Policy 추가 기능 | `addonProfiles.azurepolicy.enabled` | — |
+   | Azure만 | 관리형 Prometheus | `azureMonitorProfile.metrics.enabled` + **이 클러스터의** 작업 영역(데이터 수집 규칙 연결 → 규칙 → `monitoringAccounts`) + 그 작업 영역의 `Microsoft.Monitor/accounts/data/metrics/read` | Monitoring Data Reader(작업 영역 범위) |
+   | Azure만 | Container Insights | `azureMonitorProfile.containerInsights` / `omsagent` | — |
+   | 클러스터 안 | Entra 로그인·로컬 계정 | `aadProfile.managed`·`tenantID`·`disableLocalAccounts` | — |
+   | 클러스터 안 | 권한 부여 방식 | `aadProfile.enableAzureRBAC` 꺼짐 → ClusterRoleBinding(개체 ID 채움) / 켜짐 → Azure 역할 | 바인딩 YAML 또는 역할 할당 |
+   | 클러스터 안 | Cluster User Role | 클러스터 범위 `listClusterUserCredential/action` | 역할 할당 명령 |
+   | 클러스터 안 | 네트워크 경로 | DNS → TCP 443(토큰 없음) | 프라이빗 = 클러스터별 PE(`management`), 공용 = 허용 IP |
+   | 연결 | 자격 증명 | 비밀 / 인증서 / 페더레이션 | 비밀이면 페더레이션 자격 증명 JSON |
+
+   ARM은 설정하지 않은 프로필을 응답에서 빼므로 클러스터를 읽었는데 값이 없으면 '꺼짐', 클러스터를 못 읽으면 모두 '확인 못 함'입니다
+5. 대시보드 쪽 확인(관리자): **설정 › Azure 연결 › 점검 › 클러스터 권한 점검** — 연결의 자격 증명으로 로그인한 뒤 `SelfSubjectAccessReview`로 읽기 범위 규칙 24개·Pod 로그·Hubble exec(켠 경우)를 묻고, Secret 읽기·exec·`*` 권한이 있으면 경고합니다. 로그인 단계에서 막히면 이유가 그대로 나옵니다(`AKS Cluster User Role` 없음 → 자격 증명 권한 없음, 로컬 계정 클러스터 → 거부됨, 네트워크 → API 서버에 닿지 않음)
 
 ## 9. 문제 해결
 
@@ -144,7 +159,8 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 
 ## 10. 교체
 
-- 비밀 대신 **인증서**(90일 이하) 또는 **관리 ID + 페더레이션 자격 증명**(고객 앱이 플랫폼 MI를 신뢰 — 비밀 없음, 고객이 FIC를 지우면 즉시 차단). 관리 ID 자체는 다른 테넌트에서 직접 쓸 수 없음
+- 비밀 없는 순서: **워크로드 ID 페더레이션**(고객 앱이 플랫폼 API의 Kubernetes 서비스 계정을 신뢰 — ArgoCD Entra SSO와 같은 방식, [connect-tenant.md](./connect-tenant.md) B-2) → **인증서**(90일 이하, OIDC 발급자가 없는 곳) → 비밀(최후, 만료 12개월 이하). 고객이 페더레이션 자격 증명을 지우면 즉시 차단
+- 관리 ID를 자격 증명으로 쓰는 방식은 앱과 관리 ID가 같은 테넌트여야 해서(Microsoft Learn) 고객 앱에는 쓸 수 없음
 - 환경(stg/prd)마다 신원을 나눕니다 — 하나가 새도 다른 환경은 안전
 
 ## 11. 해제
@@ -178,4 +194,4 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | 도달성 | 호스트는 ARM 값만, 상세는 숨김 | DNS→TCP 사전 점검 | **사전 점검 + 호스트 이름 없는 오류 코드** |
 | 빈 클러스터 | — | 전부 실패해도 성공 응답(버그) | **전부 실패 = 오류** |
 
-후속 과제: ~~연결 점검에 클러스터별 SelfSubjectAccessReview(과도 권한 경고)~~ (완료 — §8 확인 4), 에이전트 없는 대체 데이터(Container Insights·kube-state-metrics), ACNS 흐름 로그 수집기, Azure RBAC용 사용자 지정 역할 JSON, 관리 ID + FIC, 사용자 OBO Pod 로그, 아웃바운드 에이전트 Tier.
+후속 과제: ~~연결 점검에 클러스터별 SelfSubjectAccessReview(과도 권한 경고)~~ (완료 — §8 확인 4), 에이전트 없는 대체 데이터(Container Insights·kube-state-metrics), ACNS 흐름 로그 수집기, Azure RBAC용 사용자 지정 역할 JSON, ~~페더레이션 자격 증명~~ (완료 — Kubernetes 서비스 계정, connect-tenant B-2), ~~연동 준비 상태~~ (완료 — §8 확인 4), 사용자 OBO Pod 로그, 아웃바운드 에이전트 Tier, Azure Policy 준수 상태(`policyresources`).
