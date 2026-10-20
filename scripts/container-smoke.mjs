@@ -7,6 +7,7 @@
 // Cleans up whatever happens.   node scripts/container-smoke.mjs [--image aud-dashboard:smoke] [--no-build] [--port 3300]
 import { execFileSync, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
+import http from "node:http";
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : dflt; };
 const IMAGE = arg("--image", "aud-dashboard:smoke");
@@ -17,8 +18,24 @@ const tryDocker = (...a) => spawnSync("docker", a, { encoding: "utf8" });
 const GUID = (d) => `${d.repeat(8)}-${d.repeat(4)}-${d.repeat(4)}-${d.repeat(4)}-${d.repeat(12)}`;
 const harden = ["--user", "65532:65532", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:mode=1777,size=64m", "--init"];
 const results = [];
+// An interrupted run (Ctrl-C, a dropped SSH session) still removes its containers
+const cleanup = () => { for (const n of ["web", "api", "pod"]) tryDocker("rm", "-f", `${P}-${n}`); };
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { cleanup(); process.exit(130); });
 const check = (name, ok, detail = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`); };
-const get = async (url) => { try { const r = await fetch(url, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, text: await r.text() }; } catch (e) { return { status: 0, text: String(e) }; } };
+// node:http, not fetch: on the host's Node 18, an aborted fetch (docker-proxy holding the request while the web was
+// still starting) never settled, the event loop emptied and the process exited mid-await (code 13) — skipping the
+// cleanup. A socket with its own timeout always ends in a result.
+const get = (url, timeoutMs = 10_000) => new Promise((resolve) => {
+  const req = http.get(url, (res) => {
+    let text = "";
+    res.setEncoding("utf8");
+    res.on("data", (c) => (text += c));
+    res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
+    res.on("error", (e) => resolve({ status: 0, text: String(e) }));
+  });
+  req.setTimeout(timeoutMs, () => req.destroy(new Error("timeout")));
+  req.on("error", (e) => resolve({ status: 0, text: String(e) }));
+});
 const execIn = (name, js) => tryDocker("exec", name, "node", "-e", js);
 
 try {
@@ -26,6 +43,7 @@ try {
     console.log(`building ${IMAGE} …`);
     execFileSync("docker", ["build", "-t", IMAGE, "--build-arg", "AUD_VERSION=smoke", "."], { stdio: "inherit" });
   }
+  console.log(`starting ${P}-{pod,api,web} from ${IMAGE} (port ${PORT})`);
   docker("run", "-d", "--name", `${P}-pod`, ...harden, "-p", `127.0.0.1:${PORT}:3000`, IMAGE, "node", "-e", "process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},3.6e6)");
   docker("run", "-d", "--name", `${P}-api`, ...harden, "--network", `container:${P}-pod`,
     "-e", "PORT=4000", "-e", "API_BIND_HOST=127.0.0.1", "-e", `AZURE_AD_TENANT_ID=${GUID("1")}`, "-e", `AZURE_AD_CLIENT_ID=${GUID("2")}`,
@@ -36,12 +54,20 @@ try {
     "-e", "AUD_WEB_API_SCOPE=api://aud/Azure.Read.All", IMAGE);
 
   const base = `http://127.0.0.1:${PORT}`;
-  for (let i = 0; i < 60 && (await get(`${base}/readyz`)).status !== 200; i++) await wait(1000);
+  console.log("waiting for /readyz …");
+  for (let i = 0; i < 60; i++) {
+    const r = await get(`${base}/readyz`);
+    if (process.env.SMOKE_DEBUG) console.log(`  try ${i}: ${r.status} ${r.text.slice(0, 60)}`);
+    if (r.status === 200) break;
+    await wait(1000);
+  }
   const rz = await get(`${base}/readyz`);
   check("web /readyz (web + API next to it)", rz.status === 200, rz.text.slice(0, 80));
   check("web /healthz", (await get(`${base}/healthz`)).status === 200);
   const viaProxy = await get(`${base}/api/healthz`);
   check("/healthz is not exposed through the /api proxy", viaProxy.status !== 200, `status ${viaProxy.status}`);
+  const apiRunning = docker("inspect", "-f", "{{.State.Running}}", `${P}-api`) === "true";
+  check("API container still running (dependencies complete)", apiRunning, apiRunning ? "" : tryDocker("logs", "--tail", "5", `${P}-api`).stderr.trim().split(/\r?\n/).pop());
   const sample = await get(`${base}/api/health/summary`);
   check("anonymous /api → sample data", sample.status === 200 && sample.text.includes("signin_required"), `status ${sample.status}`);
   const page = await get(`${base}/`);
@@ -61,7 +87,7 @@ try {
 } catch (e) {
   check("smoke run", false, String(e?.stderr ?? e).slice(0, 400));
 } finally {
-  for (const n of ["web", "api", "pod"]) tryDocker("rm", "-f", `${P}-${n}`);
+  cleanup();
   const failed = results.filter((x) => !x).length;
   console.log(failed ? `${failed} check(s) failed` : "all checks passed");
   process.exitCode = failed ? 1 : 0;

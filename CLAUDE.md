@@ -71,7 +71,8 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `npm test --workspace apps/api` | API 단위 테스트 (`node:test` + tsx, `apps/api/test/`) |
 | `scripts/gp.sh "<msg>"` | git add → commit → push (자동화) |
 | `docker build -t aud-dashboard:<tag> --build-arg AUD_VERSION=<sha> .` | 이미지 하나(API + 웹 standalone) — Docker 엔진 필요(개발 PC는 CLI만 있어 빌드 불가) |
-| `node scripts/container-smoke.mjs [--no-build] [--image …]` | 컨테이너 확인 12개(헬스·준비·`/healthz` 비노출·익명 예시·런타임 로그인 설정·API 비공개·65532·읽기 전용·.env 없음·SIGTERM) |
+| `node scripts/container-smoke.mjs [--no-build] [--image …]` | 컨테이너 확인 13개(헬스·준비·`/healthz` 비노출·익명 예시·런타임 로그인 설정·API 비공개·API 의존성·65532·읽기 전용·.env 없음·SIGTERM) |
+| `scripts/onprem.sh deploy\|env [--test]\|up\|tunnel\|status\|logs\|down` | 온프렘 Docker 서버(작업 PC에서): 추적 파일 전송 → 서버 빌드·기동(`deploy/docker/onprem-remote.sh`, sudo 비밀번호는 stdin) · `.env` → `api.env`/`web.env`(`scripts/onprem-env.mjs`, 값 출력 안 함) · SSH 터널 `http://localhost:3000`. 접속 정보는 gitignore `.secrets/onprem.env` (문서 container.md §5) |
 
 ## Critical Files
 - `packages/types/src/index.ts` — 전체 공유 타입 re-export

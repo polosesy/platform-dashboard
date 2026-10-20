@@ -37,7 +37,9 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/types/package.json packages/types/
-RUN npm ci --omit=dev --workspace @aud/api --include-workspace-root=false --no-audit --no-fund
+# npm hoists most packages to /prune/node_modules but nests a version it cannot hoist (zod) in
+# /prune/apps/api/node_modules — both are copied; the directory always exists so the COPY never fails
+RUN npm ci --omit=dev --workspace @aud/api --include-workspace-root=false --no-audit --no-fund  && mkdir -p apps/api/node_modules
 
 # ── runtime: files only, root-owned and read-only to the non-root user ──
 FROM ${NODE_RUNTIME_IMAGE} AS runtime
@@ -49,6 +51,7 @@ WORKDIR /app
 # HOSTNAME=0.0.0.0: the Next standalone server binds to $HOSTNAME, which Kubernetes sets to the pod name
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOME=/tmp HOSTNAME=0.0.0.0 AUD_VERSION=${AUD_VERSION}
 COPY --from=prune /prune/node_modules /app/node_modules
+COPY --from=prune /prune/apps/api/node_modules /app/apps/api/node_modules
 COPY --from=build /src/apps/api/package.json /app/apps/api/package.json
 COPY --from=build /src/apps/api/dist /app/apps/api/dist
 COPY --from=build /src/apps/web/.next/standalone /app/web
