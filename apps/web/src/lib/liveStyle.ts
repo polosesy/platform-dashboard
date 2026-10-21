@@ -83,7 +83,10 @@ export function relationLabel(e: DiagramEdgeSpec, byId: ReadonlyMap<string, Diag
   switch (e.edgeKind) {
     case "privateLink": return { key: "ld.rel.privateLink", vars: { target: SERVICE_SHORT[tk] ?? tk } };
     // observed use: the service name rides on the line (label), the grade on `protocol` (lib/plUsage.ts)
-    case "privateLinkUsage": return { key: e.protocol === "flow" ? "ld.rel.privateLinkUsage.flow" : "ld.rel.privateLinkUsage.access", vars: { target: e.label ?? "" } };
+    case "privateLinkUsage":
+      // an internal LB's observed caller (lib/lbInbound): the frontend IPs ride on the label
+      if (e.protocol === "lbFlow") return { key: "ld.rel.lbInbound", vars: { fe: e.label ?? "" } };
+      return { key: e.protocol === "flow" ? "ld.rel.privateLinkUsage.flow" : "ld.rel.privateLinkUsage.access", vars: { target: e.label ?? "" } };
     case "peering": return { key: e.peeringState && e.peeringState !== "Connected" ? "ld.rel.peeringInactive" : e.peeringTransit ? "ld.rel.peeringTransit" : "ld.rel.peering" };
     case "hybrid": return { key: "ld.rel.s2s", vars: { proto: e.protocol ?? "" } };
     case "natgw-association": return { key: "ld.rel.natAssoc" };

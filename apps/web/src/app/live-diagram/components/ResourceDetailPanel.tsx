@@ -22,6 +22,9 @@ import { maskGuids } from "@/lib/mask";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { NameParts } from "./NameParts";
 import { PrivateLinkUsageSection } from "./detail/PrivateLinkUsage";
+import { LbInboundSection } from "./detail/LbInboundSection";
+import { LifecycleSection } from "./detail/LifecycleSection";
+import { isFrontendInboundKey } from "@/lib/lbInbound";
 import { PeeringSection } from "./detail/PeeringSection";
 import { HybridSection } from "./detail/HybridSection";
 import { SpecSection } from "./detail/SpecSection";
@@ -172,7 +175,8 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
   // Plus metrics the API now reads for the kind (diagram saved before memory was added)
   // The card's two metrics first (same order as the card), then the rest the API reads for the kind
   // WAF verdict counts are shown in the WAF panel: "no block recorded" is not "unmeasured"
-  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k));
+  // … and an internal LB's per-frontend inbound hour is shown in its own section (LbInboundSection)
+  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k) && !isFrontendInboundKey(k));
   const first = cardCells(node.resourceKind ?? node.icon, allBound);
   const bound = [...first.filter((k) => allBound.includes(k)), ...allBound.filter((k) => !first.includes(k))];
   const rules: HealthRule[] = node.bindings.health?.rules ?? [];
@@ -397,8 +401,14 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
         {/* Private Link use (observed in logs) */}
         <PrivateLinkUsageSection node={node} spec={spec} usage={usage} loading={usageLoading} nameOf={nameOf} onSelectNode={onSelectNode} />
 
+        {/* Internal LB: who sends traffic in (configured / observed callers, the measured hour) */}
+        <LbInboundSection node={node} spec={spec} metrics={metrics} measured={metricsState === "ok"} usage={usage} loading={usageLoading} nameOf={nameOf} onSelectNode={onSelectNode} />
+
         {/* Specification: SKU, version, capacity, HA, access settings (resourceSpec.ts) */}
-        <SpecSection node={node} />
+        {/* Operation state read now and its recorded cause (services/lifecycle.ts) */}
+        <LifecycleSection lifecycle={liveNode?.lifecycle} />
+
+        <SpecSection node={node} live={liveNode?.liveSpec} />
 
         {/* Network */}
         {showNetwork ? (

@@ -34,6 +34,7 @@ import { shortNamesWithParts } from "@/lib/liveNames";
 import { usageThresholds } from "@/lib/liveMetricFormat";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { disconnectedPes, usageChips, usageEdges } from "@/lib/plUsage";
+import { lbInboundChips, lbInboundEdges, lbInboundFacts } from "@/lib/lbInbound";
 import { edgeLayer, impactView, isDirectedEdge, isFocusOnlyEdge, type EdgeLayer } from "@/lib/liveScope";
 import { gatewayFacts, withBackendValue } from "@/lib/liveBackends";
 import { hybridFacts } from "@/lib/liveHybrid";
@@ -158,15 +159,30 @@ function LiveCanvasInner({
     });
   }, []);
   const nodeById = useMemo(() => new Map(spec.nodes.map((n) => [n.id, n])), [spec.nodes]);
-  // Open WAF sub-cards: room below an inbound card (Front Door), an overlay elsewhere (liveLayout attachBelow)
-  const wafCards = useMemo(() => new Map([...wafOpen].map((id) => [id, wafSubCards(nodeById.get(id)?.metadata)] as const).filter(([, c]) => c.length)), [wafOpen, nodeById]);
+  // Open WAF sub-cards: room below an inbound card (Front Door), an overlay elsewhere (liveLayout attachBelow).
+  // wafAll = cards whose "+k" toggle is open (every policy up to the cap) — a view choice only, like expandedEmpty
+  const [wafAll, setWafAll] = useState<ReadonlySet<string>>(() => new Set());
+  const wafCards = useMemo(() => new Map([...wafOpen].map((id) => [id, wafSubCards(nodeById.get(id)?.metadata, { all: wafAll.has(id) })] as const).filter(([, c]) => c.length)), [wafOpen, wafAll, nodeById]);
   const attachBelow = useMemo(() => new Map([...wafCards].map(([id, c]) => [id, wafAttachHeight(c.length)] as const)), [wafCards]);
   const layout = useMemo(() => liveLayout(spec, { expandedEmpty, attachBelow }), [spec, expandedEmpty, attachBelow]);
   const onWafToggleRef = useRef(onWafToggle);
   const onWafSelectRef = useRef(onWafSelect);
   useLayoutEffect(() => { onWafToggleRef.current = onWafToggle; onWafSelectRef.current = onWafSelect; });
-  const stableWafToggle = useCallback((id: string) => onWafToggleRef.current?.(id), []);
-  const stableWafSelect = useCallback((id: string, key: string) => onWafSelectRef.current?.(id, key === "more" ? null : key), []);
+  const dropWafAll = useCallback((id: string) => setWafAll((prev) => { if (!prev.has(id)) return prev; const next = new Set(prev); next.delete(id); return next; }), []);
+  // The badge opens / closes the column; closing also folds it, so it always reopens as "first 4 + toggle"
+  const stableWafToggle = useCallback((id: string) => { dropWafAll(id); onWafToggleRef.current?.(id); }, [dropWafAll]);
+  const stableWafToggleAll = useCallback((id: string) => setWafAll((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  }), []);
+  // "more" is the in-place toggle (WafPolicyNode calls stableWafToggleAll) — a selection of it does nothing here;
+  // "rest" (beyond the cap) opens the WAF overview
+  const stableWafSelect = useCallback((id: string, key: string) => {
+    if (key === "more") return;
+    onWafSelectRef.current?.(id, key === "rest" ? null : key);
+  }, []);
   // Short names inside this view (the VNet's own words dropped) — cards and subnet headers
   const nameInfo = useMemo(() => {
     const byId = new Map(spec.nodes.map((n) => [n.id, n]));
@@ -208,10 +224,20 @@ function LiveCanvasInner({
   /** Spec nodes drawn as their own React Flow node */
   const renderedIds = useMemo(() => new Set(spec.nodes.filter((n) => !layout.hidden.has(n.id)).map((n) => n.id)), [spec.nodes, layout.hidden]);
   // Observed Private Link use (workload → PE) joins the configured lines after layout — the picture never moves
-  const usageLines = useMemo(() => usageEdges(usage, nodeById, renderedIds), [usage, nodeById, renderedIds]);
+  // … and so do observed callers of an internal LB (flow logs to a private frontend, lib/lbInbound)
+  const usageLines = useMemo(() => [...usageEdges(usage, nodeById, renderedIds), ...lbInboundEdges(usage, renderedIds)], [usage, nodeById, renderedIds]);
   const allEdges = useMemo(() => (usageLines.length ? [...spec.edges, ...usageLines] : spec.edges), [spec.edges, usageLines]);
   const disconnected = useMemo(() => disconnectedPes(usage), [usage]);
-  const chipsByNode = useMemo(() => usageChips(usage), [usage]);
+  // Internal LBs: who sends traffic in (configured / observed callers, or the measured hour) — needs the snapshot
+  const lbMetrics = useMemo(() => new Map((snapshot?.nodes ?? []).filter((s) => { const n = nodeById.get(s.id); return (n?.resourceKind ?? n?.icon) === "lb"; }).map((s) => [s.id, s.metrics] as const)), [snapshot?.nodes, nodeById]);
+  const chipsByNode = useMemo(() => {
+    const m = usageChips(usage);
+    for (const n of spec.nodes) {
+      const chips = lbInboundChips(lbInboundFacts(n, spec.edges, nodeById, lbMetrics.get(n.id), usage));
+      if (chips.length) m.set(n.id, [...chips, ...(m.get(n.id) ?? [])]);
+    }
+    return m;
+  }, [usage, spec.nodes, spec.edges, nodeById, lbMetrics]);
   // Read when cards are rebuilt (layout effect) so a rebuild keeps the chips
   const chipsRef = useRef(chipsByNode);
   useLayoutEffect(() => { chipsRef.current = chipsByNode; }, [chipsByNode]);
@@ -458,6 +484,8 @@ function LiveCanvasInner({
         azureResourceId: n.azureResourceId,
         powerState: live?.powerState,
         basis: live?.basis,
+        lifecycle: live?.lifecycle,
+        liveSpec: live?.liveSpec,
         archRole: n.metadata?.archRole,
         archGroupId: n.metadata?.archGroupId,
         nsgBadge: firstNsg ? { nodeId: firstNsg.nodeId, label: firstNsg.label, icon: firstNsg.icon as LiveNodeData["icon"], azureResourceId: firstNsg.azureResourceId } : undefined,
@@ -498,7 +526,7 @@ function LiveCanvasInner({
           position: { x: 0, y: h + LIVE.SUB_TOP + i * (LIVE.SUB_H + LIVE.SUB_GAP) },
           style: { width: LIVE.CARD_W, height: LIVE.SUB_H },
           ...(layout.reservedBelow.has(n.id) ? {} : { zIndex: 20 }),
-          data: { card, unit, parentId: n.id, index: i, onSelect: stableWafSelect } satisfies WafPolicyNodeData,
+          data: { card, unit, parentId: n.id, index: i, onSelect: stableWafSelect, onToggleAll: stableWafToggleAll } satisfies WafPolicyNodeData,
         }));
       }
     }
@@ -511,7 +539,7 @@ function LiveCanvasInner({
     lastFitKey.current = fitKey;
     const rafId = requestAnimationFrame(() => rfRef.current.fitBounds(layout.bounds, { padding: 0.06, duration: 300 }));
     return () => cancelAnimationFrame(rafId);
-  }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf, wafCards, stableWafToggle, stableWafSelect]);
+  }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf, wafCards, stableWafToggle, stableWafSelect, stableWafToggleAll]);
 
   // ── Selection → full-name tag: only the previously and newly selected nodes get new data ──
   useEffect(() => {
@@ -556,6 +584,8 @@ function LiveCanvasInner({
           sparklines: live.sparklines,
           powerState: live.powerState,
           basis: live.basis,
+          lifecycle: live.lifecycle,
+          liveSpec: live.liveSpec,
           metricsState: snapshot.coverage?.sources.metrics,
         };
         // Skip update only if nothing the card shows changed — metric values and the trend included
@@ -564,6 +594,10 @@ function LiveCanvasInner({
           prev_.healthScore === next.healthScore &&
           prev_.powerState === next.powerState &&
           prev_.basis === next.basis &&
+          // operation state and the live instance count redraw the chip line
+          JSON.stringify(prev_.lifecycle ?? null) === JSON.stringify(next.lifecycle ?? null) &&
+          JSON.stringify(prev_.liveSpec?.facts ?? null) === JSON.stringify(next.liveSpec?.facts ?? null) &&
+          prev_.liveSpec?.instancesTarget === next.liveSpec?.instancesTarget &&
           prev_.hasAlert === next.hasAlert &&
           prev_.metricsState === next.metricsState &&
           sameMetrics(prev_.metrics, next.metrics) &&

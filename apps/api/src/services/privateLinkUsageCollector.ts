@@ -17,14 +17,15 @@ import {
 } from "../infra/azureClientFactory.js";
 import { kqlString, parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
-import { isPrivateV4, joinPrivateLinkUsage, type PluAccessRow, type PluCaller, type PluFlowRow, type PluInput, type PluNic, type PluPe, type PluSubnet, type PluSite } from "./privateLinkUsage.js";
+import { isPrivateV4, joinLbInbound, joinPrivateLinkUsage, type PluAccessRow, type PluLb, type PluCaller, type PluFlowRow, type PluInput, type PluNic, type PluPe, type PluSubnet, type PluSite } from "./privateLinkUsage.js";
 
 const resultCache = new CacheManager<PrivateLinkUsageResponse>(100, 5 * 60_000);
 const inflight = new Map<string, Promise<PrivateLinkUsageResponse>>();
 const MAX_TARGETS = 20;
 const COMPUTE = new Set(["vm", "vmss", "aks", "appService", "functionApp", "containerApp"]);
-/** Kinds whose every IP in a subnet belongs to one resource (a VM has its own NIC IPs instead) */
-const SUBNET_OWNERS = new Set(["vmss", "aks", "appService", "functionApp", "containerApp"]);
+/** Kinds whose every IP in a subnet belongs to one resource (a VM has its own NIC IPs instead). An Application
+ *  Gateway's subnet holds only application gateways (dedicated subnet), so its instance IPs name it */
+const SUBNET_OWNERS = new Set(["vmss", "aks", "appService", "functionApp", "containerApp", "appGateway"]);
 const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const mask = (s: string) => s.replace(GUID, (g) => `…${g.slice(-4)}`);
 const kindOf = (n: DiagramNodeSpec) => n.resourceKind ?? n.icon;
@@ -55,6 +56,8 @@ type Scope = {
   knownCidrs: string[];
   /** On-premises sites of this VNet's gateway, or of a hub this VNet uses by gateway transit */
   sites: PluSite[];
+  /** Internal load balancers in this VNet: their private frontend IPs (flow logs name who called them) */
+  lbs: PluLb[];
 };
 
 /** Everything the join needs that the diagram already knows (no Azure call) */
@@ -141,7 +144,15 @@ export function scopeFromSpec(spec: DiagramSpec, vnetNodeId: string): Scope | nu
     try { prefixes = (JSON.parse(n.metadata?.lng ?? "{}") as { prefixes?: string[] }).prefixes ?? []; } catch { /* none */ }
     sites.push({ siteNodeId: n.id, prefixes, bgp: n.metadata?.bgp === "true", nat: n.metadata?.nat === "true" });
   }
-  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)], sites };
+  const lbs: PluLb[] = [];
+  for (const n of spec.nodes) {
+    if (kindOf(n) !== "lb" || vnetOf(n) !== vnet.id) continue;
+    let fes: Array<{ kind?: string; ip?: string }> = [];
+    try { fes = JSON.parse(n.metadata?.frontends ?? "[]") as typeof fes; } catch { /* none */ }
+    const ips = [...new Set(fes.filter((f) => f.kind === "private" && f.ip && isPrivateV4(f.ip)).map((f) => f.ip!))];
+    if (ips.length) lbs.push({ lbNodeId: n.id, ips });
+  }
+  return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)], sites, lbs };
 }
 
 async function graph<T>(arm: ArmFetcher, env: Env, query: string): Promise<T[]> {
@@ -193,7 +204,7 @@ union isfuzzy=true StorageBlobLogs, StorageFileLogs, StorageQueueLogs, StorageTa
 | top 200 by Clients desc`;
 }
 
-/** VNet flow logs (Traffic Analytics) to the Private Endpoint IPs; both directions of a pair counted once (max) */
+/** VNet flow logs (Traffic Analytics) to the Private Endpoint / internal LB frontend IPs; both directions of a pair counted once (max) */
 export function flowQuery(peIps: string[]): string {
   return `let peIps = dynamic([${peIps.map(kqlString).join(",")}]);
 NTANetAnalytics
@@ -348,7 +359,8 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
   const withTa = vnetSide.filter((f) => f.ta && f.ws);
   const flow: PlSourceStatus = { source: "vnetFlow", state: "disabled" };
   const flows: PluFlowRow[] = [];
-  const peIps = scope.pes.map((p) => p.ip).filter((x): x is string => !!x);
+  // Private Endpoint IPs and internal LB frontend IPs in one query (the join tells them apart by destination)
+  const peIps = [...new Set([...scope.pes.map((p) => p.ip).filter((x): x is string => !!x), ...scope.lbs.flatMap((l) => l.ips)])];
   if (withTa.length) {
     flow.state = "ok";
     flow.intervalMin = Math.max(...withTa.map((f) => f.interval ?? 60));
@@ -379,5 +391,5 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
     identities, peerings: scope.peerings, access, flows, peBytes: new Map(), sources,
     clusterOf: scope.clusterOf, outerSubnets: scope.outerSubnets, knownCidrs: scope.knownCidrs, sites: scope.sites,
   };
-  return { ...joinPrivateLinkUsage(input), sources };
+  return { ...joinPrivateLinkUsage(input), sources, ...(scope.lbs.length ? { lbInbound: joinLbInbound(input, scope.lbs, flows) } : {}) };
 }

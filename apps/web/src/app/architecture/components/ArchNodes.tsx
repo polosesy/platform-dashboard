@@ -79,11 +79,19 @@ export const BoxNode = memo(function BoxNode({ data }: NodeProps<ArchNodeData>) 
   );
 });
 
-/** Resource tile (also used for stacks, ghosts, the Internet and collapsed VNets). */
+/** Resource tile (also used for stacks and their fold tiles, ghosts, the Internet and collapsed VNets). */
 export const TileNode = memo(function TileNode({ data }: NodeProps<ArchNodeData>) {
   const kind = data.shape.shape;
+  // A stack and the fold tile that replaces it once open are one toggle in one spot (the page's onNodeClick)
+  const toggle = kind === "stack" || kind === "fold" ? data.toggle : undefined;
   return (
-    <button type="button" className={`${s.tile} ${s[`tile_${kind}`] ?? ""} ${data.context ? s.context : ""}`} aria-label={data.ariaLabel}>
+    <button
+      type="button"
+      className={`${s.tile} ${s[`tile_${kind}`] ?? ""} ${data.context ? s.context : ""}`}
+      aria-label={data.ariaLabel}
+      aria-expanded={toggle ? toggle === "collapse" : undefined}
+      data-export={kind === "fold" ? "skip" : undefined}
+    >
       <Handles />
       <Icon src={data.icon} />
       <span className={s.tileText}>
@@ -92,6 +100,7 @@ export const TileNode = memo(function TileNode({ data }: NodeProps<ArchNodeData>
         {data.meta ? <span className={s.tileMeta}>{data.meta}</span> : null}
       </span>
       <Badges badges={data.badges} />
+      {toggle ? <span className={s.tileChevron} aria-hidden="true">{toggle === "collapse" ? "▴" : "▾"}</span> : null}
     </button>
   );
 });

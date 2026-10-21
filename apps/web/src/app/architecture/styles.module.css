@@ -271,6 +271,33 @@
   background: rgba(255, 255, 255, 0.35);
 }
 
+/* Outer boundary (Azure Architecture Center order): outside Azure › subscription › region › VNet › subnet */
+.box_external {
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.22);
+  background: transparent;
+  border-radius: 14px;
+}
+
+.box_subscription {
+  border: 1.5px solid rgba(var(--ink-rgb), 0.32);
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 18px;
+}
+
+.box_subscription .boxHead {
+  height: 38px;
+}
+
+.box_subscription .boxName {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.box_external .boxName {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .box_region {
   border: 1.5px dashed rgba(20, 21, 23, 0.28);
   background: rgba(255, 255, 255, 0.28);
@@ -510,6 +537,28 @@
   box-shadow: 3px 3px 0 -1px var(--panel-solid), 3px 3px 0 0 var(--border), 6px 6px 0 -1px var(--panel-solid), 6px 6px 0 0 var(--border);
 }
 
+/* An expanded stack's slot: a group header that folds it back — dashed and quiet, so it never reads as a resource */
+.tile_fold {
+  border-style: dashed;
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.04);
+  box-shadow: none;
+}
+
+.tile_fold .tileSub {
+  color: var(--accent);
+}
+
+/* ▾ / ▴ of a stack and its fold tile — the same corner in both states */
+.tileChevron {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent);
+}
+
 .tile_pill {
   border: 2px solid rgba(0, 120, 212, 0.5);
   background: rgba(240, 247, 253, 0.96);
@@ -627,6 +676,10 @@
   height: 11px;
   border-radius: 3px;
   margin-left: 4px;
+}
+
+.lb_subscription {
+  border: 1.5px solid rgba(var(--ink-rgb), 0.45);
 }
 
 .lb_region {

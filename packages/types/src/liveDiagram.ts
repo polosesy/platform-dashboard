@@ -366,6 +366,49 @@ export type LiveNode = {
   basis?: "metric" | "resourceHealth" | "observed" | "configured" | "notApplicable" | "none";
   /** i18n keys of the evidence (ld.ev.*) shown in the panel */
   reasons?: string[];
+  /** What the resource is doing right now and why, when it is not simply ready (services/lifecycle.ts) */
+  lifecycle?: LiveLifecycle;
+  /** Spec facts read on this poll — they replace the ones stored when the diagram was generated */
+  liveSpec?: LiveSpec;
+};
+
+/**
+ * A resource's operation state, from its own properties read on this poll (ARM), and the cause when a record says
+ * it: a change record (Resource Graph resourcechanges: who changed what, before → after) or a planned-maintenance
+ * event that lists this resource. Never a status input — the card keeps its health colour.
+ */
+export type LiveLifecycle = {
+  /** ready = nothing in progress (sent only with a recent change) */
+  state: "ready" | "updating" | "scaling" | "starting" | "stopping" | "creating" | "deleting" | "failed";
+  /** The state word Azure returned (provisioningState / state / status) */
+  raw?: string;
+  /** user / app = a change record by a user / an application (service principal, managed identity, automation);
+   *  platform = a change record by Azure itself (changedByType System); maintenance = an active planned-maintenance
+   *  event lists this resource; unknown = in progress with no record yet (records arrive within ~5 min) */
+  cause?: "user" | "app" | "platform" | "maintenance" | "unknown";
+  /** The latest change record in the last hours (before → after when Azure recorded them) */
+  change?: LiveChange;
+  /** ISO time of the read */
+  asOf: string;
+};
+
+export type LiveChange = {
+  at: string;
+  by: "user" | "app" | "platform" | "unknown";
+  changeType?: "Create" | "Update" | "Delete";
+  /** Changed properties shown (at most 4): path, previous value, new value */
+  items: Array<{ path: string; from?: string; to?: string }>;
+  /** How many properties the record changed */
+  count: number;
+};
+
+export type LiveSpec = {
+  facts: Array<{ k: string; v: string | number | boolean }>;
+  /** Scale set: the target capacity when the actual instance count differs */
+  instancesTarget?: number;
+  /** Scale set: instances by provisioning state (Succeeded, Creating, …) */
+  instanceStates?: Record<string, number>;
+  asOf: string;
 };
 
 export type LiveEdge = {
@@ -818,4 +861,32 @@ export type PrivateLinkUsageResponse = {
   unresolved: PlUnresolved[];
   publicAccess: PlPublicAccess[];
   sources: PlSourceStatus[];
+  /**
+   * Internal load balancers of the VNet in view: who sent packets to a private frontend, from VNet flow logs
+   * (Traffic Analytics, the caller side records the frontend IP as destination). Same caller rules as the Private
+   * Endpoint use — exactly one resource or unresolved. Absent on older responses.
+   */
+  lbInbound?: LbInbound;
+};
+
+export type LbInboundCaller = {
+  /** `lbi:${callerNodeId}>${lbNodeId}` */
+  id: string;
+  callerNodeId: string;
+  lbNodeId: string;
+  /** the frontend IPs the caller's flows went to */
+  frontendIps: string[];
+  callerIp?: string;
+  attribution: PrivateLinkUsage["attribution"];
+  viaNodeIds?: string[];
+  lastSeen?: string;
+  evidence: PlEvidence[];
+};
+
+export type LbInbound = {
+  /** Internal LBs looked at, with their private frontend IPs */
+  frontends: Array<{ lbNodeId: string; ips: string[] }>;
+  callers: LbInboundCaller[];
+  /** targetNodeId = the LB node */
+  unresolved: PlUnresolved[];
 };

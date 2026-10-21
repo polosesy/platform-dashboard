@@ -356,21 +356,47 @@ export async function collectBatchEdgeMetrics(
 }
 
 // ────────────────────────────────────────────
-// PowerState Collection
+// Live read: power state + the resource's own state, read on every poll (cached briefly)
 //
-// Fetches instance power state for compute resources
-// (VM, VMSS, AKS, Container App, Function App, App Service).
-// Uses ARM instanceView or properties.powerState/state.
+// One ARM GET per resource (the same call that gives the power state) also carries provisioningState, the
+// service's own state (PostgreSQL / MySQL Flexible `state`, SQL `status`, …) and the SKU — the spec stored at
+// generation time is not refreshed, so these are what the card and the panel must show "as of now". A scale set's
+// instance list (`/virtualMachines`) is the actual instance count; its own GET gives the target (`sku.capacity`)
+// and whether a scale operation is running (`provisioningState`).
 // ────────────────────────────────────────────
 
-const powerStateCache = new CacheManager<PowerState>(200, 120_000);
+/** Instances of a scale set as ARM lists them right now (Deleting ones are on their way out — not counted) */
+export type VmssInstanceSummary = { actual: number; byProvisioning: Record<string, number>; byPower: Record<string, number> };
+
+export type LiveRead = {
+  power: PowerState;
+  /** properties.provisioningState as ARM returns it (Succeeded, Updating, Creating, Deleting, Failed, …) */
+  provisioningState?: string;
+  /** The service's own state (PostgreSQL / MySQL Flexible `state`, SQL `status`, App Service `state`, AKS power) */
+  state?: string;
+  sku?: { name?: string; tier?: string; capacity?: number };
+  instances?: VmssInstanceSummary;
+  /** The resource body as read (sku + properties) — the panel's spec facts are rebuilt from it (resourceSpec) */
+  row?: { sku?: Record<string, unknown>; kind?: string; properties?: Record<string, unknown> };
+  /** ISO time of the read */
+  asOf: string;
+};
+
+/** A read that shows something in progress is kept 20 s instead of 120 s, so the end of a scale shows soon */
+const SETTLED_TTL_MS = 120_000;
+const MOVING_TTL_MS = 20_000;
+const liveReadCache = new CacheManager<LiveRead>(400, SETTLED_TTL_MS);
 
 const POWER_STATE_RESOURCE_KINDS = new Set([
   "vm", "vmss", "aks", "containerApp", "functionApp", "appService",
   "postgres", "sql", "redis", "cosmosDb", "storage", "keyVault",
 ]);
 
-function parsePowerState(code: string): PowerState {
+/**
+ * Power from a state word. Updating / scaling / upgrading are operations, not power: they map to "unknown" so the
+ * card keeps its health colour and the lifecycle chip says what is going on (a scaling Redis is not "stopping").
+ */
+export function parsePowerState(code: string): PowerState {
   const lower = code.toLowerCase();
   // Compute states
   if (lower.includes("running")) return "running";
@@ -381,157 +407,157 @@ function parsePowerState(code: string): PowerState {
   // PaaS operational states
   if (lower === "ready" || lower === "online" || lower === "succeeded" || lower === "available") return "running";
   if (lower === "disabled" || lower === "offline" || lower === "paused" || lower === "dropped") return "stopped";
-  if (lower === "creating" || lower === "resuming" || lower === "updating") return "starting";
-  if (lower === "deleting" || lower === "pausing" || lower === "scaling") return "stopping";
+  if (lower === "creating" || lower === "resuming") return "starting";
+  if (lower === "deleting" || lower === "pausing" || lower === "dropping") return "stopping";
   return "unknown";
 }
 
-async function collectResourcePowerState(
+type VmssVmRow = { instanceId?: string; properties?: { provisioningState?: string; instanceView?: { statuses?: Array<{ code: string }> } } };
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Count a scale set's instances by provisioning state and power (pure; tested in lifecycle.test.ts) */
+export function summarizeVmssInstances(rows: readonly VmssVmRow[]): VmssInstanceSummary {
+  const byProvisioning: Record<string, number> = {};
+  const byPower: Record<string, number> = {};
+  let actual = 0;
+  for (const r of rows) {
+    const prov = cap(r.properties?.provisioningState ?? r.properties?.instanceView?.statuses?.find((s) => s.code.startsWith("ProvisioningState/"))?.code.split("/")[1] ?? "Unknown");
+    byProvisioning[prov] = (byProvisioning[prov] ?? 0) + 1;
+    const ps = r.properties?.instanceView?.statuses?.find((s) => s.code.startsWith("PowerState/"));
+    const power = ps ? parsePowerState(ps.code) : "unknown";
+    byPower[power] = (byPower[power] ?? 0) + 1;
+    if (prov.toLowerCase() !== "deleting") actual++;
+  }
+  return { actual, byProvisioning, byPower };
+}
+
+/** Power of a scale set from its instances: all the same → that, mixed → the least running one */
+function vmssPower(sum: VmssInstanceSummary): PowerState {
+  const states = Object.keys(sum.byPower) as PowerState[];
+  if (!states.length) return "unknown";
+  if (states.length === 1) return states[0]!;
+  if (states.includes("deallocated") || states.includes("stopped")) return "stopped";
+  if (states.includes("starting") || states.includes("stopping")) return "starting";
+  return "running";
+}
+
+const inProgress = (r: LiveRead) =>
+  (!!r.provisioningState && r.provisioningState.toLowerCase() !== "succeeded") ||
+  (!!r.state && /updating|scaling|upgrading|starting|stopping|creating|deleting|dropping/i.test(r.state)) ||
+  (r.instances != null && r.sku?.capacity != null && r.instances.actual !== r.sku.capacity);
+
+type ArmBody = { sku?: { name?: string; tier?: string; capacity?: number }; kind?: string; properties?: Record<string, unknown> };
+const strOf = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const skuOf = (b: ArmBody | undefined) =>
+  b?.sku ? { ...(b.sku.name ? { name: b.sku.name } : {}), ...(b.sku.tier ? { tier: b.sku.tier } : {}), ...(typeof b.sku.capacity === "number" ? { capacity: b.sku.capacity } : {}) } : undefined;
+
+/** api-version and the property that carries the service's own state, per kind (one GET each) */
+const KIND_GET: Record<string, { api: string; state?: (p: Record<string, unknown>) => string | undefined }> = {
+  aks: { api: "2024-09-01", state: (p) => strOf((p.powerState as { code?: string } | undefined)?.code) },
+  containerApp: { api: "2024-03-01", state: (p) => strOf(p.runningStatus) },
+  functionApp: { api: "2023-12-01", state: (p) => strOf(p.state) },
+  appService: { api: "2023-12-01", state: (p) => strOf(p.state) },
+  postgres: { api: "2022-12-01", state: (p) => strOf(p.state) },
+  sql: { api: "2021-11-01", state: (p) => strOf(p.status) },
+  redis: { api: "2023-08-01" },
+  cosmosDb: { api: "2024-02-15-preview" },
+  storage: { api: "2023-05-01", state: (p) => strOf(p.statusOfPrimary) },
+  keyVault: { api: "2023-07-01" },
+};
+
+async function collectResourceLiveRead(
   env: Env,
   bearerToken: string | undefined,
   azureResourceId: string,
   resourceKind: string,
-): Promise<PowerState> {
+): Promise<LiveRead> {
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:powerstate:${azureResourceId}`;
-  const cached = powerStateCache.get(cacheKey);
+  const cacheKey = `${prefix}:liveread:${azureResourceId}`;
+  const cached = liveReadCache.get(cacheKey);
   if (cached) return cached;
 
-  let state: PowerState = "unknown";
-
+  const read: LiveRead = { power: "unknown", asOf: new Date().toISOString() };
   try {
     const fetcher = await getArmFetcherAuto(env, bearerToken);
     if (resourceKind === "vm") {
-      const resp = await fetcher.fetchJson<{
-        statuses?: Array<{ code: string }>;
-      }>(`https://management.azure.com${azureResourceId}/instanceView?api-version=2024-07-01`);
-      const psStatus = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
-      if (psStatus) state = parsePowerState(psStatus.code);
+      const resp = await fetcher.fetchJson<{ statuses?: Array<{ code: string }> }>(`https://management.azure.com${azureResourceId}/instanceView?api-version=2024-07-01`);
+      const ps = resp.statuses?.find((s) => s.code.startsWith("PowerState/"));
+      if (ps) read.power = parsePowerState(ps.code);
+      const prov = resp.statuses?.find((s) => s.code.startsWith("ProvisioningState/"))?.code.split("/")[1];
+      if (prov) read.provisioningState = cap(prov);
     } else if (resourceKind === "vmss") {
-      // VMSS scale-set-level instanceView doesn't contain PowerState.
-      // Query individual VM instances and aggregate their power states.
-      const resp = await fetcher.fetchJson<{
-        value?: Array<{
-          instanceId: string;
-          properties?: { instanceView?: { statuses?: Array<{ code: string }> } };
-        }>;
-      }>(`https://management.azure.com${azureResourceId}/virtualMachines?api-version=2024-07-01&$expand=instanceView`);
-
-      const instances = resp.value ?? [];
-      if (instances.length > 0) {
-        const instanceStates: PowerState[] = [];
-        for (const inst of instances) {
-          const ps = inst.properties?.instanceView?.statuses?.find(
-            (s) => s.code.startsWith("PowerState/"),
-          );
-          instanceStates.push(ps ? parsePowerState(ps.code) : "unknown");
-        }
-        // Aggregate: all same → that state, mixed → worst state wins
-        const allSame = instanceStates.every((s) => s === instanceStates[0]);
-        if (allSame) {
-          state = instanceStates[0]!;
-        } else if (instanceStates.some((s) => s === "deallocated")) {
-          state = "stopped";
-        } else if (instanceStates.some((s) => s === "stopped")) {
-          state = "stopped";
-        } else if (instanceStates.some((s) => s === "starting" || s === "stopping")) {
-          state = "starting";
-        } else {
-          state = "running";
-        }
+      // The scale set (target capacity, scale operation running) and its instances (the actual count, power)
+      const [self, list] = await Promise.all([
+        fetcher.fetchJson<ArmBody>(`https://management.azure.com${azureResourceId}?api-version=2024-07-01`).catch(() => undefined),
+        fetcher.fetchJson<{ value?: VmssVmRow[] }>(`https://management.azure.com${azureResourceId}/virtualMachines?api-version=2024-07-01&$expand=instanceView`),
+      ]);
+      const sku = skuOf(self);
+      if (sku) read.sku = sku;
+      if (self) read.row = { ...(self.sku ? { sku: self.sku as Record<string, unknown> } : {}), ...(self.properties ? { properties: self.properties } : {}) };
+      const prov = strOf(self?.properties?.provisioningState);
+      if (prov) read.provisioningState = prov;
+      // Flexible orchestration lists no instances here — then only the target is known (never shown as actual)
+      const rows = list.value ?? [];
+      if (rows.length || strOf(self?.properties?.orchestrationMode) !== "Flexible") {
+        read.instances = summarizeVmssInstances(rows);
+        read.power = vmssPower(read.instances);
       }
-    } else if (resourceKind === "aks") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { powerState?: { code: string } };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2024-09-01`);
-      const code = resp.properties?.powerState?.code;
-      if (code) state = parsePowerState(code);
-    } else if (resourceKind === "containerApp") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { runningStatus?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2024-03-01`);
-      const rs = resp.properties?.runningStatus;
-      if (rs) state = parsePowerState(rs);
-    } else if (resourceKind === "functionApp" || resourceKind === "appService") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { state?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2023-12-01`);
-      const s = resp.properties?.state;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "postgres") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { state?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2022-12-01`);
-      const s = resp.properties?.state;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "sql") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { status?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2021-11-01`);
-      const s = resp.properties?.status;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "redis") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { provisioningState?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2023-08-01`);
-      const s = resp.properties?.provisioningState;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "cosmosDb") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { provisioningState?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2024-02-15-preview`);
-      const s = resp.properties?.provisioningState;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "storage") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { statusOfPrimary?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2023-05-01`);
-      const s = resp.properties?.statusOfPrimary;
-      if (s) state = parsePowerState(s);
-    } else if (resourceKind === "keyVault") {
-      const resp = await fetcher.fetchJson<{
-        properties?: { provisioningState?: string };
-      }>(`https://management.azure.com${azureResourceId}?api-version=2023-07-01`);
-      const s = resp.properties?.provisioningState;
-      if (s) state = parsePowerState(s);
+    } else if (KIND_GET[resourceKind]) {
+      const def = KIND_GET[resourceKind]!;
+      const resp = await fetcher.fetchJson<ArmBody>(`https://management.azure.com${azureResourceId}?api-version=${def.api}`);
+      const p = resp.properties ?? {};
+      const prov = strOf(p.provisioningState);
+      if (prov) read.provisioningState = prov;
+      const st = def.state?.(p);
+      if (st) read.state = st;
+      const sku = skuOf(resp);
+      if (sku) read.sku = sku;
+      read.row = { ...(resp.sku ? { sku: resp.sku as Record<string, unknown> } : {}), ...(resp.kind ? { kind: resp.kind } : {}), properties: p };
+      // Power: the service's state when it has one, else the provisioning state (Redis, Cosmos DB, Key Vault)
+      const word = st ?? prov;
+      if (word) read.power = parsePowerState(word);
     }
   } catch {
-    // Non-critical — return "unknown"
+    // Non-critical — power "unknown", nothing else read
   }
 
-  powerStateCache.set(cacheKey, state);
-  return state;
+  liveReadCache.set(cacheKey, read, inProgress(read) ? MOVING_TTL_MS : SETTLED_TTL_MS);
+  return read;
 }
 
-/**
- * Batch collect power states for compute resources (parallel with concurrency limit).
- */
+/** Live reads for the diagram's resources (parallel, concurrency 10, within the snapshot budget) */
+export async function collectBatchLiveReads(
+  env: Env,
+  bearerToken: string | undefined,
+  nodes: Array<{ azureResourceId: string; resourceKind: string }>,
+  deadlineMs?: number,
+): Promise<Map<string, LiveRead>> {
+  const CONCURRENCY = 10;
+  const targets = nodes.filter((n) => n.azureResourceId && POWER_STATE_RESOURCE_KINDS.has(n.resourceKind));
+  const results = new Map<string, LiveRead>();
+  const queue = [...targets];
+  async function worker() {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) break;
+      try {
+        results.set(item.azureResourceId, await collectResourceLiveRead(env, bearerToken, item.azureResourceId, item.resourceKind));
+      } catch {
+        results.set(item.azureResourceId, { power: "unknown", asOf: new Date().toISOString() });
+      }
+    }
+  }
+  return untilDeadline(Promise.all(Array.from({ length: CONCURRENCY }, () => worker())), results, deadlineMs);
+}
+
+/** Power states only (callers that need nothing else) */
 export async function collectBatchPowerStates(
   env: Env,
   bearerToken: string | undefined,
   nodes: Array<{ azureResourceId: string; resourceKind: string }>,
   deadlineMs?: number,
 ): Promise<Map<string, PowerState>> {
-  const CONCURRENCY = 10;
-  const targets = nodes.filter(
-    (n) => n.azureResourceId && POWER_STATE_RESOURCE_KINDS.has(n.resourceKind),
-  );
-
-  const results = new Map<string, PowerState>();
-  const queue = [...targets];
-
-  async function worker() {
-    while (queue.length > 0) {
-      const item = queue.shift();
-      if (!item) break;
-      try {
-        const state = await collectResourcePowerState(env, bearerToken, item.azureResourceId, item.resourceKind);
-        results.set(item.azureResourceId, state);
-      } catch {
-        results.set(item.azureResourceId, "unknown");
-      }
-    }
-  }
-
-  return untilDeadline(Promise.all(Array.from({ length: CONCURRENCY }, () => worker())), results, deadlineMs);
+  const reads = await collectBatchLiveReads(env, bearerToken, nodes, deadlineMs);
+  return new Map([...reads].map(([id, r]) => [id, r.power] as const));
 }

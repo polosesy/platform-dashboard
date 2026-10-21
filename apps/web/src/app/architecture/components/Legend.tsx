@@ -16,6 +16,7 @@ export function Legend({ open, onToggle, showContext = false }: { open: boolean;
       {open ? (
         <div className={s.legendBody}>
           <div className={s.legendGroup}>
+            <span className={`${s.legendBox} ${s.lb_subscription}`} />{t("arch.box.subscription")}
             <span className={`${s.legendBox} ${s.lb_region}`} />{t("arch.box.region")}
             <span className={`${s.legendBox} ${s.lb_vnet}`} />VNet
             <span className={`${s.legendBox} ${s.lb_subnet}`} />{t("arch.box.subnet")}
@@ -34,7 +35,7 @@ export function Legend({ open, onToggle, showContext = false }: { open: boolean;
               );
             })}
           </ul>
-          <p className={s.legendNote}>{t("arch.legendNote")}</p>
+          <p className={s.legendNote}>{t("arch.legendNote")} {t("arch.legendFocus")}</p>
         </div>
       ) : null}
     </div>

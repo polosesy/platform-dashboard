@@ -38,11 +38,15 @@ remote_sudo() {
 
 push() {
   local tag; tag="$(git rev-parse --short HEAD)"
-  git diff --quiet HEAD -- || tag="$tag-dirty"
-  git ls-files -z | tar --force-local --null -czf "$TMP/src.tar.gz" -T -
+  git diff --quiet HEAD -- 2>/dev/null || tag="$tag-dirty"
+  # Tracked files plus new ones not committed yet (still honouring .gitignore: no .env, .secrets, keys, connections
+  # file); files deleted in the working tree are skipped
+  [ -n "$(git ls-files --others --exclude-standard -- . ':!.claude')" ] && tag="${tag%-dirty}-dirty"
+  git ls-files -z --cached --others --exclude-standard -- . ':!.claude' | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done > "$TMP/files"
+  tar --force-local --null -czf "$TMP/src.tar.gz" -T "$TMP/files"
   scp "${SCP_OPTS[@]}" "$TMP/src.tar.gz" "$REMOTE:aud-src.tar.gz"
   ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -rf ~/aud-dashboard && mkdir -p ~/aud-dashboard && tar -xzf ~/aud-src.tar.gz -C ~/aud-dashboard && rm ~/aud-src.tar.gz && echo $tag > ~/aud-dashboard/.source-sha"
-  echo "pushed $(git ls-files | wc -l | tr -d ' ') tracked files as $tag (no .env, .secrets, config/connections.json)"
+  echo "pushed $(tr -cd '\0' < "$TMP/files" | wc -c | tr -d ' ') files as $tag (gitignored ones never: .env, .secrets, config/connections.json)"
 }
 
 env_files() {

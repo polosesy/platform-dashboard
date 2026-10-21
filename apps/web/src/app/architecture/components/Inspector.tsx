@@ -153,7 +153,8 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
   );
 
   if (sh.shape === "internet") {
-    const entries = model.edges.filter((e) => e.source === internetId(sh.region) && (e.kind === "ingress" || e.kind === "exposure"));
+    const from = new Set(sh.regions.map(internetId));
+    const entries = model.edges.filter((e) => from.has(e.source) && (e.kind === "ingress" || e.kind === "exposure") && shownAt.has(e.target));
     return (
       <aside className={s.inspector}>
         <h2 className={s.iTitle}>{t("arch.internet")}</h2>

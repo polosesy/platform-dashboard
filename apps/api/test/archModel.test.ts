@@ -6,7 +6,7 @@ import * as ns from "../../web/src/lib/archModel.ts";
 import { mockArchitectureGraph } from "../src/mockData.js";
 
 const m = ((ns as unknown as { default?: typeof ns }).default ?? ns) as typeof ns;
-const { buildArchModel, layoutArch, initialCollapsed, defaultRegion, internetId, searchArch, labelWidth, ARCH } = m;
+const { buildArchModel, layoutArch, initialCollapsed, defaultRegion, internetId, searchArch, labelWidth, ARCH, INTERNET_TILE } = m;
 
 // ── synthetic subscription (fake IDs only) ──
 const SUB = "/subscriptions/00000000-0000-0000-0000-000000000000";
@@ -115,8 +115,8 @@ test("partition: every graph node lands in exactly one bucket", () => {
   assert.equal(model.accounting.size, graph.nodes.length);
   for (const n of graph.nodes) assert.ok(model.accounting.has(n.id.toLowerCase()), n.id);
   const by = (as: string) => [...model.accounting].filter(([, v]) => v.as === as).map(([id]) => id);
-  assert.deepEqual(by("omitted").length, 3, "subscription + 2 resource groups");
-  assert.deepEqual(by("container").sort(), [A1, A2, B1, VNET_A, VNET_B].sort());
+  assert.deepEqual(by("omitted").length, 2, "2 resource groups");
+  assert.deepEqual(by("container").sort(), [SUB.toLowerCase(), A1, A2, B1, VNET_A, VNET_B].sort(), "the subscription is the outer frame");
   // counted = unused NSG, unused public IP, public IP whose owner is not in the graph
   assert.deepEqual(by("counted").sort(), [nsgId("nsg4"), pipId("pip-unused"), pipId("pip-vpn")].sort());
   assert.equal(model.accounting.get(VMSS)?.into, AKS);
@@ -166,6 +166,7 @@ test("lines: configuration relationships only, NAT is egress-only, SNAT pair is 
   assert.deepEqual(kinds("privateLink"), [`${PE}->${KV}`]);
   assert.equal(kinds("peering").length, 1);
   assert.deepEqual(kinds("outbound"), [`${A2}->${NAT}`]);
+  assert.deepEqual(kinds("egress"), [`${NAT}->${internetId("koreacentral")}`], "NAT with a public IP → the Internet (configuration)");
   assert.ok(!model.edges.some((e) => e.target === NAT && (e.kind === "exposure" || e.kind === "ingress")));
   for (const e of model.edges) assert.ok(!["contains", "attached-to", "bound-to"].includes(e.kind));
 });
@@ -197,7 +198,7 @@ test("region view: nested geometry, stacks, ghosts for other regions", () => {
   assert.ok(ids.has(`stack:${A2}:vm`), "7 VMs in one subnet stack");
   assert.ok(ids.has(`stack:paas:data:koreacentral:storage`), "5 storage accounts stack in the lane");
   assert.ok(ids.has(`ghost:${KV}`) && ids.has(`ghost:${VNET_B}`), "other-region ends shown as ghosts");
-  assert.ok(ids.has(internetId("koreacentral")));
+  assert.ok(ids.has(INTERNET_TILE) && !ids.has(internetId("koreacentral")), "one Internet tile, not one per region");
   assert.ok(!ids.has(AKS), "eastus resources are not drawn in the koreacentral view");
   // Default layers: no VM exposure line, ingress yes
   assert.ok(L.edges.some((e) => e.kind === "ingress"));
@@ -217,6 +218,30 @@ test("expanding a stack shows its members; collapsing a VNet rolls lines up to i
   const routes = closed.edges.filter((e) => e.kind === "routes");
   assert.deepEqual(routes.map((e) => `${e.source}->${e.target}`).sort(), [`${LB_PUB}->${VNET_A}`, `${LB_PUB}->ghost:${AKS}`].sort(), "vm1 line rolls up to the collapsed VNet; AKS (eastus) is a ghost");
   assert.ok(closed.edges.every((e) => e.source !== e.target));
+});
+
+test("an expanded stack keeps its slot as a fold tile: same spot, no edges, not exported", () => {
+  const STACK = `stack:${A2}:vm`;
+  const shut = layoutArch(model, { region: "koreacentral", collapsed: new Set(), expandedStacks: new Set() });
+  const open = layoutArch(model, { region: "koreacentral", collapsed: new Set(), expandedStacks: new Set([STACK]) });
+  const stack = shut.shapes.find((s) => s.id === STACK)!;
+  const fold = open.shapes.find((s) => s.id === `fold:${STACK}`)!;
+  assert.ok(fold && fold.shape === "fold", "fold tile drawn");
+  if (fold.shape !== "fold") return;
+  assert.equal(fold.ref, STACK);
+  assert.equal(fold.n, 7);
+  assert.equal(fold.parent, A2);
+  assert.deepEqual({ x: fold.x, y: fold.y, w: fold.w, h: fold.h }, { x: stack.x, y: stack.y, w: stack.w, h: stack.h }, "the click target stays where the stack was");
+  assert.ok(![...open.shownAt.values()].some((v) => v.startsWith("fold:")), "nothing is shown at a fold tile");
+  assert.ok(open.edges.every((e) => !e.source.startsWith("fold:") && !e.target.startsWith("fold:")));
+  // A run at or below the threshold has no stack, so an expanded id for it draws no fold
+  const small = layoutArch(model, { region: "koreacentral", collapsed: new Set(), expandedStacks: new Set([`stack:${A1}:vm`]) });
+  assert.ok(!small.shapes.some((s) => s.shape === "fold"));
+  // Lanes too (PaaS group)
+  const LANE = "stack:paas:data:koreacentral:storage";
+  const lane = layoutArch(model, { region: "koreacentral", collapsed: new Set(), expandedStacks: new Set([LANE]) });
+  checkGeometry(lane);
+  assert.equal(lane.shapes.find((s) => s.id === `fold:${LANE}`)?.parent, "paas:data:koreacentral");
 });
 
 test("all-regions view: every VNet starts collapsed; geometry still valid", () => {

@@ -322,7 +322,31 @@ export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "ico
   if (kind === "publicIP" && n.metadata?.unused === "true") return NOT_MEASURED;
   if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
   if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return NODE_BINDINGS.frontDoorAfd!;
+  if (kind === "lb") return { ...NODE_BINDINGS.lb!, ...privateFrontendBindings(n.metadata?.frontends) };
   return NODE_BINDINGS[kind] ?? n.bindings ?? NOT_MEASURED;
+}
+
+/** Private frontends read per LB (more are summed by nobody — the panel lists them one by one) */
+export const MAX_PRIVATE_FRONTENDS = 3;
+
+/**
+ * An internal LB's inbound side, per private frontend (catalog LB-05): bytes and SYN packets received in the last
+ * hour (`ByteCount` / `SYNCount`, dimensions FrontendIPAddress + Direction — load-balancer metrics reference).
+ * One window = one bucket, so 0 (measured, nothing came) and null (not measured) stay apart. Never a status input,
+ * and never per caller (flow logs say who). Not counted by Azure: traffic that reaches the LB through a UDR (NVA /
+ * firewall) — the panel says so. Keys `feIn<i>` / `feSyn<i>` follow the order of the metadata frontends.
+ */
+export function privateFrontendBindings(frontendsJson: string | undefined): Record<string, MetricBinding> {
+  let fes: Array<{ kind?: string; ip?: string }> = [];
+  try { fes = JSON.parse(frontendsJson ?? "[]") as typeof fes; } catch { return {}; }
+  const ips = [...new Set(fes.filter((f) => f.kind === "private" && f.ip && PRIVATE_V4.test(f.ip)).map((f) => f.ip!))].slice(0, MAX_PRIVATE_FRONTENDS);
+  const out: Record<string, MetricBinding> = {};
+  ips.forEach((ip, i) => {
+    const filter = `FrontendIPAddress eq '${monEsc(ip)}' and Direction eq 'In'`;
+    out[`feIn${i}`] = mon("ByteCount", "total", { filter, window: "PT1H", optional: true });
+    out[`feSyn${i}`] = mon("SYNCount", "total", { filter, window: "PT1H", optional: true });
+  });
+  return out;
 }
 
 /**

@@ -13,6 +13,7 @@ export const EDGE_LOOK: Record<ArchEdgeKind | "traffic", EdgeLook> = {
   privateLink: { color: "privateLink", alpha: 1, dash: "6 3", width: 1.8, arrow: true },
   peering: { color: "accent-2", alpha: 1, dash: "8 4", width: 2.4, arrow: false },
   outbound: { color: "ink", alpha: 0.55, width: 1.5, arrow: true },
+  egress: { color: "egress", alpha: 1, dash: "7 4", width: 1.8, arrow: true },
   vnetIntegration: { color: "integration", alpha: 1, dash: "3 3", width: 1.5, arrow: true },
   logging: { color: "ink", alpha: 0.4, dash: "1 4", width: 1.4, arrow: true },
   traffic: { color: "accent", alpha: 0.55, width: 3, arrow: true },

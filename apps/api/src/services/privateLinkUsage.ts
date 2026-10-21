@@ -6,6 +6,8 @@
 // The caller is found by its NIC IP, by being the only compute in the source subnet, or by its managed identity.
 // Anything that cannot be pinned to exactly one resource is listed as unresolved — never drawn.
 import type {
+  LbInbound,
+  LbInboundCaller,
   PlEndpoint,
   PlEvidence,
   PlPlace,
@@ -212,6 +214,53 @@ export function resolveCaller(
 }
 
 const GRADE_RANK: Record<PlUsageGrade, number> = { access: 0, flow: 1 };
+
+/** An internal load balancer's private frontend IPs (from the diagram) */
+export type PluLb = { lbNodeId: string; ips: string[] };
+
+/**
+ * Who sent packets to an internal load balancer — VNet flow logs only (the caller side records the frontend IP as
+ * destination; at the backend Azure rewrites it to the backend IP unless Floating IP). Same caller rules as the
+ * Private Endpoint use: one resource (NIC, the subnet's single owner, one AKS cluster) or an unresolved row with
+ * the reason. Denied-only pairs are listed, never drawn. Bytes are per caller pair (flow log), never the LB metric.
+ */
+export function joinLbInbound(input: Pick<PluInput, "callers" | "subnets" | "nics" | "nodeByArmId" | "identities" | "clusterOf" | "outerSubnets" | "knownCidrs" | "sites">, lbs: readonly PluLb[], flows: readonly PluFlowRow[]): LbInbound {
+  const byIp = new Map<string, string>();
+  for (const lb of lbs) for (const ip of lb.ips) byIp.set(ip, lb.lbNodeId);
+  const callers = new Map<string, LbInboundCaller>();
+  const unresolved: PlUnresolved[] = [];
+  for (const f of flows) {
+    const lbNodeId = byIp.get(f.destIp);
+    if (!lbNodeId) continue;
+    if (f.allowed === 0 && f.denied > 0) {
+      unresolved.push({ targetNodeId: lbNodeId, ip: f.srcIp, reason: "denied", deniedFlows: f.denied, lastSeen: f.last });
+      continue;
+    }
+    const r = resolveCaller(input, f.srcIp);
+    if (!r.ok) {
+      unresolved.push({ targetNodeId: lbNodeId, ip: f.srcIp, ...failure(r), lastSeen: f.last });
+      continue;
+    }
+    if (r.nodeId === lbNodeId) continue;
+    const id = `lbi:${r.nodeId}>${lbNodeId}`;
+    const c = callers.get(id) ?? { id, callerNodeId: r.nodeId, lbNodeId, frontendIps: [], attribution: r.attribution, evidence: [] };
+    if (!c.frontendIps.includes(f.destIp)) c.frontendIps.push(f.destIp);
+    if (isPrivateV4(f.srcIp)) c.callerIp ??= f.srcIp;
+    if (r.attribution === "nic" || ((r.attribution === "subnetOwner" || r.attribution === "aksCluster") && c.attribution === "identity")) c.attribution = r.attribution;
+    if (r.via?.length) c.viaNodeIds = [...new Set([...(c.viaNodeIds ?? []), ...r.via])].sort(cmp);
+    c.evidence.push({
+      source: "vnetFlow", grade: "flow", firstSeen: f.first, lastSeen: f.last, bytes: f.bytes, flows: f.flows,
+      ...(f.denied ? { deniedFlows: f.denied } : {}), ...(f.ports?.length ? { ports: [...f.ports].sort((a, b) => a - b).slice(0, 5) } : {}),
+    });
+    c.lastSeen = maxIso(c.lastSeen, f.last);
+    callers.set(id, c);
+  }
+  const list = [...callers.values()]
+    .map((c) => ({ ...c, frontendIps: [...c.frontendIps].sort(cmp) }))
+    .sort((a, b) => cmp(a.lbNodeId, b.lbNodeId) || cmp(b.lastSeen ?? "", a.lastSeen ?? "") || cmp(a.id, b.id));
+  unresolved.sort((a, b) => cmp(a.targetNodeId, b.targetNodeId) || cmp(a.reason, b.reason) || cmp(a.ip ?? "", b.ip ?? ""));
+  return { frontends: lbs.map((l) => ({ lbNodeId: l.lbNodeId, ips: [...l.ips].sort(cmp) })).sort((a, b) => cmp(a.lbNodeId, b.lbNodeId)), callers: list, unresolved };
+}
 
 const failure = (r: Extract<Resolved, { ok: false }>): Pick<PlUnresolved, "reason" | "nicName" | "candidates" | "basis" | "place"> => ({
   reason: r.reason,

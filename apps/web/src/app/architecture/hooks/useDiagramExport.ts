@@ -94,6 +94,8 @@ export function useDiagramExport(p: Params) {
         height: H,
         pixelRatio: ratio,
         style: { transform: `translate(${PAD}px, ${PAD}px) scale(1)`, width: `${W}px`, height: `${H}px` },
+        // Screen controls (a stack's fold tile) are not part of the picture — same as the draw.io export
+        filter: (el) => !(el instanceof HTMLElement && el.dataset.export === "skip"),
       });
 
       const out = document.createElement("canvas");

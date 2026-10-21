@@ -21,11 +21,18 @@
 
 import type { ArchitectureGraph, ArchitectureNode, InboundExposure } from "@aud/types";
 import { measure, place, type PackNode } from "./boxPack";
+import { routeOrthogonal, type RouteBox, type RRect, type Side } from "./archRoute";
 
-export type ArchEdgeKind = "ingress" | "exposure" | "routes" | "privateLink" | "peering" | "outbound" | "vnetIntegration" | "logging";
-export const ARCH_EDGE_KINDS: ArchEdgeKind[] = ["ingress", "routes", "privateLink", "peering", "outbound", "vnetIntegration", "exposure", "logging"];
+export type ArchEdgeKind = "ingress" | "exposure" | "routes" | "privateLink" | "peering" | "outbound" | "egress" | "vnetIntegration" | "logging";
+export const ARCH_EDGE_KINDS: ArchEdgeKind[] = ["ingress", "routes", "privateLink", "peering", "outbound", "egress", "vnetIntegration", "exposure", "logging"];
 /** Layers drawn by default; VM public-IP exposure and logging are opt-in to keep the first view readable. */
-export const DEFAULT_LAYERS: ArchEdgeKind[] = ["ingress", "routes", "privateLink", "peering", "outbound", "vnetIntegration"];
+export const DEFAULT_LAYERS: ArchEdgeKind[] = ["ingress", "routes", "privateLink", "peering", "outbound", "egress", "vnetIntegration"];
+/**
+ * Relationships repeated across the diagram (every PE → its service, every subnet → its NAT gateway, every
+ * integrated app → its subnet): drawn only for the selected tile / box unless "all lines" is on — their facts stay
+ * on screen as chips and badges (PE "→ target", PaaS "PE n", subnet "NAT name", app "VNet integration").
+ */
+export const FOCUS_KINDS: ReadonlySet<ArchEdgeKind> = new Set(["privateLink", "outbound", "vnetIntegration"]);
 
 export type PaasCategory = "app" | "data" | "security" | "messaging" | "monitoring" | "dns" | "other";
 export const PAAS_ORDER: PaasCategory[] = ["app", "data", "security", "messaging", "monitoring", "dns", "other"];
@@ -194,6 +201,8 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   // ── tiles ──
   const resources = new Map<string, ArchResource>();
   for (const [id, n] of byId) {
+    // The subscription is the outer frame of the drawing; resource groups are a filter, not a box
+    if (n.kind === "subscription") { account(id, "container"); continue; }
     if (OMITTED.has(n.kind)) { account(id, "omitted"); continue; }
     if (n.kind === "vnet" || n.kind === "subnet" || n.kind === "nic" || n.kind === "nsg" || n.kind === "publicIP") continue;
     if (n.kind === "vmss" && vmssOwner.has(id)) continue;
@@ -340,6 +349,8 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       if (!ENTRY_KINDS.has(ok) && verdict) r.exposure = mostExposedState(r.exposure, verdict);
       const closed = !ENTRY_KINDS.has(ok) && (verdict === "closed" || verdict === "noNsg");
       if (ok !== "natGateway" && !noInbound && !closed) addEdge(ENTRY_KINDS.has(ok) ? "ingress" : "exposure", internetId(r.region), owner);
+      // NAT gateway with a public IP: the subnets' outbound path to the Internet (configuration, never traffic)
+      if (ok === "natGateway") addEdge("egress", owner, internetId(r.region));
       continue;
     }
     const viaNic = nicSubnet.get(ownerId);
@@ -602,30 +613,49 @@ export function filterArchModel(model: ArchModel, cats: ReadonlySet<ArchCategory
 // ──────────────────────────────────────────────────────────────
 
 export const ARCH = {
-  LEAF_W: 188, LEAF_H: 74, GAP: 10, PAD: 12, PILL_W: 236, PILL_H: 72,
+  /** GAP = room between tiles (a line runs in its middle); BOX_GAP = room between boxes (two lines side by side) */
+  LEAF_W: 188, LEAF_H: 74, GAP: 14, BOX_GAP: 28, PAD: 12, PILL_W: 236, PILL_H: 72,
   /** Same-kind tiles in one subnet / lane group above this collapse into a stack */
   STACK_AT: 6, LANE_STACK_AT: 4,
   SUBNET_COLS: 3, VNETS_MAX_W: 1400, REGIONS_MAX_W: 2600,
 } as const;
-const HEAD = { root: 0, global: 36, region: 42, vnet: 38, subnet: 32, lane: 32, group: 28 } as const;
+const HEAD = { root: 0, external: 32, subscription: 40, global: 36, region: 42, vnet: 38, subnet: 32, lane: 32, group: 28 } as const;
+/** Header strip height per box type (lines never cross it — the tests check) */
+export const ARCH_HEAD: Readonly<Record<keyof typeof HEAD, number>> = HEAD;
 const MAXW = {
-  root: Infinity, global: ARCH.LEAF_W, region: Infinity, vnet: 1260,
+  root: Infinity, external: ARCH.LEAF_W, subscription: Infinity, global: ARCH.LEAF_W, region: Infinity, vnet: 1260,
   subnet: ARCH.SUBNET_COLS * ARCH.LEAF_W + (ARCH.SUBNET_COLS - 1) * ARCH.GAP,
   lane: ARCH.LEAF_W, group: 2 * ARCH.LEAF_W + ARCH.GAP,
 } as const;
+/** The one Internet tile — outside the subscription (not an Azure resource); every region's Internet maps to it */
+export const INTERNET_TILE = "internet";
 
 export type ArchBoxType = keyof typeof HEAD;
 export type ArchShape =
   | { id: string; shape: "box"; type: ArchBoxType; ref?: string; label: string; region?: string }
   | { id: string; shape: "tile"; ref: string }
   | { id: string; shape: "stack"; ref: string; kind: string; members: string[] }
+  /** An expanded stack's own slot: folds it back (ref = the stack id). UI only — no graph node, no edges, not exported */
+  | { id: string; shape: "fold"; ref: string; kind: string; n: number }
   | { id: string; shape: "pill"; ref: string }
   | { id: string; shape: "ghost"; ref: string }
-  | { id: string; shape: "internet"; region: string };
+  /** regions: the region keys whose Internet lines end here */
+  | { id: string; shape: "internet"; regions: string[] };
 
 export type ArchRect = { x: number; y: number; w: number; h: number };
 export type ArchPlaced = ArchShape & ArchRect & { depth: number; parent: string | null };
-export type ArchDrawEdge = { id: string; kind: ArchEdgeKind; source: string; target: string; count: number };
+export type ArchSide = Side;
+export type ArchDrawEdge = {
+  id: string; kind: ArchEdgeKind; source: string; target: string; count: number;
+  /** "focus" = drawn only while one of its ends is selected (FOCUS_KINDS, unless all lines are on) */
+  display: "always" | "focus";
+  /** Orthogonal route (lib/archRoute): absolute points from the source side to the target side */
+  points: Array<[number, number]>;
+  sourceSide: Side;
+  targetSide: Side;
+  /** No free path was found (drawn as an L) */
+  fallback?: boolean;
+};
 export type ArchLayout = {
   shapes: ArchPlaced[];
   edges: ArchDrawEdge[];
@@ -648,6 +678,10 @@ export type ArchViewOptions = {
   expandedStacks: ReadonlySet<string>;
   /** Edge kinds to draw (default DEFAULT_LAYERS) */
   layers?: ReadonlySet<ArchEdgeKind>;
+  /** Draw FOCUS_KINDS like the others (export "with every line"); default: only for the selection */
+  allLines?: boolean;
+  /** Subscription frame title (GUIDs masked by the caller); default: the graph's subscription node name */
+  subscriptionLabel?: string;
 };
 
 /**
@@ -690,12 +724,16 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
     maxW: maxW ?? MAXW[shape.type],
     head: HEAD[shape.type],
     pad: ARCH.PAD,
-    gap: shape.type === "root" ? 24 : ARCH.GAP,
+    // Boxes of boxes get wide gaps: the lanes lines run in (lib/archRoute); tiles keep the narrow one
+    gap: shape.type === "root" || children.some((c) => c.t === "box") ? ARCH.BOX_GAP : ARCH.GAP,
     framed: shape.type !== "root",
   });
   const shownAt = new Map<string, string>();
 
-  /** Tiles of one container; same-kind runs above `at` become a stack unless expanded. */
+  /**
+   * Tiles of one container; same-kind runs above `at` become a stack unless expanded. An expanded stack keeps its
+   * slot as a fold tile first in the run — the spot the user clicked folds it back (never in shownAt: no edge ends there).
+   */
   const tilesOf = (containerId: string, ids: string[], at: number): TNode[] => {
     const groups = new Map<string, string[]>();
     for (const id of ids) {
@@ -709,6 +747,7 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
         kids.push(leaf({ id: stackId, shape: "stack", ref: containerId, kind: k, members }));
         for (const id of members) shownAt.set(id, stackId);
       } else {
+        if (members.length > at) kids.push(leaf({ id: `fold:${stackId}`, shape: "fold", ref: stackId, kind: k, n: members.length }));
         for (const id of members) { kids.push(leaf({ id, shape: "tile", ref: id })); shownAt.set(id, id); }
       }
     }
@@ -733,16 +772,11 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
     return box({ id: vid, shape: "box", type: "vnet", ref: vid, label: v.node.name }, "row", v.subnets.map(subnetNode), labelWidth(v.node.name, v.node.endpoint, 120, 250));
   };
 
-  const hasInternet = (key: string) => model.edges.some((e) => (e.kind === "ingress" || e.kind === "exposure") && e.source === internetId(key));
-
   const regionNode = (reg: ArchRegion): TNode => {
     const cols: TNode[] = [];
-    const edgeKids: TNode[] = [];
-    if (hasInternet(reg.key)) {
-      shownAt.set(internetId(reg.key), internetId(reg.key));
-      edgeKids.push(leaf({ id: internetId(reg.key), shape: "internet", region: reg.key }));
-    }
-    edgeKids.push(...tilesOf(`lane:edge:${reg.key}`, reg.edge, ARCH.LANE_STACK_AT));
+    // Public entry and egress resources of the region (public LB, NAT gateway, firewall, …) — Azure resources, so
+    // inside the region; the Internet itself is outside the subscription (INTERNET_TILE)
+    const edgeKids = tilesOf(`lane:edge:${reg.key}`, reg.edge, ARCH.LANE_STACK_AT);
     if (edgeKids.length) cols.push(box({ id: `lane:edge:${reg.key}`, shape: "box", type: "lane", label: "edge", region: reg.key }, "col", edgeKids));
     if (reg.vnets.length) cols.push(box({ id: `vnets:${reg.key}`, shape: "box", type: "root", label: "" }, "row", reg.vnets.map(vnetNode), undefined, ARCH.VNETS_MAX_W));
     if (reg.outside.length) cols.push(box({ id: `lane:outside:${reg.key}`, shape: "box", type: "lane", label: "outside", region: reg.key }, "col", tilesOf(`lane:outside:${reg.key}`, reg.outside, ARCH.LANE_STACK_AT)));
@@ -753,19 +787,21 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
     return box({ id: `region:${reg.key}`, shape: "box", type: "region", label: reg.key, region: reg.key }, "row", cols, 320);
   };
 
-  const rootKids: TNode[] = [];
+  // Subscription frame: global services, the regions, then other-region ends — everything Azure drew for it
+  const subKids: TNode[] = [];
   if (model.global.length) {
-    rootKids.push(box({ id: "global", shape: "box", type: "global", label: "global" }, "col", tilesOf("global", model.global, ARCH.LANE_STACK_AT)));
+    subKids.push(box({ id: "global", shape: "box", type: "global", label: "global" }, "col", tilesOf("global", model.global, ARCH.LANE_STACK_AT)));
   }
   // Regions side by side while they fit, then wrap
-  rootKids.push(box({ id: "regions", shape: "box", type: "root", label: "" }, "row", shown.map(regionNode), undefined, ARCH.REGIONS_MAX_W));
+  subKids.push(box({ id: "regions", shape: "box", type: "root", label: "" }, "row", shown.map(regionNode), undefined, ARCH.REGIONS_MAX_W));
 
+  const isInternet = (id: string) => id.startsWith("internet:");
   // Endpoints in regions that are not shown → ghost tiles so the relationship stays visible
   const offscreen: ArchEdge[] = [];
   if (opts.region !== "all") {
     const ghostIds = new Set<string>();
     for (const e of model.edges) {
-      if (!layers.has(e.kind) || e.kind === "ingress" || e.kind === "exposure") continue;
+      if (!layers.has(e.kind) || isInternet(e.source) || isInternet(e.target)) continue;
       const s = shownAt.get(e.source), t = shownAt.get(e.target);
       if (!!s === !!t) continue;
       offscreen.push(e);
@@ -774,9 +810,22 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
     const ids = [...ghostIds].sort();
     if (ids.length) {
       for (const id of ids) shownAt.set(id, `ghost:${id}`);
-      rootKids.push(box({ id: "elsewhere", shape: "box", type: "global", label: "elsewhere" }, "col", ids.map((id) => leaf({ id: `ghost:${id}`, shape: "ghost", ref: id }))));
+      subKids.push(box({ id: "elsewhere", shape: "box", type: "global", label: "elsewhere" }, "col", ids.map((id) => leaf({ id: `ghost:${id}`, shape: "ghost", ref: id }))));
     }
   }
+  const subNode = model.nodes.size ? [...model.nodes.values()].find((n) => n.kind === "subscription") : undefined;
+  const subscription = box({ id: "subscription", shape: "box", type: "subscription", ref: subNode ? lower(subNode.id) : undefined, label: opts.subscriptionLabel ?? subNode?.name ?? "" }, "row", subKids);
+
+  // The Internet: one tile outside the subscription, left (traffic reads left → right), when a drawn line uses it
+  const internetRegions = [...new Set(model.edges
+    .filter((e) => layers.has(e.kind) && (isInternet(e.source) ? shownAt.has(e.target) : isInternet(e.target) && shownAt.has(e.source)))
+    .map((e) => (isInternet(e.source) ? e.source : e.target).slice("internet:".length)))].sort();
+  const rootKids: TNode[] = [];
+  if (internetRegions.length) {
+    for (const k of internetRegions) shownAt.set(internetId(k), INTERNET_TILE);
+    rootKids.push(box({ id: "external", shape: "box", type: "external", label: "external" }, "col", [leaf({ id: INTERNET_TILE, shape: "internet", regions: internetRegions })]));
+  }
+  rootKids.push(subscription);
   const root = box({ id: "root", shape: "box", type: "root", label: "" }, "row", rootKids);
 
   // ── measure / place (lib/boxPack) ──
@@ -807,9 +856,29 @@ export function layoutArch(model: ArchModel, opts: ArchViewOptions): ArchLayout 
     const id = `${e.kind}:${s}->${t}`;
     const d = drawn.get(id);
     if (d) d.count++;
-    else drawn.set(id, { id, kind: e.kind, source: s, target: t, count: 1 });
+    else drawn.set(id, { id, kind: e.kind, source: s, target: t, count: 1, display: !opts.allLines && FOCUS_KINDS.has(e.kind) ? "focus" : "always", points: [], sourceSide: "r", targetSide: "l" });
   }
-  return { shapes: placed, edges: [...drawn.values()], width: measured.w, height: measured.h, shownAt, offscreen };
+
+  // ── routes (lib/archRoute): lines run in the gaps, never through a tile or a box header ──
+  // Lines shown together are routed together (their parallel runs are spread apart); focus lines on their own
+  const tiles = new Map<string, RRect>(placed.filter((s) => s.shape !== "box").map((s) => [s.id, { x: s.x, y: s.y, w: s.w, h: s.h }]));
+  const boxes: RouteBox[] = placed.filter((s) => s.shape === "box").map((s) => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, head: s.shape === "box" ? HEAD[s.type] : 0 }));
+  // A trunk per gateway (one line that branches), per NAT → Internet (they merge at the Internet)
+  const bundle = (e: ArchDrawEdge) => (e.kind === "egress" ? `to:${e.target}` : e.kind === "peering" ? e.id : e.source);
+  for (const display of ["always", "focus"] as const) {
+    const list = [...drawn.values()].filter((e) => e.display === display);
+    const routed = routeOrthogonal(tiles, boxes, list.map((e) => ({ id: e.id, source: e.source, target: e.target, bundle: bundle(e) })));
+    for (const e of list) {
+      const r = routed.get(e.id);
+      if (!r) continue;
+      e.points = r.points;
+      e.sourceSide = r.sourceSide;
+      e.targetSide = r.targetSide;
+      if (r.fallback) e.fallback = true;
+    }
+  }
+  const edges = [...drawn.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { shapes: placed, edges, width: measured.w, height: measured.h, shownAt, offscreen };
 }
 
 /** Shapes directly connected to `id` by a drawn line (for selection highlight). */

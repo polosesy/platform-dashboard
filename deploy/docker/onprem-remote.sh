@@ -58,7 +58,8 @@ wait_ready() {
 cmd="${1:-status}"
 case "$cmd" in
   build)
-    TAG="$(tag_or_default "${2:-}")"
+    # The pushed source names the image (not the last .image-tag — that is the image running now)
+    TAG="${2:-$(cat "$SRC/.source-sha")}"
     docker build -t "aud-dashboard:$TAG" --build-arg "AUD_VERSION=$TAG" "$SRC"
     mkdir -p "$RUN" && echo "$TAG" > "$RUN/.image-tag" && chown "$OWNER": "$RUN" "$RUN/.image-tag"
     docker image ls aud-dashboard --format '{{.Tag}}  {{.Size}}  {{.CreatedSince}}'

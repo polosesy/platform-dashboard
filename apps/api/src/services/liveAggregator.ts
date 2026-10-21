@@ -15,7 +15,9 @@ import type {
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix, cachePrefix, principalKey } from "../infra/cacheManager.js";
 import { debug } from "../infra/logger.js";
-import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchPowerStates } from "./metricsCollector.js";
+import { collectBatchMetrics, collectBatchEdgeMetrics, collectBatchLiveReads, type LiveRead } from "./metricsCollector.js";
+import { liveSpecOf, resolveLifecycle, type ChangeRow } from "./lifecycle.js";
+import { collectPlannedMaintenance, collectRecentChanges } from "./lifecycleCollector.js";
 import { normalizeSpecBindings } from "./specGenerator.js";
 import { resolveEvidence } from "./healthEvidence.js";
 import { collectResourceHealth, type RhState } from "./resourceHealthCollector.js";
@@ -208,13 +210,22 @@ export async function buildLiveSnapshot(
   // ── Power state for compute resources ──
   // No default: a power state that was not collected stays unknown (LB / App Gateway / PaaS have none,
   // and an assumed "running" painted cards green without evidence)
+  // The same read carries provisioningState, the service's own state, the SKU and a scale set's instances
+  // (metricsCollector live read) — the generation-time spec is not refreshed, these are "as of now"
   const powerTask = (async () => {
-    if (!azureEnabled) return new Map<string, PowerState>();
-    // SP fallback when no bearer token — collectBatchPowerStates handles undefined
+    if (!azureEnabled) return new Map<string, LiveRead>();
+    // SP fallback when no bearer token — collectBatchLiveReads handles undefined
     const computeNodes = spec.nodes.filter((n) => n.azureResourceId && n.resourceKind).map((n) => ({ azureResourceId: n.azureResourceId!, resourceKind: n.resourceKind! }));
-    if (!computeNodes.length) return new Map<string, PowerState>();
-    try { return await collectBatchPowerStates(env, bearerToken, computeNodes, SNAPSHOT_BUDGET_MS); } catch { return new Map<string, PowerState>(); }
+    if (!computeNodes.length) return new Map<string, LiveRead>();
+    try { return await collectBatchLiveReads(env, bearerToken, computeNodes, SNAPSHOT_BUDGET_MS); } catch { return new Map<string, LiveRead>(); }
   })();
+
+  // ── Why a resource is updating: change records and planned maintenance (services/lifecycleCollector.ts) ──
+  const noCauses = { changes: new Map<string, ChangeRow[]>(), maintenance: new Set<string>() };
+  const causeIds = spec.nodes.map((n) => n.azureResourceId ?? "").filter(Boolean);
+  const causesTask = live && causeIds.length
+    ? withBudget(Promise.all([collectRecentChanges(env, bearerToken, causeIds), collectPlannedMaintenance(env, bearerToken, causeIds)]).then(([changes, maintenance]) => ({ changes, maintenance })), noCauses)
+    : Promise.resolve(noCauses);
 
   // ── Traffic flow data (multi-source; these collectors use SP fallback — no bearer token required) ──
   const trafficTask = withBudget(collectAllTrafficSources(env, bearerToken, spec, azureEnabled), emptyTraffic());
@@ -226,11 +237,14 @@ export async function buildLiveSnapshot(
 
   const t0 = Date.now();
   const timed = <T,>(name: string, p: Promise<T>) => p.finally(() => debug(`[live] ${diagramId} ${name} ${Date.now() - t0}ms`));
-  const [nodeMetricsMap, edgeMonitorMetrics, appInsightsEdgeMetrics, liveAlerts, alertRules, powerStateMap, trafficFlowData, rhMap] =
+  const [nodeMetricsMap, edgeMonitorMetrics, appInsightsEdgeMetrics, liveAlerts, alertRules, liveReads, trafficFlowData, rhMap, causes] =
     await Promise.all([
       timed("metrics", nodeMetricsTask), timed("edgeMetrics", edgeMetricsTask), timed("appInsights", appInsightsTask),
       timed("alerts", alertsTask), timed("alertRules", alertRulesTask), timed("power", powerTask), timed("traffic", trafficTask), timed("resourceHealth", rhTask),
+      timed("causes", causesTask),
     ]);
+  const powerStateMap = new Map([...liveReads].map(([id, r]) => [id, r.power] as const));
+  const nowMs = Date.now();
 
   // ── Build alert lookup for node/edge activeAlertIds ──
   const nodeAlertIds = new Map<string, string[]>();
@@ -264,7 +278,8 @@ export async function buildLiveSnapshot(
       health: judged0.health,
       judged: judged0.health !== "unknown",
       metrics,
-      provisioningState: nodeSpec.metadata?.provisioningState,
+      // live when the read has it (a resource that just failed or finished must not keep its generation-time word)
+      provisioningState: liveReads.get(nodeSpec.azureResourceId ?? "")?.provisioningState ?? nodeSpec.metadata?.provisioningState,
       peConnections: parseList(nodeSpec.metadata?.peConnections),
       rh: rhMap.get((nodeSpec.azureResourceId ?? "").toLowerCase()),
       unused: nodeSpec.metadata?.unused === "true",
@@ -301,6 +316,14 @@ export async function buildLiveSnapshot(
     }
 
     const powerState = powerStateMap.get(nodeSpec.azureResourceId ?? "") as PowerState | undefined;
+    const rid = (nodeSpec.azureResourceId ?? "").toLowerCase();
+    const read = liveReads.get(nodeSpec.azureResourceId ?? "");
+    const lifecycle = nodeSpec.azureResourceId ? resolveLifecycle({
+      // only what was read now: a generation-time "Updating" would never end
+      kind: nodeSpec.resourceKind ?? nodeSpec.icon, read,
+      changes: causes.changes.get(rid), maintenance: causes.maintenance.has(rid), now: nowMs,
+    }) : undefined;
+    const liveSpec = nodeSpec.azureResourceId ? liveSpecOf(nodeSpec.azureResourceId, read) : undefined;
 
     return {
       id: nodeSpec.id,
@@ -315,6 +338,8 @@ export async function buildLiveSnapshot(
       powerState,
       basis: ev.basis,
       ...(ev.reasons.length ? { reasons: ev.reasons } : {}),
+      ...(lifecycle ? { lifecycle } : {}),
+      ...(liveSpec ? { liveSpec } : {}),
     };
   });
 

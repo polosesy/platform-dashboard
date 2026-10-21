@@ -25,10 +25,14 @@ export type WafBadge = {
   hint: { key: string; vars: Record<string, string | number> };
 };
 export type WafSubCard = {
-  /** "p:<policy name>" · "more" · "none" · "unknown" — also the panel key */
+  /** "p:<policy name>" · "more" (the fold toggle) · "rest" (beyond the open cap → panel) · "none" · "unknown" — also the panel key */
   key: string;
-  kind: "policy" | "more" | "none" | "unknown";
+  kind: "policy" | "more" | "rest" | "none" | "unknown";
   name?: string;
+  /** The name drawn on the card: the prefix every sibling policy shares is replaced by "…" (full name in the tooltip) */
+  short?: string;
+  /** "more": the extra policies are shown right after it (it then folds them back) */
+  expanded?: boolean;
   pill: string;
   tone: WafTone;
   units: number;
@@ -40,8 +44,10 @@ export type WafSubCard = {
   more?: number;
 };
 
-/** Policy cards shown before "+k" — the rest are in the WAF panel */
+/** Policy cards shown before the "+k" toggle */
 export const MAX_POLICY_CARDS = 4;
+/** Policy cards when the toggle is open — beyond this one "rest" card opens the WAF panel (the column would outgrow the lane) */
+export const MAX_POLICY_CARDS_ALL = 12;
 
 const STATES = new Set<AfdWafState>(["prevent", "detect", "partial", "none", "unknown", "unreadable", "noDomains"]);
 const parse = <T,>(v: string | undefined, fallback: T): T => { try { return v ? (JSON.parse(v) as T) : fallback; } catch { return fallback; } };
@@ -91,19 +97,50 @@ export function policyPill(p: Pick<WafPolicyInfo, "mode" | "enabled">): { pill: 
 const RANK: Record<WafTone, number> = { public: 0, muted: 1, neutral: 2 };
 
 /**
- * The sub-cards under a protected card: policies that do not block first (detection, disabled), then unknown mode,
- * then prevention — more units first, then name (code points); at most MAX_POLICY_CARDS, then "+k"; then the units
- * without a WAF and the units not judged, always shown. Deterministic.
+ * Names on sibling cards: WAF policy names are letters and digits only (no separators) and usually share a long
+ * prefix (`waf<org><env>…`), so a middle ellipsis keeps exactly the part they all have in common. When at least two
+ * names share 8+ leading characters, that prefix becomes "…" and the last `context` shared characters stay
+ * (never an empty name). The same prefix for every card — opening the toggle does not rename the first ones.
  */
-export function wafSubCards(meta: Record<string, string> | undefined): WafSubCard[] {
+export function shortPolicyNames(names: readonly string[], context = 4): Map<string, string> {
+  const out = new Map(names.map((n) => [n, n] as const));
+  if (names.length < 2) return out;
+  let p = names[0]!.length;
+  for (const n of names) {
+    let i = 0;
+    while (i < p && i < n.length && n[i] === names[0]![i]) i++;
+    p = i;
+  }
+  if (p < 8) return out;
+  const cut = p - context;
+  for (const n of names) out.set(n, `…${n.slice(cut)}`);
+  return out;
+}
+
+/**
+ * The sub-cards under a protected card: policies that do not block first (detection, disabled), then unknown mode,
+ * then prevention — more units first, then name (code points); at most MAX_POLICY_CARDS, then the "+k" toggle; with
+ * `all` the toggle stays in that slot (the same spot folds them back) and the others follow it, up to
+ * MAX_POLICY_CARDS_ALL, then one "rest" card for the panel; then the units without a WAF and the units not judged,
+ * always shown. Deterministic; the first cards keep their keys in both states.
+ */
+export function wafSubCards(meta: Record<string, string> | undefined, opts: { all?: boolean } = {}): WafSubCard[] {
   const f = wafFacts(meta);
   if (!f || f.state === "noDomains") return [];
+  const short = shortPolicyNames(f.policies.map((p) => p.name));
   const policies = f.policies.map((p): WafSubCard => ({
-    key: `p:${p.name}`, kind: "policy", name: p.name, ...policyPill(p), units: p.domains.length,
+    key: `p:${p.name}`, kind: "policy", name: p.name, short: short.get(p.name) ?? p.name, ...policyPill(p), units: p.domains.length,
     managed: p.managed ? p.managed.length : null, custom: p.customRules, ...(p.level ? { level: p.level } : {}),
   })).sort((a, b) => RANK[a.tone] - RANK[b.tone] || b.units - a.units || cmp(a.name!, b.name!));
   const out = policies.slice(0, MAX_POLICY_CARDS);
-  if (policies.length > MAX_POLICY_CARDS) out.push({ key: "more", kind: "more", pill: "ld.waf.pill.more", tone: "muted", units: 0, more: policies.length - MAX_POLICY_CARDS });
+  if (policies.length > MAX_POLICY_CARDS) {
+    const all = !!opts.all;
+    out.push({ key: "more", kind: "more", pill: "ld.waf.pill.more", tone: "muted", units: 0, more: policies.length - MAX_POLICY_CARDS, expanded: all });
+    if (all) {
+      out.push(...policies.slice(MAX_POLICY_CARDS, MAX_POLICY_CARDS_ALL));
+      if (policies.length > MAX_POLICY_CARDS_ALL) out.push({ key: "rest", kind: "rest", pill: "ld.waf.pill.more", tone: "muted", units: 0, more: policies.length - MAX_POLICY_CARDS_ALL });
+    }
+  }
   const counted = (d: WafDomainInfo) => f.unit === "domain" || d.kind === "public";
   if (f.counts.none > 0) {
     out.push({ key: "none", kind: "none", pill: "ld.waf.pill.noBlock", tone: "public", units: f.counts.none, endpointNone: f.domains.filter((d) => d.state === "none" && d.kind === "endpoint" && counted(d)).length });

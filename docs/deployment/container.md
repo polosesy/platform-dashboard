@@ -61,6 +61,8 @@ docker compose ps                                              # pod·api·web·
 
 서버에 접속해 손으로 명령을 치지 않고, **작업 PC**에서 [`scripts/onprem.sh`](../../scripts/onprem.sh) 하나로 소스 전송 → 서버 빌드 → 기동 → 터널까지 합니다. 서버 쪽은 [`deploy/docker/onprem-remote.sh`](../../deploy/docker/onprem-remote.sh)가 sudo로 실행됩니다.
 
+> **PowerShell에서는** `.sh`를 직접 실행할 수 없습니다("'onprem.sh' 프로그램을 실행하지 못했습니다"). [`scripts\onprem.ps1`](../../scripts/onprem.ps1)이 Git for Windows의 bash로 같은 스크립트를 실행합니다 — 아래 `scripts/onprem.sh <명령>`은 PowerShell에서 `.\scripts\onprem.ps1 <명령>`으로 읽으세요(WSL의 `bash`는 경로·SSH 키가 달라 쓰지 않음).
+
 > **5살 비유**: 서버의 가게(웹 3000)는 서버 안에서만 문을 열어요(127.0.0.1). SSH 터널은 내 PC에서 그 가게 문 앞까지 이어진 **비밀 통로**예요. 내 브라우저는 `localhost:3000`(내 집 주소)로 들어가는데, 실제로는 통로를 지나 서버 가게에 도착해요. 집 주소라서 로그인(MSAL)도 https 없이 허락돼요.
 
 ```
@@ -83,7 +85,7 @@ AUD_LOCAL_PORT=3000
 **2) 배포** — 처음엔 **예시 데이터 모드**(서버에 비밀 값 없음, 로그인 꺼짐)
 
 ```bash
-scripts/onprem.sh deploy        # push(추적 파일만) → build(서버) → up(예시 설정 자동 생성) → 준비 확인
+scripts/onprem.sh deploy        # push(추적 + 커밋 안 된 새 파일, gitignore 제외) → build(서버) → up(예시 설정 자동 생성) → 준비 확인
 scripts/onprem.sh status        # pod·api·web healthy, readyz {"ok":true}
 ```
 

@@ -8,7 +8,7 @@
 // so resource names can never be interpreted as markup. No ARM IDs are written.
 // ──────────────────────────────────────────────────────────────
 
-import type { ArchLayout, ArchPlaced } from "./archModel";
+import type { ArchDrawEdge, ArchLayout, ArchPlaced } from "./archModel";
 import { EDGE_LOOK } from "./archStyle";
 import { UI, VIZ, hex, type UiColor, type VizColor } from "./palette";
 import { maskGuids } from "./mask";
@@ -48,6 +48,8 @@ function tint(c: UiColor | VizColor, alpha: number): string {
 
 const BASE = "whiteSpace=wrap;html=0;fontFamily=Helvetica;";
 const BOX_STYLE: Record<string, string> = {
+  external: `rounded=1;arcSize=4;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontSize=11;dashed=1;strokeColor=${tint("ink", 0.3)};fillColor=none;`,
+  subscription: `rounded=1;arcSize=3;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontStyle=1;fontSize=15;strokeWidth=1.5;strokeColor=${tint("ink", 0.45)};fillColor=none;`,
   region: `rounded=1;arcSize=4;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=14;dashed=1;strokeColor=${tint("ink", 0.4)};fillColor=none;`,
   vnet: `rounded=1;arcSize=4;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;strokeWidth=2;strokeColor=${hex("accent")};fillColor=${tint("accent", 0.04)};`,
   subnet: `rounded=1;arcSize=4;container=1;collapsible=0;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=11;dashed=1;strokeColor=${tint("subnet", 0.6)};fillColor=${tint("subnet", 0.04)};`,
@@ -71,9 +73,14 @@ function vertexStyle(sh: ArchPlaced, o: DrawioOptions): string {
   return st;
 }
 
-function edgeStyle(kind: keyof typeof EDGE_LOOK): string {
-  const l = EDGE_LOOK[kind];
-  let st = `edgeStyle=orthogonalEdgeStyle;rounded=1;html=0;strokeColor=${hex(l.color)};strokeWidth=${l.width};`;
+/** Where a side of a shape is, as draw.io's relative exit / entry point */
+const SIDE_XY: Record<ArchDrawEdge["sourceSide"], [number, number]> = { l: [0, 0.5], r: [1, 0.5], t: [0.5, 0], b: [0.5, 1] };
+
+function edgeStyle(e: ArchDrawEdge): string {
+  const l = EDGE_LOOK[e.kind];
+  const [ex, ey] = SIDE_XY[e.sourceSide], [nx, ny] = SIDE_XY[e.targetSide];
+  // The route of the screen (lib/archRoute): its sides and bend points — draw.io keeps them when shapes move
+  let st = `edgeStyle=orthogonalEdgeStyle;rounded=1;html=0;strokeColor=${hex(l.color)};strokeWidth=${l.width};exitX=${ex};exitY=${ey};exitPerimeter=0;entryX=${nx};entryY=${ny};entryPerimeter=0;`;
   if (l.alpha < 1) st += `opacity=${Math.round(l.alpha * 100)};`;
   if (l.dash) st += `dashed=1;dashPattern=${l.dash};`;
   st += l.arrow ? "endArrow=block;endFill=1;" : "endArrow=none;";
@@ -81,8 +88,8 @@ function edgeStyle(kind: keyof typeof EDGE_LOOK): string {
 }
 
 export function toDrawio(layout: ArchLayout, o: DrawioOptions): string {
-  // Parents before children (stable by depth), ids c1..cN
-  const shapes = layout.shapes.map((s, i) => ({ s, i })).sort((a, b) => a.s.depth - b.s.depth || a.i - b.i).map((x) => x.s);
+  // Parents before children (stable by depth), ids c1..cN. Fold tiles are screen controls, not resources
+  const shapes = layout.shapes.filter((s) => s.shape !== "fold").map((s, i) => ({ s, i })).sort((a, b) => a.s.depth - b.s.depth || a.i - b.i).map((x) => x.s);
   const ids = new Map(shapes.map((s, i) => [s.id, `c${i + 1}`]));
   const byId = new Map(shapes.map((s) => [s.id, s]));
   const cells: string[] = ['<mxCell id="0"/>', '<mxCell id="1" parent="0"/>'];
@@ -100,12 +107,16 @@ export function toDrawio(layout: ArchLayout, o: DrawioOptions): string {
       `<mxCell id="${ids.get(s.id)}" value="${xmlText(value)}" style="${vertexStyle(s, o)}" vertex="1" parent="${parent}"><mxGeometry x="${x}" y="${y}" width="${s.w}" height="${s.h}" as="geometry"/></mxCell>`,
     );
   }
-  layout.edges.forEach((e, i) => {
+  // The lines the screen draws: focus lines (FOCUS_KINDS) only when the view shows every line
+  layout.edges.filter((e) => e.display === "always").forEach((e, i) => {
     const src = ids.get(e.source), dst = ids.get(e.target);
     if (!src || !dst) return;
     const value = e.count > 1 ? `×${e.count}` : "";
+    // Interior bend points, absolute (the edge's parent is the root layer)
+    const inner = e.points.slice(1, -1);
+    const pts = inner.length ? `<Array as="points">${inner.map(([x, y]) => `<mxPoint x="${x}" y="${y}"/>`).join("")}</Array>` : "";
     cells.push(
-      `<mxCell id="e${i + 1}" value="${xmlText(value)}" style="${edgeStyle(e.kind)}" edge="1" parent="1" source="${src}" target="${dst}"><mxGeometry relative="1" as="geometry"/></mxCell>`,
+      `<mxCell id="e${i + 1}" value="${xmlText(value)}" style="${edgeStyle(e)}" edge="1" parent="1" source="${src}" target="${dst}"><mxGeometry relative="1" as="geometry">${pts}</mxGeometry></mxCell>`,
     );
   });
   const name = xmlText(maskGuids(o.title));

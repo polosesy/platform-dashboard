@@ -76,6 +76,8 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => initialCollapsed(model, firstRegion));
   const [stacks, setStacks] = useState<ReadonlySet<string>>(() => new Set());
   const [layers, setLayers] = useState<ReadonlySet<ArchEdgeKind>>(() => new Set(DEFAULT_LAYERS));
+  // Private Link / NAT / VNet integration lines: on selection only (lib/archModel FOCUS_KINDS) unless this is on
+  const [allLines, setAllLines] = useState(false);
   const [traffic, setTraffic] = useState(false);
   const [lookback, setLookback] = useState(60);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -94,7 +96,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   const vm = view.model;
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  const layout = useMemo(() => layoutArch(vm, { region, collapsed, expandedStacks: stacks, layers }), [vm, region, collapsed, stacks, layers]);
+  const layout = useMemo(() => layoutArch(vm, { region, collapsed, expandedStacks: stacks, layers, allLines }), [vm, region, collapsed, stacks, layers, allLines]);
   const flow = useFlowOverlay(subscriptionId, traffic, lookback);
 
   const baseNodes = useMemo(() => buildNodes(vm, layout, t, { context: view.context, hiddenIn: view.hiddenIn }), [vm, layout, t, view]);
@@ -121,7 +123,9 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     }
     return [...seen.values()];
   }, [flow.overlay, layout.shownAt]);
-  const edges = useMemo(() => [...buildEdges(layout.edges, t), ...trafficEdges], [layout.edges, t, trafficEdges]);
+  // Focus lines (Private Link, subnet → NAT, VNet integration) join for the selected tile / box only
+  const selectedForLines = selectedId && selectedId !== CLEANUP ? selectedId : null;
+  const edges = useMemo(() => [...buildEdges(layout.edges, t, selectedForLines), ...trafficEdges], [layout.edges, t, selectedForLines, trafficEdges]);
 
   const selectedShape = selectedId && selectedId !== CLEANUP ? layout.shapes.find((x) => x.id === selectedId) ?? null : null;
   const target: InspectorTarget = selectedId === CLEANUP ? { type: "cleanup" } : selectedShape ? { type: "shape", shape: selectedShape } : null;
@@ -184,6 +188,14 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
       setSelectedId(sh.parent);
       return;
     }
+    if (sh.shape === "fold") {
+      // The same spot folds it back (ref = the stack id); the subnet stays still on screen
+      const parent = sh.parent ? posOf(sh.parent) : null;
+      if (parent) setAnchor(parent);
+      setStacks((prev) => { const next = new Set(prev); next.delete(sh.ref); return next; });
+      setSelectedId(sh.parent);
+      return;
+    }
     if (sh.shape === "pill") {
       toggleVnet(sh.id);
       setSelectedId(sh.id);
@@ -242,6 +254,8 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
   };
   const collapseAll = () => {
     setCollapsed(new Set(vm.regions.filter((r) => region === "all" || r.key === region).flatMap((r) => r.vnets.map((v) => v.node.id.toLowerCase()))));
+    // Stacks too (lanes have them, and an open VNet would come back with its old stacks open) — the pair of 모두 펼치기
+    setStacks(new Set());
     setAnchor(null);
     setFitNonce((n) => n + 1);
   };
@@ -280,10 +294,10 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     view.active
       ? `${t("arch.filter.title")}: ${[...(cats ?? [])].map((c) => t(`arch.cat.${c}`)).join(", ")} · ${t("arch.filter.banner", { shown: scope.shown, total: scope.total, ctx: scope.ctx, cut: scope.cut.length })}`
       : t("arch.filter.everything"),
-    `${t("arch.layers")}: ${ARCH_EDGE_KINDS.filter((k) => layers.has(k)).map((k) => t(`arch.layer.${k}`)).join(", ") || "—"}${traffic ? ` · ${t("arch.export.traffic", { m: lookback })}` : ""}${rg ? ` · ${t("arch.rgHighlight")}: ${rg}` : ""}`,
+    `${t("arch.layers")}: ${ARCH_EDGE_KINDS.filter((k) => layers.has(k)).map((k) => t(`arch.layer.${k}`)).join(", ") || "—"} · ${t(allLines ? "arch.export.allLines" : "arch.export.focusLines")}${traffic ? ` · ${t("arch.export.traffic", { m: lookback })}` : ""}${rg ? ` · ${t("arch.rgHighlight")}: ${rg}` : ""}`,
     `${t("arch.export.basis")}${graph.source === "mock" ? ` · ${t("common.sampleData")}` : ""}`,
   ];
-  const dimmed = useMemo(() => new Set(rgFocus ? layout.shapes.filter((x) => x.shape !== "box" && !rgFocus.has(x.id)).map((x) => x.id) : []), [rgFocus, layout]);
+  const dimmed = useMemo(() => new Set(rgFocus ? layout.shapes.filter((x) => x.shape !== "box" && x.shape !== "fold" && !rgFocus.has(x.id)).map((x) => x.id) : []), [rgFocus, layout]);
   const exp = useDiagramExport({
     layout, nodes: baseNodes, caption: exportCaption, title: t("nav.item.architecture"), region, filtered: view.active,
     sample: graph.source === "mock", context: view.context, dimmed, canvasRef,
@@ -334,6 +348,10 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
                 {t(`arch.layer.${k}`)}
               </label>
             ))}
+            <label className={s.layerItem} title={t("arch.allLinesHint")}>
+              <input type="checkbox" checked={allLines} onChange={(e) => setAllLines(e.target.checked)} />
+              {t("arch.allLines")}
+            </label>
             <label className={s.layerItem}>
               <input type="checkbox" checked={traffic} onChange={(e) => setTraffic(e.target.checked)} />
               <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4" stroke={EDGE_STYLE.traffic.stroke} strokeWidth="3" /></svg>

@@ -4,7 +4,8 @@ import { memo, type CSSProperties } from "react";
 import type { GatewayFacts } from "@/lib/liveBackends";
 import { useI18n } from "@/lib/i18n";
 import type { NodeProps } from "reactflow";
-import type { HealthRule, HealthStatus, InboundExposure, LiveNode as LiveNodeState, LiveSourceState, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import type { HealthRule, HealthStatus, InboundExposure, LiveLifecycle, LiveNode as LiveNodeState, LiveSourceState, LiveSpec, PowerState, SparklineData, DiagramIconKind, SubResource } from "@aud/types";
+import { instancesOf, lifecycleChip } from "@/lib/liveLifecycle";
 import type { HybridFacts } from "@/lib/liveHybrid";
 import type { WafBadge } from "@/lib/liveWaf";
 import { cardStatus } from "@/lib/liveStatus";
@@ -29,6 +30,10 @@ export type NsgBadgeInfo = {
 
 export type LiveNodeData = {
   label: string;
+  /** Operation state read on this poll (updating, scaling, …) and its recorded cause — a neutral chip, never the status */
+  lifecycle?: LiveLifecycle;
+  /** Spec read on this poll: a scale set's actual instance count */
+  liveSpec?: LiveSpec;
   /** Name without the words its VNet repeats (lib/liveNames) — the full name shows in a tag while selected */
   shortName?: string;
   /** The full name split into the words the short name kept and dropped */
@@ -222,7 +227,13 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
   // ── chips on the second line (at most two, by priority) ──
   const publicIp = subResources?.find((s) => s.kind === "publicIP")?.endpoint;
   const chips: Array<{ key: string; el: React.ReactNode }> = [];
-  // Observed Private Link use first: it is what this card is about when the layer is on
+  // An operation running now (or a change just made) first: the most time-sensitive fact, and neutral
+  const lc = lifecycleChip(data.lifecycle);
+  if (lc) {
+    const label = [t(lc.stateKey), lc.causeKey ? t(lc.causeKey) : null].filter(Boolean).join(" · ");
+    chips.push({ key: "lc", el: <span className={styles.cardChip} data-tone={lc.tone === "warn" ? "public" : lc.tone === "muted" ? "muted" : "lc"} title={`${label} — ${t("ld.lc.chipHint")}`}>{label}</span> });
+  }
+  // Observed Private Link use next: it is what this card is about when the layer is on
   for (const c of data.plChips ?? []) {
     chips.push({ key: `pl:${c.key}`, el: <span className={styles.cardChip} data-tone={c.tone === "warn" ? "public" : c.tone === "muted" ? "muted" : "pl"} title={t(`${c.key}.hint`)}>{t(c.key, c.vars)}</span> });
   }
@@ -232,6 +243,10 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
         {t("ld.card.instances")} {vmssExpanded ? "▴" : "▾"}
       </button>
     ) });
+  } else if (instancesOf(data.liveSpec)) {
+    // A scale set's instances as ARM lists them now (the spec stored at generation is not refreshed)
+    const inst = instancesOf(data.liveSpec)!;
+    chips.push({ key: "instN", el: <span className={styles.cardChip} data-tone="muted" title={t("ld.lc.instancesHint")}>{inst.target != null ? t("ld.lc.instancesOf", { n: inst.n, target: inst.target }) : t("ld.lc.instances", { n: inst.n })}</span> });
   }
   if (data.waf) {
     // WAF badge (catalog EDGE-10 / AGW-08): icon + state word, toggles the policy sub-cards; configuration, not status

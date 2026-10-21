@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, useReactFlow, useStore, type Edge, type Node } from "reactflow";
 import type { ArchNodeData } from "./ArchNodes";
 import { ArchActions, NODE_TYPES } from "./ArchNodes";
+import { EDGE_TYPES } from "./ArchEdge";
 import s from "../styles.module.css";
 import { rgba } from "@/lib/palette";
 
@@ -106,6 +107,7 @@ function Inner(p: CanvasProps) {
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           onNodeClick={(_e, n) => p.onNodeClick(n as Node<ArchNodeData>)}
           onPaneClick={p.onPaneClick}
           nodesDraggable={false}

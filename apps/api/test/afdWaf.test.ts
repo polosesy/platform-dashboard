@@ -240,3 +240,39 @@ test("WAF sub-cards: non-blocking policies first, at most four then '+k', the no
   assert.equal(W.wafAttachHeight(0), 0);
   assert.equal(W.wafAttachHeight(2), 20 + 2 * 58 + 8);
 });
+
+test("WAF sub-cards: the '+k' toggle opens the rest in place and folds them back; cap then 'rest'", () => {
+  const mk = (names: string[]) => ({
+    wafState: "prevent", wafUnit: "domain",
+    wafCounts: JSON.stringify({ served: names.length, prevent: names.length, detect: 0, disabled: 0, none: 0, unknown: 1 }),
+    wafPolicies: JSON.stringify(names.map((n) => ({ name: n, sku: null, mode: "Prevention", enabled: true, managed: [], customRules: 0, domains: [`${n}.example.com`] }))),
+    wafDomains: "[]",
+  });
+  const seven = mk(["a", "b", "c", "d", "e", "f", "g"]);
+  const shut = W.wafSubCards(seven);
+  const open = W.wafSubCards(seven, { all: true });
+  assert.deepEqual(shut.map((c) => c.key), ["p:a", "p:b", "p:c", "p:d", "more", "unknown"]);
+  assert.deepEqual(open.map((c) => c.key), ["p:a", "p:b", "p:c", "p:d", "more", "p:e", "p:f", "p:g", "unknown"], "the toggle keeps its slot; the others follow it; buckets stay last");
+  assert.deepEqual([shut[4]!.expanded, open[4]!.expanded, open[4]!.more], [false, true, 3]);
+  assert.ok(W.wafAttachHeight(open.length) > W.wafAttachHeight(shut.length), "the lane makes room for the open column");
+  // At or below four: no toggle, the option changes nothing
+  const three = mk(["a", "b", "c"]);
+  assert.deepEqual(W.wafSubCards(three, { all: true }), W.wafSubCards(three));
+  // Above the cap: 12 policy cards, then one 'rest' card for the panel
+  const many = W.wafSubCards(mk(Array.from({ length: 15 }, (_, i) => `p${String(i).padStart(2, "0")}`)), { all: true });
+  assert.equal(many.filter((c) => c.kind === "policy").length, W.MAX_POLICY_CARDS_ALL);
+  assert.deepEqual(many.slice(-2).map((c) => [c.key, c.more ?? null]), [["rest", 3], ["unknown", null]]);
+});
+
+test("WAF policy names: the prefix all siblings share becomes '…' (8+ characters), the distinct part stays", () => {
+  const s = W.shortPolicyNames(["wafcontosoprdkrc01ubk", "wafcontosoprdkr", "wafcontosostgkr"]);
+  assert.deepEqual([...s.values()], ["…tosoprdkrc01ubk", "…tosoprdkr", "…tosostgkr"]);
+  assert.deepEqual([...W.shortPolicyNames(["wafpolicyone"]).values()], ["wafpolicyone"], "one name is never shortened");
+  assert.deepEqual([...W.shortPolicyNames(["waf-a", "waf-b"]).values()], ["waf-a", "waf-b"], "a short shared prefix stays");
+  // The same names on every card whether the toggle is open or not
+  const meta = { wafState: "prevent", wafUnit: "domain", wafCounts: JSON.stringify({ served: 6, prevent: 6, detect: 0, disabled: 0, none: 0, unknown: 0 }), wafDomains: "[]",
+    wafPolicies: JSON.stringify(["wafcontosoprd01aa", "wafcontosoprd02bb", "wafcontosoprd03cc", "wafcontosoprd04dd", "wafcontosoprd05ee"].map((n) => ({ name: n, sku: null, mode: "Prevention", enabled: true, managed: [], customRules: 0, domains: [`${n}.example.com`] }))) };
+  const shortOf = (all: boolean) => W.wafSubCards(meta, { all }).filter((c) => c.kind === "policy").slice(0, 4).map((c) => c.short);
+  assert.deepEqual(shortOf(false), shortOf(true));
+  assert.equal(shortOf(false)[0], "…prd01aa", "shared \"wafcontosoprd0\" → keep its last 4");
+});

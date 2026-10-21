@@ -1276,6 +1276,12 @@
 .cardInstance:hover { border-color: rgba(var(--accent-rgb), 0.45); }
 .instDetail { grid-template-rows: 20px 16px; }
 
+/* WAF "+k" sub-card: a fold toggle in its own slot (dashed, so it never reads as a policy) — ▾ shows the others
+   right after it, ▴ folds them back */
+.wafToggle { border-style: dashed; background: rgba(var(--accent-rgb), 0.03); }
+.wafToggle .cardDesc { color: var(--accent); }
+.wafChevron { flex: none; margin-left: auto; font-size: 12px; line-height: 1; color: var(--accent); }
+
 /* ── Internet Node (아웃바운드 트래픽 종착 노드) ── */
 
 .internetNode {
@@ -1904,6 +1910,14 @@
   color: rgba(var(--private-link-rgb), 1);
   background: rgba(var(--private-link-rgb), 0.08);
   cursor: default;
+}
+
+/* Operation running now (lib/liveLifecycle) — neutral accent, never a status colour */
+.cardChip[data-tone="lc"] {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  border-style: dashed;
 }
 
 .cardChip[data-tone="muted"] {

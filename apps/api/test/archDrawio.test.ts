@@ -76,11 +76,11 @@ test("drawio: well-formed XML with one cell per shape and edge", () => {
   const vertices = [...xml.matchAll(/<mxCell id="(c\d+)"[^>]*vertex="1"/g)].map((x) => x[1]);
   assert.equal(vertices.length, layout.shapes.length);
   const edges = [...xml.matchAll(/<mxCell id="e\d+"[^>]*edge="1"[^>]*source="(c\d+)" target="(c\d+)"/g)];
-  assert.equal(edges.length, layout.edges.length);
+  assert.equal(edges.length, layout.edges.filter((e) => e.display === "always").length, "the lines the screen draws");
   const ids = [...xml.matchAll(/<mxCell id="([^"]+)"/g)].map((x) => x[1]);
   assert.equal(new Set(ids).size, ids.length, "ids are unique");
   for (const e of edges) assert.ok(vertices.includes(e[1]!) && vertices.includes(e[2]!));
-  assert.ok(edges.every((e) => /<mxGeometry relative="1" as="geometry"\/>/.test(xml.slice(e.index!, xml.indexOf("</mxCell>", e.index!)))));
+  assert.ok(edges.every((e) => /<mxGeometry relative="1" as="geometry">(<Array as="points">(<mxPoint x="-?\d+" y="-?\d+"\/>)+<\/Array>)?<\/mxGeometry>/.test(xml.slice(e.index!, xml.indexOf("</mxCell>", e.index!)))), "route bend points are written");
 });
 
 test("drawio: parents come first and children sit inside their parent", () => {
@@ -121,6 +121,15 @@ test("drawio: deterministic, collapsed VNet is a single cell, context tiles are 
   assert.ok(v.context.has(VM), "VM behind the LB is context in a network view");
   assert.match(x3, /a&amp;b[^"]*" style="[^"]*dashed=1;opacity=55;/);
   assert.ok(!x3.includes("kv1"), "hidden resources are not in the file");
+});
+
+test("drawio: a stack's fold tile is a screen control — not in the file", () => {
+  const host = layout.shapes.find((s) => s.shape === "box" && s.id === SUBNET)!;
+  const fold = { id: "fold:stack:x:vm", shape: "fold", ref: "stack:x:vm", kind: "vm", n: 8, x: host.x + 12, y: host.y + 40, w: 188, h: 74, depth: host.depth + 1, parent: host.id } as modelNs.ArchPlaced;
+  const withFold = { ...layout, shapes: [...layout.shapes, fold] };
+  const x = d.toDrawio(withFold, { label, title: "t", caption: ["x"] });
+  assert.equal((x.match(/vertex="1"/g) ?? []).length - 1, layout.shapes.length, "one cell per shape, the fold left out");
+  assert.ok(!x.includes("fold:") && !x.includes("undefined"));
 });
 
 test("drawio: export file name has no subscription data", () => {
