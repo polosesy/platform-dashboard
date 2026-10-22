@@ -5,7 +5,10 @@
 //   2. observed callers — VNet flow logs to a private frontend IP (API joinLbInbound: one resource or unresolved)
 //   3. measured inbound — ByteCount / SYNCount per private frontend over the last hour (specGenerator
 //      privateFrontendBindings `feIn<i>` / `feSyn<i>`): traffic arrived, the source is not known
-//   4. nothing measured / 0 measured — said as such ("not measured" ≠ "nothing came")
+//   4. nothing measured / 0 measured — said as such ("not measured" ≠ "nothing came"), and never as "no inbound":
+//      Azure does not count traffic that reaches an internal LB through a UDR in its byte / packet / SYN metrics
+//      (load-balancer-standard-diagnostics). When route tables name the LB as next hop (API udrNextHopsToIlb) the
+//      card says that (configuration) instead of a bytes chip
 // Never a risk colour, never the card status. Peered VNets and on-premises sites are reachable, not callers.
 import type { DiagramEdgeSpec, DiagramNodeSpec, LbInboundCaller, PlUnresolved, PrivateLinkUsageResponse } from "@aud/types";
 import type { UsageChip } from "./plUsage";
@@ -37,9 +40,29 @@ export function privateFrontends(meta: Record<string, string> | undefined): stri
   return [...new Set(fes.filter((f) => f.kind === "private" && f.ip && PRIVATE_V4.test(f.ip)).map((f) => f.ip!))].slice(0, MAX_PRIVATE_FRONTENDS);
 }
 
+/** Route tables whose UDR next hop is this internal LB (API subnetEgress.ts udrNextHopsToIlb, metadata JSON) */
+export type LbUdrFact = {
+  state: "ok" | "unreadable"; routeTables: number; subnets: number; prefixes: number;
+  entries: Array<{ subnet: string; vnet: string; routeTable: string; prefixes: string[]; frontendIp: string }>;
+};
+
+export function udrFactOf(meta: Record<string, string> | undefined): LbUdrFact | null {
+  if (!meta?.udrNextHop) return null;
+  try {
+    const f = JSON.parse(meta.udrNextHop) as Partial<LbUdrFact>;
+    if ((f.state !== "ok" && f.state !== "unreadable") || typeof f.subnets !== "number") return null;
+    return { state: f.state, routeTables: Number(f.routeTables ?? 0), subnets: f.subnets, prefixes: Number(f.prefixes ?? 0), entries: Array.isArray(f.entries) ? f.entries : [] };
+  } catch {
+    return null;
+  }
+}
+
 export type LbInboundFacts = {
   lbNodeId: string;
-  frontends: Array<{ ip: string; bytes: number | null; syn: number | null }>;
+  /** ruleBound: a load-balancing rule uses the frontend (false = none; undefined = not read) */
+  frontends: Array<{ ip: string; bytes: number | null; syn: number | null; ruleBound?: boolean }>;
+  /** UDRs that send traffic to this LB (configuration) — that traffic is not in the byte / SYN metrics */
+  udr: LbUdrFact | null;
   /** Bytes received over the hour on all private frontends; null = none of them measured */
   bytes: number | null;
   configured: Array<{ nodeId: string; edgeId: string }>;
@@ -62,7 +85,9 @@ export function lbInboundFacts(
   const ips = privateFrontends(lb.metadata);
   if (!ips.length) return null;
   const val = (k: string) => { const v = metrics?.[k]; return typeof v === "number" && Number.isFinite(v) ? v : null; };
-  const frontends = ips.map((ip, i) => ({ ip, bytes: val(`feIn${i}`), syn: val(`feSyn${i}`) }));
+  let bound = new Map<string, boolean>();
+  try { bound = new Map((JSON.parse(lb.metadata?.frontends ?? "[]") as Array<{ ip?: string; ruleBound?: boolean }>).filter((x) => x.ip && typeof x.ruleBound === "boolean").map((x) => [x.ip!, x.ruleBound!])); } catch { /* frontends already parsed above */ }
+  const frontends = ips.map((ip, i) => ({ ip, bytes: val(`feIn${i}`), syn: val(`feSyn${i}`), ...(bound.has(ip) ? { ruleBound: bound.get(ip)! } : {}) }));
   const measured = frontends.map((f) => f.bytes).filter((b): b is number => b != null);
   const configured = edges
     .filter((e) => e.target === lb.id && e.edgeKind === "routes" && CALLER_KINDS.has(kindOf(byId.get(e.source))))
@@ -72,6 +97,7 @@ export function lbInboundFacts(
   return {
     lbNodeId: lb.id,
     frontends,
+    udr: udrFactOf(lb.metadata),
     bytes: measured.length ? measured.reduce((s, b) => s + b, 0) : null,
     configured,
     observed: (resp?.lbInbound?.callers ?? []).filter((c) => c.lbNodeId === lb.id),
@@ -85,7 +111,8 @@ export function lbInboundFacts(
 export const knownCallers = (f: LbInboundFacts) => new Set([...f.configured.map((c) => c.nodeId), ...f.observed.map((c) => c.callerNodeId)]).size;
 
 /**
- * Card chip (one, plus the unresolved count): callers known · traffic measured but no caller known · 0 measured ·
+ * Card chips (plus the unresolved count): callers known · UDR next hop of n subnets (configuration — then no bytes
+ * chip: that traffic is not in the metric) · bytes measured but no caller known · "LB bytes 0" (never "no inbound") ·
  * not measured (ld.lbin.chip.*). Neutral / muted only.
  */
 export function lbInboundChips(f: LbInboundFacts | null): UsageChip[] {
@@ -93,9 +120,12 @@ export function lbInboundChips(f: LbInboundFacts | null): UsageChip[] {
   const out: UsageChip[] = [];
   const n = knownCallers(f);
   if (n) out.push({ key: "ld.lbin.chip.callers", vars: { count: n } });
-  else if (f.bytes != null && f.bytes > 0) out.push({ key: "ld.lbin.chip.sourceUnknown", tone: "muted" });
-  else if (f.bytes === 0) out.push({ key: "ld.lbin.chip.none", tone: "muted" });
-  else out.push({ key: "ld.lbin.chip.notMeasured", tone: "muted" });
+  if (f.udr?.state === "ok" && f.udr.subnets > 0) out.push({ key: "ld.lbin.chip.udr", vars: { count: f.udr.subnets, rt: f.udr.routeTables }, tone: "muted" });
+  if (!out.length) {
+    if (f.bytes != null && f.bytes > 0) out.push({ key: "ld.lbin.chip.sourceUnknown", tone: "muted" });
+    else if (f.bytes === 0) out.push({ key: "ld.lbin.chip.zeroBytes", tone: "muted" });
+    else out.push({ key: "ld.lbin.chip.notMeasured", tone: "muted" });
+  }
   const u = unresolvedCount(f.unresolved);
   if (u) out.push({ key: "ld.plu.chip.unresolved", vars: { count: u }, tone: "muted" });
   return out;

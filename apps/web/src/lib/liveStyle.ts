@@ -23,6 +23,8 @@ export const LIVE_EDGE_LOOK: Record<LiveEdgeStyleKey, LiveEdgeLook> = {
   privateLinkUsage: { color: "privateLink", alpha: 0.95, width: 1.4 },
   egress: { color: "egress", alpha: 0.85, width: 1.6 },
   egressDeprecated: { color: "egress", alpha: 0.85, dash: "6 4", width: 1.6 },
+  /** Subnet → the next hop its route table names: configuration found by address match — dashed, never a risk colour */
+  udr: { color: "egress", alpha: 0.8, dash: "3 3", width: 1.5 },
   peering: { color: "peering", alpha: 0.85, width: 2 },
   /** A peering that is not Connected on both sides: grey, solid (configuration, not weak evidence) — never red */
   peeringInactive: { color: "neutral", alpha: 0.55, width: 1.6 },
@@ -33,7 +35,7 @@ export const LIVE_EDGE_LOOK: Record<LiveEdgeStyleKey, LiveEdgeLook> = {
 };
 
 /** Order of the legend and of the toolbar menu */
-export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "ingressUnknown", "config", "configWeak", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "hybrid", "peering", "peeringInactive", "publicIp", "inferred"];
+export const LIVE_STYLE_ORDER: readonly LiveEdgeStyleKey[] = ["ingress", "ingressUnknown", "config", "configWeak", "privateLinkUsage", "privateLink", "egress", "egressDeprecated", "udr", "hybrid", "peering", "peeringInactive", "publicIp", "inferred"];
 
 export function liveStroke(key: LiveEdgeStyleKey): string {
   const l = LIVE_EDGE_LOOK[key];
@@ -90,6 +92,10 @@ export function relationLabel(e: DiagramEdgeSpec, byId: ReadonlyMap<string, Diag
     case "peering": return { key: e.peeringState && e.peeringState !== "Connected" ? "ld.rel.peeringInactive" : e.peeringTransit ? "ld.rel.peeringTransit" : "ld.rel.peering" };
     case "hybrid": return { key: "ld.rel.s2s", vars: { proto: e.protocol ?? "" } };
     case "natgw-association": return { key: "ld.rel.natAssoc" };
+    case "udr-route": {
+      const p = e.route?.prefixes ?? [];
+      return p.length > 1 ? { key: "ld.rel.udrN", vars: { first: p[0]!, n: String(p.length - 1) } } : { key: "ld.rel.udr", vars: { first: p[0] ?? "" } };
+    }
     case "outbound-internet":
       return { key: sk === "natGateway" ? "ld.rel.outNat" : sk === "lb" ? "ld.rel.outSnat" : sk === "subnet" ? "ld.rel.outDefault" : "ld.rel.outPip" };
     case "routes": {

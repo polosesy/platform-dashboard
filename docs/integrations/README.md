@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-22
+---
 # 연동 (Integrations)
 
 이 플랫폼이 외부 시스템과 연결되는 방법을 한곳에 모은 문서입니다. 모든 연동 문서는 같은 양식([`_template.md`](./_template.md))을 따릅니다.
@@ -15,6 +20,7 @@ Datadog·Grafana·Argo CD의 연동 문서처럼 **개요 → 동작 방식 → 
 | 문제 해결 | 오류 코드별 원인과 조치 | [azure/troubleshooting.md](./azure/troubleshooting.md) |
 | 수명 주기 | 자격 증명 교체, 연결 해제 | [azure/lifecycle.md](./azure/lifecycle.md) |
 | 보안·FAQ | 격리, 감사, 익명·개발 모드 | [azure/security-faq.md](./azure/security-faq.md) |
+| AKS 클러스터 안 읽기 | Tier·RBAC 템플릿·Pod 로그·Hubble opt-in | [azure/aks.md](./azure/aks.md) |
 | VNet 흐름 로그 | `/network` 화면의 데이터 원천(VNet 흐름 로그 + Traffic Analytics) | [../observability/vnet-flow-logs.md](../observability/vnet-flow-logs.md) |
 
 ## 읽는 순서

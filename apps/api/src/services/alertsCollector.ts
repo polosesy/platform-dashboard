@@ -1,49 +1,62 @@
 import type { Env } from "../env.js";
-import type { LiveAlert, AlertSeverity, DiagramNodeSpec } from "@aud/types";
+import type { LiveAlert, LiveAlertHistory, AlertSeverity, DiagramNodeSpec } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
 import { getArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
 // Azure Monitor Alerts Collector
 //
-// Fetches active alerts from Azure Alerts Management API,
-// then correlates them with diagram nodes by azureResourceId
-// to produce LiveAlert[] for the snapshot.
+// Alerts Management "Alerts - Get All" per subscription, correlated with diagram nodes by target resource ID:
+//   active  = monitorCondition Fired (and not Closed), any start time in the last 30 days
+//   history = every instance (Fired or Resolved) that started in the last day — a rule that fires and mitigates
+//             between two polls (flapping) is still visible
+// The API takes plain query parameters (monitorCondition, timeRange 1h|1d|7d|30d, pageCount ≤ 250) and pages with
+// nextLink; api-version 2018-05-05 (the newer 2023-01-01 does not exist for this resource type — every call of the
+// old collector failed with 404 and was shown as "no active alerts").
+// Learn: https://learn.microsoft.com/rest/api/monitor/alertsmanagement/alerts/get-all
 // ────────────────────────────────────────────
 
-const alertsCache = new CacheManager<LiveAlert[]>(50, 60_000);
+export const ALERTS_API_VERSION = "2018-05-05";
+/** Hours of history shown (instances are read for a day; older ones are dropped) */
+export const HISTORY_HOURS = 6;
+const MAX_PAGES = 4;
 
 // Azure Alerts Management REST response shape
-type AzureAlert = {
+export type AzureAlert = {
   id: string;
   name: string;
   properties: {
     essentials: {
       severity: string; // "Sev0" | "Sev1" | "Sev2" | "Sev3" | "Sev4"
-      signalType: string;
+      signalType?: string;
       alertState: string; // "New" | "Acknowledged" | "Closed"
       monitorCondition: string; // "Fired" | "Resolved"
+      monitorConditionResolvedDateTime?: string;
       targetResource?: string;
       targetResourceGroup?: string;
       targetResourceType?: string;
       startDateTime: string;
-      lastModifiedDateTime: string;
+      lastModifiedDateTime?: string;
       description?: string;
       alertRule?: string;
-    };
-    context?: {
-      // Custom payload from alert rule
-      context?: Record<string, unknown>;
     };
   };
 };
 
-type AlertsResponse = {
-  value?: AzureAlert[];
-  nextLink?: string;
+type AlertsPage = { value?: AzureAlert[]; nextLink?: string };
+export type AlertsFetch = (url: string) => Promise<AlertsPage>;
+
+export type DiagramAlerts = {
+  alerts: LiveAlert[];
+  history: LiveAlertHistory[];
+  /** ok = every subscription answered; failed = at least one did not (nothing shown may then be wrong) */
+  state: "ok" | "failed";
 };
 
-function mapSeverity(azureSeverity: string): AlertSeverity {
+const alertsCache = new CacheManager<DiagramAlerts>(50, 60_000);
+const inflight = new Map<string, Promise<DiagramAlerts>>();
+
+export function mapSeverity(azureSeverity: string): AlertSeverity {
   switch (azureSeverity) {
     case "Sev0":
     case "Sev1":
@@ -55,30 +68,25 @@ function mapSeverity(azureSeverity: string): AlertSeverity {
   }
 }
 
-/**
- * Fetch active alerts for a subscription from Azure Alerts Management API.
- */
-async function fetchAzureAlerts(
-  env: Env,
-  bearerToken: string,
-  subscriptionId: string,
-): Promise<AzureAlert[]> {
-  const fetcher = await getArmFetcher(env, bearerToken);
+const sevNumber = (s: string) => Number(/\d/.exec(s ?? "")?.[0] ?? 4);
+const ruleName = (a: AzureAlert) => (a.properties.essentials.alertRule ?? a.name).split("/").filter(Boolean).pop() ?? a.name;
 
-  // Filter: only fired/new alerts
-  const filter = encodeURIComponent(
-    "properties/essentials/monitorCondition eq 'Fired' and properties/essentials/alertState ne 'Closed'",
-  );
+export function alertsUrl(subscriptionId: string, condition: "Fired" | "Resolved"): string {
+  return `https://management.azure.com/subscriptions/${subscriptionId}/providers/Microsoft.AlertsManagement/alerts` +
+    `?api-version=${ALERTS_API_VERSION}&monitorCondition=${condition}&timeRange=${condition === "Fired" ? "30d" : "1d"}` +
+    `&pageCount=250&includeContext=false`;
+}
 
-  const url =
-    `https://management.azure.com/subscriptions/${subscriptionId}` +
-    `/providers/Microsoft.AlertsManagement/alerts` +
-    `?api-version=2023-01-01` +
-    `&$filter=${filter}` +
-    `&$top=100`;
-
-  const resp = await fetcher.fetchJson<AlertsResponse>(url);
-  return resp.value ?? [];
+/** Every page of one query (nextLink), at most MAX_PAGES — throws on any error (the caller reports "failed") */
+export async function fetchAllPages(fetch: AlertsFetch, firstUrl: string): Promise<AzureAlert[]> {
+  const out: AzureAlert[] = [];
+  let url: string | undefined = firstUrl;
+  for (let page = 0; url && page < MAX_PAGES; page++) {
+    const r: AlertsPage = await fetch(url);
+    out.push(...(r.value ?? []));
+    url = r.nextLink;
+  }
+  return out;
 }
 
 /**
@@ -110,89 +118,119 @@ function inferRootCauses(alert: AzureAlert): string[] {
 }
 
 /**
- * Collect alerts for the diagram and correlate with nodes/edges.
- *
- * 1. Extracts unique subscription IDs from node azureResourceIds.
- * 2. Fetches alerts for each subscription (parallel).
- * 3. Maps alerts to LiveAlert[], linking to affected nodes/edges.
+ * Alerts of the subscriptions → the diagram's active alerts and per (node, rule) history. Pure.
+ * Target resource IDs are compared case-insensitively (Azure writes `resourcegroups` in some places).
+ */
+export function correlateAlerts(
+  azAlerts: AzureAlert[],
+  resourceIdToNodeId: Map<string, string>,
+  edgeMap: Map<string, { source: string; target: string }>,
+  nowMs: number,
+): { alerts: LiveAlert[]; history: LiveAlertHistory[] } {
+  const since = nowMs - HISTORY_HOURS * 3600_000;
+  const seen = new Set<string>();
+  const alerts: LiveAlert[] = [];
+  const hist = new Map<string, LiveAlertHistory>();
+
+  for (const az of azAlerts) {
+    if (seen.has(az.id)) continue;   // the Fired and Resolved queries can overlap while an alert changes state
+    seen.add(az.id);
+    const e = az.properties.essentials;
+    const nodeId = e.targetResource ? resourceIdToNodeId.get(e.targetResource.toLowerCase()) : undefined;
+    if (!nodeId) continue;
+    const active = e.monitorCondition === "Fired" && e.alertState !== "Closed";
+
+    if (active) {
+      const affectedEdgeIds = [...edgeMap].filter(([, ed]) => ed.source === nodeId || ed.target === nodeId).map(([id]) => id);
+      alerts.push({
+        id: az.name,
+        severity: mapSeverity(e.severity),
+        title: ruleName(az),
+        resourceId: e.targetResource ?? "",
+        firedAt: e.startDateTime,
+        summary: e.description ?? "Azure Monitor alert fired",
+        rootCauseCandidates: inferRootCauses(az),
+        affectedNodeIds: [nodeId],
+        affectedEdgeIds,
+      });
+    }
+
+    const started = Date.parse(e.startDateTime);
+    if (!active && !(started >= since)) continue;   // history: active ones always, others when they started recently
+    const key = `${nodeId}|${ruleName(az).toLowerCase()}`;
+    const h = hist.get(key) ?? {
+      nodeId, rule: ruleName(az), severity: mapSeverity(e.severity), sev: sevNumber(e.severity),
+      active: false, instances: [], count: 0, windowHours: HISTORY_HOURS,
+    };
+    h.active ||= active;
+    h.count++;
+    h.instances.push({
+      firedAt: e.startDateTime,
+      ...(e.monitorCondition === "Resolved" && e.monitorConditionResolvedDateTime ? { resolvedAt: e.monitorConditionResolvedDateTime } : {}),
+    });
+    hist.set(key, h);
+  }
+
+  // Sort by severity (critical first) then by firedAt (newest first)
+  const sevOrder: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
+  alerts.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity] || Date.parse(b.firedAt) - Date.parse(a.firedAt));
+  const history = [...hist.values()].map((h) => ({
+    ...h,
+    instances: h.instances.sort((a, b) => Date.parse(b.firedAt) - Date.parse(a.firedAt)).slice(0, 10),
+  })).sort((a, b) => Number(b.active) - Number(a.active) || a.sev - b.sev || Date.parse(b.instances[0]!.firedAt) - Date.parse(a.instances[0]!.firedAt));
+  return { alerts, history };
+}
+
+/** One subscription's alerts: the active ones (30 days) and everything of the last day */
+async function subscriptionAlerts(fetch: AlertsFetch, subscriptionId: string): Promise<AzureAlert[]> {
+  const [fired, resolved] = await Promise.all([
+    fetchAllPages(fetch, alertsUrl(subscriptionId, "Fired")),
+    fetchAllPages(fetch, alertsUrl(subscriptionId, "Resolved")),
+  ]);
+  return [...fired, ...resolved];
+}
+
+/**
+ * Alerts of the diagram's subscriptions, correlated with its nodes. A subscription that fails makes the result
+ * "failed" — the page then says alerts could not be read instead of "no active alerts" — and is not cached.
  */
 export async function collectDiagramAlerts(
   env: Env,
   bearerToken: string,
   nodes: DiagramNodeSpec[],
   edgeMap: Map<string, { source: string; target: string }>,
-): Promise<LiveAlert[]> {
+  fetchOverride?: AlertsFetch,
+): Promise<DiagramAlerts> {
   const prefix = bearerKeyPrefix(bearerToken);
-  const nodeIds = nodes.map((n) => n.id).sort().join(",");
-  const cacheKey = `${prefix}:alerts:${nodeIds}`;
+  const cacheKey = `${prefix}:alerts:${nodes.map((n) => n.id).sort().join(",")}`;
   const cached = alertsCache.get(cacheKey);
   if (cached) return cached;
+  const running = inflight.get(cacheKey);
+  if (running) return running;
 
-  // Extract unique subscription IDs from node resource IDs
-  const subscriptionIds = new Set<string>();
-  const resourceIdToNodeId = new Map<string, string>();
-
-  for (const node of nodes) {
-    if (!node.azureResourceId) continue;
-    resourceIdToNodeId.set(node.azureResourceId.toLowerCase(), node.id);
-    const match = node.azureResourceId.match(/\/subscriptions\/([^/]+)/i);
-    if (match) subscriptionIds.add(match[1]!);
-  }
-
-  if (subscriptionIds.size === 0) return [];
-
-  // Fetch alerts from all subscriptions in parallel
-  const allAzureAlerts: AzureAlert[] = [];
-  const fetchPromises = [...subscriptionIds].map(async (subId) => {
-    try {
-      const alerts = await fetchAzureAlerts(env, bearerToken, subId);
-      allAzureAlerts.push(...alerts);
-    } catch {
-      // Non-critical: skip alerts for failed subscriptions
+  const job = (async (): Promise<DiagramAlerts> => {
+    const subscriptionIds = new Set<string>();
+    const resourceIdToNodeId = new Map<string, string>();
+    for (const node of nodes) {
+      if (!node.azureResourceId) continue;
+      resourceIdToNodeId.set(node.azureResourceId.toLowerCase(), node.id);
+      const match = node.azureResourceId.match(/\/subscriptions\/([^/]+)/i);
+      if (match) subscriptionIds.add(match[1]!.toLowerCase());
     }
-  });
-  await Promise.all(fetchPromises);
+    if (subscriptionIds.size === 0) return { alerts: [], history: [], state: "ok" };
 
-  // Correlate alerts with diagram nodes
-  const liveAlerts: LiveAlert[] = [];
-
-  for (const azAlert of allAzureAlerts) {
-    const targetResource = azAlert.properties.essentials.targetResource?.toLowerCase();
-    if (!targetResource) continue;
-
-    // Find matching node
-    const matchedNodeId = resourceIdToNodeId.get(targetResource);
-    if (!matchedNodeId) continue; // Alert for resource not in diagram
-
-    // Find edges connected to the affected node
-    const affectedEdgeIds: string[] = [];
-    for (const [edgeId, edge] of edgeMap) {
-      if (edge.source === matchedNodeId || edge.target === matchedNodeId) {
-        affectedEdgeIds.push(edgeId);
-      }
-    }
-
-    liveAlerts.push({
-      id: azAlert.name,
-      severity: mapSeverity(azAlert.properties.essentials.severity),
-      title: azAlert.properties.essentials.alertRule ?? azAlert.name,
-      resourceId: azAlert.properties.essentials.targetResource ?? "",
-      firedAt: azAlert.properties.essentials.startDateTime,
-      summary: azAlert.properties.essentials.description ?? "Azure Monitor alert fired",
-      rootCauseCandidates: inferRootCauses(azAlert),
-      affectedNodeIds: [matchedNodeId],
-      affectedEdgeIds,
-    });
+    const fetcher = fetchOverride ?? (await getArmFetcher(env, bearerToken)).fetchJson as AlertsFetch;
+    let failed = false;
+    const all = (await Promise.all([...subscriptionIds].map((sub) =>
+      subscriptionAlerts(fetcher, sub).catch(() => { failed = true; return [] as AzureAlert[]; })))).flat();
+    const result: DiagramAlerts = { ...correlateAlerts(all, resourceIdToNodeId, edgeMap, Date.now()), state: failed ? "failed" : "ok" };
+    if (!failed) alertsCache.set(cacheKey, result, env.AZURE_MONITOR_ALERTS_CACHE_TTL_MS);
+    return result;
+  })();
+  inflight.set(cacheKey, job);
+  try {
+    return await job;
+  } finally {
+    inflight.delete(cacheKey);
   }
-
-  // Sort by severity (critical first) then by firedAt (newest first)
-  liveAlerts.sort((a, b) => {
-    const sevOrder: Record<AlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
-    const sevDiff = sevOrder[a.severity] - sevOrder[b.severity];
-    if (sevDiff !== 0) return sevDiff;
-    return new Date(b.firedAt).getTime() - new Date(a.firedAt).getTime();
-  });
-
-  alertsCache.set(cacheKey, liveAlerts);
-  return liveAlerts;
 }

@@ -136,12 +136,13 @@ test("routes: parallel runs of different sources do not overlap in a lane", () =
   for (const e of L.edges) for (let k = 1; k + 2 < e.points.length; k++) {
     const [a, b] = [e.points[k]!, e.points[k + 1]!];
     const v = a[0] === b[0];
-    runs.push({ id: e.id, source: e.kind === "egress" ? `to:${e.target}` : e.source, at: v ? a[0] : a[1], lo: Math.min(v ? a[1] : a[0], v ? b[1] : b[0]), hi: Math.max(v ? a[1] : a[0], v ? b[1] : b[0]), v });
+    runs.push({ id: e.id, source: e.kind === "egress" || e.kind === "outbound" ? `to:${e.target}` : e.source, at: v ? a[0] : a[1], lo: Math.min(v ? a[1] : a[0], v ? b[1] : b[0]), hi: Math.max(v ? a[1] : a[0], v ? b[1] : b[0]), v });
   }
   let shared = 0;
   for (let i = 0; i < runs.length; i++) for (let j = i + 1; j < runs.length; j++) {
     const [p, q] = [runs[i]!, runs[j]!];
-    if (p.v !== q.v || p.at !== q.at || p.source === q.source || p.hi <= q.lo || q.hi <= p.lo) continue;
+    // A few pixels where a run meets another at its bend is a junction, not a shared lane
+    if (p.v !== q.v || p.at !== q.at || p.source === q.source || Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) < 8) continue;
     shared++;
   }
   // A full lane may still share (the nudge never cuts a tile); in this picture every lane has room
@@ -158,10 +159,12 @@ test("boundaries: the Internet is outside the subscription; regions and global s
   assert.ok(net.x + net.w <= subBox.x, "… and left of it (traffic reads left → right)");
   assert.ok(inside(region, subBox), "region inside the subscription");
   assert.equal(subBox.shape === "box" && subBox.label, "Contoso Production", "framed with the subscription name");
-  assert.equal(at(model.regions[0]!.edge.find((id) => id.includes("natgateways"))!).parent, "lane:edge:westeurope", "NAT gateway stays in its region");
-  // Ingress and egress meet the one Internet tile
+  assert.equal(at(model.regions[0]!.egress.find((id) => id.includes("natgateways"))!).parent, "lane:egress:westeurope", "NAT gateway: the region's outbound lane");
+  // In from the Internet on the left, out to the Internet on the right
   assert.ok(L.edges.some((e) => e.kind === "ingress" && e.source === m.INTERNET_TILE));
-  assert.ok(L.edges.some((e) => e.kind === "egress" && e.target === m.INTERNET_TILE));
+  assert.ok(L.edges.some((e) => e.kind === "egress" && e.target === m.INTERNET_OUT_TILE));
+  const out = at(m.INTERNET_OUT_TILE);
+  assert.ok(out && out.x >= subBox.x + subBox.w, "the outbound Internet is right of the subscription");
 });
 
 test("focus lines: Private Link / NAT / VNet integration are drawn for the selection unless every line is on", () => {

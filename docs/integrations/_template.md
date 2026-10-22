@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-22
+---
 # <연동 이름>
 
 > **대상**: <누가 읽나 — 플랫폼 관리자 / 고객 테넌트 관리자> · **소요 시간**: <n분> · **필요 권한**: <예: 고객 테넌트의 Global Administrator 또는 Privileged Role Administrator>
@@ -5,6 +10,8 @@
 <!--
 연동 문서 표준 양식. 모든 연동 문서는 이 12개 절을 이 순서로 둡니다(해당 없는 절은 "해당 없음" 한 줄).
 본문은 한국어, 제품·역할·환경 변수·오류 코드는 영어. 실제 ID·비밀 값 금지(자리표시자 <...>).
+맨 위 머리(front matter)는 모든 문서에 필수 — status(current|draft|archived)·owner(팀)·last-verified(코드와 맞춰 본 날짜)·
+covers(선택: 이 문서가 설명하는 코드 경로 — 그 코드가 더 최근에 바뀌면 테스트가 진단 메시지로 알려 줌). docs/README.md에도 한 줄 추가.
 -->
 
 ## 1. 개요

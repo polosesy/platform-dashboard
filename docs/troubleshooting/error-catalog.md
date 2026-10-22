@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform
+last-verified: 2026-10-22
+covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts]
+---
 # 에러 카탈로그
 
 > 프로젝트 전체에서 발생한 주요 에러 케이스, 원인, 해결 방법을 도메인별로 정리한 문서입니다.
@@ -9,7 +15,7 @@
 
 1. [Hubble (Cilium 네트워크)](#1-hubble-cilium-네트워크)
 2. [Observability (Container Insights / Prometheus)](#2-observability)
-3. [Azure 인증 / OBO · 플랫폼 역할](#3-azure-인증--obo)
+3. [Azure 인증 · 플랫폼 역할](#3-azure-인증--플랫폼-역할)
 4. [Kubernetes API](#4-kubernetes-api)
 5. [프론트엔드 (Next.js / React)](#5-프론트엔드)
 6. [보안 (Defender for Cloud)](#6-보안-defender-for-cloud)
@@ -26,7 +32,7 @@
 ### HUB-001: exec 500 에러
 - **에러**: `{"error":"service_map_failed","message":"exec failed: command terminated with exit code 1"}`
 - **원인**: cilium-agent pod에서 `hubble observe --server relay:443` 실행 시 mTLS 인증 실패
-- **해결**: 로컬 소켓(`/var/run/cilium/hubble.sock`) 경유 전략으로 변경
+- **해결**: 모든 노드의 로컬 소켓(`/var/run/cilium/hubble.sock`) 팬아웃 + 병합(`hubbleMerge.ts`)으로 변경
 
 ### HUB-002: `cilium hubble` 명령 불가
 - **에러**: `unknown command "hubble" for "cilium-dbg"`
@@ -36,7 +42,7 @@
 ### HUB-003: TLS 플래그 미지원
 - **에러**: `unknown flag: --tls-allow-server-name`
 - **원인**: AKS 포함 hubble CLI 버전에 해당 플래그 없음
-- **해결**: TLS 플래그 제거, 로컬 소켓 우선 전략
+- **해결**: TLS 플래그 제거, 전 노드 로컬 소켓 팬아웃
 
 ### HUB-004: flows 0건 (Hubble 활성 상태)
 - **증상**: `Hubble: Ok, Flows/s: 43.63` 이지만 UI에 0건
@@ -69,32 +75,32 @@
 
 ---
 
-## 3. Azure 인증 / OBO
+## 3. Azure 인증 · 플랫폼 역할
 
 ### AUTH-001: AADSTS65001 — 동의 누락
 - **에러**: `AADSTS65001: The user or administrator has not consented to use the application` (화면: `consent_required` 문장 — 원문·앱 ID·추적 ID는 더 이상 노출되지 않음)
 - **원인**: 사용자 위임(OBO) 연결(`AUD_HOME_CONNECTION_MODE=delegated` 또는 `mode:"delegated"`)에서 API 앱의 위임 권한(Log Analytics `Data.Read` 등)에 관리자 동의가 없음. 기본 플랫폼 연결에서는 발생하지 않음
 - **해결**: 플랫폼 연결을 쓰거나(권장, [overview](../integrations/azure/overview.md)), Azure Portal → App Registration → API Permissions → Grant admin consent
 
-### AUTH-002: OBO 토큰 교환 실패
-- **에러**: `AADSTS50013: Assertion failed signature validation`
-- **원인**: API와 Web의 App Registration audience/scope 불일치
-- **해결**: API의 `AZURE_AD_API_SCOPE`와 Web의 `loginRequest.scopes` 일치 확인
+### AUTH-002: 토큰 대상·범위 불일치
+- **에러**: `AADSTS50013: Assertion failed signature validation`(delegated OBO) 또는 401 `invalid_token` `reason:aud|scp`
+- **원인**: 웹이 요청한 범위와 API가 받는 대상·범위가 다름
+- **해결**: 웹 `AUD_WEB_API_SCOPE`(개발: `NEXT_PUBLIC_AZURE_AD_API_SCOPE`, `loginRequestFor`) = `api://<aud-api>/Azure.Read.All`, API `AUD_AUTH_SCOPES`(기본 `Azure.Read.All`)·`AUD_AUTH_AUDIENCES`(기본 `api://<AZURE_AD_CLIENT_ID>`) 일치 확인
 
 ### AUTH-003: ECONNRESET
-- **에러**: `read ECONNRESET` (Azure SDK 호출 시)
-- **원인**: 네트워크 불안정 또는 Azure 서비스 일시적 장애
-- **해결**: OBO token pool에 retry 로직 포함, 요청 타임아웃 설정
+- **에러**: `read ECONNRESET` (Azure 호출 또는 웹 `/api` 프록시)
+- **원인**: 네트워크 불안정·Azure 일시 장애, 또는 프록시 타임아웃(웹 rewrite 기본 30초 — `next.config` `experimental.proxyTimeout` 120초로 늘림)
+- **해결**: Azure 호출은 fetcher 타임아웃(`azureClientFactory`)으로 끊고 오류로 답함(재시도 없음). 운영에서 끊긴 소켓 ECONNRESET·EPIPE·ECONNABORTED는 프로세스를 종료하지 않음(`infra/lifecycle.ts`)
 
 ### AUTH-004: 로그인 버튼이 동작하지 않음 — AADSTS900144 (client_id 누락)
 - **증상**: 로그인 팝업이 `AADSTS900144: The request body must contain the following parameter: 'client_id'`로 끝나거나 `/common` 권한으로 열림
 - **원인**: Next.js는 앱 디렉터리(`apps/web`)의 `.env`만 읽는데 환경 파일은 저장소 루트에만 있어, 브라우저 번들의 `NEXT_PUBLIC_AZURE_AD_*`가 빈 값
-- **해결**: `apps/web/next.config.ts`가 루트 `.env*`를 `processEnv`로 반영하고 `NEXT_PUBLIC_*`를 `env`로 넘겨 인라인. 변경 후 dev 서버 재시작 필요. 확인: 번들에 `"TURBOPACK compile-time value"`로 clientId가 들어 있는지
+- **해결**: `apps/web/next.config.ts`가 루트 `.env*`를 `processEnv`로 반영하고 `NEXT_PUBLIC_*`를 `env`로 넘겨 인라인. 변경 후 dev 서버 재시작 필요. 확인: 번들에 `"TURBOPACK compile-time value"`로 clientId가 들어 있는지. 컨테이너는 빌드 값이 아니라 실행 시 `AUD_WEB_TENANT_ID`·`AUD_WEB_CLIENT_ID`를 읽음(`runtimeConfig.ts`)
 
 ### AUTH-005: 로그인 팝업에서 계정 선택 후 60초 뒤 `timed_out`
 - **에러**: `BrowserAuthError: timed_out` (`redirect_bridge_timeout`), 팝업이 닫히지 않음
 - **원인**: MSAL v5는 팝업 응답을 BroadcastChannel(redirect bridge)로만 받음. 리디렉트 URI 페이지가 `broadcastResponseToMainFrame()`을 호출하지 않으면 원래 창이 응답을 받지 못함 (v2/v3의 팝업 URL 감시 방식은 제거됨)
-- **해결**: `apps/web/src/app/providers.tsx`가 모듈 로드 시 URL에 인증 응답(`state` + `code|error`)이 있으면 `@azure/msal-browser/redirect-bridge`의 `broadcastResponseToMainFrame()`을 호출하고 앱을 렌더링하지 않음. 리디렉트 URI(`NEXT_PUBLIC_AZURE_AD_REDIRECT_URI`)는 Entra 앱 등록의 **SPA** 플랫폼에 등록되어 있어야 함
+- **해결**: `apps/web/src/app/providers.tsx`가 모듈 로드 시 URL에 인증 응답(`state` + `code|error`)이 있으면 `@azure/msal-browser/redirect-bridge`의 `broadcastResponseToMainFrame()`을 호출하고 앱을 렌더링하지 않음. 리디렉트 URI(개발 `NEXT_PUBLIC_AZURE_AD_REDIRECT_URI`, 컨테이너 `AUD_WEB_REDIRECT_URI` — 없으면 페이지 origin)는 Entra 앱 등록의 **SPA** 플랫폼에 등록되어 있어야 함
 
 ### AUTH-006: 401 `invalid_token` / `token_expired`
 - **증상**: 모든 `/api` 호출이 401, 응답 `{"error":"invalid_token","reason":"aud|iss|signature|kid|tid|malformed"}` 또는 `token_expired`
@@ -190,8 +196,8 @@
 ## 6. 보안 (Defender for Cloud)
 
 ### SEC-001: 보안 화면이 '예시 데이터'로만 나옴
-- **원인**: `/api/security/posture`는 로그인 사용자 권한(OBO)으로만 실데이터를 읽음. 비로그인이면 mock(`source:"mock"`)
-- **해결**: 로그인. 사용자에게 구독의 **Security Reader**(또는 Reader) 권한이 있어야 함. 로컬 검증에서만 `AZURE_SECURITY_SP_FALLBACK=true`로 서비스 주체 사용 가능(기본 false — 운영에서 켜지 말 것)
+- **원인**: `/api/security/posture`는 로그인 사용자에게만 실데이터 — 연결의 자격 증명으로 읽음(delegated 연결만 OBO). 비로그인이면 mock(`source:"mock"`)
+- **해결**: 로그인. 연결의 서비스 주체(또는 관리 ID)에 구독의 **Security Reader**(또는 Reader) 권한이 있어야 함. 로컬 검증에서만 `AZURE_SECURITY_SP_FALLBACK=true`로 서비스 주체 사용 가능(기본 false — 운영에서 켜지 말 것)
 
 ### SEC-002: 보안 화면에 '일부 데이터를 가져오지 못했습니다'
 - **원인**: Resource Graph 6개 쿼리 중 일부 실패(권한·스로틀링 429) — 실패 섹션은 `gaps`로 오고 화면에 '수집 실패'로 표시(0건으로 표시하지 않음)

@@ -96,11 +96,11 @@ export function Tabs<K extends string>({ items, value, onChange, label, idPrefix
 }
 
 /* ── Segmented control (view switches) ── */
-export function Segmented<K extends string | number>({ items, value, onChange, label }: { items: { id: K; label: ReactNode }[]; value: K; onChange: (id: K) => void; label: string }) {
+export function Segmented<K extends string | number>({ items, value, onChange, label }: { items: { id: K; label: ReactNode; title?: string }[]; value: K; onChange: (id: K) => void; label: string }) {
   return (
     <div className={s.segmented} role="group" aria-label={label}>
       {items.map((it) => (
-        <button key={String(it.id)} type="button" className={s.segment} aria-pressed={it.id === value} onClick={() => onChange(it.id)}>
+        <button key={String(it.id)} type="button" className={s.segment} aria-pressed={it.id === value} title={it.title} onClick={() => onChange(it.id)}>
           {it.label}
         </button>
       ))}

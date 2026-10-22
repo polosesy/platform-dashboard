@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# audctl — runs the dashboard on the on-prem Docker host WITHOUT the source. It lives in ~<user>/aud-runtime next to
+# compose.yaml, nginx.conf, api.env, web.env, config/, tls/ and state/ (copied there by every build).
+# The web is published on 127.0.0.1:${AUD_HTTP_PORT:-3000} only: open it from a workstation through an SSH tunnel.
+#
+#   sudo ~/aud-runtime/audctl status | up [tag] | down | restart [service] | logs [service] [lines] [-f]
+#                             rollback [tag] | images | version | sample-env
+#   internal (scripts/onprem.sh deploy): audctl build <context-dir> <tag>   — the context is deleted afterwards
+set -euo pipefail
+
+REPO=aud-dashboard
+# Our tags only: <sha>, <sha>-dirty (older builds), <sha>-dirty-<UTC yyyymmddTHHMMSS>. Anything else (e.g. :dev,
+# another team's image) is never touched
+TAG_RE='^[0-9a-f]{7,40}(-dirty(-[0-9]{8}T[0-9]{6})?)?$'
+
+# The whole body is in functions and runs from the last line: bash has read all of it before `build` deletes the
+# context directory this file may be running from
+main() {
+  [ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
+  SELF="$(readlink -f "$0")"
+  if [ -n "${AUD_RUNTIME:-}" ]; then RUN="$AUD_RUNTIME"
+  elif [ -f "${SELF%/*}/.aud-runtime" ]; then RUN="${SELF%/*}"
+  else RUN="$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)/aud-runtime"; fi
+  OWNER="$(stat -c %U "$RUN" 2>/dev/null || echo "${SUDO_USER:-root}")"
+  OWNER_HOME="$(getent passwd "$OWNER" | cut -d: -f6)"
+  HTTP_PORT="${AUD_HTTP_PORT:-3000}"
+  KEEP="${AUD_KEEP_IMAGES:-3}"
+
+  local cmd="${1:-status}"; shift || true
+  case "$cmd" in
+    build) build "${1:?context dir}" "${2:?tag}" ;;
+    up) up "${1:-}" ;;
+    down) compose down ;;
+    restart) compose restart ${1:+"$1"}; wait_ready ;;
+    status)
+      echo "image $REPO:$(cur)   previous: $(prev)"
+      compose ps
+      printf 'readyz: '; curl -sS -m 5 "http://127.0.0.1:$HTTP_PORT/readyz" || echo unreachable; echo ;;
+    logs) compose logs --tail "${2:-100}" ${3:+"$3"} ${1:+"$1"} ;;
+    rollback)
+      local t="${1:-$(prev)}"
+      [ -n "$t" ] || { echo "no previous tag recorded"; exit 1; }
+      up "$t" ;;
+    images)
+      docker image ls "$REPO" --format 'table {{.Tag}}\t{{.Size}}\t{{.CreatedSince}}'
+      echo "current: $(cur)   previous: $(prev)" ;;
+    version)
+      for t in "$(cur)" "$(prev)"; do
+        [ -n "$t" ] && docker image inspect "$REPO:$t" --format "$t  {{.Created}}" 2>/dev/null || true
+      done ;;
+    sample-env) sample_env ;;
+    *) sed -n '2,8p' "$SELF"; exit 2 ;;
+  esac
+}
+
+cur()  { cat "$RUN/.image-tag" 2>/dev/null || true; }
+prev() { cat "$RUN/.image-tag.prev" 2>/dev/null || true; }
+
+# The image comes from $RUN/.env too, so `cd ~/aud-runtime && sudo docker compose ps` works without this script
+compose() {
+  AUD_IMAGE="$REPO:$(cur)" AUD_HTTP_PORT="$HTTP_PORT" \
+    docker compose -p "$REPO" -f "$RUN/compose.yaml" --project-directory "$RUN" "$@"
+}
+
+# Current → previous (only when it changes, so rollback toggles between the two), then the new current
+record() {
+  local c; c="$(cur)"
+  if [ -n "$c" ] && [ "$c" != "$1" ]; then echo "$c" > "$RUN/.image-tag.prev"; fi
+  echo "$1" > "$RUN/.image-tag"
+  printf 'AUD_IMAGE=%s:%s\nAUD_HTTP_PORT=%s\n' "$REPO" "$1" "$HTTP_PORT" > "$RUN/.env"
+  chown "$OWNER": "$RUN"/.image-tag* "$RUN/.env"
+}
+
+# Build from a temporary context in the owner's home, install the three runtime files, delete the context (trap:
+# also on failure or Ctrl-C). Nothing of the source stays on the host
+build() {
+  local ctx tag="$2"
+  ctx="$(readlink -f "$1")"
+  case "$ctx" in "$OWNER_HOME"/.aud-build.*) ;; *) echo "refusing context $ctx (expected $OWNER_HOME/.aud-build.*)"; exit 2 ;; esac
+  # shellcheck disable=SC2064 — expand now: the trap must remove this exact directory
+  trap "rm -rf -- '$ctx'" EXIT
+  [[ $tag =~ $TAG_RE ]] || { echo "bad tag $tag"; exit 2; }
+  # Leftovers of interrupted uploads (older than 12 h)
+  find "$OWNER_HOME" -maxdepth 1 -name '.aud-build.*' -mmin +720 ! -path "$ctx" -exec rm -rf -- {} + 2>/dev/null || true
+  # COPY keeps file modes and the image runs as 65532: everything below the context readable (the context directory
+  # itself stays 0700). A 0600 file here once made the web crash-loop on EACCES
+  find "$ctx" -mindepth 1 -exec chmod a+rX {} +
+  docker build -t "$REPO:$tag" --build-arg "AUD_VERSION=$tag" "$ctx"
+  mkdir -p "$RUN"; chown "$OWNER": "$RUN"; chmod 700 "$RUN"
+  touch "$RUN/.aud-runtime"
+  local g; g="$(id -gn "$OWNER")"
+  install -o "$OWNER" -g "$g" -m 0644 "$ctx/deploy/docker/compose.yaml" "$ctx/deploy/docker/nginx.conf" "$RUN/"
+  install -o "$OWNER" -g "$g" -m 0755 "$ctx/deploy/docker/audctl" "$RUN/audctl"
+  chown "$OWNER": "$RUN/.aud-runtime"
+  echo "built $REPO:$tag (build context removed)"
+}
+
+up() {
+  local tag="${1:-$(cur)}"
+  [ -n "$tag" ] || { echo "nothing deployed yet — run scripts/onprem.sh deploy on the workstation"; exit 1; }
+  docker image inspect "$REPO:$tag" >/dev/null 2>&1 || { echo "no image $REPO:$tag on this host (see: audctl images)"; exit 1; }
+  [ -f "$RUN/compose.yaml" ] || { echo "$RUN/compose.yaml missing — run scripts/onprem.sh deploy"; exit 1; }
+  ensure_runtime
+  record "$tag"
+  compose up -d --remove-orphans
+  wait_ready || { echo "not ready — to go back: sudo $RUN/audctl rollback   (→ $(prev))"; exit 1; }
+  compose ps
+  prune
+}
+
+# Our repository only — never `docker image prune` / `builder prune` (other teams share this host). Keeps the newest
+# $KEEP of our tags plus the current and previous ones
+prune() {
+  local keep=" $(cur) $(prev) " n=0 t
+  docker image ls "$REPO" --format '{{.Tag}}' | while read -r t; do
+    [[ $t =~ $TAG_RE ]] || continue
+    n=$((n + 1)); [ "$n" -le "$KEEP" ] && continue
+    case "$keep" in *" $t "*) continue ;; esac
+    docker image rm "$REPO:$t" >/dev/null && echo "removed old image $REPO:$t"
+  done
+}
+
+# Sample mode: no Azure identity — anonymous visitors get sample data, sign-in stays off. Real values come from
+# `scripts/onprem.sh env` (never overwritten here)
+sample_env() {
+  mkdir -p "$RUN/config" "$RUN/tls"
+  if [ ! -f "$RUN/api.env" ]; then
+    cat > "$RUN/api.env" <<EOF
+# sample mode (scripts/onprem.sh env replaces this file)
+NODE_ENV=production
+AZURE_AD_TENANT_ID=00000000-0000-0000-0000-000000000000
+AZURE_AD_CLIENT_ID=00000000-0000-0000-0000-000000000000
+AZURE_SUBSCRIPTION_IDS=00000000-0000-0000-0000-000000000000
+CORS_ORIGIN=http://localhost:${HTTP_PORT}
+AUD_AUDIT_LOG=stdout
+EOF
+    echo "wrote sample api.env"
+  fi
+  [ -f "$RUN/web.env" ] || { echo "# sample mode — sign-in off (no AUD_WEB_CLIENT_ID)" > "$RUN/web.env"; echo "wrote sample web.env"; }
+}
+
+ensure_runtime() {
+  mkdir -p "$RUN/config" "$RUN/tls"
+  touch "$RUN/.aud-runtime"
+  sample_env
+  # Env files hold secrets: the owner only (docker reads them as root). config/ is mounted into the containers
+  # (user 65532): readable files, IDs and names only — no secrets in connections.json
+  chown -R "$OWNER": "$RUN"
+  chmod 700 "$RUN"; chmod 600 "$RUN"/api.env "$RUN"/web.env
+  chmod 755 "$RUN/config"; find "$RUN/config" -type f -exec chmod 644 {} +
+  # Team layouts (written by the api container's user 65532 — the only writable mount)
+  mkdir -p "$RUN/state/arrangements" && chown -R 65532:65532 "$RUN/state" && chmod 750 "$RUN/state/arrangements"
+}
+
+wait_ready() {
+  for _ in $(seq 1 60); do
+    if curl -fsS -m 3 "http://127.0.0.1:${HTTP_PORT}/readyz" >/dev/null 2>&1; then echo "ready: http://127.0.0.1:${HTTP_PORT}"; return 0; fi
+    sleep 2
+  done
+  echo "not ready after 120 s — last api logs:"; compose logs --tail 30 api || true; return 1
+}
+
+main "$@"

@@ -89,6 +89,7 @@ export type DiagramEdgeKind =
   | "bound-to"           // NIC → VM
   | "outbound-internet"  // Resource → Internet (NAT GW / LB SNAT / PIP / default)
   | "natgw-association"  // Subnet → NAT GW (visible when NAT GW card is expanded)
+  | "udr-route"          // Subnet → the next hop its route table names (virtual appliance / VNet gateway, SEC-04 / NET-07)
   | "privateLinkUsage";  // Workload → Private Endpoint, observed in access / flow logs (web-only, never in a stored spec)
 
 export type DiagramEdgeSpec = {
@@ -124,6 +125,8 @@ export type DiagramEdgeSpec = {
   rule?: "nodeRg" | "sameVnet";
   /** VNet peering line (EDGE-02): the worse of the two sides' states, and whether gateway transit is set up both ways */
   peeringState?: string;
+  /** udr-route: the route table, its prefixes to this next hop, the address; firstExit = the subnet's 0.0.0.0/0 exit (NET-09) */
+  route?: { routeTable: string; prefixes: string[]; nextHopIp?: string; hop: "appliance" | "gateway"; firstExit: boolean };
   peeringTransit?: boolean;
   /** Front Door → origin resource (EDGE-04..07): the origin, its group and how it was matched */
   origin?: { name: string; group: string; evidence: "cfg" | "ipMatch" | "fqdnMatch"; status?: string };
@@ -211,7 +214,7 @@ export type MetricBinding = {
   node?: "source" | "target";
   /** Read one bucket over this window instead of the latest 1-minute value (activity over an hour, NAT data path
    *  averaged over 15 minutes as Azure recommends) */
-  window?: "PT15M" | "PT1H";
+  window?: "PT5M" | "PT15M" | "PT1H";
   /** Edges only: read the queried VM's instance-level public IP(s) instead of the node itself (server-derived) */
   on?: "publicIp";
   /**
@@ -318,6 +321,9 @@ export type LiveDiagramSnapshot = {
   nodes: LiveNode[];
   edges: LiveEdge[];
   alerts: LiveAlert[];
+  /** Alert instances of the last hours per (resource, rule) — fired and resolved, so a flapping rule shows even when
+   *  nothing is active at this poll */
+  alertHistory?: LiveAlertHistory[];
   alertRules?: AlertRuleInfo[];
   topology?: {
     nodeCount: number;
@@ -363,7 +369,7 @@ export type LiveNode = {
    * both ways in the window (inferred normal — not counted as ok) · configured = provisioned and approved, nothing
    * observed · notApplicable = Azure defines no state for it (NSG) · none = no evidence
    */
-  basis?: "metric" | "resourceHealth" | "observed" | "configured" | "notApplicable" | "none";
+  basis?: "metric" | "alert" | "resourceHealth" | "observed" | "configured" | "notApplicable" | "none";
   /** i18n keys of the evidence (ld.ev.*) shown in the panel */
   reasons?: string[];
   /** What the resource is doing right now and why, when it is not simply ready (services/lifecycle.ts) */
@@ -453,12 +459,33 @@ export type LiveAlert = {
   affectedEdgeIds: string[];
 };
 
+/** One rule's instances on one resource in the history window (Azure Alerts Management: each fire is an instance;
+ *  monitorCondition Fired → Resolved when the rule mitigates) */
+export type LiveAlertHistory = {
+  nodeId: string;
+  /** Rule name (last segment of the rule ID) */
+  rule: string;
+  severity: AlertSeverity;
+  /** Azure severity 0–4 */
+  sev: number;
+  /** Is an instance still Fired (and not Closed) */
+  active: boolean;
+  /** Instances in the window, newest first (at most 10) */
+  instances: Array<{ firedAt: string; resolvedAt?: string }>;
+  /** All instances in the window (instances may be capped) */
+  count: number;
+  /** The window the count covers, hours */
+  windowHours: number;
+};
+
 export type AlertRuleInfo = {
   id: string;
   name: string;
   severity: number; // Azure Sev0–Sev4
   signalType: string; // "Metric" | "Log" | "Activity Log" | "Smart Detection" | "Advisor"
   condition?: string; // human-readable condition string
+  /** Metric rules: how Azure evaluates — e.g. Average over PT5M every PT1M, dimension filters "name = value" */
+  evaluation?: { aggregation?: string; windowSize?: string; frequency?: string; dimensions?: string[]; autoMitigate?: boolean };
   targetResourceId: string;
   targetResourceType?: string;
   enabled: boolean;

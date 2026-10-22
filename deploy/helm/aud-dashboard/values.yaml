@@ -1,0 +1,83 @@
+# Placeholders in <> — an environment's values-<env>.yaml replaces them. Nothing here is secret: Azure is read with
+# federated tokens (workload identity), the connections file holds IDs and names only.
+
+image:
+  repository: <acr>/<path>/aud-dashboard
+  tag: "<semver>-<sha7>"          # exact tag (never latest)
+  digest: ""                       # "sha256:…" — pin it in GitOps (rendered as tag@digest)
+  pullPolicy: IfNotPresent
+
+# The pod's service account. Its token is exchanged at Entra by BOTH identities through federated credentials with
+#   issuer  = this cluster's OIDC issuer
+#   subject = system:serviceaccount:<release namespace>:<serviceAccount.name>   (default aud-dashboard:aud-dashboard)
+#   audience = api://AzureADTokenExchange
+serviceAccount:
+  name: aud-dashboard
+  clientId: "<home-platform-identity-client-id>"   # home-tenant identity (aud-api app or user-assigned managed identity)
+  tenantId: "<home-tenant-guid>"                   # without it the webhook injects the cluster's own tenant
+
+# Sign-in (home tenant) — the web reads these at run time (AUD_WEB_*), the API verifies tokens for apiClientId
+sso:
+  tenantId: "<home-tenant-guid>"
+  spaClientId: "<aud-web-spa-client-id>"
+  apiClientId: "<aud-api-app-client-id>"
+
+host: "<dashboard-host>"                 # https://<host>/ is the SPA redirect URI and the API's CORS origin
+homeSubscriptionIds: "<home-subscription-ids>"   # home connection only; customer subscriptions belong in connections
+platform:
+  oidcIssuer: "<this-cluster-oidc-issuer-url>"    # display only: the connection check prints FIC JSON with it
+
+features:
+  liveDiagram: true
+  security: true
+
+# Azure connections file (AUD_CONNECTIONS_FILE) — IDs and names only. A customer connection reads with its own app
+# or managed identity via federation (no secret): docs/integrations/azure/connect-tenant.md
+connections: |
+  {"connections":[
+    {"key":"home","displayName":"Home","tenantId":"<home-tenant-guid>","mode":"platform","subscriptions":[]},
+    {"key":"<customer-key>","displayName":"<customer name>","tenantId":"<customer-tenant-guid>","mode":"servicePrincipal",
+     "clientId":"<customer-connection-identity-client-id>","federation":{"kind":"kubernetes"},
+     "subscriptions":["<customer-subscription-guid>"],"logAnalyticsWorkspaces":["<workspace-customer-id>"],
+     "aks":{"allowLocalAccount":false,"hubbleExec":false}}
+  ]}
+
+web:
+  extraEnv: []
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }      # no CPU limit (throttling hurts more than it protects here)
+api:
+  extraEnv: []                     # e.g. AZURE_LOG_ANALYTICS_WORKSPACE_ID, AZURE_TRANSLATOR_REGION
+  nodeOptions: "--max-old-space-size=768"
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 1Gi }
+
+replicas: 1                        # caches and live diagrams are in memory
+podDisruptionBudget:
+  enabled: true                    # maxUnavailable 1 — never blocks node drains with one replica
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+
+# ArgoCD sync waves: config (-1) → workload (0) → routing (1)
+syncWaves: true
+
+# Gateway API route (e.g. Application Gateway for Containers). Off = bring your own ingress
+gateway:
+  enabled: false
+  parentRef: { name: <gateway>, namespace: <gateway-namespace> }
+  frontDoorId: ""                  # set → only requests carrying X-Azure-FDID = this Front Door (no WAF bypass)
+# AGC health probe of the Service (AGC-only CRD)
+healthCheckPolicy:
+  enabled: false
+
+# Baseline CiliumNetworkPolicy. Start with enforce: false (audit — no default deny), watch Hubble drops, then true
+networkPolicy:
+  enabled: false
+  enforce: false
+  ingressCidrs: ["<ingress-subnet-cidr>"]
+  apiServerCidr: ""                # "<api-server-private-endpoint-ip>/32" — only if Hubble shows kube-apiserver does not match
+  prometheusPattern: "*.<region>.prometheus.monitor.azure.com"
+  extraFqdns: []                   # e.g. api.cognitive.microsofttranslator.com when a Translator key is set

@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-15
+---
 # 애플리케이션·통합 — Azure 리소스 관계 사전
 
 > **대상**: 이 영역의 리소스를 그리는 다이어그램 코드 작성자, 보안 검토자, Azure를 처음 배우는 운영자. 다루는 서비스는 App Service·Functions·Logic Apps·Static Web Apps·API Management·Service Bus·Event Hubs·Event Grid·Relay·App Configuration·AI 서비스(Cognitive Services/Azure OpenAI/Foundry)·Machine Learning·AI Search·SignalR/Web PubSub입니다.

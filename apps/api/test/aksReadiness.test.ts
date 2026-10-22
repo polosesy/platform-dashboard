@@ -55,8 +55,8 @@ test("Entra in another tenant, local accounts on, no Entra at all", () => {
 test("snippets: the object id when known, placeholders otherwise; the federated credential matches the platform", () => {
   assert.ok(askSnippet("clusterRoleBinding", { objectId: OID }).includes(`name: "${OID}"`));
   assert.ok(askSnippet("clusterUserRole").includes("<CONNECTION_IDENTITY_OBJECT_ID>"));
-  const fic = JSON.parse(askSnippet("federation", { issuer: "https://oidc.example/abc/", subject: "system:serviceaccount:aud:aud-api" }));
-  assert.deepEqual([fic.issuer, fic.subject, fic.audiences], ["https://oidc.example/abc/", "system:serviceaccount:aud:aud-api", ["api://AzureADTokenExchange"]]);
+  const fic = JSON.parse(askSnippet("federation", { issuer: "https://oidc.example/abc/", subject: "system:serviceaccount:aud-dashboard:aud-dashboard" }));
+  assert.deepEqual([fic.issuer, fic.subject, fic.audiences], ["https://oidc.example/abc/", "system:serviceaccount:aud-dashboard:aud-dashboard", ["api://AzureADTokenExchange"]]);
   assert.match(fic.name, /^fed-common-/);
   assert.ok(askSnippet("privateEndpoint").includes("--group-id management"));
   for (const k of ["clusterUserRole", "clusterRoleBinding", "azureRbacRole", "amwDataReader", "privateEndpoint", "allowedIp", "federation"] as const) {

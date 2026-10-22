@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-16
+covers: [apps/api/src/services/featureCatalog.ts]
+---
 # Azure 연결 권한 표
 
 > **대상**: 고객 테넌트 관리자, 보안 검토자 · **소요 시간**: 읽기 5분 · **필요 권한**: 역할 부여 권한(Owner / User Access Administrator)

@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-observability
+last-verified: 2026-10-22
+---
 # Observability 계측 및 수집 가이드
 
 > AKS 환경에서 클러스터/애플리케이션 메트릭과 로그를 수집하기 위한 계측 원리, 수집 경로, 앱별 설정 방법을 정리한 문서입니다.
@@ -621,8 +626,8 @@ Collector.ts            Collector.ts
 getLogAnalyticsFetcher  getArmFetcherAuto()
 Auto()                    │
   │                      │
-  │  OBO 토큰 → SP      │  OBO 토큰 → SP fallback
-  │  fallback            │  (사용자 토큰 기반)
+  │  연결의 자격 증명    │  연결의 자격 증명
+  │  (폴백 없음)         │  (delegated만 OBO)
   │                      │
   ▼                      ▼
 Log Analytics API       Azure Monitor Metrics API
@@ -1057,8 +1062,8 @@ await coreV1.readNamespacedPodLog({
 
 1. **K8s API 직접 조회** (이미 구현됨)
    - 네임스페이스/Pod 실시간 목록
-   - Pod 로그 실시간 조회 + `--previous` 지원
-   - Container Insights 의존성 제거
+   - Pod 로그 실시간 조회 + `--previous` 지원 — 운영자 역할 + 연결 `aks.podLogNamespaces`(거부되면 Container Insights)
+   - Container Insights는 여전히 필요(로그 보관·노드 밖 조회)
 
 2. **Container Insights DCR 최적화**
    - 수집 그룹: "로그 및 이벤트" (ContainerLogV2 + KubeEvents + KubePodInventory)

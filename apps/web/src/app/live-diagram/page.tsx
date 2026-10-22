@@ -20,12 +20,17 @@ import { formatAzureRegion } from "./utils/regionFormat";
 import { LIVE_EDGE_LOOK, liveStroke, type LiveEdgeStyleKey } from "@/lib/liveStyle";
 import { peeringPairOf, siteOfEdge } from "@/lib/livePeering";
 import styles from "./styles.module.css";
-import { Button, EmptyState, Notice, PageHeader, Select, Toggle } from "@/components/ui";
+import { Button, EmptyState, Notice, PageHeader, Segmented, Select, Toggle } from "@/components/ui";
+import { useStoredArrangement } from "@/lib/useStoredArrangement";
+import { EMPTY_ARRANGEMENT } from "@/lib/archArrange";
+import { liveArrangementStatus, liveKey, resetContainer, setGridCols, type ArrangeContainer } from "@/lib/liveArrange";
 
 /** Built-in example diagram (sample resources and values) */
 const SAMPLE_DIAGRAM_ID = "prod-infra";
 /** Hover focus on/off, remembered per browser */
 const FOCUS_KEY = "aud.liveDiagram.hoverFocus";
+/** No fault-impact dimming while arranging */
+const NO_IMPACTS: never[] = [];
 /** Last diagram generated from Azure, restored on the next visit */
 const LAST_DIAGRAM_KEY = "aud.liveDiagram.last";
 
@@ -128,6 +133,7 @@ const LAYER_SWATCH: Record<EdgeLayer, LiveEdgeStyleKey> = {
   privateLink: "privateLink",
   privateLinkUsage: "privateLinkUsage",
   ingress: "ingress",
+  udr: "udr",
   egress: "egress",
   hybrid: "hybrid",
   peering: "peering",
@@ -324,6 +330,33 @@ export default function LiveDiagramPage() {
     try { window.localStorage.setItem(FOCUS_KEY, on ? "1" : "0"); } catch { /* not remembered */ }
   }, []);
 
+  // Manual arrangement (lib/liveArrange) — per diagram, kept in this browser, undoable. Edit mode turns the panels,
+  // hover focus, comets and fault-impact dimming off (a click selects a box for its tools instead)
+  const arr = useStoredArrangement(`aud.live.arrange.v1:${diagramId || "none"}`);
+  const [editMode, setEditMode] = useState(false);
+  const [applyManual, setApplyManual] = useState(true);
+  const [editSel, setEditSel] = useState<{ id: string; own?: ArrangeContainer; parent?: ArrangeContainer } | null>(null);
+  const [arrangeNotice, setArrangeNotice] = useState<string | null>(null);
+  const changeEditMode = useCallback((on: boolean) => {
+    setEditMode(on);
+    setEditSel(null);
+    setArrangeNotice(null);
+    if (on) { setSelectedNodeId(null); setSelectedEdgeId(null); setSelectedWaf(null); setSelectedVmssInstance(null); }
+  }, []);
+  const onArrange = useCallback((next: typeof arr.arrangement) => arr.commit(next), [arr]);
+  useEffect(() => {
+    if (!editMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement | null)?.closest?.("input, textarea, select")) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); arr.undo(); }
+      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); arr.redo(); }
+      else return;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editMode, arr]);
+
   // Connection & Subscription context (a connection = one customer tenant the platform reads)
   const [tenants, setTenants] = useState<AzureConnectionOption[]>([]);
   const [tenantId, setTenantId] = useState("");
@@ -429,6 +462,10 @@ export default function LiveDiagramPage() {
   }, [specError, diagramId]);
 
   const isSample = diagramId === SAMPLE_DIAGRAM_ID || snapshot?.dataSource === "mock";
+  const arrangeStatus = useMemo(
+    () => liveArrangementStatus(arr.arrangement, new Set((spec?.nodes ?? []).map(liveKey))),
+    [arr.arrangement, spec?.nodes],
+  );
 
   // ── VNet / Region option extraction ──
   const vnetOptions = useMemo(() => {
@@ -833,7 +870,45 @@ export default function LiveDiagramPage() {
             >
               {t("ld.impact.label", { n: visibleImpacts.length })}
             </Toggle>
+            <Segmented
+              label={t("ld.edit.mode")}
+              value={editMode ? "arrange" : "auto"}
+              onChange={(v) => changeEditMode(v === "arrange")}
+              items={[{ id: "auto", label: t("ld.edit.auto") }, { id: "arrange", label: t("ld.edit.arrange"), title: t("ld.edit.hint") }]}
+            />
           </div>
+        </div>
+      )}
+
+      {/* Manual arrangement bar: in edit mode, or while an arrangement exists (to switch it off for a look) */}
+      {filteredSpec && (editMode || arrangeStatus.boxes > 0) && (
+        <div className={styles.arrangeBarRow} data-testid="arrange-bar">
+          {arrangeStatus.boxes > 0 ? <span className={styles.arrangeBadge}>{t("ld.edit.badge", { n: arrangeStatus.boxes })}</span> : null}
+          {arrangeStatus.stale > 0 ? <span className={styles.arrangeStale} title={t("ld.edit.staleHint")}>{t("ld.edit.stale", { n: arrangeStatus.stale })}</span> : null}
+          {!editMode ? (
+            <Toggle checked={applyManual} onChange={setApplyManual} title={t("ld.edit.applyHint")}>{t("ld.edit.apply")}</Toggle>
+          ) : (
+            <>
+              <Button size="sm" variant="ghost" onClick={arr.undo} disabled={!arr.canUndo} title="Ctrl+Z">{t("arch.edit.undo")}</Button>
+              <Button size="sm" variant="ghost" onClick={arr.redo} disabled={!arr.canRedo} title="Ctrl+Shift+Z">{t("arch.edit.redo")}</Button>
+              {editSel?.own?.kind === "grid" ? (
+                <Segmented
+                  label={t("ld.edit.cols")}
+                  value={String(arr.arrangement.grid.get(editSel.own.storeKey)?.cols ?? "auto")}
+                  onChange={(v) => { const own = editSel.own as Extract<ArrangeContainer, { kind: "grid" }>; arr.commit(setGridCols(arr.arrangement, own, v === "auto" ? null : Number(v))); }}
+                  items={[{ id: "auto", label: t("ld.edit.colsAuto") }, { id: "1", label: "1" }, { id: "2", label: "2" }, { id: "3", label: "3" }]}
+                />
+              ) : null}
+              {editSel?.own && (arr.arrangement.grid.has(editSel.own.storeKey) || arr.arrangement.order.has(editSel.own.storeKey)) ? (
+                <Button size="sm" variant="ghost" onClick={() => arr.commit(resetContainer(arr.arrangement, editSel.own!.storeKey))}>{t(editSel.own.kind === "grid" ? "ld.edit.resetSubnet" : "ld.edit.resetBox")}</Button>
+              ) : null}
+              {editSel?.parent && (arr.arrangement.grid.has(editSel.parent.storeKey) || arr.arrangement.order.has(editSel.parent.storeKey)) ? (
+                <Button size="sm" variant="ghost" onClick={() => arr.commit(resetContainer(arr.arrangement, editSel.parent!.storeKey))}>{t(editSel.parent.kind === "grid" ? "ld.edit.resetSubnet" : "ld.edit.resetOrder")}</Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(t("ld.edit.resetAllConfirm"))) arr.commit(EMPTY_ARRANGEMENT); }} disabled={arrangeStatus.boxes === 0}>{t("ld.edit.resetAll")}</Button>
+              <span className={styles.arrangeHint} aria-live="polite">{arrangeNotice ? t(arrangeNotice) : t("ld.edit.liveOff")}</span>
+            </>
+          )}
         </div>
       )}
 
@@ -846,8 +921,8 @@ export default function LiveDiagramPage() {
             onNodeSelect={handleNodeSelect}
             onEdgeSelect={handleEdgeSelect}
             layers={layers}
-            trafficOn={trafficOn && hasMeasuredTraffic}
-            impacts={shownImpacts}
+            trafficOn={trafficOn && hasMeasuredTraffic && !editMode}
+            impacts={editMode ? NO_IMPACTS : shownImpacts}
             usage={usage}
             hoverFocus={hoverFocus}
             selectedNodeId={selectedNodeId}
@@ -857,6 +932,11 @@ export default function LiveDiagramPage() {
             wafOpen={wafOpen}
             onWafToggle={handleWafToggle}
             onWafSelect={handleWafSelect}
+            arrangement={editMode || applyManual ? arr.arrangement : EMPTY_ARRANGEMENT}
+            editMode={editMode}
+            onArrange={onArrange}
+            onEditSelect={setEditSel}
+            onArrangeNotice={setArrangeNotice}
           />
 
           {/* Right sidebar: edge detail, node detail, or alerts (list / timeline) */}
@@ -879,6 +959,8 @@ export default function LiveDiagramPage() {
                 liveNode={selectedNodeId ? (snapshot?.nodes.find((n) => n.id === selectedNodeId) ?? null) : null}
                 alerts={selectedNodeId ? (snapshot?.alerts.filter((a) => a.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
                 alertRules={selectedNodeId ? (snapshot?.alertRules?.filter((r) => r.affectedNodeIds.includes(selectedNodeId)) ?? []) : []}
+                alertHistory={selectedNodeId ? (snapshot?.alertHistory?.filter((h) => h.nodeId === selectedNodeId) ?? []) : []}
+                alertsState={snapshot?.coverage?.sources.alerts}
                 connectedEdges={selectedNodeId ? connectedEdges : []}
                 spec={filteredSpec}
                 impacts={shownImpacts}

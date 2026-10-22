@@ -10,9 +10,10 @@ coverage/
 # Azure connections (IDs of customer tenants) — never committed; see config/connections.example.json
 config/connections.json
 config/tenants.json
-# Diagrams of real environments (subscription / resource IDs) — kept local only (scripts/gp.sh adds everything)
-docs/nexsrm-infra-diagram.md
-docs/resource-inventory-diagram.md
+# Diagrams / notes of real environments (subscription / resource IDs) — local only: name them *.local.md or keep them
+# under .secrets/ (scripts/gp.sh adds everything)
+*.local.md
+/local/
 # Local read-only probes against real tenants (print tenant facts) — never committed
 apps/api/.probe/
 

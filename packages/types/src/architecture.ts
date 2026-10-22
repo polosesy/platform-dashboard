@@ -100,6 +100,9 @@ export type ArchitectureEdge = {
     origin?: string;
     /** Front Door Private Link origin: approval state */
     status?: string;
+    /** SEC-04: the UDR default route's next-hop address and its route table */
+    nextHopIp?: string;
+    routeTable?: string;
   };
 };
 

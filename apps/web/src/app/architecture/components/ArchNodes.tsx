@@ -6,6 +6,8 @@ import type { ArchPlaced } from "@/lib/archModel";
 import s from "../styles.module.css";
 
 export type ArchBadge = { text: string; tone?: "danger" | "warn" | "info" | "muted"; title?: string };
+/** One item of a header row laid out by the layout (lib/archModel subnetHead) */
+export type ArchHeadCell = { k: "name" } | { k: "cidr" } | { k: "badge"; badge: ArchBadge };
 export type ArchNodeData = {
   shape: ArchPlaced;
   title: string;
@@ -21,6 +23,8 @@ export type ArchNodeData = {
   context?: boolean;
   /** Box kind class (region, vnet, subnet, lane, group, global) */
   variant?: string;
+  /** Subnet header in the layout's rows (name · CIDR · NSG · NAT …) — drawn exactly as reserved, never wider */
+  rows?: ArchHeadCell[][];
 };
 
 /** Actions reached from inside nodes without putting callbacks into node data. */
@@ -50,19 +54,35 @@ function Badges({ badges }: { badges: ArchBadge[] }) {
 /** Decorative Azure service icon (a background image keeps it out of the accessibility tree). */
 const Icon = ({ src }: { src?: string }) => (src ? <span className={s.icon} style={{ backgroundImage: `url(${src})` }} aria-hidden="true" /> : null);
 
-/** Region / VNet / subnet / lane boundary — the body lets clicks through; only the header is interactive. */
+/**
+ * Region / VNet / subnet / lane boundary — the body lets clicks through; only the header is interactive. Every header
+ * starts with the drag grip's own slot (shown in arrange mode) so the grip never covers text; a subnet header is drawn
+ * in the rows the layout reserved.
+ */
 export const BoxNode = memo(function BoxNode({ data }: NodeProps<ArchNodeData>) {
   const { toggleVnet } = useContext(ArchActions);
+  const title = (
+    <button type="button" className={s.boxTitle} aria-label={data.ariaLabel} title={data.title}>
+      <Icon src={data.icon} />
+      <span className={s.boxName}>{data.title}</span>
+      {data.sub && !data.rows ? <span className={s.boxSub}>{data.sub}</span> : null}
+    </button>
+  );
+  const cell = (c: ArchHeadCell, i: number) =>
+    c.k === "name" ? <span key="name" className={s.boxHeadName}>{title}</span>
+    : c.k === "cidr" ? <span key="cidr" className={s.boxSub}>{data.sub}</span>
+    : <span key={`b${i}`} className={`${s.badge} ${c.badge.tone ? s[`badge_${c.badge.tone}`] : ""}`} title={c.badge.title ?? c.badge.text}>{c.badge.text}</span>;
   return (
     <div className={`${s.box} ${data.variant ? s[`box_${data.variant}`] : ""}`}>
       <Handles />
       <div className={s.boxHead}>
-        <button type="button" className={s.boxTitle} aria-label={data.ariaLabel}>
-          <Icon src={data.icon} />
-          <span className={s.boxName}>{data.title}</span>
-          {data.sub ? <span className={s.boxSub}>{data.sub}</span> : null}
-        </button>
-        <Badges badges={data.badges} />
+        <span className={s.grip} aria-hidden="true">⠿</span>
+        {data.rows ? data.rows[0]?.map(cell) : (
+          <>
+            {title}
+            <Badges badges={data.badges} />
+          </>
+        )}
         {data.toggle ? (
           <button
             type="button"
@@ -75,6 +95,7 @@ export const BoxNode = memo(function BoxNode({ data }: NodeProps<ArchNodeData>) 
           </button>
         ) : null}
       </div>
+      {data.rows?.slice(1).map((row, r) => <div key={r} className={s.boxHeadRow}>{row.map(cell)}</div>)}
     </div>
   );
 });

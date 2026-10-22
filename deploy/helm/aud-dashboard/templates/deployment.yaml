@@ -1,0 +1,151 @@
+# One pod, two containers of the same image: web :3000 (the only port) + api on 127.0.0.1:4000 (no Service).
+# Azure is read through workload identity: the webhook projects the token into the api container only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aud-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "0") | nindent 2 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      {{- include "aud.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aud.labels" . | nindent 8 }}
+        azure.workload.identity/use: "true"
+      annotations:
+        azure.workload.identity/skip-containers: web     # the web never calls Azure
+        checksum/connections: {{ .Values.connections | sha256sum | trunc 16 }}   # a new connections file restarts the pod
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false                # no Kubernetes API token; the federated token is its own volume
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532                                   # the projected token file readable by 65532
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 20
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "aud.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - { name: PORT, value: "3000" }
+            - { name: HOSTNAME, value: "0.0.0.0" }      # Kubernetes sets HOSTNAME to the pod name
+            - { name: AUD_WEB_TENANT_ID, value: {{ .Values.sso.tenantId | quote }} }
+            - { name: AUD_WEB_CLIENT_ID, value: {{ .Values.sso.spaClientId | quote }} }
+            - { name: AUD_WEB_API_SCOPE, value: {{ printf "api://%s/Azure.Read.All" .Values.sso.apiClientId | quote }} }
+            - { name: AUD_WEB_REDIRECT_URI, value: {{ printf "https://%s/" .Values.host | quote }} }
+            {{- with .Values.web.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }      # web + the API next to it; never Azure
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          securityContext:
+            {{- include "aud.hardened" . | nindent 12 }}
+          volumeMounts:
+            - { name: web-tmp, mountPath: /tmp }
+            - { name: next-cache, mountPath: /app/web/apps/web/.next/cache }
+        - name: api
+          image: {{ include "aud.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "/app/apps/api/dist/index.js"]
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: PORT, value: "4000" }
+            - { name: API_BIND_HOST, value: "127.0.0.1" }
+            - { name: NODE_OPTIONS, value: {{ .Values.api.nodeOptions | quote }} }
+            - { name: AZURE_AD_TENANT_ID, value: {{ .Values.sso.tenantId | quote }} }
+            - { name: AZURE_AD_CLIENT_ID, value: {{ .Values.sso.apiClientId | quote }} }
+            - { name: AUD_AUTH_AUDIENCES, value: {{ printf "api://%s" .Values.sso.apiClientId | quote }} }
+            - { name: AZURE_SUBSCRIPTION_IDS, value: {{ .Values.homeSubscriptionIds | quote }} }
+            - { name: CORS_ORIGIN, value: {{ printf "https://%s" .Values.host | quote }} }
+            # AZURE_CLIENT_ID + AZURE_FEDERATED_TOKEN_FILE come from the workload identity webhook
+            - { name: AUD_PLATFORM_CREDENTIAL, value: workloadIdentity }
+            - { name: AUD_PLATFORM_OIDC_ISSUER, value: {{ .Values.platform.oidcIssuer | quote }} }
+            - { name: AUD_PLATFORM_FEDERATION_SUBJECT, value: {{ include "aud.subject" . | quote }} }
+            - { name: AUD_CONNECTIONS_FILE, value: /etc/aud/connections.json }
+            - { name: AUD_AUDIT_LOG, value: stdout }
+            - { name: AZURE_LIVE_DIAGRAM_ENABLED, value: {{ .Values.features.liveDiagram | quote }} }
+            - { name: AZURE_SECURITY_ENABLED, value: {{ .Values.features.security | quote }} }
+            {{- with .Values.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            {{- include "aud.apiProbe" . | nindent 12 }}
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            {{- include "aud.apiProbe" . | nindent 12 }}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "aud.hardened" . | nindent 12 }}
+          volumeMounts:
+            - { name: api-tmp, mountPath: /tmp }
+            - { name: connections, mountPath: /etc/aud, readOnly: true }
+      volumes:
+        - { name: web-tmp, emptyDir: { sizeLimit: 64Mi } }
+        - { name: api-tmp, emptyDir: { sizeLimit: 64Mi } }
+        - { name: next-cache, emptyDir: { sizeLimit: 128Mi } }
+        - { name: connections, configMap: { name: aud-dashboard-connections } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aud-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "0") | nindent 2 }}
+spec:
+  selector:
+    {{- include "aud.selector" . | nindent 4 }}
+  ports:
+    - { name: http, port: 80, targetPort: http }
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aud-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "0") | nindent 2 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "aud.selector" . | nindent 6 }}
+{{- end }}

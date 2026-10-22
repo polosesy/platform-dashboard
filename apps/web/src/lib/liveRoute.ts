@@ -34,7 +34,7 @@ const right = (r: Rect) => r.x + r.w;
 const bottom = (r: Rect) => r.y + r.h;
 
 /** Kinds drawn as curves: associations and peerings (shown on hover / as stubs), outbound to the rail */
-const CURVED_KINDS = new Set(["natgw-association", "peering", "outbound-internet"]);
+const CURVED_KINDS = new Set(["natgw-association", "peering", "outbound-internet", "udr-route"]);
 /** Horizontal clearance for a line to leave on a side */
 const CLEAR = 8;
 
@@ -107,6 +107,9 @@ export function routeEdges(layout: LiveLayout, edges: readonly DiagramEdgeSpec[]
     let centerX: number;
     if (sMeta && tMeta && sMeta.band === tMeta.band && Math.abs(sMeta.layer - tMeta.layer) === 1) {
       centerX = meta.corridorX.get(`${sMeta.band}:${Math.min(sMeta.layer, tMeta.layer)}`) ?? (right(S) + T.x) / 2;
+    } else if (left(sLane) && left(tLane)) {
+      // Front Door → its origin LB in the next column of the inbound lane: bend in the gap between the two
+      centerX = (right(S) + T.x) / 2;
     } else if (meta.terminals.has(e.source)) {
       // Internet terminal → public LB of the lane, or straight into a VNet entry point
       centerX = meta.laneInnerGapX ?? meta.ingressGapX;
@@ -116,7 +119,11 @@ export function routeEdges(layout: LiveLayout, edges: readonly DiagramEdgeSpec[]
     } else {
       centerX = forward ? (right(S) + T.x) / 2 : (right(T) + S.x) / 2;
     }
-    out.set(e.id, { kind: "step", sourceHandle, targetHandle, centerX, centerY: (cyOf(S) + cyOf(T)) / 2 });
+    const step: Route = { kind: "step", sourceHandle, targetHandle, centerX, centerY: (cyOf(S) + cyOf(T)) / 2 };
+    // A line that starts in the inbound lane (the Internet → a public LB beyond a Front Door of the same row, a Front
+    // Door → an origin past an LB) must not run through a card of that lane: a free gap instead
+    const fromLeft = forward && (meta.terminals.has(e.source) || left(sLane));
+    out.set(e.id, (fromLeft ? rescueStep(layout, e.source, e.target, S, T, step) : null) ?? step);
   }
   return out;
 }
@@ -328,16 +335,21 @@ function layoutObstacles(layout: LiveLayout): Array<[string, Rect]> {
  * Internet terminals and the inbound cards, between the inbound lane and the VNets, the corridors between layers);
  * the first one that passes no card and no other subnet wins. Null = none is free (the curve stays, under the cards).
  */
-function rescueStep(layout: LiveLayout, sourceId: string, targetId: string, S: Rect, T: Rect): Route | null {
+function rescueStep(layout: LiveLayout, sourceId: string, targetId: string, S: Rect, T: Rect, first?: Route): Route | null {
   const meta = layout.placeMeta;
   const own = new Set<string>([sourceId, targetId]);
   for (const id of [sourceId, targetId]) for (let cur = layout.items.get(id); cur?.parent; cur = layout.items.get(cur.parent)) own.add(cur.parent);
   const obstacles = layoutObstacles(layout);
   const sx = right(S), sy = cyOf(S), tx = T.x, ty = cyOf(T);
-  const [c1, c2] = bezierControls(sx, sy, tx, ty);
-  if (!firstHit(sampleBezier([sx, sy], c1, c2, [tx, ty]), obstacles, own)) return null;
+  // Nothing to rescue when the route it would replace (a curve, or the given step) is clear
+  if (first) {
+    if (!firstHit(stepPolyline(first, S, T), obstacles, own)) return null;
+  } else {
+    const [c1, c2] = bezierControls(sx, sy, tx, ty);
+    if (!firstHit(sampleBezier([sx, sy], c1, c2, [tx, ty]), obstacles, own)) return null;
+  }
   const mid = (sx + tx) / 2;
-  const xs = [meta.laneInnerGapX, meta.ingressGapX, ...meta.corridorX.values()]
+  const xs = [meta.laneInnerGapX, meta.ingressGapX, ...(meta.ingressTierGapX ?? []), ...meta.corridorX.values()]
     .filter((x): x is number => x != null && x > sx + CLEAR && x < tx - CLEAR)
     .sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid) || a - b);
   for (const centerX of [...new Set(xs)]) {

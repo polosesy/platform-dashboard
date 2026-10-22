@@ -1,6 +1,8 @@
 # PowerShell entry for scripts/onprem.sh (PowerShell cannot run a .sh file itself). Runs it with Git for Windows'
 # bash - never C:\Windows\System32\bash.exe (that is WSL: another filesystem, no Windows ssh / keys).
-#   scripts\onprem.ps1 deploy | env [--test] | up | tunnel | status | logs [service] [lines] | down
+#   scripts\onprem.ps1 deploy | env [--test] | tunnel | up [tag] | down | restart | status | logs [service] [lines]
+#                      rollback [tag] | images | version | cleanup-source
+# The source never stays on the server: deploy builds from a temporary directory there and deletes it.
 # Guide: docs/deployment/container.md section 5
 $ErrorActionPreference = 'Stop'
 $candidates = @(

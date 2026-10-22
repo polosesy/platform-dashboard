@@ -44,6 +44,8 @@ export const REL = {
   "AKS-02": { kind: "connects", what: "AKS → node-pool VMSS (node resource group)" },
   // §8 Edge and transit
   "EDGE-01": { kind: "network", what: "subnet → NAT gateway", spec: { type: "microsoft.network/virtualnetworks/subnets", path: "natGateway" } },
+  // An address match (nextHopIpAddress is a value, not a reference): no spec — like AGW-04 / EDGE-04
+  "SEC-04": { kind: "routes", what: "subnet 0.0.0.0/0 UDR (VirtualAppliance) → holder of nextHopIpAddress (exactly one) — drawn only when it is the first exit (NET-09)" },
   "EDGE-02": { kind: "peering", what: "VNet ↔ VNet peering", spec: { type: "microsoft.network/virtualnetworks", path: "virtualNetworkPeerings[].remoteVirtualNetwork" } },
   "EDGE-04": { kind: "routes", what: "Front Door origin → resource by host name (exactly one holder)" },
   "EDGE-08": { kind: "hybrid", what: "S2S connection → VNet gateway (folded into the gateway)", spec: { type: "microsoft.network/connections", path: "virtualNetworkGateway1" } },

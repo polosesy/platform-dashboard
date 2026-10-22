@@ -1,8 +1,9 @@
-# Reference only — the customer's GitOps (ArgoCD, exact tags) renders its own chart from these files.
-# The ClusterRole + ClusterRoleBinding (list only) are in docs/integrations/azure/templates/aks/aud-dashboard-reader.yaml.
+# Plain reference manifests. aud-dashboard.yaml is GENERATED from the Helm chart deploy/helm/aud-dashboard
+# (scripts/render-k8s.sh) — change the chart, then re-render. GitOps tools that read Helm charts use the chart itself.
+# The cluster-wide read access (ClusterRole + ClusterRoleBinding, list only) is separate:
+# docs/integrations/azure/templates/aks/aud-dashboard-reader.yaml. Guide: docs/deployment/kubernetes.md
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: aud-dashboard
 resources:
-  - deployment.yaml
-  - ciliumnetworkpolicy.yaml
+  - namespace.yaml
+  - aud-dashboard.yaml

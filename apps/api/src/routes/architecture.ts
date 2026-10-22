@@ -7,8 +7,40 @@ import { tryGetArchitectureGraphFromAzure } from "../services/azure.js";
 import { mockNetworkSummary, tryGetNetworkSummaryFromLogAnalytics } from "../services/network.js";
 import { mapSubnetPairsToGraphEdgeMetrics } from "../services/flowOverlay.js";
 import { isSigninRequired, queryInt, querySubscriptionId, safeMessage, sendError } from "../infra/requestParams.js";
+import { requireRole } from "../infra/platformAccess.js";
+import { ArrangementBody, readArrangement, writeArrangement } from "../services/arrangementStore.js";
 
 export function registerArchitectureRoutes(router: Router, env: Env) {
+  // Team layout of the diagram (slot order + manual lines) — layout only, nothing in Azure changes
+  const durable = !!env.AUD_ARRANGEMENT_DIR;
+  router.get("/api/architecture/arrangement", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.json({ doc: null, durable, signedIn: false });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.json({ doc: null, durable, signedIn: true });
+      res.json({ doc: await readArrangement(env.AUD_ARRANGEMENT_DIR, subscriptionId), durable, signedIn: true });
+    } catch (e: unknown) {
+      sendError(res, e, "arrangement_read_failed");
+    }
+  });
+  router.put("/api/architecture/arrangement", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      // requireRole lets anonymous callers through (they see sample data) — publishing needs a signed-in operator
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      // Only the document's own fields (baseVersion rides along in the body); grid is optional (v1 documents have none)
+      const body = ArrangementBody.safeParse({ order: req.body?.order, lines: req.body?.lines, ...(req.body?.grid !== undefined ? { grid: req.body.grid } : {}) });
+      if (!body.success) return res.status(400).json({ error: "arrangement_invalid" });
+      const baseVersion = typeof req.body?.baseVersion === "number" ? req.body.baseVersion : null;
+      const r = await writeArrangement(env.AUD_ARRANGEMENT_DIR, subscriptionId, body.data, { baseVersion, force: req.query.force === "1", by: req.auth.principal.name });
+      if (!r.ok) return res.status(409).json({ error: "arrangement_conflict", doc: r.conflict, durable });
+      res.json({ doc: r.doc, durable });
+    } catch (e: unknown) {
+      sendError(res, e, "arrangement_write_failed");
+    }
+  });
+
   router.get("/api/architecture/graph", async (req: Request, res: Response) => {
     try {
       const subscriptionId = querySubscriptionId(req, env);

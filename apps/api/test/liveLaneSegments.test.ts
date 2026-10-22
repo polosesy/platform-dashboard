@@ -116,3 +116,56 @@ test("an outbound-only public LB (AKS SNAT) sits in the outbound lane before its
   assert.equal(run({ inboundRules: "1", outboundRules: "1" }).placeMeta.laneOf.get("lb-kubernetes"), "ingress", "an inbound rule: an entry point");
   assert.equal(run({ outboundRules: "1" }).placeMeta.laneOf.get("lb-kubernetes"), "ingress", "rule count unknown: unchanged");
 });
+
+// ── the inbound Internet card is pinned with the entries it feeds (one inbound box per VNet) ──
+const ingressBoxOf = (lay: ReturnType<typeof L.liveLayout>, id: string) => {
+  const r = lay.abs.get(id)!;
+  return lay.lanes.filter((l) => l.lane === "ingress" && l.parent === null).find((l) => r.x >= l.x && r.y >= l.y && r.x + r.w <= l.x + l.w && r.y + r.h <= l.y + l.h)?.id;
+};
+const pubLb = (id: string) => node(id, { icon: "lb", resourceKind: "lb", subResources: [{ id: `${id}-pip`, kind: "publicIP", label: `${id}-pip`, endpoint: "203.0.113.30" }] as DiagramNodeSpec["subResources"] });
+const inet = (id: string) => node(id, { icon: "internet", resourceKind: "internet", metadata: { direction: "ingress" } });
+const exposure = { edgeKind: "network" as const, flowType: "ingress" as const, exposure: { state: "open", ports: ["443"], nsgs: [], reasons: [] } as unknown as DiagramEdgeSpec["exposure"] };
+
+test("one VNet: the Internet card shares the inbound box of the public LB it feeds, at its top — even when most of its lines are VM public IPs in another band", () => {
+  const nodes: DiagramNodeSpec[] = [group("vnet-h", "vnet"), group("snet-app", "subnet", "vnet-h"), group("snet-pep", "subnet", "vnet-h"), group("snet-dmz", "subnet", "vnet-h"), group("snet-db", "subnet", "vnet-h")];
+  for (let i = 0; i < 3; i++) nodes.push(node(`vm-app${i}`, { parentId: "snet-app" }), node(`vm-dmz${i}`, { parentId: "snet-dmz" }), node(`vm-db${i}`, { parentId: "snet-db" }));
+  nodes.push(pe("pe-h", "snet-pep"), pubLb("lb-pub"), inet("internet-in-vnet-h"));
+  const edges: DiagramEdgeSpec[] = [
+    edge("vm-app0", "pe-h", { edgeKind: "network" }), // band of app + pep
+    edge("vm-dmz0", "vm-db0", { edgeKind: "network" }), // another band: dmz + db
+    edge("lb-pub", "vm-app0", { edgeKind: "routes" }), edge("lb-pub", "vm-app1", { edgeKind: "routes" }),
+    edge("internet-in-vnet-h", "lb-pub", { edgeKind: "network", flowType: "ingress" }),
+    edge("internet-in-vnet-h", "vm-dmz1", exposure), edge("internet-in-vnet-h", "vm-dmz2", exposure),
+  ];
+  const lay = L.liveLayout({ id: "t", name: "t", nodes, edges } as DiagramSpec);
+  const boxes = lay.lanes.filter((l) => l.lane === "ingress" && l.parent === null);
+  assert.equal(boxes.length, 1, boxes.map((b) => b.id).join(","));
+  assert.equal(ingressBoxOf(lay, "internet-in-vnet-h"), ingressBoxOf(lay, "lb-pub"));
+  assert.ok(Math.abs(lay.abs.get("internet-in-vnet-h")!.y - lay.abs.get("lb-pub")!.y) < 1, "pinned at the box top");
+});
+
+test("several VNets: each Internet card in its own VNet's box with its LB; the Front Door Internet card once, with most of its Front Doors", () => {
+  const s = many();
+  const afd = (id: string) => node(id, { icon: "frontDoor", resourceKind: "frontDoor" });
+  s.nodes.push(pubLb("lb-a"), pubLb("lb-c"), inet("internet-in-vnet-a"), inet("internet-in-vnet-c"), inet("internet-in-external"), afd("afd1"), afd("afd2"), afd("afd3"));
+  s.edges.push(
+    edge("lb-a", "vm-a0", { edgeKind: "routes" }), edge("lb-c", "vm-c0", { edgeKind: "routes" }),
+    edge("internet-in-vnet-a", "lb-a", { edgeKind: "network", flowType: "ingress" }), edge("internet-in-vnet-a", "vm-a5", exposure),
+    edge("internet-in-vnet-c", "lb-c", { edgeKind: "network", flowType: "ingress" }),
+    edge("internet-in-external", "afd1", { edgeKind: "network", flowType: "ingress" }), edge("internet-in-external", "afd2", { edgeKind: "network", flowType: "ingress" }), edge("internet-in-external", "afd3", { edgeKind: "network", flowType: "ingress" }),
+    edge("afd1", "vm-b0", { edgeKind: "routes" }), edge("afd2", "vm-c1", { edgeKind: "routes" }), edge("afd3", "vm-c2", { edgeKind: "routes" }),
+  );
+  const lay = L.liveLayout(s);
+  assert.equal(ingressBoxOf(lay, "internet-in-vnet-a"), ingressBoxOf(lay, "lb-a"));
+  assert.equal(ingressBoxOf(lay, "internet-in-vnet-c"), ingressBoxOf(lay, "lb-c"));
+  assert.ok(within(lay, "internet-in-vnet-a", "vnet-a") && within(lay, "internet-in-vnet-c", "vnet-c"), "beside their own VNet");
+  assert.equal(ingressBoxOf(lay, "internet-in-external"), ingressBoxOf(lay, "lb-c"), "two of its three Front Doors serve vnet-c");
+  assert.equal(lay.abs.size, new Set(lay.abs.keys()).size);
+  const top = lay.lanes.filter((l) => l.parent === null);
+  for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) {
+    const a = top[i]!, b = top[j]!;
+    assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} / ${b.id}`);
+  }
+  const rev = L.liveLayout({ ...s, nodes: [...s.nodes].reverse(), edges: [...s.edges].reverse() });
+  assert.deepEqual([...rev.abs.entries()].sort(), [...lay.abs.entries()].sort(), "input order does not matter");
+});

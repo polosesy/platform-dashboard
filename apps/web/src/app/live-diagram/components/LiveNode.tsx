@@ -45,6 +45,8 @@ export type LiveNodeData = {
   healthScore: number;
   metrics: Record<string, number | null>;
   hasAlert: boolean;
+  /** A rule fired here in the last hours and is resolved now (lib/liveAlerts recentAlertChip) */
+  alertRecent?: { count: number; sev: number; hours: number } | null;
   sparklines?: Record<string, SparklineData>;
   /** Metric keys the API reads for this kind (NODE_BINDINGS); empty → the card shows a relation line */
   boundMetrics?: string[];
@@ -233,9 +235,14 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
     const label = [t(lc.stateKey), lc.causeKey ? t(lc.causeKey) : null].filter(Boolean).join(" · ");
     chips.push({ key: "lc", el: <span className={styles.cardChip} data-tone={lc.tone === "warn" ? "public" : lc.tone === "muted" ? "muted" : "lc"} title={`${label} — ${t("ld.lc.chipHint")}`}>{label}</span> });
   }
+  // A rule that fired and mitigated between polls: the card is green again, but it was not quiet
+  if (data.alertRecent && !hasAlert) {
+    const r = data.alertRecent;
+    chips.push({ key: "alertRecent", el: <span className={styles.cardChip} data-tone="public" title={t("ld.alerts.chipHint", { h: r.hours, n: r.count, sev: r.sev })}>{t("ld.alerts.chip", { n: r.count })}</span> });
+  }
   // Observed Private Link use next: it is what this card is about when the layer is on
   for (const c of data.plChips ?? []) {
-    chips.push({ key: `pl:${c.key}`, el: <span className={styles.cardChip} data-tone={c.tone === "warn" ? "public" : c.tone === "muted" ? "muted" : "pl"} title={t(`${c.key}.hint`)}>{t(c.key, c.vars)}</span> });
+    chips.push({ key: `pl:${c.key}`, el: <span className={styles.cardChip} data-tone={c.tone === "warn" ? "public" : c.tone === "muted" ? "muted" : "pl"} title={t(`${c.key}.hint`, c.vars)}>{t(c.key, c.vars)}</span> });
   }
   if (archRole === "aks-vmss" && azureResourceId && onVmssExpand) {
     chips.push({ key: "inst", el: (

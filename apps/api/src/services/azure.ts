@@ -18,6 +18,7 @@ import { agcFacts, resolveAgcCluster, type AgcChildRow } from "./agc.js";
 import { resolveAgwWaf } from "./agwWaf.js";
 import { resourceSpec } from "./resourceSpec.js";
 import { activeRoutes, fetchFrontDoorConfig, resolveAfdOrigins, resolveAfdWaf, wafPolicyFacts } from "./frontDoorConfig.js";
+import { resolveSubnetEgress, resolveSubnetRoutes, udrNextHopsToIlb, type ApplianceHolder, type RouteTableIn, type UdrSubnet } from "./subnetEgress.js";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind, InboundExposure } from "@aud/types";
 
 type AzureResourceRow = {
@@ -960,7 +961,7 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
   const cfgProp = (cfg: Record<string, unknown>, key: string): unknown =>
     (cfg.properties as Record<string, unknown> | undefined)?.[key] ?? cfg[key];
   const nsgById = new Map<string, NsgInput>();
-  const subnetNet = new Map<string, { nsg: string | null; routeTable: string | null }>();
+  const subnetNet = new Map<string, { nsg: string | null; routeTable: string | null; nat: string | null; defaultOutbound?: string; name: string }>();
   for (const r of resRows) {
     const t = (r.type ?? "").toLowerCase();
     if (t === "microsoft.network/networksecuritygroups" && r.id) nsgById.set(r.id, (r.properties ?? {}) as NsgInput);
@@ -969,9 +970,13 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     for (const sn of subnets as Array<Record<string, unknown>>) {
       const id = safeId(sn.id);
       if (!id) continue;
+      const dfl = cfgProp(sn, "defaultOutboundAccess");
       subnetNet.set(id, {
         nsg: safeId((cfgProp(sn, "networkSecurityGroup") as { id?: unknown } | undefined)?.id) ?? null,
         routeTable: safeId((cfgProp(sn, "routeTable") as { id?: unknown } | undefined)?.id) ?? null,
+        nat: safeId((cfgProp(sn, "natGateway") as { id?: unknown } | undefined)?.id) ?? null,
+        ...(dfl != null ? { defaultOutbound: String(dfl) } : {}),
+        name: safeString(sn.name) ?? id.split("/").pop() ?? id,
       });
     }
   }
@@ -1254,6 +1259,13 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       if (ip && ownerId) addressEntries.push({ address: ip, targetId: ownerId, source: "pip" });
       const fqdn = safeString((rp.dnsSettings as { fqdn?: unknown } | undefined)?.fqdn);
       if (fqdn && ownerId) addressEntries.push({ address: fqdn.toLowerCase(), targetId: ownerId, source: "pipFqdn" });
+    } else if (t === "microsoft.network/azurefirewalls") {
+      // SEC-04: a UDR next hop names the firewall by its private IP
+      for (const c of safePropArray(rp, "ipConfigurations")) {
+        const cp = ((c as Record<string, unknown>).properties ?? c) as Record<string, unknown>;
+        const ip = safeString(cp.privateIPAddress);
+        if (ip) addressEntries.push({ address: ip, targetId: r.id.toLowerCase(), vnetId: vnetOfSubnet(safeId((cp.subnet as { id?: unknown } | undefined)?.id)), source: "firewall" });
+      }
     } else if (t === "microsoft.servicenetworking/trafficcontrollers") {
       for (const fe of agcByController.get(r.id)?.frontends ?? []) if (fe.fqdn) addressEntries.push({ address: fe.fqdn, targetId: r.id, source: "agcFrontend" });
     } else if (t === "microsoft.web/sites") {
@@ -1408,6 +1420,116 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
     }
     return out;
   };
+  // ── NET-09: each subnet's first exit (subnetEgress.ts) — UDR default route (SEC-04 appliance by ipMatch, gateway,
+  // dropped) > forced tunnelling > NAT (EDGE-01) > the firewall's own public IP > default outbound (SEC-07) ──
+  {
+    const routeTables = new Map<string, RouteTableIn>();
+    for (const r of exposureRows ?? []) {
+      if ((r.type ?? "").toLowerCase() !== "microsoft.network/routetables" || !r.id) continue;
+      routeTables.set(r.id.toLowerCase(), {
+        name: r.id.split("/").pop() ?? r.id,
+        disableBgpRoutePropagation: (r.properties as { disableBgpRoutePropagation?: unknown } | undefined)?.disableBgpRoutePropagation === true,
+        routes: safePropArray(r.properties, "routes").map((x) => {
+          const rp = (((x as Record<string, unknown>).properties ?? x) as Record<string, unknown>);
+          return { prefix: safeString(rp.addressPrefix) ?? "", nextHopType: safeString(rp.nextHopType) ?? "", nextHopIp: safeString(rp.nextHopIpAddress) ?? null };
+        }),
+      });
+    }
+    // VPN / ER gateways by VNet (CT-07) and the hub a spoke uses through gateway transit (both sides' flags, Connected)
+    const gwByVnet = new Map<string, string>();
+    const gwDefaultSite = new Set<string>();
+    for (const r of resRows) {
+      if ((r.type ?? "").toLowerCase() !== "microsoft.network/virtualnetworkgateways" || !r.id) continue;
+      const sn = safePropArray(r.properties, "ipConfigurations").map((c) => safeId((((c as Record<string, unknown>).properties ?? c) as { subnet?: { id?: unknown } }).subnet?.id)).find(Boolean);
+      const v = vnetOfSubnet(sn);
+      if (v && !gwByVnet.has(v)) gwByVnet.set(v, r.id.toLowerCase());
+      if ((r.properties as { gatewayDefaultSite?: unknown } | undefined)?.gatewayDefaultSite) gwDefaultSite.add(r.id.toLowerCase());
+    }
+    const peeringFlags = new Map<string, Map<string, { state: string; transit: boolean; useRemote: boolean }>>();
+    for (const r of resRows) {
+      if (!r.id || (r.type ?? "").toLowerCase() !== "microsoft.network/virtualnetworks") continue;
+      const m = new Map<string, { state: string; transit: boolean; useRemote: boolean }>();
+      for (const pe of safePropArray(r.properties, "virtualNetworkPeerings")) {
+        const remote = safePropString(pe, "properties", "remoteVirtualNetwork", "id")?.toLowerCase();
+        if (!remote) continue;
+        const pp = (((pe as Record<string, unknown>).properties ?? {}) as Record<string, unknown>);
+        m.set(remote, { state: String(pp.peeringState ?? "").toLowerCase(), transit: pp.allowGatewayTransit === true, useRemote: pp.useRemoteGateways === true });
+      }
+      peeringFlags.set(r.id.toLowerCase(), m);
+    }
+    const gatewayOf = (vnetId: string): string | null => {
+      const own = gwByVnet.get(vnetId);
+      if (own) return own;
+      for (const [remote, f] of peeringFlags.get(vnetId) ?? []) {
+        const back = peeringFlags.get(remote)?.get(vnetId);
+        if (f.useRemote && f.state === "connected" && back?.transit && back.state === "connected" && gwByVnet.has(remote)) return gwByVnet.get(remote)!;
+      }
+      return null;
+    };
+    const forcedTunnel = (gw: string) => {
+      if (gwDefaultSite.has(gw)) return true;
+      const s2s = (nodes.find((n) => n.id.toLowerCase() === gw)?.metadata?.s2s ?? []) as Array<{ lng?: { prefixes?: string[] } | null }>;
+      return s2s.some((c) => (c.lng?.prefixes ?? []).includes("0.0.0.0/0"));
+    };
+    const holdersOf = (ip: string, vnets: ReadonlySet<string>): ApplianceHolder[] => {
+      const out: ApplianceHolder[] = [];
+      for (const e of addressIndex.get(ip.toLowerCase()) ?? []) {
+        if (!e.vnetId || !vnets.has(e.vnetId)) continue;
+        if (e.source === "firewall") out.push({ kind: "firewall", targetId: e.targetId });
+        else if (e.source === "lbFrontend") out.push({ kind: "ilb", targetId: e.targetId.toLowerCase() });
+        else if (e.source === "nic") {
+          const np = ((nicById.get(e.targetId)?.properties ?? {}) as Record<string, unknown>);
+          const vm = safeId((np.virtualMachine as { id?: unknown } | undefined)?.id);
+          out.push({ kind: "vm", targetId: vm ?? e.targetId.toLowerCase(), ipForwarding: np.enableIPForwarding === true });
+        }
+      }
+      return out;
+    };
+    const firewallBySubnet = new Map<string, { id: string; hasPublicIp: boolean }>();
+    for (const r of resRows) {
+      if ((r.type ?? "").toLowerCase() !== "microsoft.network/azurefirewalls" || !r.id) continue;
+      const cfgs = safePropArray(r.properties, "ipConfigurations").map((c) => (((c as Record<string, unknown>).properties ?? c) as Record<string, unknown>));
+      const sn = cfgs.map((c) => safeId((c.subnet as { id?: unknown } | undefined)?.id)).find(Boolean);
+      if (sn) firewallBySubnet.set(sn, { id: r.id.toLowerCase(), hasPublicIp: cfgs.some((c) => !!safeId((c.publicIPAddress as { id?: unknown } | undefined)?.id)) });
+    }
+    const graphIds = new Set(nodes.map((n) => n.id.toLowerCase()));
+    for (const node of nodes) {
+      if (node.kind !== "subnet") continue;
+      const sid = node.id.toLowerCase();
+      const sn = subnetNet.get(sid);
+      const vnetId = vnetOfSubnet(sid);
+      if (!sn || !vnetId) continue;
+      const egress = resolveSubnetEgress({
+        vnetId,
+        routeTable: sn.routeTable ? (exposureRows === null ? null : routeTables.get(sn.routeTable) ?? null) : undefined,
+        natGatewayId: sn.nat,
+        ...(sn.defaultOutbound !== undefined ? { defaultOutboundAccess: sn.defaultOutbound } : {}),
+        firewall: firewallBySubnet.get(sid) ?? null,
+      }, { holdersOf, scope: (v) => scopeOf([`${v}/subnets/x`]), gatewayOf, forcedTunnel });
+      // The whole route table, each next hop resolved (the live diagram draws subnet → appliance / gateway lines)
+      const udrRoutes = sn.routeTable ? resolveSubnetRoutes(exposureRows === null ? null : routeTables.get(sn.routeTable) ?? null, vnetId, { holdersOf, scope: (v) => scopeOf([`${v}/subnets/x`]), gatewayOf }) : null;
+      node.metadata = { ...node.metadata, egress, ...(udrRoutes ? { udrRoutes } : {}) };
+      if (egress.via === "appliance" && egress.targetId && graphIds.has(egress.targetId)) {
+        edges.push(relEdge("SEC-04", `e:subnet->appliance:${sid}:${egress.targetId}`, node.id, egress.targetId, { evidence: "ipMatch", nextHopIp: egress.nextHopIp, routeTable: egress.routeTable?.name }));
+      }
+    }
+    // Internal LBs named as a UDR next hop (any prefix) by any subnet read — also subnets outside the drawn graph:
+    // a hub ILB serves spokes. The live card says so instead of "0 bytes" (UDR traffic is not in the LB metrics)
+    const vnetNames = new Map(resRows.filter((r) => r.id && (r.type ?? "").toLowerCase() === "microsoft.network/virtualnetworks").map((r) => [r.id.toLowerCase(), r.name ?? r.id.split("/").pop() ?? ""] as const));
+    const udrSubnets: UdrSubnet[] = [...subnetNet].flatMap(([sid, sn]) => {
+      const vnetId = vnetOfSubnet(sid);
+      if (!vnetId || !sn.routeTable) return [];
+      return [{ id: sid, name: sn.name, vnetId, vnetName: vnetNames.get(vnetId) ?? vnetId.split("/").pop() ?? "", routeTable: exposureRows === null ? null : routeTables.get(sn.routeTable) ?? null }];
+    });
+    const udrToIlb = udrNextHopsToIlb(udrSubnets, { holdersOf, scope: (v) => scopeOf([`${v}/subnets/x`]) });
+    for (const node of nodes) {
+      if (node.kind !== "lb") continue;
+      const fact = udrToIlb.get(node.id.toLowerCase());
+      if (fact) node.metadata = { ...node.metadata, udrNextHop: fact };
+      else if (exposureRows === null) node.metadata = { ...node.metadata, udrNextHop: { state: "unreadable", routeTables: 0, subnets: 0, prefixes: 0, entries: [] } };
+    }
+  }
+
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   type Unresolved = { pool: string; address: string; reason: string };
   const noteUnresolved = (gwId: string, u: Unresolved) => {

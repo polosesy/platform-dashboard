@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-22
+covers: [apps/api/src/infra/connectionRegistry.ts, apps/api/src/infra/connectionCredentials.ts]
+---
 # Azure 연결 설정 — 홈 · 고객 서비스 주체 · Lighthouse
 
 > **대상**: 플랫폼 관리자(A·연결 등록), 고객 테넌트 관리자(B·C) · **소요 시간**: 연결당 15–30분 · **필요 권한**: 고객 구독의 Owner 또는 User Access Administrator(역할 부여), 앱 등록 권한(B)
@@ -74,8 +80,8 @@ ArgoCD가 Entra SSO의 클라이언트 비밀을 없앤 방식과 같습니다. 
 
 | 누가 | 무엇을 |
 |---|---|
-| 플랫폼 | API를 OIDC 발급자가 있는 Kubernetes에서 실행(AKS `--enable-oidc-issuer`), 서비스 계정 토큰을 대상 `api://AzureADTokenExchange`로 투영 — [`templates/aks/aud-api-serviceaccount.yaml`](./templates/aks/aud-api-serviceaccount.yaml). `AUD_FEDERATED_TOKEN_FILE`(없으면 워크로드 ID 웹후크의 `AZURE_FEDERATED_TOKEN_FILE`) + 표시용 `AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT` |
-| 고객 (Application Administrator · Cloud Application Administrator · 앱 소유자) | 연결 앱에 페더레이션 자격 증명 추가: 발급자 = 플랫폼 클러스터 OIDC 발급자, 주체 = `system:serviceaccount:<namespace>:<sa>`, 대상 = `api://AzureADTokenExchange` — [`fic.sh`](./templates/service-principal/fic.sh) · [`fic.tf`](./templates/service-principal/fic.tf) · [`fic-kubernetes.json`](./templates/service-principal/fic-kubernetes.json). 이름 예 `fed-common-aud-dashboard` |
+| 플랫폼 | API를 OIDC 발급자가 있는 Kubernetes에서 실행(AKS `--enable-oidc-issuer`), 서비스 계정 토큰을 대상 `api://AzureADTokenExchange`로 투영 — [`templates/aks/aud-dashboard-serviceaccount.yaml`](./templates/aks/aud-dashboard-serviceaccount.yaml). `AUD_FEDERATED_TOKEN_FILE`(없으면 워크로드 ID 웹후크의 `AZURE_FEDERATED_TOKEN_FILE`) + 표시용 `AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT` |
+| 고객 (Application Administrator · Cloud Application Administrator · 앱 소유자) | 연결 앱에 페더레이션 자격 증명 추가: 발급자 = 플랫폼 클러스터 OIDC 발급자, 주체 = `system:serviceaccount:aud-dashboard:aud-dashboard`(차트 기본 — 플랫폼이 다른 이름이면 그 값, 연결 점검이 보여 줌), 대상 = `api://AzureADTokenExchange` — [`fic.sh`](./templates/service-principal/fic.sh) · [`fic.tf`](./templates/service-principal/fic.tf) · [`fic-kubernetes.json`](./templates/service-principal/fic-kubernetes.json). 이름 예 `fed-common-aud-dashboard` |
 | 플랫폼 관리자 | 연결 파일에서 `secretEnv` 대신 `"federation": { "kind": "kubernetes" }` (경로는 파일에 쓰지 않음 — env만). 설정 › Azure 연결 › 점검이 자격 증명 `페더레이션 (비밀 없음)`이면 고객이 옛 비밀을 삭제 |
 
 - 다른 테넌트에서도 됩니다: Microsoft Learn — 워크로드 ID 페더레이션은 "어느 Kubernetes 클러스터에서 실행되는 워크로드"든 지원하고, 발급자는 외부 IdP입니다. 앱 하나에 페더레이션 자격 증명은 최대 20개.
@@ -124,6 +130,15 @@ az deployment sub create --location koreacentral \
 | `logAnalyticsWorkspaces` | 아니요 | 이 연결로 쿼리할 작업 영역(customer ID). 목록에 없는 작업 영역은 홈 연결이 읽음 |
 
 `.env`: `AUD_CONNECTIONS_FILE=config/connections.json`(상대 경로는 저장소 루트 — `.env`가 있는 곳 — 기준) → API 재시작. 시작 로그에 `[auth] … Azure connections: home:platform, custa:lighthouse, custb:servicePrincipal`이 나옵니다. 예전 `AUD_TENANTS_FILE`(`tenants` + `access`)도 그대로 읽힙니다.
+
+**옛 설정에서 옮기기**
+
+| 예전 | 지금 |
+|---|---|
+| 운영자가 자기 Azure 권한(OBO)으로 고객 구독을 봄 | 사용자는 **로그인(SSO)과 플랫폼 역할**만, Azure는 **연결의 자격 증명**으로 읽음 |
+| Lighthouse 위임 대상 = 운영자 그룹 | Lighthouse 위임 대상 = **플랫폼 서비스 주체** (`delegated` 연결일 때만 운영자 그룹) |
+| `AUD_TENANTS_FILE` (`tenants`, `access`) | `AUD_CONNECTIONS_FILE` (`connections`, `mode`) — 예전 파일도 그대로 읽힘 |
+| `docs/templates/lighthouse/` | `docs/integrations/azure/templates/lighthouse/` |
 
 ## 5. 설정 — 수동 (Portal)
 

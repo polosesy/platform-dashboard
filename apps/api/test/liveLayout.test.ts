@@ -150,7 +150,8 @@ test("every line style is a distinct (colour, dash) pair; the legend lists exact
 test("dashes only mark weaker evidence", () => {
   for (const k of St.LIVE_STYLE_ORDER) {
     const dashed = !!St.LIVE_EDGE_LOOK[k].dash;
-    assert.equal(dashed, k === "inferred" || k === "egressDeprecated" || k === "ingressUnknown" || k === "configWeak", k);
+    // udr: the next hop is found by address match and effective routes (BGP, longer prefixes) may differ — weaker evidence
+    assert.equal(dashed, k === "inferred" || k === "egressDeprecated" || k === "ingressUnknown" || k === "configWeak" || k === "udr", k);
   }
 });
 

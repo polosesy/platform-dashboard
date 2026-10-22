@@ -24,11 +24,20 @@ export type NsgBadgeInfo = {
 
 /** How a subnet reaches the Internet (from the generator's `egressVia`) */
 export type EgressInfo = {
-  via: "nat" | "lb-snat" | "default" | "none" | "unknown";
-  /** NAT Gateway name and node id (the chip selects the NAT card on the egress rail) */
+  /** NET-09 first exit: a 0.0.0.0/0 UDR (appliance / gateway / drop / unclear) > NAT > LB SNAT > default outbound */
+  via: "nat" | "lb-snat" | "default" | "none" | "unknown" | "appliance" | "gateway" | "dropped" | "udr-unresolved";
+  /** NAT gateway / appliance / gateway name and node id (the chip selects that card) */
   name?: string;
   natId?: string;
+  /** A NAT gateway is attached but the UDR wins */
+  natBypassed?: boolean;
 };
+
+/** The chip / dot words for an exit */
+export function egressText(e: EgressInfo, t: (k: string, v?: Record<string, string | number>) => string): string {
+  const base = e.via === "nat" || e.via === "appliance" || e.via === "gateway" ? t(`ld.egress.${e.via}`, { name: e.name ?? "" }) : t(`ld.egress.${e.via}`);
+  return e.natBypassed ? `${base} · ${t("ld.egress.natBypassed")}` : base;
+}
 
 export type PeeringInfo = LivePeering;
 
@@ -84,13 +93,13 @@ export const GroupNode = memo(function GroupNode({ id, data }: NodeProps<GroupNo
         style={{ borderColor: scope.borderColor, borderStyle: scope.borderStyle, borderWidth: scope.borderWidth, background: scope.background }}
       >
         {isSubnet ? (
-          <div className={styles.subnetHeader}>
+          <div className={`${styles.subnetHeader} ld-drag`}>
             <div className={styles.subnetHeaderLine}>
               {nsg}
               <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} className={styles.groupNodeIcon} />
               <span className={styles.groupNodeLabel} title={label}>{shortLabel || label}</span>
               {/* At a distance line 2 is hidden; the outbound path stays visible as a dot here */}
-              {egress && <span className={styles.egressDot} data-via={egress.via} title={egress.via === "nat" ? t("ld.egress.nat", { name: egress.name ?? "" }) : t(`ld.egress.${egress.via}`)} />}
+              {egress && <span className={styles.egressDot} data-via={egress.via} title={egressText(egress, t)} />}
             </div>
             <div className={`${styles.subnetHeaderLine} ${styles.lodDetailBlock}`}>
               {subtitle && <span className={styles.groupNodeSubtitle}>{subtitle}</span>}
@@ -102,14 +111,14 @@ export const GroupNode = memo(function GroupNode({ id, data }: NodeProps<GroupNo
                   title={t(`ld.egress.${egress.via}.hint`)}
                   onClick={(e) => { if (egress.natId) { e.stopPropagation(); onNsgSelect?.(egress.natId); } }}
                 >
-                  {egress.via === "nat" ? t("ld.egress.nat", { name: egress.name ?? "" }) : t(`ld.egress.${egress.via}`)}
+                  {egressText(egress, t)}
                 </button>
               )}
               {nicCount ? <span className={styles.nicChip} title={t("ld.nicCount.hint")}>{t("ld.nicCount", { n: nicCount })}</span> : null}
             </div>
           </div>
         ) : (
-          <div className={styles.groupNodeHeader}>
+          <div className={`${styles.groupNodeHeader} ld-drag`}>
             {nsg}
             <img src={getAzureIconUrl(icon)} alt={icon} width={16} height={16} className={styles.groupNodeIcon} />
             <span className={styles.groupNodeLabel} title={label}>{label}</span>

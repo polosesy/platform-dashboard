@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Workstation side of the on-prem Docker deployment: push the source, build the image on the server, write the
-# runtime settings, start / stop, and open the web through an SSH tunnel. Guide: docs/deployment/container.md §5.
+# Workstation side of the on-prem Docker deployment. The source stays here: deploy streams it into a temporary
+# directory on the server, builds the image there and deletes the directory (also on failure). The server keeps only
+# ~/aud-runtime (compose.yaml, nginx.conf, env files, config, state, and audctl to run it by hand).
+# Guide: docs/deployment/container.md §5.
 #
-#   scripts/onprem.sh deploy            push + build + up (sample settings unless env was run before)
+#   scripts/onprem.sh deploy            build on the server from this working tree + up (source removed after)
 #   scripts/onprem.sh env [--test]      api.env / web.env (+ connections.json) from the local .env → server
 #   scripts/onprem.sh tunnel            http://localhost:3000 → the server's 127.0.0.1:3000 (Ctrl-C to close)
-#   scripts/onprem.sh push | build | up | status | logs [service] [lines] | down
+#   scripts/onprem.sh build | up [tag] | down | restart [service] | status | logs [service] [lines] [-f]
+#                     rollback [tag] | images | version | cleanup-source (one time: old ~/aud-dashboard)
+#   on the server itself:  sudo ~/aud-runtime/audctl status | up | down | restart | logs | rollback | images | version
 #
 # Connection settings (environment, or the gitignored .secrets/onprem.env):
 #   AUD_ONPREM_HOST, AUD_ONPREM_PORT (22), AUD_ONPREM_USER, AUD_ONPREM_KEY (private key path),
@@ -23,30 +27,52 @@ LOCAL_PORT="${AUD_LOCAL_PORT:-3000}"
 SSH_OPTS=(-p "$SSH_PORT" -o ServerAliveInterval=30 ${KEY:+-i "$KEY" -o IdentitiesOnly=yes})
 SCP_OPTS=(-P "$SSH_PORT" -q ${KEY:+-i "$KEY" -o IdentitiesOnly=yes})
 REMOTE="$USER_@$HOST"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-# Run onprem-remote.sh as root: the sudo password from a file (piped, never on a command line), else the terminal
-remote_sudo() {
-  local cmd="bash ~/aud-dashboard/deploy/docker/onprem-remote.sh $*"
+# The remote build context is removed even when this script fails before audctl's own trap is set
+CTX=""
+cleanup() {
+  rm -rf "$TMP"
+  if [ -n "$CTX" ]; then ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -rf -- '$CTX'" || true; fi
+}
+TMP="$(mktemp -d)"; trap cleanup EXIT
+
+# A remote command as root: the sudo password from a file (piped, never on a command line), else the terminal
+as_root() {
   if [ -n "${AUD_ONPREM_SUDO_PASSWORD_FILE:-}" ]; then
     { grep -m1 '^pw:' "$AUD_ONPREM_SUDO_PASSWORD_FILE" | sed 's/^pw://' || head -1 "$AUD_ONPREM_SUDO_PASSWORD_FILE"; } \
-      | tr -d '\r' | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo -S -p '' $cmd"
+      | tr -d '\r' | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo -S -p '' $1"
   else
-    ssh -t "${SSH_OPTS[@]}" "$REMOTE" "sudo $cmd"
+    ssh -t "${SSH_OPTS[@]}" "$REMOTE" "sudo $1"
   fi
 }
+ctl() { as_root "bash ~/aud-runtime/audctl $*"; }
 
-push() {
-  local tag; tag="$(git rev-parse --short HEAD)"
-  git diff --quiet HEAD -- 2>/dev/null || tag="$tag-dirty"
+# <sha>, or <sha>-dirty-<UTC time> with uncommitted changes (two dirty builds never share a tag, so rollback works
+# between them)
+source_tag() {
+  local t; t="$(git rev-parse --short HEAD)"
+  if ! git diff --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard -- . ':!.claude')" ]; then
+    t="$t-dirty-$(date -u +%Y%m%dT%H%M%S)"
+  fi
+  echo "$t"
+}
+
+build() {
+  local tag; tag="$(source_tag)"
   # Tracked files plus new ones not committed yet (still honouring .gitignore: no .env, .secrets, keys, connections
   # file); files deleted in the working tree are skipped
-  [ -n "$(git ls-files --others --exclude-standard -- . ':!.claude')" ] && tag="${tag%-dirty}-dirty"
-  git ls-files -z --cached --others --exclude-standard -- . ':!.claude' | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done > "$TMP/files"
-  tar --force-local --null -czf "$TMP/src.tar.gz" -T "$TMP/files"
-  scp "${SCP_OPTS[@]}" "$TMP/src.tar.gz" "$REMOTE:aud-src.tar.gz"
-  ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -rf ~/aud-dashboard && mkdir -p ~/aud-dashboard && tar -xzf ~/aud-src.tar.gz -C ~/aud-dashboard && rm ~/aud-src.tar.gz && echo $tag > ~/aud-dashboard/.source-sha"
-  echo "pushed $(tr -cd '\0' < "$TMP/files" | wc -c | tr -d ' ') files as $tag (gitignored ones never: .env, .secrets, config/connections.json)"
+  git ls-files -z --cached --others --exclude-standard -- . ':!.claude' \
+    | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done > "$TMP/files"
+  # Streamed into a fresh directory — no tarball written on either side. mktemp -d makes it 0700 (others cannot enter);
+  # the files inside keep normal modes (umask 022): docker COPY keeps them, and the image's user 65532 must read them
+  CTX="$(tar --force-local --null -czf - -T "$TMP/files" | ssh "${SSH_OPTS[@]}" "$REMOTE" \
+    'umask 022; d=$(mktemp -d "$HOME/.aud-build.XXXXXX") || exit 1
+     tar -xzf - -C "$d" || { rm -rf -- "$d"; exit 1; }; echo "$d"')"
+  [[ $CTX == /*/.aud-build.* ]] || { CTX=""; echo "upload failed"; exit 1; }
+  echo "sent $(tr -cd '\0' < "$TMP/files" | wc -c | tr -d ' ') files as $tag into a temporary build directory"
+  # The new audctl from the context builds, installs itself into ~/aud-runtime and deletes the context
+  as_root "bash '$CTX/deploy/docker/audctl' build '$CTX' '$tag'"
+  CTX=""; BUILT="$tag"
 }
 
 env_files() {
@@ -55,7 +81,7 @@ env_files() {
   scp "${SCP_OPTS[@]}" "$TMP/env/api.env" "$TMP/env/web.env" "$REMOTE:aud-runtime/"
   [ -f "$TMP/env/connections.json" ] && scp "${SCP_OPTS[@]}" "$TMP/env/connections.json" "$REMOTE:aud-runtime/config/connections.json"
   ssh "${SSH_OPTS[@]}" "$REMOTE" "chmod 600 ~/aud-runtime/api.env ~/aud-runtime/web.env; [ -f ~/aud-runtime/config/connections.json ] && chmod 644 ~/aud-runtime/config/connections.json; true"
-  echo "settings uploaded — run: scripts/onprem.sh up"
+  echo "settings uploaded — run: scripts/onprem.sh restart"
 }
 
 tunnel() {
@@ -66,16 +92,27 @@ tunnel() {
   ssh -N "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes -L "$LOCAL_PORT:127.0.0.1:3000" "$REMOTE"
 }
 
+# One time, after the first deploy with audctl: remove the source the old push left in ~/aud-dashboard. As the user
+# (no sudo), and only when it is exactly that: a plain directory of the user's with the pushed marker files
+cleanup_source() {
+  ssh "${SSH_OPTS[@]}" "$REMOTE" 'set -eu; p="$HOME/aud-dashboard"
+    [ -e "$p" ] || { echo "nothing to remove ($p does not exist)"; exit 0; }
+    { [ -d "$p" ] && [ ! -L "$p" ]; } || { echo "refusing: $p is not a plain directory"; exit 1; }
+    [ "$(stat -c %U "$p")" = "$(id -un)" ] || { echo "refusing: $p is not owned by $(id -un)"; exit 1; }
+    { [ -f "$p/.source-sha" ] && [ -f "$p/deploy/docker/compose.yaml" ]; } || { echo "refusing: $p is not the pushed source"; exit 1; }
+    { [ -x "$HOME/aud-runtime/audctl" ] && [ -s "$HOME/aud-runtime/.image-tag" ]; } || { echo "deploy first (no ~/aud-runtime/audctl)"; exit 1; }
+    rm -rf -- "$p"; rm -f -- "$HOME/aud-src.tar.gz"
+    echo "removed $p (runtime ~/aud-runtime kept)"'
+}
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  push) push ;;
-  build) remote_sudo build "$@" ;;
+  deploy) build; ctl up "$BUILT" ;;
+  build) build; echo "built $BUILT — start it: scripts/onprem.sh up $BUILT" ;;
   env) env_files "$@" ;;
-  up) remote_sudo up "$@" ;;
-  status) remote_sudo status ;;
-  logs) remote_sudo logs "$@" ;;
-  down) remote_sudo down ;;
-  deploy) push; remote_sudo build; remote_sudo up ;;
   tunnel) tunnel ;;
-  *) sed -n '2,15p' "$0"; exit 2 ;;
+  up|down|restart|status|logs|rollback|images|version) ctl "$cmd" "$@" ;;
+  cleanup-source) cleanup_source ;;
+  push) echo "removed: the source no longer stays on the server — use: scripts/onprem.sh deploy"; exit 2 ;;
+  *) sed -n '2,18p' "$0"; exit 2 ;;
 esac

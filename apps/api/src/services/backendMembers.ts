@@ -183,7 +183,7 @@ export type AddressEntry = {
   targetId: string;
   /** VNet of a private address (lowercase id); public addresses and host names have none */
   vnetId?: string;
-  source: "nic" | "lbFrontend" | "pe" | "pip" | "site" | "containerApp" | "agcFrontend" | "pipFqdn";
+  source: "nic" | "lbFrontend" | "pe" | "pip" | "site" | "containerApp" | "agcFrontend" | "pipFqdn" | "firewall";
 };
 
 export type AddressIndex = Map<string, AddressEntry[]>;

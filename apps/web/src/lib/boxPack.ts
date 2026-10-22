@@ -27,7 +27,7 @@ export type PackNode<S> = PackLeaf<S> | PackBox<S>;
 
 export type Measured<S> = { n: PackNode<S>; w: number; h: number; rows: Measured<S>[][] };
 
-export type Placed<S> = { shape: S; x: number; y: number; w: number; h: number; depth: number; parent: S | null; leaf: boolean };
+export type Placed<S> = { shape: S; x: number; y: number; w: number; h: number; depth: number; parent: S | null; leaf: boolean; /** Header height (boxes; 0 for leaves) */ head: number };
 
 export function measure<S>(n: PackNode<S>): Measured<S> {
   if (n.t === "leaf") return { n, w: n.w, h: n.h, rows: [] };
@@ -57,7 +57,7 @@ export function measure<S>(n: PackNode<S>): Measured<S> {
 export function place<S>(m: Measured<S>, x = 0, y = 0): Placed<S>[] {
   const out: Placed<S>[] = [];
   const walk = (cur: Measured<S>, cx0: number, cy0: number, depth: number, parent: S | null, h: number) => {
-    out.push({ shape: cur.n.shape, x: cx0, y: cy0, w: cur.w, h, depth, parent, leaf: cur.n.t === "leaf" });
+    out.push({ shape: cur.n.shape, x: cx0, y: cy0, w: cur.w, h, depth, parent, leaf: cur.n.t === "leaf", head: cur.n.t === "box" ? cur.n.head : 0 });
     if (cur.n.t === "leaf") return;
     const box = cur.n;
     const pad = box.framed ? box.pad : 0;

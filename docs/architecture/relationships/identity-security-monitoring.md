@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-15
+---
 # 신원·보안·모니터링·거버넌스 — Azure 리소스 관계 사전
 
 > 대상: 관리 ID·RBAC·정책·잠금·Key Vault·암호화(CMK)·Azure Monitor(진단 설정·DCR·경고·작업 영역)·Defender for Cloud·Backup을 그리거나 검토하는 개발자와 운영자

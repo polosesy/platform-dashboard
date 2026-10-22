@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-15
+---
 # 데이터·스토리지 — Azure 리소스 관계 사전
 
 > **대상**: SQL Database·SQL Managed Instance·PostgreSQL/MySQL Flexible·Cosmos DB·Redis·Storage·Data Factory·Synapse·Databricks·NetApp Files·Data Explorer를 다루는 개발자, 운영자, 보안 검토자

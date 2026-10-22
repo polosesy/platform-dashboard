@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-observability
+last-verified: 2026-10-22
+covers: [apps/api/src/services/hubbleClient.ts, apps/api/src/services/hubbleMerge.ts]
+---
 # Hubble 트러블슈팅 가이드
 
 > Cilium Hubble 연동 과정에서 발생한 에러 케이스와 해결 방법을 정리한 문서입니다.
@@ -163,7 +169,8 @@ kubectl exec -n kube-system ds/cilium -c cilium-agent -- which cilium-dbg
 
 - **로컬 소켓**: 해당 노드의 flow만 조회 (단일 노드 관점)
 - **Relay 경유**: 클러스터 전체 flow 조회 (mTLS 인증서 필요)
-- **현재 구현**: 로컬 소켓 우선 → 단일 노드 flow 수집. 클러스터 전체 수집을 위해서는 향후 gRPC 클라이언트 직접 연결 검토 필요.
+- **현재 구현**: 모든 노드의 로컬 소켓에 팬아웃 → `hubbleMerge.ts`로 병합(관측점·노드·SNAT 중복 제거, `coverage` 노드 n/m). 한계 = 노드당 링 버퍼 4,095건.
+- **501 `hubble_exec_disabled`**: 운영에서는 exec가 기본 꺼짐 — `HUBBLE_EXEC_ENABLED`·연결 `aks.hubbleExec`·클러스터 Role 세 겹([aks.md](../integrations/azure/aks.md)). **403 `aks_rbac_forbidden`**: ClusterRoleBinding 주체가 연결 신원의 개체 ID인지 확인
 
 ### AKS에서 Hubble 비활성화 시 활성화 방법
 

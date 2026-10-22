@@ -27,7 +27,7 @@ const parseList = (v: string | undefined): string[] | undefined => {
   try { const x = JSON.parse(v); return Array.isArray(x) ? x.map(String) : undefined; } catch { return undefined; }
 };
 import { collectAppInsightsMetrics, resolveAppInsightsResourceId } from "./appInsightsCollector.js";
-import { collectDiagramAlerts } from "./alertsCollector.js";
+import { collectDiagramAlerts, type DiagramAlerts } from "./alertsCollector.js";
 import { collectAlertRules } from "./alertRulesCollector.js";
 import { collectTrafficAnalytics, type EdgeTrafficData } from "./trafficAnalyticsCollector.js";
 import { collectNsgFlowLogs, type NsgFlowEdgeData } from "./nsgFlowLogCollector.js";
@@ -197,10 +197,16 @@ export async function buildLiveSnapshot(
   })();
 
   // ── Azure Monitor alerts and alert rules ──
-  const alertsTask = (async (): Promise<LiveAlert[]> => {
-    if (!live) return [];
+  // Not read (an error, or later than the budget) = "failed": the page says alerts are unknown, never "none active"
+  const alertsTask = (async (): Promise<DiagramAlerts> => {
+    const none: DiagramAlerts = { alerts: [], history: [], state: "ok" };
+    if (!live) return none;
     const edgeMap = new Map(spec.edges.map((e) => [e.id, { source: e.source, target: e.target }]));
-    try { return await withBudget(collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap), [] as LiveAlert[]); } catch { alertsState = "failed"; return []; }
+    try {
+      const r = await withBudget(collectDiagramAlerts(env, bearerToken!, spec.nodes, edgeMap), { ...none, state: "failed" } as DiagramAlerts);
+      if (r.state === "failed") alertsState = "failed";
+      return r;
+    } catch { alertsState = "failed"; return none; }
   })();
   const alertRulesTask = (async (): Promise<AlertRuleInfo[]> => {
     if (!live) return [];
@@ -237,12 +243,13 @@ export async function buildLiveSnapshot(
 
   const t0 = Date.now();
   const timed = <T,>(name: string, p: Promise<T>) => p.finally(() => debug(`[live] ${diagramId} ${name} ${Date.now() - t0}ms`));
-  const [nodeMetricsMap, edgeMonitorMetrics, appInsightsEdgeMetrics, liveAlerts, alertRules, liveReads, trafficFlowData, rhMap, causes] =
+  const [nodeMetricsMap, edgeMonitorMetrics, appInsightsEdgeMetrics, alertsRead, alertRules, liveReads, trafficFlowData, rhMap, causes] =
     await Promise.all([
       timed("metrics", nodeMetricsTask), timed("edgeMetrics", edgeMetricsTask), timed("appInsights", appInsightsTask),
       timed("alerts", alertsTask), timed("alertRules", alertRulesTask), timed("power", powerTask), timed("traffic", trafficTask), timed("resourceHealth", rhTask),
       timed("causes", causesTask),
     ]);
+  const liveAlerts: LiveAlert[] = alertsRead.alerts;
   const powerStateMap = new Map([...liveReads].map(([id, r]) => [id, r.power] as const));
   const nowMs = Date.now();
 
@@ -283,6 +290,7 @@ export async function buildLiveSnapshot(
       peConnections: parseList(nodeSpec.metadata?.peConnections),
       rh: rhMap.get((nodeSpec.azureResourceId ?? "").toLowerCase()),
       unused: nodeSpec.metadata?.unused === "true",
+      alerts: liveAlerts.filter((a) => a.affectedNodeIds.includes(nodeSpec.id)).map((a) => a.severity),
     });
     const health = ev.health;
     const score = health === judged0.health ? judged0.score : health === "critical" ? 0.2 : health === "warning" ? 0.55 : health === "ok" ? 1 : 0.5;
@@ -450,6 +458,7 @@ export async function buildLiveSnapshot(
     nodes: liveNodes,
     edges: liveEdges,
     alerts: liveAlerts,
+    ...(alertsRead.history.length ? { alertHistory: alertsRead.history } : {}),
     alertRules: alertRules.length > 0 ? alertRules : undefined,
     topology: {
       nodeCount: resourceNodeSpecs.length,
@@ -606,7 +615,7 @@ export function buildFaultImpacts(
 ): FaultImpact[] {
   const criticalAlertNodes = new Set(alerts.filter((a) => a.severity === "critical").flatMap((a) => a.affectedNodeIds));
   const sources = liveNodes
-    .map((n) => (n.health === "critical" ? { id: n.id, trigger: "metric" as const } : criticalAlertNodes.has(n.id) ? { id: n.id, trigger: "alert" as const } : null))
+    .map((n) => (n.health === "critical" && n.basis !== "alert" ? { id: n.id, trigger: "metric" as const } : criticalAlertNodes.has(n.id) || (n.health === "critical" && n.basis === "alert") ? { id: n.id, trigger: "alert" as const } : null))
     .filter((x): x is { id: string; trigger: "metric" | "alert" } => x !== null);
   const links = edgeSpecs.filter((e) => e.evidence !== "inferred" && (e.edgeKind == null || IMPACT_EDGE_KINDS.has(e.edgeKind)));
 

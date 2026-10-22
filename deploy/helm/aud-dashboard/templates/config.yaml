@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.syncWaves }}
+    argocd.argoproj.io/sync-wave: "-1"
+    {{- end }}
+    azure.workload.identity/client-id: {{ .Values.serviceAccount.clientId | quote }}
+    azure.workload.identity/tenant-id: {{ .Values.serviceAccount.tenantId | quote }}
+automountServiceAccountToken: false
+---
+# IDs and names only — no secrets (the API refuses secret values and PEM in this file)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aud-dashboard-connections
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "-1") | nindent 2 }}
+data:
+  connections.json: |
+    {{- .Values.connections | nindent 4 }}

@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-22
+---
 # AUD 프로젝트 용어 사전 (Glossary)
 
 > Azure Unified Dashboard 개발 및 프롬프트 작성 시 혼선을 방지하기 위한 공식 용어 정리.
@@ -26,7 +31,7 @@
 | 공식 용어 | 위치 | 설명 |
 |-----------|------|------|
 | **NSG 배지** (GroupNode) | GroupNode 헤더 좌측 | Subnet에 연결된 NSG를 나타내는 아이콘 배지. `GroupNode.tsx` 헤더 내 렌더링 |
-| **NSG 배지** (NIC/VM) | 리소스 카드 좌상단 | NIC 또는 VM에 직접 연결된 NSG. `liveNsgBadge` CSS 클래스 |
+| **NSG 배지** (NIC/VM) | 리소스 카드 좌상단 | NIC 또는 VM에 직접 연결된 NSG. `nsgBadge` CSS 모듈 클래스 |
 | **상태 배지** | 리소스 카드 우측 | RUNNING / STOPPED 등 리소스 전원 상태 표시 레이블 |
 | **K8s Pod 배지** | 리소스 카드 하단 | Kubernetes Pod 수를 표시하는 배지 |
 | **리전 배지** | GroupNode 헤더 우측 | Azure 리전명(예: Korea Central)을 표시하는 배지 |
@@ -68,7 +73,10 @@
 | **LiveCanvas** | `apps/web/src/app/live-diagram/components/LiveCanvas.tsx` | ReactFlow 캔버스 전체를 관리하는 클라이언트 컴포넌트 |
 | **azureIcons** | `apps/web/src/app/live-diagram/utils/azureIcons.ts` | 리소스 타입별 SVG 아이콘 매핑 유틸리티 |
 | **ResourceDetailPanel** | `apps/web/src/app/live-diagram/components/ResourceDetailPanel.tsx` | 리소스 카드 클릭 시 나타나는 상세 정보 사이드패널 |
-| **OBO Token** | `apps/api/src/infra/oboTokenPool.ts` | On-Behalf-Of 인증 토큰. 사용자 권한으로 Azure API 호출 시 사용 |
+| **OBO Token** | `apps/api/src/infra/oboTokenPool.ts` | On-Behalf-Of 토큰 — `delegated` 연결 전용(사용자 권한으로 Azure 호출). 기본 연결은 플랫폼 자격 증명으로 읽음 |
+| **플랫폼 자격 증명** | `AUD_PLATFORM_CREDENTIAL` | 홈 연결이 Azure를 읽는 신원 — `certificate`·`secret`·`workloadIdentity`(AKS 워크로드 ID, 비밀 없음) |
+| **페더레이션 연결** | `connections.json` `federation: {kind:"kubernetes"}` | 고객 앱이 플랫폼 파드의 서비스 계정 토큰을 신뢰 — 비밀 없음, 주체 `system:serviceaccount:aud-dashboard:aud-dashboard` |
+| **팀 배치** | `/api/architecture/arrangement` | 인프라 구성도의 공유 배치(순서·칸·연결선) — `AUD_ARRANGEMENT_DIR`에 구독별 JSON |
 
 ---
 

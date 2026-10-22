@@ -2,7 +2,8 @@
 // for (Private Endpoint, public IP, DNS zones, gateways …). Pure; tested from apps/api/test/healthEvidence.test.ts.
 //
 // `health` stays the risk axis (and the only input to fault impact); `basis` says why a card is ok / unknown:
-//   risk (worst wins)  quality rules · Resource Health Degraded (warning) / Unavailable (critical) ·
+//   risk (worst wins)  quality rules · an active Azure Monitor alert (Sev0/1 critical, Sev2 warning — Azure's own
+//                      verdict, basis "alert") · Resource Health Degraded (warning) / Unavailable (critical) ·
 //                      configuration faults — provisioning Failed, a PE connection Rejected / Disconnected — at most
 //                      warning (a configuration fact must not start a fault-impact spread)
 //   positive (first)   quality rules passed → metric · Resource Health Available → resourceHealth (ok) ·
@@ -12,7 +13,7 @@
 // Learn: Resource Health states https://learn.microsoft.com/azure/service-health/resource-health-overview ·
 // "Only private endpoints in an approved state can be used to send traffic" https://learn.microsoft.com/azure/private-link/private-endpoint-overview ·
 // zeros vs NULLs are the provider's choice https://learn.microsoft.com/azure/azure-monitor/metrics/metrics-aggregation-explained
-import type { HealthStatus, LiveNode } from "@aud/types";
+import type { AlertSeverity, HealthStatus, LiveNode } from "@aud/types";
 import type { RhState } from "./resourceHealthCollector.js";
 
 export type Evidence = { health: HealthStatus; basis: NonNullable<LiveNode["basis"]>; reasons: string[] };
@@ -30,6 +31,8 @@ export type EvidenceInput = {
   rh?: RhState;
   /** Public IP attached to nothing */
   unused?: boolean;
+  /** Severities of the resource's active (Fired, not Closed) Azure Monitor alerts */
+  alerts?: AlertSeverity[];
 };
 
 /** Two directions of traffic per kind; one key = a single activity count (DNS queries) */
@@ -57,8 +60,15 @@ export function resolveEvidence(i: EvidenceInput): Evidence {
   if (pe.includes("rejected")) { risk = worst(risk, "warning"); reasons.push("ld.ev.peRejected"); if (!i.judged) riskBasis = "configured"; }
   if (pe.includes("disconnected")) { risk = worst(risk, "warning"); reasons.push("ld.ev.peDisconnected"); if (!i.judged) riskBasis = "configured"; }
   if (pe.includes("pending")) reasons.push("ld.ev.pePending");
+  // An active alert is Azure's verdict on this resource now — it outranks a metric bucket that already looks fine
+  // (a rule over a 5-minute window stays Fired for minutes after the latest minute reads 0)
+  const alertRisk: HealthStatus = (i.alerts ?? []).includes("critical") ? "critical" : (i.alerts ?? []).includes("warning") ? "warning" : "unknown";
+  if (alertRisk !== "unknown") {
+    if (rank(alertRisk) > rank(risk) || risk === "unknown") { risk = alertRisk; riskBasis = "alert"; }
+    reasons.push("ld.ev.alertFired");
+  }
   if (i.rh === "Unavailable") { risk = worst(risk, "critical"); reasons.push("ld.ev.rhUnavailable"); riskBasis = "resourceHealth"; }
-  if (i.rh === "Degraded") { risk = worst(risk, "warning"); reasons.push("ld.ev.rhDegraded"); if (riskBasis !== "resourceHealth" && !i.judged) riskBasis = "resourceHealth"; }
+  if (i.rh === "Degraded") { risk = worst(risk, "warning"); reasons.push("ld.ev.rhDegraded"); if (riskBasis !== "resourceHealth" && riskBasis !== "alert" && !i.judged) riskBasis = "resourceHealth"; }
   if (risk === "warning" || risk === "critical") return { health: risk, basis: riskBasis, reasons };
 
   if (i.judged && i.health === "ok") return { health: "ok", basis: "metric", reasons };

@@ -1,0 +1,43 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+# Baseline for the dashboard namespace. Audit first (no default deny, name *-audit), watch Hubble drops, then enforce.
+# FQDN rules need the DNS L7 rule. Not needed: IMDS (no managed identity endpoint — tokens are federated), the
+# registry (the kubelet pulls images)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ if $np.enforce }}aud-dashboard-baseline{{ else }}aud-dashboard-baseline-audit{{ end }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+spec:
+  endpointSelector: {}
+  {{- if not $np.enforce }}
+  enableDefaultDeny: { ingress: false, egress: false }
+  {{- end }}
+  ingress:
+    - fromCIDR: [{{ range $i, $c := $np.ingressCidrs }}{{ if $i }}, {{ end }}{{ $c | quote }}{{ end }}]
+      toPorts: [{ ports: [{ port: "3000", protocol: TCP }] }]
+  egress:
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, "k8s:k8s-app": kube-dns }
+      toPorts:
+        - ports: [{ port: "53", protocol: ANY }]
+          rules: { dns: [{ matchPattern: "*" }] }
+    - toEntities: [kube-apiserver]
+    {{- with $np.apiServerCidr }}
+    - toCIDR: [{{ . | quote }}]
+      toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
+    {{- end }}
+    - toFQDNs:
+        - matchName: login.microsoftonline.com          # both token exchanges + the signing keys of user tokens
+        - matchName: management.azure.com
+        - matchName: api.loganalytics.io
+        - matchPattern: {{ $np.prometheusPattern | quote }}
+        - matchName: azure.status.microsoft
+        - matchName: rssfeed.azure.status.microsoft
+        {{- range $np.extraFqdns }}
+        - matchName: {{ . | quote }}
+        {{- end }}
+      toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
+{{- end }}

@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-15
+covers: [apps/api/src/infra/tokenVerifier.ts, apps/api/src/infra/platformAccess.ts]
+---
 # 플랫폼 로그인 (SSO) — Entra ID + 앱 역할
 
 > **대상**: 플랫폼 관리자 · **소요 시간**: 15분 · **필요 권한**: 홈 테넌트의 Application Administrator(앱 역할 정의) + 엔터프라이즈 앱 사용자 할당 권한

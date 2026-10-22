@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-observability
+last-verified: 2026-10-15
+covers: [apps/api/src/services/networkQueries.ts, apps/api/src/services/flowLogCoverage.ts]
+---
 # VNet 트래픽 (Flow Log) — VNet 흐름 로그 + Traffic Analytics
 
 > **대상**: 운영자, 플랫폼 관리자 · 화면: **네트워크 › VNet 트래픽 (Flow Log)** (`/network`)

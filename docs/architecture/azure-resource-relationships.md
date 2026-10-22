@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-16
+---
 # Azure 리소스 관계 사전
 
 > **대상**: 다이어그램(인프라 구성도·라이브 다이어그램) 코드를 고치는 개발자, 구성도를 검토하는 운영자
@@ -254,7 +259,7 @@ Azure는 커다란 **아파트 단지**예요. 모든 영역 페이지가 같은
 | SEC-01 | NSG → 서브넷 / NIC | 규칙이 적용되는 곳 | `networkSecurityGroups.properties.subnets[]`, `.networkInterfaces[]` | cfg | badge / badge(분리된 NSG는 '미사용·분리됨' 레인) | azure.ts | virtual-network/network-security-groups-overview |
 | SEC-02 | ASG ← NIC IP 구성 | 애플리케이션 보안 그룹 | `ipConfigurations[].properties.applicationSecurityGroups[]` | cfg | chip | — | virtual-network/application-security-groups |
 | SEC-03 | 경로 테이블 → 서브넷 | UDR 적용 | `routeTables.properties.subnets[]` | cfg | badge | — | virtual-network/virtual-networks-udr-overview |
-| SEC-04 | UDR 다음 홉 → 가상 어플라이언스 | 트래픽 우회 | `routes[].properties.nextHopIpAddress` | ipMatch | line-dashed | — | 〃 |
+| SEC-04 | UDR 다음 홉 → 가상 어플라이언스 | 트래픽 우회 — 서브넷의 **첫 출구**(NET-09)일 때만: 0.0.0.0/0(또는 0.0.0.0/1+128.0.0.0/1 같은 다음 홉) `VirtualAppliance`의 주소를 서브넷 VNet + Connected 피어 안에서 **정확히 하나**가 가질 때(방화벽 `ipConfigurations[].privateIPAddress`·NVA VM NIC·내부 LB 프런트엔드). 0개·여럿이면 선 없이 서브넷 칩 'UDR → IP (보유 리소스 없음/여럿)'. 붙어 있는 NAT는 '우회됨' | `routes[].properties.nextHopIpAddress` | ipMatch | line-dashed (구성도 `udr`, 선택할 때만) + 서브넷 칩 'UDR → 이름' + 대상 칩 'UDR 출구 n' | azure.ts · subnetEgress.ts | virtual-network/virtual-networks-udr-overview |
 | SEC-05 | 서브넷 서비스 엔드포인트 | 서브넷 → PaaS 공용 엔드포인트 경로 | `subnets.properties.serviceEndpoints[]` | cfg | chip (배치 아님) | — | virtual-network/virtual-network-service-endpoints-overview |
 | SEC-07 | 서브넷 기본 아웃바운드 | 명시적 출구 없음 | `subnets.properties.defaultOutboundAccess` | cfg | chip / 서브넷 출구 칩 | specGenerator.ts | virtual-network/ip-services/default-outbound-access |
 
@@ -336,6 +341,7 @@ AKS용 관리형 L7 로드 밸런서(Gateway API·Ingress). 클러스터 안의 
 | EDGE-08 | 연결(S2S) → VNet 게이트웨이 | 게이트웨이 쪽 끝 — 연결은 노드가 아니라 게이트웨이에 흡수('연결 n'), LNG와 함께 `metadata.s2s` | `connections.properties.virtualNetworkGateway1.id` | cfg | 흡수(게이트웨이 패널) | azure.ts | vpn-gateway/vpn-gateway-about-vpn-gateway-settings |
 | EDGE-09 | 연결(S2S) → 로컬 네트워크 게이트웨이 | 온프레미스 쪽 끝 — 라이브 다이어그램은 연결마다 '온프레미스 사이트' 카드(왼쪽 레인)와 게이트웨이 → 사이트 선(`hybrid`, 연결 메트릭 BitsIn/OutPerSecond). LNG `localNetworkAddressSpace` = 라우팅 **구성**(관측 아님): 미확인 사설 IP가 사이트 대역 정확히 하나에 들면 '온프레미스 사이트 대역(구성 기준)', 선 없음 | `connections.properties.localNetworkGateway2.id` | cfg | 사이트 카드 + 선 / 패널 | azure.ts | vpn-gateway/vpn-gateway-howto-site-to-site-resource-manager-portal · vpn-gateway/monitor-vpn-gateway-reference |
 | EDGE-10 | Front Door 보안 정책 → WAF 정책 (도메인별) | Standard/Premium의 WAF는 **도메인(엔드포인트 기본 도메인·사용자 지정 도메인)에 보안 정책으로** 붙음 — 한 프로필 안에서도 도메인마다 다른 정책·모드(방지/탐지). 정책은 노드가 아니라 Front Door 카드 칩('WAF 방지'·'WAF 방지 n/m'·'WAF 탐지'·'WAF 없음'·'WAF 미확인')과 패널. 보안 정책을 못 읽으면 '미확인'(없음 아님), 정책이 Resource Graph에 없으면(다른 구독·권한) 그 도메인만 미확인 | `profiles/securityPolicies.properties.parameters`(`type='WebApplicationFirewall'`, `wafPolicy.id`, `associations[].domains[].id`, `associations[].patternsToMatch`) → `frontdoorwebapplicationfirewallpolicies.properties.policySettings.mode`·`enabledState`·`managedRules.managedRuleSets[]` | cfg | 칩 + 패널(선 없음, 카드 상태·장애 영향에 안 씀). 판정 수 `WebApplicationFirewallRequestCount`(Action) 1시간 합계는 패널만 | azure.ts | web-application-firewall/afds/afds-overview · frontdoor/front-door-security-policy |
+| EDGE-12 | 인터넷 → Front Door (공용 진입) | Front Door Standard/Premium은 그 자체가 인터넷 진입점(공용 IP 리소스가 없음). 활성 엔드포인트의 활성 라우트가 하나 이상이면 인터넷 → Front Door 선. 구성을 못 읽으면(`configUnreadable`) 점선 '미확인', classic·라우트 없음은 선 없음(가정 금지). Traffic Manager는 DNS만 답하므로 선 없음 | `afdEndpoints.properties.enabledState` + `afdEndpoints/routes.properties.enabledState` (`activeRoutes`) | cfg | line (인터넷 → 글로벌 상자) | archModel.ts (그래프 메타 `endpoints`·`activeRoutes`) | frontdoor/front-door-overview · frontdoor/front-door-route-matching |
 | EDGE-11 | Front Door 라우트 → 도메인 | WAF 범위의 분모 — 활성 엔드포인트의 활성 라우트가 서비스하는 도메인 = 사용자 지정 도메인 + (기본 도메인 연결을 끄지 않았으면) 엔드포인트 도메인. 라우트가 쓰지 않는 도메인은 개수에서 빼고 패널에만 | `afdEndpoints/routes.properties.customDomains[].id`, `linkToDefaultDomain` | cfg | 칩의 n/m · 패널 | azure.ts | frontdoor/front-door-route-matching · frontdoor/standard-premium/how-to-add-custom-domain |
 
 ## §9 Private Link (PL)

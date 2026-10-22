@@ -1,0 +1,13 @@
+# The dashboard's own namespace — created by a cluster admin before the first sync (it is not in the chart: GitOps
+# tools usually own namespaces at a lower layer). Pod Security "restricted": the pod already complies (65532, no
+# privilege escalation, read-only root, drop ALL, RuntimeDefault seccomp).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aud-dashboard
+  labels:
+    app.kubernetes.io/part-of: azure-unified-dashboard
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

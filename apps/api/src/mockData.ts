@@ -73,6 +73,8 @@ export const mockArchitectureGraph: ArchitectureGraph = {
       id: FD, kind: "frontDoor", name: "fd-sample", azureId: FD, location: "global", resourceGroup: "rg-sample",
       // Sample WAF coverage (EDGE-10): one domain blocks, one only detects — example.com names only
       metadata: {
+        // one enabled endpoint with an enabled route: the public entry (EDGE-12)
+        endpoints: 1, activeRoutes: 1,
         waf: {
           state: "partial", counts: { served: 2, prevent: 1, detect: 1, disabled: 0, none: 0, unknown: 0 },
           policies: [

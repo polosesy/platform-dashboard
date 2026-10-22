@@ -73,6 +73,8 @@ const EnvSchema = z.object({
   AUD_PLATFORM_FEDERATION_SUBJECT: z.string().regex(/^system:serviceaccount:[a-z0-9-]+:[a-z0-9.-]+$/, "system:serviceaccount:<namespace>:<name>").optional(),
   /** One JSON audit line per signed-in API request (who · role · connection · route · status), never tokens or IDs */
   AUD_AUDIT_LOG: z.enum(["off", "stdout"]).optional(),
+  /** Team layout of the infrastructure diagram: a writable directory (mounted volume); unset = in memory, lost on restart */
+  AUD_ARRANGEMENT_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)
@@ -137,7 +139,7 @@ const EnvSchema = z.object({
   // Live Diagram — Azure Monitor real integration
   AZURE_LIVE_DIAGRAM_ENABLED: envBool(false),
   AZURE_LIVE_METRICS_CACHE_TTL_MS: z.coerce.number().default(60_000),
-  AZURE_MONITOR_ALERTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
+  AZURE_MONITOR_ALERTS_CACHE_TTL_MS: z.coerce.number().default(30_000),
   AZURE_APP_INSIGHTS_APP_ID: z.string().optional(),
   AZURE_APP_INSIGHTS_CACHE_TTL_MS: z.coerce.number().default(60_000),
 

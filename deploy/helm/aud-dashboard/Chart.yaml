@@ -1,0 +1,11 @@
+# The dashboard in a Kubernetes namespace — one pod (web :3000 + api on 127.0.0.1:4000), workload identity, no
+# secret. Generic: every environment value is a placeholder in values.yaml; a customer's GitOps keeps its own
+# values-<env>.yaml (real IDs, hosts, CIDRs) next to a vendored copy of this chart. No dependencies (offline install).
+# deploy/kubernetes/aud-dashboard.yaml is this chart rendered with values.yaml (scripts/render-k8s.sh, checked by
+# apps/api/test/deployChart.test.ts). Guide: docs/deployment/kubernetes.md
+apiVersion: v2
+name: aud-dashboard
+description: Azure Unified Dashboard (web + api in one pod, workload identity)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

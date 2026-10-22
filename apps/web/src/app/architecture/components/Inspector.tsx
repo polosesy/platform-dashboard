@@ -3,7 +3,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { ArchitectureNode } from "@aud/types";
-import { internetId, locationPath, type ArchDrawEdge, type ArchEdge, type ArchModel, type ArchPlaced } from "@/lib/archModel";
+import { FLOW_UNREACHED, flowPath, internetId, internetOutId, locationPath, type ArchDrawEdge, type ArchEdge, type ArchModel, type ArchPlaced } from "@/lib/archModel";
+import { formatBytes } from "@/lib/format";
+import { maskGuids } from "@/lib/mask";
 import { regionName } from "../utils/toFlow";
 import { useI18n } from "@/lib/i18n";
 import s from "../styles.module.css";
@@ -24,6 +26,8 @@ type Props = {
   filteredOut?: ArchEdge[];
   /** Resource types in the subscriptions that the diagram does not draw (count only) */
   undrawn?: Array<{ type: string; count: number }>;
+  /** Traffic-entry order is on: show why a tile / subnet sits in its column */
+  flow?: boolean;
 };
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
@@ -37,7 +41,7 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 
 const portalUrl = (azureId?: string) => (azureId ? `https://portal.azure.com/#@/resource${azureId}` : null);
 
-export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [], undrawn = [] }: Props) {
+export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [], undrawn = [], flow = false }: Props) {
   const { t } = useI18n();
   const kind = (k: string) => {
     const v = t(`arch.kind.${k}`);
@@ -152,6 +156,63 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
     </section>
   );
 
+  if (sh.shape === "internet" && sh.out) {
+    // Outbound: the NATs subnets leave through first (NET-09); a subnet that a UDR sends to a firewall goes there instead
+    const to = new Set(sh.regions.map(internetOutId));
+    const exits = model.edges.filter((e) => to.has(e.target) && e.kind === "egress" && shownAt.has(e.source));
+    return (
+      <aside className={s.inspector}>
+        <h2 className={s.iTitle}>{t("arch.internetOut")}</h2>
+        <p className={s.iHint}>{t("arch.internetOutHint")}</p>
+        <section className={s.iSection}>
+          <h3>{t("arch.i.exits")} · {exits.length}</h3>
+          <ul className={s.iList}>
+            {exits.map((e) => (
+              <li key={e.id}>
+                <button type="button" className={s.iLink} onClick={() => onSelect(shownAt.get(e.source) ?? e.source)}>{nameOf(e.source)}</button>
+                <span className={s.iDim}>{model.resources.get(e.source)?.publicIps.join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </aside>
+    );
+  }
+
+  if (sh.shape === "site") {
+    const st = model.sites.get(sh.ref);
+    if (!st) return null;
+    return (
+      <aside className={s.inspector}>
+        <h2 className={s.iTitle}>{maskGuids(st.name)}</h2>
+        <p className={s.iKind}>{t(st.lngKnown ? "arch.site.sub" : "arch.site.subUnknown")}</p>
+        <dl className={s.iRows}>
+          <Row k={t("arch.site.prefixes")}><span className={s.mono}>{st.prefixes.join(", ") || "—"}</span></Row>
+          <Row k={t("arch.site.peer")}><span className={s.mono}>{st.peerIp ?? st.fqdn ?? "—"}</span></Row>
+          {st.bgp ? <Row k="BGP">✓</Row> : null}
+          <Row k={t("arch.site.gateway")}>
+            <button type="button" className={s.iLink} onClick={() => onSelect(shownAt.get(st.gatewayId) ?? st.gatewayId)}>{nameOf(st.gatewayId)}</button>
+          </Row>
+        </dl>
+        <section className={s.iSection}>
+          <h3>{t("arch.site.connections", { n: st.connections.length })}</h3>
+          <ul className={s.iList}>
+            {st.connections.map((c) => (
+              <li key={c.name}>
+                <span>{maskGuids(c.name)}{c.protocol ? ` · ${c.protocol}` : ""}{c.nat ? " · NAT" : ""}</span>
+                <span className={c.status.toLowerCase() === "connected" ? s.iDim : s.warnText}>{c.status} · {t("arch.site.statusAt")}</span>
+                {c.ingressBytes != null || c.egressBytes != null ? (
+                  <span className={s.iDim}>{t("arch.site.counters")}: {c.ingressBytes != null ? formatBytes(c.ingressBytes) : "—"} / {c.egressBytes != null ? formatBytes(c.egressBytes) : "—"}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p className={s.iHint}>{t("arch.site.countersHint")}</p>
+        </section>
+      </aside>
+    );
+  }
+
   if (sh.shape === "internet") {
     const from = new Set(sh.regions.map(internetId));
     const entries = model.edges.filter((e) => from.has(e.source) && (e.kind === "ingress" || e.kind === "exposure") && shownAt.has(e.target));
@@ -252,6 +313,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
         {res?.extraSubnets.length ? <Row k={t("arch.i.extraSubnets")}>{res.extraSubnets.map((x) => model.subnets.get(x)?.node.name ?? x).join(", ")}</Row> : null}
       </dl>
       {linkList}
+      {flow ? <FlowWhy model={model} id={id} nameOf={(x) => (x === "internet" ? t("arch.internet") : nameOf(x))} onSelect={(x) => onSelect(shownAt.get(x) ?? x)} /> : null}
       {filteredList}
       <div className={s.iActions}>
         {portal ? <a href={portal} target="_blank" rel="noopener noreferrer" className={s.iAction}>{t("common.openPortal")} ↗</a> : null}
@@ -264,5 +326,43 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
         </details>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * "Why here" in traffic-entry order: the configured inward path that sets the tile's column (lib/archModel flowPath) —
+ * Internet → Front Door → App Gateway → this; a subnet shows the tile that sets its column.
+ */
+function FlowWhy({ model, id, nameOf, onSelect }: { model: ArchModel; id: string; nameOf: (id: string) => string; onSelect: (id: string) => void }) {
+  const { t } = useI18n();
+  const subnet = model.subnets.get(id);
+  // A subnet's column = its earliest tile
+  const lead = subnet ? [...subnet.resources].filter((r) => model.flowRank.has(r)).sort((a, b) => model.flowRank.get(a)! - model.flowRank.get(b)!)[0] : id;
+  if (!subnet && !model.resources.has(id)) return null;
+  const rank = lead ? model.flowRank.get(lead) : undefined;
+  const path = lead ? flowPath(model, lead) : [];
+  const step = rank === undefined ? null : rank >= FLOW_UNREACHED ? rank - FLOW_UNREACHED + 1 : rank;
+  return (
+    <section className={s.iSection}>
+      <h3>{t("arch.why.title")}</h3>
+      {rank === undefined ? (
+        <p className={s.iDim}>{t(subnet ? "arch.why.subnetNone" : "arch.why.none")}</p>
+      ) : (
+        <>
+          <p className={s.iDim}>
+            {subnet && lead ? `${t("arch.why.subnet", { name: nameOf(lead) })} · ` : ""}
+            {rank >= FLOW_UNREACHED ? t("arch.why.internal", { n: step! }) : t("arch.why.step", { n: step! })}
+          </p>
+          <ol className={s.iPath}>
+            {path.map((x, i) => (
+              <li key={x}>
+                {x === "internet" || x === lead ? <span>{nameOf(x)}</span> : <button type="button" className={s.iLink} onClick={() => onSelect(x)}>{nameOf(x)}</button>}
+                {i < path.length - 1 ? <span aria-hidden> → </span> : null}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+    </section>
   );
 }

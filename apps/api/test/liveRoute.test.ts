@@ -303,3 +303,46 @@ test("segmentHitsRect: touching an edge is not a hit; through a corner, crossing
   assert.equal(R.segmentHitsRect([2, 2], [3, 3], r), true, "inside");
   assert.equal(R.segmentHitsRect([12, 0], [12, 10], r), false);
 });
+
+// ── v13: a site level with its VPN gateway; Internet | Front Door | origin LB in one row of the inbound lane ──
+const nd = (id: string, extra: Partial<DiagramNodeSpec> = {}): DiagramNodeSpec => ({ id, label: id, icon: "vm", resourceKind: "vm", bindings: {}, ...extra });
+const grp = (id: string, icon: "vnet" | "subnet", parentId?: string): DiagramNodeSpec => nd(id, { icon, nodeType: "group", parentId, resourceKind: icon });
+const ed = (source: string, target: string, extra: Partial<DiagramEdgeSpec> = {}): DiagramEdgeSpec => ({ id: `${source}->${target}`, source, target, bindings: {}, ...extra });
+const cyR = (r: { y: number; h: number }) => r.y + r.h / 2;
+
+test("S2S: an on-premises site's card centre is its VPN gateway's centre — the line is straight", () => {
+  const nodes = [grp("vnet", "vnet"), grp("snet-gw", "subnet", "vnet"), grp("snet-app", "subnet", "vnet"),
+    nd("vgw", { icon: "vpnGateway" as DiagramNodeSpec["icon"], resourceKind: "vnetGateway", parentId: "snet-gw" }),
+    nd("vm1", { parentId: "snet-app" }), nd("vm2", { parentId: "snet-app" }),
+    nd("site-a", { icon: "onPremSite" as DiagramNodeSpec["icon"], resourceKind: "onPremSite" })];
+  const edges = [ed("vgw", "site-a", { edgeKind: "hybrid" })];
+  const lay = L.liveLayout({ id: "t", name: "t", nodes, edges } as DiagramSpec);
+  assert.ok(Math.abs(cyR(lay.abs.get("site-a")!) - cyR(lay.abs.get("vgw")!)) < 0.5, `${cyR(lay.abs.get("site-a")!)} vs ${cyR(lay.abs.get("vgw")!)}`);
+  const r = R.routeEdges(lay, edges).get("vgw->site-a")!;
+  const pts = r.kind === "step" ? R.stepPolyline(r, lay.abs.get("vgw")!, lay.abs.get("site-a")!) : R.routePoints(r, lay.abs.get("vgw")!, lay.abs.get("site-a")!);
+  assert.equal(new Set(pts.map((p) => Math.round(p[1]))).size, 1, JSON.stringify(pts));
+});
+
+test("inbound lane: Internet | Front Door | its origin LB, the Front Door level with the LB; no line crosses a card", () => {
+  const nodes = [grp("vnet", "vnet"), grp("snet-app", "subnet", "vnet"), nd("vm1", { parentId: "snet-app" }), nd("vm2", { parentId: "snet-app" }),
+    nd("lb-ips", { icon: "lb", resourceKind: "lb", subResources: [{ id: "lb-pip", kind: "publicIP", label: "lb-pip", endpoint: "203.0.113.40" }] as DiagramNodeSpec["subResources"] }),
+    nd("afd", { icon: "frontDoor", resourceKind: "frontDoor" }),
+    nd("internet-in-vnet", { icon: "internet", resourceKind: "internet", metadata: { direction: "ingress" } })];
+  const edges = [
+    ed("lb-ips", "vm1", { edgeKind: "routes" }), ed("lb-ips", "vm2", { edgeKind: "routes" }),
+    ed("afd", "lb-ips", { edgeKind: "routes" }),
+    ed("internet-in-vnet", "lb-ips", { edgeKind: "network", flowType: "ingress" }), ed("internet-in-vnet", "afd", { edgeKind: "network", flowType: "ingress" }),
+  ];
+  const lay = L.liveLayout({ id: "t", name: "t", nodes, edges } as DiagramSpec);
+  const at = (id: string) => lay.abs.get(id)!;
+  assert.ok(at("internet-in-vnet").x < at("afd").x && at("afd").x < at("lb-ips").x, "left → right: Internet, Front Door, LB");
+  assert.ok(Math.abs(cyR(at("afd")) - cyR(at("lb-ips"))) < 0.5, "Front Door level with its origin");
+  const routes = R.routeEdges(lay, edges);
+  const afdLine = R.stepPolyline(routes.get("afd->lb-ips")!, at("afd"), at("lb-ips"));
+  assert.equal(new Set(afdLine.map((p) => Math.round(p[1]))).size, 1, "Front Door → LB is a straight line");
+  for (const e of edges) {
+    const r = routes.get(e.id)!;
+    const hit = R.firstHit(R.routePoints(r, at(e.source), at(e.target)), cardRects(lay), new Set([e.source, e.target]));
+    assert.equal(hit, null, `${e.id} crosses ${hit}`);
+  }
+});

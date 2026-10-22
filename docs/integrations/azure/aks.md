@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-19
+covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts]
+---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)
 
 > **대상**: 플랫폼 관리자, 고객 테넌트 관리자·보안 검토자 · **소요 시간**: 30분(클러스터당) · **필요 권한**: 클러스터 리소스의 역할 할당 권한(Owner / User Access Administrator) + 클러스터 RBAC 관리(GitOps 또는 `cluster-admin`)

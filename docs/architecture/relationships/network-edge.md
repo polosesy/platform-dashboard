@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-15
+---
 # 네트워크 경계·연결 — Azure 리소스 관계 사전
 > 대상: 구성도·라이브 다이어그램 코드를 고치는 개발자, 네트워크 경계를 검토하는 운영자·보안 담당자, Azure 네트워크를 처음 익히는 사람
 > 근거: Azure REST API 최신 스펙(파일별 최신 stable, stable이 없으면 최신 preview) + providers API + 실제 테넌트 교차 검증 (2026-10-15)

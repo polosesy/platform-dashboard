@@ -1,0 +1,48 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: aud-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "1") | nindent 2 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.parentRef.name }}
+      namespace: {{ .Values.gateway.parentRef.namespace }}
+  hostnames: [{{ .Values.host | quote }}]
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+          {{- with .Values.gateway.frontDoorId }}
+          # Only through this Front Door (its WAF) — a direct request to the gateway gets 404
+          headers: [{ type: Exact, name: X-Azure-FDID, value: {{ . | quote }} }]
+          {{- end }}
+      backendRefs: [{ name: aud-dashboard, port: 80 }]
+{{- end }}
+{{- if .Values.healthCheckPolicy.enabled }}
+---
+apiVersion: alb.networking.azure.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: aud-dashboard-hc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  {{- include "aud.wave" (dict "root" . "wave" "1") | nindent 2 }}
+spec:
+  targetRef: { group: "", kind: Service, name: aud-dashboard, namespace: {{ .Release.Namespace }} }
+  default:
+    interval: 10s
+    timeout: 5s
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+    port: 3000
+    http:
+      host: localhost
+      path: /readyz
+      match: { statusCodes: [{ start: 200, end: 299 }] }
+{{- end }}

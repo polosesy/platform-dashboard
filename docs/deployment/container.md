@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-ops
+last-verified: 2026-10-22
+covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts]
+---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
 
 > **대상**: 플랫폼 운영자(온프레미스 서버), 고객 클러스터 담당자 · **소요 시간**: 30분(이미지 빌드 포함) · **필요한 것**: Docker Engine 24+ (Compose v2), 홈 테넌트 앱 등록 2개(웹 SPA·API), 플랫폼 신원 인증서
@@ -59,7 +65,20 @@ docker compose ps                                              # pod·api·web·
 
 ## 5. 설정 — 작업 PC에서 원격으로 + 로컬 브라우저로 테스트 (SSH 터널)
 
-서버에 접속해 손으로 명령을 치지 않고, **작업 PC**에서 [`scripts/onprem.sh`](../../scripts/onprem.sh) 하나로 소스 전송 → 서버 빌드 → 기동 → 터널까지 합니다. 서버 쪽은 [`deploy/docker/onprem-remote.sh`](../../deploy/docker/onprem-remote.sh)가 sudo로 실행됩니다.
+**소스는 작업 PC에만 있습니다.** 작업 PC에서 [`scripts/onprem.sh`](../../scripts/onprem.sh) 하나로 빌드 → 기동 → 터널까지 하고, 서버에는 실행에 필요한 것(`~/aud-runtime`)만 남습니다. 서버에서 직접 운영할 때는 거기 설치되는 [`audctl`](../../deploy/docker/audctl)을 씁니다(`sudo ~/aud-runtime/audctl status`).
+
+```
+작업 PC (소스·git)                                   온프렘 서버
+scripts/onprem.sh deploy ── tar 스트림(SSH) ──▶ ~/.aud-build.XXXXXX (0700, 임시)
+                                                  │ sudo audctl build → docker build → aud-dashboard:<tag>
+                                                  │ compose.yaml·nginx.conf·audctl → ~/aud-runtime
+                                                  └ 임시 폴더 삭제 (trap — 실패·Ctrl-C에도)
+                         ── sudo audctl up <tag> ─▶ ~/aud-runtime: compose up → readyz 확인 → 옛 이미지 정리
+```
+
+> **5살 비유**: 예전엔 서버에 **요리책(소스)**을 통째로 두고 요리했어요. 이제는 요리책은 집(작업 PC)에만 두고, 서버 부엌에 잠깐 빌려줬다가 **요리(이미지)가 끝나면 바로 회수**해요. 서버에는 완성된 요리와 **리모컨(audctl)**만 남아서, 서버에서도 리모컨으로 켜고·끄고·이전 요리로 되돌릴 수 있어요.
+
+개발 PC에 Docker 엔진이 없어서 빌드는 서버에서 하지만, 빌드 재료는 임시 폴더(소유자만 읽기)에 몇 분만 있다가 지워집니다. 빌드 머신(Docker 엔진)이 생기면 거기서 빌드해 `docker save | ssh … docker load`로 이미지만 보내는 방식으로 바꿀 수 있습니다(서버에 빌드 재료가 아예 가지 않음).
 
 > **PowerShell에서는** `.sh`를 직접 실행할 수 없습니다("'onprem.sh' 프로그램을 실행하지 못했습니다"). [`scripts\onprem.ps1`](../../scripts/onprem.ps1)이 Git for Windows의 bash로 같은 스크립트를 실행합니다 — 아래 `scripts/onprem.sh <명령>`은 PowerShell에서 `.\scripts\onprem.ps1 <명령>`으로 읽으세요(WSL의 `bash`는 경로·SSH 키가 달라 쓰지 않음).
 
@@ -85,7 +104,7 @@ AUD_LOCAL_PORT=3000
 **2) 배포** — 처음엔 **예시 데이터 모드**(서버에 비밀 값 없음, 로그인 꺼짐)
 
 ```bash
-scripts/onprem.sh deploy        # push(추적 + 커밋 안 된 새 파일, gitignore 제외) → build(서버) → up(예시 설정 자동 생성) → 준비 확인
+scripts/onprem.sh deploy        # 임시 폴더로 전송(추적 + 커밋 안 된 새 파일, gitignore 제외) → build(서버) → 임시 폴더 삭제 → up(예시 설정 자동 생성) → 준비 확인
 scripts/onprem.sh status        # pod·api·web healthy, readyz {"ok":true}
 ```
 
@@ -101,7 +120,7 @@ scripts/onprem.sh tunnel        # 그대로 둔 채(Ctrl-C로 닫음) 브라우�
 
 ```bash
 scripts/onprem.sh env           # api.env·web.env(+ connections.json) → 서버 ~/aud-runtime (600, 값은 화면에 안 나옴)
-scripts/onprem.sh up            # 새 설정으로 재기동
+scripts/onprem.sh restart       # 새 설정으로 재기동
 ```
 
 | 옮기는 것 | 옮기지 않는 것 (이유) |
@@ -114,13 +133,34 @@ scripts/onprem.sh up            # 새 설정으로 재기동
 
 **5) 운영**
 
+작업 PC의 `scripts/onprem.sh <명령>`과 서버의 `sudo ~/aud-runtime/audctl <명령>`은 같은 일을 합니다(작업 PC 쪽이 SSH로 audctl을 부름).
+
 | 명령 | 하는 일 |
 |---|---|
-| `scripts/onprem.sh logs api 200` | api 로그 끝 200줄 (`web`·`pod` 가능) |
-| `scripts/onprem.sh down` | 중지·삭제(설정 `~/aud-runtime`은 남음) |
-| `scripts/onprem.sh deploy` | 코드 갱신 → 새 이미지(태그 = 커밋, 변경 있으면 `-dirty`) → 재기동 |
+| `deploy` (작업 PC만) | 코드 갱신 → 새 이미지(태그 = 커밋, 변경 있으면 `<sha>-dirty-<UTC 시각>`) → 재기동 |
+| `status` | 지금·이전 이미지 태그, 컨테이너 상태, readyz |
+| `logs api 200 [-f]` | api 로그 끝 200줄 (`web`·`pod` 가능, `-f` 따라가기) |
+| `restart [api\|web]` | 재기동(설정 파일 바꾼 뒤) |
+| `rollback [tag]` | 이전 이미지로 되돌림(다시 하면 새 이미지로 — 둘 사이를 오감) |
+| `images` · `version` | 서버의 우리 이미지 목록 · 지금/이전 이미지 생성 시각 |
+| `up [tag]` · `down` | 기동 · 중지(설정 `~/aud-runtime`은 남음) |
 
-서버 디렉터리: 소스 `~/aud-dashboard`(전송 때마다 교체) · 실행 설정 `~/aud-runtime`(api.env·web.env 600, config/, .image-tag — 유지). compose는 `--project-directory ~/aud-runtime`로 실행됩니다.
+이미지 정리: 기동이 성공하면 **우리 태그만**(`aud-dashboard:<sha>[-dirty…]`) 최신 3개 + 지금·이전을 남기고 지웁니다(`AUD_KEEP_IMAGES`). 다른 팀 이미지가 있는 서버라 `docker image prune`·`system prune`은 쓰지 않습니다.
+
+**서버 디렉터리** — `~/aud-runtime`(700, 소스 없음):
+
+| 파일 | 내용 |
+|---|---|
+| `audctl` | 운영 스크립트(빌드마다 갱신) |
+| `compose.yaml` · `nginx.conf` | 실행 구성(빌드마다 갱신) |
+| `.env` | `AUD_IMAGE`·`AUD_HTTP_PORT` — `cd ~/aud-runtime && sudo docker compose ps`도 audctl 없이 동작 |
+| `.image-tag` · `.image-tag.prev` | 지금·이전 이미지(되돌리기용) |
+| `api.env` · `web.env` (600) · `config/` · `tls/` | 설정(`scripts/onprem.sh env`가 씀) |
+| `state/arrangements` (65532) | 팀 배치(유일한 쓰기 마운트) |
+
+**예전 방식에서 옮기기(한 번)**: 새 `deploy`로 `audctl`이 설치된 뒤 `scripts/onprem.sh cleanup-source` — 예전 소스 `~/aud-dashboard`를 지웁니다(내 소유의 일반 폴더이고 `.source-sha`·`compose.yaml`이 있을 때만, sudo 없이). 실행 중인 컨테이너는 compose 프로젝트 이름(`aud-dashboard`)이 같아 그대로 이어받습니다.
+
+**남는 흔적**: BuildKit 빌드 캐시(`/var/lib/docker`, root만 읽기)에는 빌드 단계의 파일이 캐시 정리 전까지 남습니다. 공용 서버에서 `docker builder prune`은 다른 팀 캐시도 지우므로 쓰지 않습니다 — 완전히 없애야 하면 전용 빌더(`docker buildx create --name aud` → `buildx build --builder aud --load` → `buildx prune --builder aud -af`)를 씁니다.
 
 **6) VS Code로 서버 열기 (Remote-SSH)** — 작업 PC의 `~/.ssh/config`에 별칭을 하나 두면 VS Code의 *Remote-SSH: Connect to Host…*에서 그 이름으로 접속합니다(확장 `ms-vscode-remote.remote-ssh`, 플랫폼 Linux).
 
@@ -152,7 +192,7 @@ Host aud-onprem
 
 ## 7. 수집 데이터
 
-개발 실행과 같습니다 — [`../integrations/azure/data-collected.md`](../integrations/azure/data-collected.md). 컨테이너가 쓰는 디스크는 tmpfs뿐이고, 캐시·라이브 다이어그램은 메모리에 있어 재시작하면 사라집니다.
+개발 실행과 같습니다 — [`../integrations/azure/data-collected.md`](../integrations/azure/data-collected.md). 컨테이너가 쓰는 디스크는 tmpfs와 팀 배치 쓰기 마운트(`state/arrangements` → `AUD_ARRANGEMENT_DIR=/var/lib/aud/arrangements`, 구독별 배치 JSON)뿐이고, 캐시·라이브 다이어그램은 메모리에 있어 재시작하면 사라집니다.
 
 ## 8. 확인
 
@@ -184,7 +224,7 @@ Host aud-onprem
 
 ## 12. AKS로 옮길 때 (다음 단계)
 
-같은 이미지를 쓰고 바뀌는 것은 실행 설정뿐입니다 — 참고 매니페스트 [`deploy/kubernetes/`](../../deploy/kubernetes/) (`deployment.yaml`·`ciliumnetworkpolicy.yaml`).
+같은 이미지를 쓰고 바뀌는 것은 실행 설정뿐입니다 — 절차는 [kubernetes.md](./kubernetes.md), 원본은 Helm 차트 [`deploy/helm/aud-dashboard`](../../deploy/helm/aud-dashboard/)(평문 매니페스트 [`deploy/kubernetes/`](../../deploy/kubernetes/)는 그 렌더 결과).
 
 | 항목 | 온프레미스 | AKS |
 |---|---|---|

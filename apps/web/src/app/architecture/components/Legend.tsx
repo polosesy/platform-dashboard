@@ -6,7 +6,7 @@ import { EDGE_STYLE } from "../utils/toFlow";
 import s from "../styles.module.css";
 
 /** Boundaries, line kinds and badges — line samples come from the same style table as the canvas. */
-export function Legend({ open, onToggle, showContext = false }: { open: boolean; onToggle: () => void; showContext?: boolean }) {
+export function Legend({ open, onToggle, showContext = false, flow = false }: { open: boolean; onToggle: () => void; showContext?: boolean; flow?: boolean }) {
   const { t } = useI18n();
   return (
     <div className={s.legend}>
@@ -35,7 +35,7 @@ export function Legend({ open, onToggle, showContext = false }: { open: boolean;
               );
             })}
           </ul>
-          <p className={s.legendNote}>{t("arch.legendNote")} {t("arch.legendFocus")}</p>
+          <p className={s.legendNote}>{t("arch.legendNote")} {t("arch.legendFocus")}{flow ? ` ${t("arch.legendFlow")}` : ""}</p>
         </div>
       ) : null}
     </div>

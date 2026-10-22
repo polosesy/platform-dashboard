@@ -9,7 +9,7 @@
 // ──────────────────────────────────────────────────────────────
 
 import type { ArchDrawEdge, ArchLayout, ArchPlaced } from "./archModel";
-import { EDGE_LOOK } from "./archStyle";
+import { EDGE_LOOK, lookOf } from "./archStyle";
 import { UI, VIZ, hex, type UiColor, type VizColor } from "./palette";
 import { maskGuids } from "./mask";
 
@@ -64,10 +64,12 @@ const TILE_STYLE: Record<string, string> = {
   pill: `rounded=1;arcSize=16;align=left;verticalAlign=middle;spacingLeft=8;fontSize=11;strokeWidth=2;strokeColor=${hex("accent")};fillColor=${tint("accent", 0.08)};`,
   ghost: `rounded=1;arcSize=10;align=left;verticalAlign=middle;spacingLeft=8;fontSize=10;dashed=1;fillColor=#FFFFFF;strokeColor=${tint("ink", 0.3)};opacity=80;`,
   internet: `ellipse;align=center;verticalAlign=middle;fontSize=11;fontStyle=1;strokeColor=${hex("danger")};fillColor=${tint("danger", 0.06)};`,
+  internetOut: `ellipse;align=center;verticalAlign=middle;fontSize=11;fontStyle=1;strokeColor=${hex("egress")};fillColor=${tint("egress", 0.08)};`,
+  site: `rounded=1;arcSize=10;align=left;verticalAlign=middle;spacingLeft=8;fontSize=11;fillColor=#FFFFFF;strokeColor=${hex("accent-2")};strokeWidth=1.5;`,
 };
 
 function vertexStyle(sh: ArchPlaced, o: DrawioOptions): string {
-  let st = BASE + (sh.shape === "box" ? BOX_STYLE[sh.type] ?? BOX_STYLE.lane : TILE_STYLE[sh.shape]);
+  let st = BASE + (sh.shape === "box" ? BOX_STYLE[sh.type] ?? BOX_STYLE.lane : TILE_STYLE[sh.shape === "internet" && sh.out ? "internetOut" : sh.shape]);
   if (sh.shape === "tile" && o.context?.has(sh.ref)) st += "dashed=1;opacity=55;";
   if (o.dimmed?.has(sh.id)) st += "opacity=35;";
   return st;
@@ -77,13 +79,16 @@ function vertexStyle(sh: ArchPlaced, o: DrawioOptions): string {
 const SIDE_XY: Record<ArchDrawEdge["sourceSide"], [number, number]> = { l: [0, 0.5], r: [1, 0.5], t: [0.5, 0], b: [0.5, 1] };
 
 function edgeStyle(e: ArchDrawEdge): string {
-  const l = EDGE_LOOK[e.kind];
+  const l = lookOf(e.kind, e.state);
   const [ex, ey] = SIDE_XY[e.sourceSide], [nx, ny] = SIDE_XY[e.targetSide];
-  // The route of the screen (lib/archRoute): its sides and bend points — draw.io keeps them when shapes move
-  let st = `edgeStyle=orthogonalEdgeStyle;rounded=1;html=0;strokeColor=${hex(l.color)};strokeWidth=${l.width};exitX=${ex};exitY=${ey};exitPerimeter=0;entryX=${nx};entryY=${ny};entryPerimeter=0;`;
+  // The route of the screen (lib/archRoute, or the user's line — lib/archArrange): its sides and bend points
+  const shape = e.manual === "straight" ? "edgeStyle=none;" : e.manual === "curve" ? "edgeStyle=none;curved=1;" : "edgeStyle=orthogonalEdgeStyle;rounded=1;";
+  let st = `${shape}html=0;strokeColor=${hex(l.color)};strokeWidth=${l.width};exitX=${ex};exitY=${ey};exitPerimeter=0;entryX=${nx};entryY=${ny};entryPerimeter=0;`;
   if (l.alpha < 1) st += `opacity=${Math.round(l.alpha * 100)};`;
   if (l.dash) st += `dashed=1;dashPattern=${l.dash};`;
   st += l.arrow ? "endArrow=block;endFill=1;" : "endArrow=none;";
+  // Peering: draw.io's own double line (a pipe), like the screen's two rails
+  if (e.kind === "peering" && (e.state ?? "Connected").toLowerCase() === "connected") st = st.replace(`strokeWidth=${l.width};`, "shape=link;width=4;strokeWidth=1.5;");
   return st;
 }
 

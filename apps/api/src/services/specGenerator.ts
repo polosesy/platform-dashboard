@@ -144,7 +144,9 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
   appGateway: {
     requests: mon("TotalRequests", "total"),
     healthyHosts: mon("HealthyHostCount", "avg"),
-    unhealthyHosts: mon("UnhealthyHostCount", "avg"),
+    // Worst minute of the last 5 (Maximum over one PT5M bucket): the usual alert rule "UnhealthyHostCount > 0 over 5 min"
+    // fires on a single unhealthy minute — the newest 1-minute average alone hid it a minute later
+    unhealthyHosts: mon("UnhealthyHostCount", "max", { window: "PT5M" }),
     backend: derived("share", "healthyHosts", "unhealthyHosts"),
     failedReq: mon("FailedRequests", "total"),
     errorRate: derived("ratio", "failedReq", "requests"),
@@ -1709,6 +1711,8 @@ export async function generateDiagramSpec(
   const diagramNodes: DiagramNodeSpec[] = [];
   // Pending subnet → NAT GW association edges — processed after makeEdge is available
   const pendingNatGwAssocEdges: Array<{ subnetShortId: string; ngwShortId: string }> = [];
+  /** Subnets with a route table (their UDR lines are made once every card has an id) */
+  const pendingUdrSubnets: Array<{ subnetShortId: string; origId: string }> = [];
   let cursorY = 40;
   // Track NAT GW diagramNodes already added — one per unique NAT GW (deduplicate)
   const addedNatGwShortIds = new Set<string>();
@@ -1753,6 +1757,11 @@ export async function generateDiagramSpec(
       const attachedNatGwOrigId = subnetToNatGw.get(sub.node.id);
       const subnetMeta: Record<string, string> = {};
       if (sub.node.endpoint) subnetMeta.prefix = sub.node.endpoint;
+      // The route table, each next hop resolved (azure.ts resolveSubnetRoutes) — the subnet panel and the UDR lines
+      if (sub.node.metadata?.udrRoutes && typeof sub.node.metadata.udrRoutes === "object") {
+        subnetMeta.udrRoutes = JSON.stringify(sub.node.metadata.udrRoutes);
+        pendingUdrSubnets.push({ subnetShortId: sub.shortId, origId: sub.node.id });
+      }
       // Embed NAT GW badge info in subnet metadata so GroupNode can render it
       if (attachedNatGwOrigId) {
         const natGwNode = graph.nodes.find((n) => n.id === attachedNatGwOrigId);
@@ -2580,6 +2589,32 @@ export async function generateDiagramSpec(
     diagramEdges.push(makeEdge(subnetShortId, ngwShortId, "subnet", "NAT Gateway", undefined, "natgw-association", undefined, "egress"));
   }
 
+  // Subnet → the next hop its route table names (SEC-04 appliance by ipMatch, NET-07 VNet gateway): one line per
+  // (subnet, card) with every prefix that goes there. Configuration — not traffic, not effective routes
+  {
+    const shortByLower = new Map([...idMap].map(([orig, sid]) => [orig.toLowerCase(), sid] as const));
+    type R = { prefix: string; nextHopIp?: string; target?: { id: string; kind: string } };
+    for (const { subnetShortId, origId } of pendingUdrSubnets) {
+      const g = graph.nodes.find((n) => n.id === origId);
+      const ur = g?.metadata?.udrRoutes as { routeTable?: { name: string } | null; routes?: R[] } | undefined;
+      const exit = g?.metadata?.egress as { via?: string; targetId?: string } | undefined;
+      const byTarget = new Map<string, { kind: string; prefixes: string[]; ip?: string; origTarget: string }>();
+      for (const r of ur?.routes ?? []) {
+        if (!r.target) continue;
+        const sid = shortByLower.get(r.target.id.toLowerCase());
+        if (!sid || sid === subnetShortId) continue;
+        const cur = byTarget.get(sid) ?? byTarget.set(sid, { kind: r.target.kind, prefixes: [], ...(r.nextHopIp ? { ip: r.nextHopIp } : {}), origTarget: r.target.id.toLowerCase() }).get(sid)!;
+        cur.prefixes.push(r.prefix);
+      }
+      for (const [sid, t] of [...byTarget].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+        const edge = makeEdge(subnetShortId, sid, "subnet", undefined, undefined, "udr-route" as DiagramEdgeKind);
+        const firstExit = !!exit?.targetId && exit.targetId.toLowerCase() === t.origTarget && (exit.via === "appliance" || exit.via === "gateway");
+        edge.route = { routeTable: ur?.routeTable?.name ?? "", prefixes: t.prefixes, ...(t.ip ? { nextHopIp: t.ip } : {}), hop: t.kind === "gateway" ? "gateway" : "appliance", firstExit };
+        diagramEdges.push(edge);
+      }
+    }
+  }
+
   // Dependency-based edges: proximity-scored inference (replaces Cartesian product)
   const existingPairs = new Set<string>();
   for (const e of diagramEdges) {
@@ -2720,6 +2755,9 @@ export async function generateDiagramSpec(
   // 4. Subnets with defaultOutboundAccess=true and no explicit egress → deprecated
   for (const subnetNode of subnetNodes) {
     if (subnetNode.metadata?.defaultOutboundAccess !== "true") continue;
+    // NET-09: a 0.0.0.0/0 UDR (appliance, gateway, drop) comes before default outbound — no "retiring" line then
+    const firstExit = (subnetNode.metadata?.egress as { via?: string } | undefined)?.via;
+    if (firstExit === "appliance" || firstExit === "gateway" || firstExit === "dropped") continue;
     const subnetShortId = idMap.get(subnetNode.id);
     if (!subnetShortId || outboundSourceSet.has(subnetShortId)) continue;
     const hasNatGw = graph.edges.some((e) => {
@@ -2795,6 +2833,8 @@ export async function generateDiagramSpec(
         const pub = fes.filter((f) => f.kind === "public" && f.ruleBound).flatMap((f) => f.listeners);
         if (pub.length) out.publicListeners = JSON.stringify(pub);
         if (Array.isArray(meta.unresolvedBackends) && meta.unresolvedBackends.length) out.unresolvedBackends = JSON.stringify(meta.unresolvedBackends);
+        // Subnets whose UDR names this internal LB as next hop (subnetEgress.ts udrNextHopsToIlb) — lbInbound chip / panel
+        if (meta.udrNextHop && typeof meta.udrNextHop === "object") out.udrNextHop = JSON.stringify(meta.udrNextHop);
         // AGW-08: WAF per rule-bound listener
         if (n.resourceKind === "appGateway") Object.assign(out, wafMetadata(meta.waf as WafCoverage | undefined));
         n.metadata = { ...n.metadata, ...out };
@@ -2943,9 +2983,23 @@ export async function generateDiagramSpec(
   // ── Subnet outbound path (shown as a chip on the subnet header; catalog SEC-07 default outbound access) ──
   // nat > LB outbound rule (SNAT) > default outbound (on / off) > unknown (property not reported; UDR not read yet)
   const snatSources = new Set(outboundSources.filter((s) => s.label === "LB SNAT").map((s) => s.id));
+  const shortOfLower = new Map([...idMap].map(([orig, sid]) => [orig.toLowerCase(), sid] as const));
   for (const sub of diagramNodes) {
     if (sub.icon !== "subnet" || sub.nodeType !== "group") continue;
     const meta = (sub.metadata ??= {});
+    // NET-09 (azure.ts subnetEgress): a 0.0.0.0/0 UDR to an appliance / the gateway, or one that drops, comes first —
+    // an attached NAT gateway is then bypassed
+    const origSub = [...idMap.entries()].find(([, sid]) => sid === sub.id)?.[0];
+    const fx = origSub ? (graph.nodes.find((g) => g.id === origSub)?.metadata?.egress as { via?: string; targetId?: string; evidence?: string; natBypassed?: string } | undefined) : undefined;
+    if (fx && (fx.via === "appliance" || fx.via === "gateway" || fx.via === "dropped" || (fx.via === "unknown" && fx.evidence === "udr"))) {
+      meta.egressVia = fx.via === "unknown" ? "udr-unresolved" : fx.via;
+      const tgt = fx.targetId ? graph.nodes.find((g) => g.id.toLowerCase() === fx.targetId!.toLowerCase()) : undefined;
+      if (tgt) meta.egressName = tgt.name;
+      const tShort = fx.targetId ? shortOfLower.get(fx.targetId.toLowerCase()) : undefined;
+      if (tShort) meta.egressTargetId = tShort;
+      if (fx.natBypassed) meta.egressNatBypassed = "true";
+      continue;
+    }
     if (meta.natGwBadgeId) {
       meta.egressVia = "nat";
       meta.egressName = meta.natGwBadgeLabel ?? "";

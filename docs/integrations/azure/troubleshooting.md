@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-15
+---
 # 문제 해결 — 로그인·연결 오류 코드
 
 > **대상**: 플랫폼 관리자 · 모든 코드는 화면에서 현재 언어의 문장으로 보입니다(원문 AAD 메시지·추적 ID는 보이지 않음).

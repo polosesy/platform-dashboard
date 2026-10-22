@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-22
+---
 # 보안 · FAQ
 
 > **대상**: 보안 검토자, 고객 · **소요 시간**: 읽기 5분
@@ -27,7 +32,7 @@ A. 쓸 수 있습니다. 연결을 `delegated`로 두면 그 연결은 로그인
 A. Azure 쪽 활동 로그에는 연결의 서비스 주체 이름으로 남고, "어느 사용자가 봤는지"는 플랫폼 감사 로그(`AUD_AUDIT_LOG=stdout`, 프로덕션 기본)에 남습니다. stdout을 로그 수집기로 보내세요.
 
 **Q. 비밀 값 대신 관리 ID를 쓸 수 있나요?**
-A. 워크로드 ID 페더레이션(관리 ID → 앱)은 후속 작업입니다. 지금은 인증서를 권장합니다.
+A. 예. 플랫폼은 `AUD_PLATFORM_CREDENTIAL=workloadIdentity`(AKS 사용자 할당 관리 ID), 고객 연결은 `federation: {kind:"kubernetes"}`(고객 앱이 플랫폼 서비스 계정 토큰을 신뢰) — 둘 다 비밀 없음([connect-tenant.md](./connect-tenant.md) B, [kubernetes.md](../../deployment/kubernetes.md)). 온프레미스처럼 OIDC 발급자가 없으면 인증서를 권장합니다.
 
 **Q. 고객이 동의 버튼만 누르는 방식(멀티 테넌트 앱)은?**
 A. 후속 작업입니다. 지금은 Lighthouse(C) 또는 고객 서비스 주체(B)를 씁니다.

@@ -1,7 +1,7 @@
 {
   "name": "fed-common-aud-dashboard",
   "issuer": "<PLATFORM_OIDC_ISSUER_URL>",
-  "subject": "system:serviceaccount:<PLATFORM_NAMESPACE>:<PLATFORM_SERVICE_ACCOUNT>",
+  "subject": "system:serviceaccount:aud-dashboard:aud-dashboard",
   "description": "Azure Unified Dashboard (read-only) - workload identity federation, no secret",
   "audiences": ["api://AzureADTokenExchange"]
 }

@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-15
+---
 # 네트워크 기본 — Azure 리소스 관계 사전
 
 > 대상: VNet·서브넷·NIC(IP 구성)·NSG/ASG·경로 테이블(UDR)·NAT 게이트웨이·공용 IP/접두사·Load Balancer(프런트엔드·풀·규칙·프로브·인바운드 NAT·아웃바운드·Gateway LB)·서비스 엔드포인트(정책)·DDoS·Virtual Network Manager(IPAM)·Network Watcher 흐름 로그 · 근거: Azure REST API 최신 스펙(파일별 최신 stable, stable이 없으면 최신 preview) + providers API + 실제 테넌트 교차 검증 (2026-10-15)
@@ -163,10 +168,7 @@ flowchart LR
   - NET-16: 프로브는 선 상세의 첫 프로브와 `DipAvailability` 바인딩에만 쓰입니다.
 
 **다음에 추가할 것** (우선순위순)
-1. **NET-09 + NET-07 (서브넷 출구 판정)**
-   - 근거 속성: `subnets[].routeTable` ✓ → `routes[].nextHopType`/`addressPrefix`
-   - 현재는 EDGE-01·SEC-07만 보고 판정합니다. 그래서 0.0.0.0/0 → NVA 서브넷이 'NAT 출구'나 '기본 아웃바운드'로 잘못 보일 수 있습니다.
-   - 출구 칩은 우선순위의 첫 번째 하나만 보여 줘야 합니다. 정확성 영향이 가장 큽니다.
+1. ~~**NET-09 + NET-07 (서브넷 출구 판정)**~~ → 구현됨: `apps/api/src/services/subnetEgress.ts`(순수) `resolveSubnetEgress` — UDR 기본 경로(0.0.0.0/0, 같은 다음 홉의 0.0.0.0/1+128.0.0.0/1) → `VirtualAppliance`는 SEC-04 ipMatch(정확히 하나: 방화벽·NVA VM·내부 LB), `VirtualNetworkGateway`·`None`·`VnetLocal` 순 → BGP 전파가 켜져 있고 게이트웨이(자기 VNet 또는 양쪽 플래그가 맞는 허브)가 로컬 네트워크 게이트웨이 `0.0.0.0/0`·`gatewayDefaultSite`면 강제 터널링 → NAT(EDGE-01) → 방화벽 서브넷의 공용 IP → 기본 아웃바운드(SEC-07). 서브넷 메타 `egress`(via·대상·근거·`natBypassed`·`bgpMayOverride`), 첫 출구만. 구성도: NAT는 '송신' 레인(오른쪽) + 오른쪽 '인터넷 (송신)', 출구가 아닌 NAT는 칩 '출구 아님', UDR 출구는 서브넷 → 어플라이언스 점선
 2. **NET-17·NET-18 (인바운드 NAT 규칙 진입 선)**
    - 근거 속성: NIC `loadBalancerInboundNatRules[]` ✓, `inboundNatRules[].frontendIPConfiguration` ✓
    - 인터넷에서 특정 VM의 관리 포트로 바로 들어오는 경로입니다. 보안 검토에서 가장 먼저 찾는 선입니다.

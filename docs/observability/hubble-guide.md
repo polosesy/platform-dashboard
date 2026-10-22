@@ -1,3 +1,9 @@
+---
+status: current
+owner: platform-observability
+last-verified: 2026-10-22
+covers: [apps/api/src/services/hubbleClient.ts, apps/api/src/services/hubbleMerge.ts, apps/api/src/services/aksAccess.ts]
+---
 # Hubble 네트워크 관측 가이드
 
 > AKS Cilium 클러스터에서 Hubble을 통한 네트워크 가시성 확보 방법을 정리한 문서입니다.
@@ -40,7 +46,7 @@ Cilium Hubble은 eBPF 기반 네트워크 관측 도구로, 클러스터 내 모
 ### 데이터 흐름
 
 1. **Web** → `GET /api/hubble/service-map?clusterId=...&timeWindow=5`
-2. **API** → `getKubeconfig()` → K8s Exec API → `hubble observe --output json --last 1000`
+2. **API** → `aksAccess.loadKubeConfig`(연결의 자격 증명 · Entra 토큰, kubelogin 없음) → `assertHubbleExecAllowed`(아래 게이트) → **모든 cilium agent**(노드당 1개)에 K8s Exec `hubble observe --output json --last min(HUBBLE_FLOW_LIMIT, 10000)` → `hubbleMerge.ts`가 관측점·노드·SNAT 중복 제거, 응답 `coverage`(노드 n/m·공통 관측 구간)
 3. **hubbleCollector** → flow 집계 → Service Map/Network/Security 응답 생성
 4. **K8s Service enrichment** → Service/Endpoint 매칭 → Pod 엔드포인트 추가
 
@@ -71,14 +77,16 @@ Cilium Hubble은 eBPF 기반 네트워크 관측 도구로, 클러스터 내 모
 |------|--------|------|
 | `HUBBLE_ENABLED` | `true` | Hubble 기능 활성화 |
 | `HUBBLE_RELAY_NAMESPACE` | `kube-system` | Hubble Relay가 설치된 네임스페이스 |
-| `HUBBLE_RELAY_PORT` | `443` | Relay 서비스 포트 |
-| `HUBBLE_FLOW_LIMIT` | `1000` | 단일 요청 최대 flow 수 |
+| `HUBBLE_RELAY_PORT` | `80` | Relay 서비스 포트 (AKS 밖 대체 경로) |
+| `HUBBLE_FLOW_LIMIT` | `10000` | 요청당 최대 flow 수 |
+| `HUBBLE_EXEC_ENABLED` | 미설정 = 개발 켬·운영 끔 | Pod exec 허용 — 운영은 홈 연결 또는 연결 `aks.hubbleExec` + 클러스터의 [`aud-dashboard-hubble-exec.yaml`](../integrations/azure/templates/aks/aud-dashboard-hubble-exec.yaml) Role까지 세 겹. 꺼져 있으면 501 `hubble_exec_disabled` |
+| `HUBBLE_CACHE_TTL_MS` | `30000` | 응답 캐시 |
 
 ## 6. Cilium 1.17+ (AKS) 특이사항
 
 - CLI: `cilium` → `cilium-dbg`, `hubble` 별도 바이너리 (`/usr/bin/hubble`)
-- 접근: 로컬 소켓 우선 (`/var/run/cilium/hubble.sock`), TLS 불필요
-- Relay: gRPC (port 4245, TLS), K8s Service port 443
+- 접근 순서: ① 모든 노드의 로컬 소켓(`/var/run/cilium/hubble.sock`, TLS 불필요) 팬아웃 + 병합 ② `--server` Relay(AKS 밖 대체) ③ K8s API 프록시로 Relay
+- 한계: 노드당 링 버퍼 4,095건 — 바쁜 노드는 1~3분치. 장기 관측은 흐름 로그
 
 ## 7. K8s Service + Pod Endpoint 표시
 
@@ -111,4 +119,4 @@ Service Map 노드에 K8s Service 정보가 자동으로 매핑됩니다:
 
 ---
 
-*최종 업데이트: 2026-03-26*
+*이력은 git log — 확인 날짜는 문서 머리의 `last-verified`*

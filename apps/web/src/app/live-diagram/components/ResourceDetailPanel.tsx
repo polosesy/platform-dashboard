@@ -11,12 +11,13 @@ import type {
   FaultImpact,
   HealthRule,
   LiveAlert,
+  LiveAlertHistory,
   LiveEdge,
   LiveNode,
   LiveSourceState,
   PowerState,
 } from "@aud/types";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button } from "@/components/ui";
 import { maskGuids } from "@/lib/mask";
 import { shortNamesWithParts } from "@/lib/liveNames";
@@ -24,9 +25,12 @@ import { NameParts } from "./NameParts";
 import { PrivateLinkUsageSection } from "./detail/PrivateLinkUsage";
 import { LbInboundSection } from "./detail/LbInboundSection";
 import { LifecycleSection } from "./detail/LifecycleSection";
+import { evaluationParts, firedMinutes } from "@/lib/liveAlerts";
 import { isFrontendInboundKey } from "@/lib/lbInbound";
 import { PeeringSection } from "./detail/PeeringSection";
 import { HybridSection } from "./detail/HybridSection";
+import { UdrRoutesSection } from "./detail/UdrRoutesSection";
+import { egressText, type EgressInfo } from "./GroupNode";
 import { SpecSection } from "./detail/SpecSection";
 import { WafPanel, WafSummarySection, WAF_METRICS } from "./detail/WafPanel";
 import { cardCells, formatMetric, METRIC_META, sparkDomain } from "@/lib/liveMetricFormat";
@@ -67,6 +71,10 @@ type ResourceDetailPanelProps = {
   liveNode: LiveNode | null;
   alerts: LiveAlert[];
   alertRules: AlertRuleInfo[];
+  /** This resource's alert instances of the last hours (fired and resolved) */
+  alertHistory?: LiveAlertHistory[];
+  /** "failed" = alerts could not be read this round — "no active alerts" would be a guess */
+  alertsState?: LiveSourceState;
   connectedEdges: ConnectedEdge[];
   /** Fault impacts in view (this node may be a source or a neighbour) */
   impacts?: FaultImpact[];
@@ -137,7 +145,7 @@ export function ResourceDetailPanel(props: ResourceDetailPanelProps) {
   return <NodePanel {...props} nodeSpec={nodeSpec} />;
 }
 
-function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, focusPeeringKey, onOpenVnet, onAddVnet, onBack, onClose, onWafSelect }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
+function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHistory = [], alertsState, connectedEdges, impacts = [], alertCount = 0, generatedAt, metricsState, showInferred, usage, usageLoading, onSelectNode, focusPeeringKey, onOpenVnet, onAddVnet, onBack, onClose, onWafSelect }: ResourceDetailPanelProps & { nodeSpec: DiagramNodeSpec }) {
   const { t } = useI18n();
   const ago = useRelativeTime();
   const kind = node.resourceKind ?? node.icon;
@@ -353,10 +361,12 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
                 <span className={styles.dpTwoLineSub}>{ago(a.firedAt)}{a.summary ? ` · ${a.summary}` : ""}</span>
               </div>
             ))}
+            <AlertHistory history={alertHistory} />
             {alertRules.length ? <AlertRules rules={alertRules} /> : null}
           </Section>
         ) : (
-          <StaticSection title={t("detail.alerts")} note={t("live.noAlerts")}>
+          <StaticSection title={t("detail.alerts")} note={t(alertsState === "failed" ? "ld.alerts.unread" : "live.noAlerts")}>
+            <AlertHistory history={alertHistory} />
             {alertRules.length ? <AlertRules rules={alertRules} inline /> : null}
           </StaticSection>
         )}
@@ -427,7 +437,8 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, connect
             {kind !== "lb" && publics.length ? <KV label={t("ld.panel.publicIp")} mono copy={publics[0]!.endpoint}>{publics.map((p) => p.endpoint).join(", ")}</KV> : null}
             {subnetNsgs.map((n) => <KV key={n.id} label={t("ld.panel.subnetNsg")}><button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(n.id)}>{n.label}</button></KV>)}
             {ownNsgs.map((n) => <KV key={n.id} label={t("ld.panel.nicNsg")}><button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(n.id)}>{n.label}</button></KV>)}
-            {egressVia?.egressVia ? <KV label={t("ld.lane.egress")}>{egressVia.egressVia === "nat" ? t("ld.egress.nat", { name: egressVia.egressName ?? "" }) : t(`ld.egress.${egressVia.egressVia}`)}</KV> : null}
+            {egressVia?.egressVia ? <KV label={t("ld.lane.egress")}>{egressText({ via: egressVia.egressVia as EgressInfo["via"], name: egressVia.egressName, natBypassed: egressVia.egressNatBypassed === "true" }, t)}</KV> : null}
+            {kind === "subnet" ? <UdrRoutesSection meta={node.metadata} cardOf={new Map(spec.edges.filter((e) => e.edgeKind === "udr-route" && e.source === node.id).flatMap((e) => (e.route?.prefixes ?? []).map((p) => [p, e.target] as const)))} nameOf={nameOf} onSelectNode={onSelectNode} /> : null}
             {kind === "subnet" ? <KV label={t("ld.panel.cards")}>{spec.nodes.filter((n) => n.parentId === node.id && n.nodeType !== "group").length}</KV> : null}
           </Section>
         ) : null}
@@ -533,14 +544,43 @@ function passes(value: number, r: HealthRule): boolean {
   }
 }
 
+/** Instances of the last hours that are resolved now — a rule that fires and mitigates between polls (flapping)
+ *  is not "no alerts". Active instances are listed above */
+function AlertHistory({ history }: { history: LiveAlertHistory[] }) {
+  const { t, locale } = useI18n();
+  const resolved = history.filter((h) => h.instances.some((i) => i.resolvedAt));
+  if (!resolved.length) return null;
+  const hm = (iso: string) => new Date(iso).toLocaleTimeString(dateLocale(locale), { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className={styles.dpAlertHistory}>
+      <div className={styles.dpAlertHistoryTitle}>{t("ld.alerts.history", { h: resolved[0]!.windowHours })}</div>
+      {resolved.map((h) => (
+        <div key={h.rule} className={styles.dpTwoLine}>
+          <span className={styles.dpTwoLineMain}>{t(`ld.sevNum.${Math.min(4, Math.max(0, h.sev))}`)} (Sev{h.sev}) · {h.rule} · {t(h.active ? "ld.alerts.countActive" : "ld.alerts.countResolved", { n: h.count })}</span>
+          <span className={styles.dpTwoLineSub}>
+            {h.instances.map((i) => {
+              const m = firedMinutes(i);
+              return `${hm(i.firedAt)} → ${i.resolvedAt ? `${hm(i.resolvedAt)} (${t("ld.alerts.minutes", { n: m ?? 0 })})` : t("ld.alerts.stillFired")}`;
+            }).join(" · ")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AlertRules({ rules, inline }: { rules: AlertRuleInfo[]; inline?: boolean }) {
   const { t } = useI18n();
-  const body = rules.map((r) => (
-    <div key={r.id} className={styles.dpTwoLine}>
-      <span className={styles.dpTwoLineMain}>{t(`ld.sevNum.${Math.min(4, Math.max(0, r.severity))}`)} (Sev{r.severity}) · {r.name}{!r.enabled ? ` · ${t("detail.disabled")}` : ""}</span>
-      {r.condition ? <span className={styles.dpTwoLineSub}>{r.condition}</span> : null}
-    </div>
-  ));
+  const body = rules.map((r) => {
+    const how = evaluationParts(r.evaluation).map((p) => t(p.key, p.vars)).join(" · ");
+    return (
+      <div key={r.id} className={styles.dpTwoLine}>
+        <span className={styles.dpTwoLineMain}>{t(`ld.sevNum.${Math.min(4, Math.max(0, r.severity))}`)} (Sev{r.severity}) · {r.name}{!r.enabled ? ` · ${t("detail.disabled")}` : ""}</span>
+        {r.condition ? <span className={styles.dpTwoLineSub}>{r.condition}</span> : null}
+        {how ? <span className={styles.dpTwoLineSub} title={t("ld.rule.howHint")}>{how}</span> : null}
+      </div>
+    );
+  });
   if (inline) {
     return (
       <details className={styles.dpInlineDetails}>

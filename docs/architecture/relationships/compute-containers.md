@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-architecture
+last-verified: 2026-10-16
+---
 # 컴퓨팅·컨테이너 — Azure 리소스 관계 사전
 
 > 대상: VM·디스크·이미지·갤러리·VMSS·AKS·Container Apps·ACI·ACR를 그리거나 검토하는 개발자와 운영자, Azure를 새로 배우는 사람

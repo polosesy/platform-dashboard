@@ -944,3 +944,288 @@
   border: 1.5px dashed var(--border-strong);
   opacity: 0.7;
 }
+
+/* ── Manual editing (lib/archArrange) ── */
+.editBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(var(--accent-rgb), 0.45);
+  border-radius: var(--radius-md, 10px);
+  background: rgba(var(--accent-rgb), 0.04);
+  font-size: 12.5px;
+}
+
+.editBadge {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.editNote {
+  color: var(--muted);
+  min-width: 0;
+}
+
+.editLines {
+  flex-basis: 100%;
+}
+
+.editLines ul {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.editLines li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas[data-edit="connect"] :global(.react-flow__node) {
+  cursor: crosshair;
+}
+
+/* Connect: the picked source, shapes it relates to (✓) and shapes it does not (✕ — never colour alone) */
+.connectFrom {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.connectOk {
+  outline: 2px solid rgba(var(--success-rgb), 0.75);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.connectNo {
+  opacity: 0.55;
+}
+
+.connectNo::after {
+  content: "✕";
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff; /* white glyph on the danger disc */
+  background: var(--danger);
+  pointer-events: none;
+}
+
+/* Arrange: the container the drop lands in, a refused drop, the shapes being moved */
+.dropTarget {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.dropRefused {
+  outline: 2px dashed var(--danger);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.dragging {
+  opacity: 0.6;
+  z-index: 1000 !important;
+}
+
+/* Arrange: what can move (a grip, grab cursor) and what is fixed (no grip, "not allowed") */
+.movable {
+  cursor: grab;
+}
+
+/* Tiles: the grip shows on hover / selection only, in the tile's top-left padding — never over the name or badges */
+.movable::before {
+  content: "⠿";
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  z-index: 3;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.movable:hover::before,
+.movable.selected::before {
+  opacity: 1;
+}
+
+/* Boxes: the grip has its own slot at the start of the header (BoxNode .grip) */
+.movable:global(.react-flow__node-archBox)::before {
+  content: none;
+}
+
+.grip {
+  flex: 0 0 10px;
+  width: 10px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--accent);
+  visibility: hidden;
+  user-select: none;
+}
+
+.movable .grip {
+  visibility: visible;
+}
+
+/* Subnet header rows 2+ (lib/archModel subnetHead): 18px each, under the name (after the grip slot) */
+.boxHeadRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px 0 26px;
+  pointer-events: auto;
+}
+
+.boxHeadRow .badge,
+.boxHead .badge {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.boxHeadName {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.fixed {
+  cursor: not-allowed;
+}
+
+/* Connect, before a pick: shapes with no configured partner are faded */
+.connectNone {
+  opacity: 0.35;
+  cursor: not-allowed !important;
+}
+
+/* The selected manual line */
+.lineSelected :global(.react-flow__edge-path) {
+  stroke-width: 4px !important;
+  filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.55));
+}
+
+.editLayer text {
+  font-family: inherit;
+  user-select: none;
+}
+
+.editTargets {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.editTargetsTitle {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.editTarget {
+  appearance: none;
+  border: 1px solid rgba(var(--success-rgb), 0.55);
+  background: rgba(var(--success-rgb), 0.06);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.editTarget:hover,
+.editTarget:focus-visible {
+  background: rgba(var(--success-rgb), 0.14);
+  outline: none;
+}
+
+.fileBtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--panel-solid);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fileBtn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.editTeam {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+/* The diagram slid off the canvas (or the viewport broke): a chip that fits it back — never automatic */
+.viewLost {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.viewLostBtn {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: var(--accent);
+  /* white text on the accent button (same as the UI kit's primary buttons) */
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* "Why here": the inward path, one step per item */
+.iPath {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}

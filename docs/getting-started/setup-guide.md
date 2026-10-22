@@ -1,483 +1,92 @@
-# Azure Unified Dashboard — Setup & Integration Guide
+---
+status: current
+owner: platform
+last-verified: 2026-10-22
+covers: [.env.example, package.json, apps/api/src/env.ts, apps/web/src/lib/runtimeConfig.ts]
+---
+# 개발 환경 설정 — 빠른 시작
 
-## 1. Quick Start (Demo Mode)
+로컬 PC에서 API(:4000)와 웹(:3000)을 띄워 화면을 보고, 로그인·Azure 읽기까지 붙이는 절차입니다. 운영 배포는 [container.md](../deployment/container.md)(온프레미스 Docker)·[kubernetes.md](../deployment/kubernetes.md)(AKS), 화면 목록은 [`CLAUDE.md`](../../CLAUDE.md)의 Web Pages 또는 [`navConfig.ts`](../../apps/web/src/lib/navConfig.ts)가 기준입니다.
 
-Demo 모드는 Azure 자격증명 없이 mock 데이터로 전체 UI를 확인할 수 있습니다.
+## 1. 예시 데이터로 바로 보기 (Azure 없이)
 
-### Prerequisites
-
-- Node.js 20+
-- npm 10+
-
-### Steps
+준비: Node.js 24, npm, Git.
 
 ```bash
-# 1. Clone & install
-git clone <repo-url> azure-unified-dashboard
-cd azure-unified-dashboard
 npm install
-
-# 2. Create .env from example
-cp .env.example .env
-
-# 3. Start both apps
-npm run dev
+cp .env.example .env          # 값이 YOUR_* 그대로여도 시작됨
+npm run dev                   # api(:4000) + web(:3000) 동시 시작
+curl http://127.0.0.1:4000/healthz   # {"ok":true,...} — API는 루프백(API_BIND_HOST=127.0.0.1)에서만 들음
 ```
 
-- **API**: http://localhost:4000 (Express)
-- **Web**: http://localhost:3000 (Next.js)
+브라우저 `http://localhost:3000` — **로그인하지 않은 사용자는 예시 데이터**(`source:"mock"`, 화면 상단 '예시 데이터' 배너, 응답 `note:"signin_required"`)를 봅니다. 로그인한 사용자에게는 예시 데이터를 주지 않습니다(실제 값 또는 상태 — 권한 없음·미설정).
 
-Demo 모드에서는 모든 `AZURE_*_ENABLED` 플래그가 `false`이므로 mock 데이터가 자동 반환됩니다.
+## 2. 로그인 붙이기 (Entra 앱 등록 2개)
 
-### Available Pages
+홈 테넌트에 앱 두 개를 등록합니다. 앱 역할(`AUD.Viewer/Operator/Admin`)과 할당은 [sso.md](../integrations/azure/sso.md).
 
-| Route | Description |
-|-------|-------------|
-| `/` | Home (Architecture 그래프) |
-| `/architecture` | Architecture 그래프 + Inspector + Flow Overlay |
-| `/network` | Network topology |
-| `/cost` | Cost Management (KPI, Trend, Budgets) |
-| `/security` | Security (Secure Score gauge, Alerts) |
-| `/health` | Resource Health (Donut chart, Resource table) |
-| `/live-diagram` | Live Architecture Diagram (실시간 노드/엣지 애니메이션) |
-| `/argocd` | ArgoCD applications |
+**`aud-api` (API — 토큰 대상 + 플랫폼 신원)**
 
-### API Endpoints (Mock)
+1. App registrations → New registration → 이 디렉터리만, 리디렉션 없음
+2. **Expose an API** → Application ID URI `api://<aud-api-client-id>` → 범위 **`Azure.Read.All`** 추가(API가 받는 범위 `AUD_AUTH_SCOPES` 기본값)
+3. 플랫폼 자격 증명: 인증서(권장, `AUD_PLATFORM_CERT_PATH`) 또는 비밀 값(`AZURE_AD_CLIENT_SECRET`) — 운영 AKS는 워크로드 ID(비밀 없음, [kubernetes.md](../deployment/kubernetes.md))
+4. `delegated` 연결(사용자 OBO)을 쓸 때만 API permissions에 `Azure Service Management` › `user_impersonation`(+ 관리자 동의). 기본 `platform` 연결에는 필요 없음
+
+**`aud-web` (SPA)**
+
+1. New registration → 플랫폼 **Single-page application**, 리디렉션 URI `http://localhost:3000` (운영 호스트는 `https://<host>/` 추가)
+2. API permissions → My APIs → `aud-api` → **`Azure.Read.All`** → 관리자 동의
+
+**`.env`**
+
+| 변수 | 값 |
+|---|---|
+| `NEXT_PUBLIC_AZURE_AD_TENANT_ID` · `NEXT_PUBLIC_AZURE_AD_CLIENT_ID` | 홈 테넌트 · `aud-web` (개발용 — 웹 dev 서버가 빌드에 넣음, 바꾸면 재시작. 컨테이너는 `AUD_WEB_*`를 실행 시 읽음) |
+| `NEXT_PUBLIC_AZURE_AD_API_SCOPE` | `api://<aud-api-client-id>/Azure.Read.All` |
+| `AZURE_AD_TENANT_ID` · `AZURE_AD_CLIENT_ID` | 홈 테넌트 · `aud-api` (토큰 검증 대상) |
+| `AZURE_AD_CLIENT_SECRET` 또는 `AUD_PLATFORM_CERT_PATH` | 플랫폼 자격 증명 (`AUD_PLATFORM_CREDENTIAL`로 고정 가능) |
+| `AUD_DEFAULT_ROLE` | 앱 역할이 없을 때 역할 — 개발 기본 `viewer`, 운영은 `none`만 |
+
+## 3. Azure 읽기 붙이기 (연결)
+
+Azure는 **사용자 권한이 아니라 연결의 자격 증명**으로 읽습니다. 홈 구독만이면 `AZURE_SUBSCRIPTION_IDS`(허용 목록)와 홈 자격 증명에 역할을 주면 끝입니다. 고객 테넌트는 연결 파일(`AUD_CONNECTIONS_FILE`) — [connect-tenant.md](../integrations/azure/connect-tenant.md).
+
+- 필요한 역할: [permissions.md](../integrations/azure/permissions.md) (화면별 필수·선택). 확인: 설정 › Azure 연결 › 점검(관리자) 또는 [verify.md](../integrations/azure/verify.md)
+- 기능 스위치: 비용·보안·리소스 상태는 기본 켜짐(`AZURE_*_ENABLED=false`면 끔), 라이브 다이어그램 `AZURE_LIVE_DIAGRAM_ENABLED`, VNet 트래픽 `AZURE_LOG_ANALYTICS_WORKSPACE_ID` — 모두 [`.env.example`](../../.env.example) 주석
+- AKS 클러스터 안(객체·정책·Pod 로그·Hubble)은 클러스터에 닿는 곳에서만 — 프라이빗 클러스터는 PC에서 `cluster_dns_unresolved`가 정상([aks.md](../integrations/azure/aks.md))
+
+리소스 공급자가 등록되지 않은 구독은 일부 API가 실패합니다:
 
 ```bash
-# Health check
-curl http://localhost:4000/health
-
-# Cost
-curl http://localhost:4000/api/cost/summary
-curl http://localhost:4000/api/cost/trend
-curl http://localhost:4000/api/cost/budgets
-
-# Security
-curl http://localhost:4000/api/security/score
-curl http://localhost:4000/api/security/alerts
-
-# Resource Health
-curl http://localhost:4000/api/health/summary
-
-# Live Diagram
-curl http://localhost:4000/api/live/diagrams
-curl http://localhost:4000/api/live/snapshot
-curl http://localhost:4000/api/live/status
+for ns in Microsoft.ResourceGraph Microsoft.CostManagement Microsoft.Security Microsoft.ResourceHealth \
+          Microsoft.Insights Microsoft.AlertsManagement Microsoft.Consumption; do
+  az provider show --namespace "$ns" --query "[namespace, registrationState]" -o tsv
+done
+# 미등록이면: az provider register --namespace <ns>   (구독 기여자 이상 — 읽기 전용 계정은 관리자에게 요청)
 ```
 
----
+## 4. 코드 구조 한눈에
 
-## 2. Azure AD 설정 (실제 연동)
+| 경로 | 역할 |
+|---|---|
+| `packages/types/` | 공유 타입 (`@aud/types`) |
+| `apps/api/src/infra/` | 토큰 검증(`tokenVerifier`)·플랫폼 역할(`platformAccess`)·연결(`connectionRegistry`·`connectionCredentials`)·Azure 호출(`azureClientFactory`)·캐시 |
+| `apps/api/src/middleware/` | `requestId`·`authorize`(역할·연결 접근·감사) |
+| `apps/api/src/routes/` · `services/` | 도메인 라우트 · 비즈니스 로직 |
+| `apps/web/src/` | Next.js 페이지·컴포넌트·순수 모듈(`lib/`) |
 
-### 2.1 App Registration (Azure Portal)
+예시 데이터는 익명 요청에만: 라우트가 `respondWithFallback`/`respondLiveOrSignin`(`infra/requestParams.ts`)으로 응답합니다.
 
-Azure Portal → Azure Active Directory → App registrations에서 **2개의 앱**을 등록합니다.
-
-#### A) API App (Confidential Client)
-
-1. **New registration** → Name: `aud-api`
-2. **Certificates & secrets** → New client secret → 값 복사
-3. **Expose an API** →
-   - Application ID URI: `api://<client-id>`
-   - Add scope: `user_impersonation` (Admin consent)
-4. **API permissions** →
-   - `Azure Service Management` → `user_impersonation` (delegated)
-   - 이 권한으로 OBO를 통해 Azure ARM API에 접근
-
-#### B) Web App (SPA)
-
-1. **New registration** → Name: `aud-web`
-2. **Authentication** →
-   - Platform: SPA
-   - Redirect URIs: `http://localhost:3000`
-3. **API permissions** →
-   - Add `aud-api` → `user_impersonation` (delegated)
-
-### 2.2 Environment Variables
-
-```env
-# Web (.env)
-NEXT_PUBLIC_AZURE_AD_TENANT_ID=<your-tenant-id>
-NEXT_PUBLIC_AZURE_AD_CLIENT_ID=<web-app-client-id>
-NEXT_PUBLIC_AZURE_AD_REDIRECT_URI=http://localhost:3000
-NEXT_PUBLIC_AZURE_AD_API_SCOPE=api://<api-app-client-id>/user_impersonation
-
-# API (.env)
-AZURE_AD_TENANT_ID=<your-tenant-id>
-AZURE_AD_CLIENT_ID=<api-app-client-id>
-AZURE_AD_CLIENT_SECRET=<api-app-secret>
-AZURE_SUBSCRIPTION_IDS=<subscription-id-1>,<subscription-id-2>
-```
-
-### 2.3 RBAC 권한
-
-API 서비스 계정에 대상 구독에서 다음 역할이 필요합니다:
-
-| Azure API | Required Role |
-|-----------|---------------|
-| Resource Graph | Reader |
-| Cost Management | Cost Management Reader |
-| Defender for Cloud | Security Reader |
-| Resource Health | Reader |
-| Azure Monitor | Monitoring Reader |
-| Azure Monitor Alerts | Monitoring Reader |
-| Log Analytics | Log Analytics Reader |
+## 5. 확인·문제 해결
 
 ```bash
-# 예시: 구독 레벨에서 Reader 할당
-az role assignment create \
-  --assignee <api-app-client-id> \
-  --role "Reader" \
-  --scope /subscriptions/<subscription-id>
-
-# Cost Management Reader
-az role assignment create \
-  --assignee <api-app-client-id> \
-  --role "Cost Management Reader" \
-  --scope /subscriptions/<subscription-id>
-
-# Security Reader
-az role assignment create \
-  --assignee <api-app-client-id> \
-  --role "Security Reader" \
-  --scope /subscriptions/<subscription-id>
-
-# Monitoring Reader
-az role assignment create \
-  --assignee <api-app-client-id> \
-  --role "Monitoring Reader" \
-  --scope /subscriptions/<subscription-id>
+npm run typecheck                 # 양쪽 --noEmit
+npm test --workspace apps/api     # 단위 테스트 (node:test + tsx)
 ```
 
----
-
-## 3. Domain별 실연동 설정
-
-각 도메인은 독립적인 feature flag로 제어됩니다. 필요한 도메인만 활성화할 수 있습니다.
-
-### 3.1 Cost Management
-
-```env
-AZURE_COST_MANAGEMENT_ENABLED=true
-AZURE_COST_CACHE_TTL_MS=300000   # 5분 캐시
-```
-
-**Required**: `Cost Management Reader` role on subscription
-
-**API 경로**: `/api/cost/summary`, `/api/cost/trend`, `/api/cost/budgets`
-
-**Azure REST API used**:
-- `POST /subscriptions/{sub}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`
-- `GET /subscriptions/{sub}/providers/Microsoft.Consumption/budgets?api-version=2023-11-01`
-
-### 3.2 Security (Defender for Cloud)
-
-```env
-AZURE_SECURITY_ENABLED=true
-AZURE_SECURITY_CACHE_TTL_MS=300000
-```
-
-**Required**: `Security Reader` role on subscription
-
-**API 경로**: `/api/security/score`, `/api/security/alerts`
-
-**Azure REST API used**:
-- `GET /subscriptions/{sub}/providers/Microsoft.Security/secureScores/ascScore?api-version=2020-01-01`
-- `GET /subscriptions/{sub}/providers/Microsoft.Security/secureScoreControls?api-version=2020-01-01`
-- `GET /subscriptions/{sub}/providers/Microsoft.Security/alerts?api-version=2022-01-01`
-
-### 3.3 Resource Health
-
-```env
-AZURE_HEALTH_ENABLED=true
-AZURE_HEALTH_CACHE_TTL_MS=120000   # 2분 캐시
-```
-
-**Required**: `Reader` role on subscription
-
-**API 경로**: `/api/health/summary`
-
-**Azure REST API used**:
-- `GET /subscriptions/{sub}/providers/Microsoft.ResourceHealth/availabilityStatuses?api-version=2024-02-01`
-
-### 3.4 Live Diagram (Azure Monitor)
-
-```env
-AZURE_LIVE_DIAGRAM_ENABLED=true
-AZURE_LIVE_METRICS_CACHE_TTL_MS=60000
-AZURE_MONITOR_ALERTS_CACHE_TTL_MS=60000
-
-# Optional: App Insights for edge metrics
-AZURE_APP_INSIGHTS_APP_ID=my-appinsights-component
-AZURE_APP_INSIGHTS_CACHE_TTL_MS=60000
-```
-
-**Required**: `Monitoring Reader` role on subscription
-
-**API 경로**: `/api/live/snapshot`, `/api/live/stream` (SSE), `/api/live/status`
-
-**Azure REST API used**:
-- `GET /{resourceId}/providers/microsoft.insights/metrics?api-version=2024-02-01`
-- `GET /subscriptions/{sub}/providers/Microsoft.AlertsManagement/alerts?api-version=2023-01-01`
-
-### 3.5 Architecture (Resource Graph)
-
-```env
-AZURE_RESOURCE_GRAPH_PAGE_SIZE=1000
-AZURE_RESOURCE_GRAPH_CACHE_TTL_MS=60000
-```
-
-**Required**: `Reader` role on subscription
-
-### 3.6 Network (Log Analytics)
-
-```env
-AZURE_LOG_ANALYTICS_WORKSPACE_ID=<workspace-guid>
-AZURE_LOG_ANALYTICS_TABLE=NTANetAnalytics
-AZURE_LOG_ANALYTICS_CACHE_TTL_MS=60000
-```
-
-**Required**: `Log Analytics Reader` role + Traffic Analytics 활성화
-
----
-
-## 4. Architecture Overview
-
-```
-Browser (Next.js 16, React 19)
-  │
-  │  MSAL v5 → Bearer Token
-  │
-  ├──→ GET /api/cost/summary ──→ Cost Management REST
-  ├──→ GET /api/security/score ──→ Defender for Cloud REST
-  ├──→ GET /api/health/summary ──→ Resource Health REST
-  ├──→ GET /api/live/snapshot ──→ Azure Monitor Metrics + Alerts
-  │
-  └──→ Express API (port 4000)
-        │
-        ├── middleware/subscriptionContext.ts (구독 파싱)
-        ├── middleware/requestId.ts (X-Request-Id)
-        │
-        ├── infra/
-        │   ├── oboTokenPool.ts (OBO credential 풀)
-        │   ├── cacheManager.ts (LRU 캐시, bearerKey 기반)
-        │   └── azureClientFactory.ts (ARM/LogAnalytics fetcher)
-        │
-        ├── routes/ (도메인별 라우트 모듈)
-        │   ├── cost.ts, security.ts, health.ts
-        │   ├── architecture.ts, network.ts
-        │   └── liveDiagram.ts
-        │
-        └── services/ (Azure API 통합)
-            ├── cost.ts, security.ts, health.ts
-            ├── metricsCollector.ts, healthCalculator.ts
-            ├── appInsightsCollector.ts, alertsCollector.ts
-            └── liveAggregator.ts
-```
-
-### Data Flow (예: Security Score)
-
-```
-1. Browser: MSAL acquireTokenSilent() → bearer token
-2. Browser: GET /api/security/score (Authorization: Bearer <token>)
-3. API: middleware extracts bearer → req.auth.bearerToken
-4. API: tryGetSecureScore()
-   a. bearerKeyPrefix(token) → cache key
-   b. CacheManager.get() → cache hit? return
-   c. OBOTokenPool.getArmToken() → ARM access token
-   d. fetch('management.azure.com/.../secureScores')
-   e. CacheManager.set() → cache result
-5. API: real data → res.json(data)
-   OR: catch → res.json(mockSecureScore)
-6. Browser: renders Secure Score gauge
-```
-
-### Mock Fallback Pattern
-
-모든 도메인은 동일한 패턴을 따릅니다:
-
-```typescript
-router.get("/api/{domain}/{endpoint}", (req, res) => {
-  tryGet{Domain}(env, req.auth?.bearerToken, opts)
-    .then((data) => res.json(data ?? mock{Domain}))
-    .catch((e) => res.json({ ...mock{Domain}, note: e.message }));
-});
-```
-
-- `tryGet*()` → Azure API 호출 시도
-- 실패 시 → mock 데이터 + `note` 필드에 에러 메시지
-- `AZURE_*_ENABLED=false` → mock 데이터만 반환 (Azure 호출 없음)
-
----
-
-## 5. Live Diagram — DiagramSpec 커스터마이징
-
-Live Diagram은 JSON DiagramSpec으로 노드/엣지/바인딩을 정의합니다.
-
-### DiagramSpec 구조
-
-```json
-{
-  "version": "1.0",
-  "id": "my-infra",
-  "name": "My Infrastructure",
-  "nodes": [
-    {
-      "id": "aks",
-      "label": "AKS Platform",
-      "icon": "aks",
-      "azureResourceId": "/subscriptions/.../managedClusters/aks-prod",
-      "position": { "x": 400, "y": 120 },
-      "bindings": {
-        "cpu": { "source": "monitor", "metric": "node_cpu_usage_percentage", "aggregation": "avg" },
-        "health": {
-          "source": "composite",
-          "rules": [
-            { "metric": "cpu", "op": "<", "threshold": 80, "weight": 0.5 },
-            { "metric": "memory", "op": "<", "threshold": 85, "weight": 0.5 }
-          ]
-        }
-      }
-    }
-  ],
-  "edges": [
-    {
-      "id": "appgw->aks",
-      "source": "appgw",
-      "target": "aks",
-      "bindings": {
-        "throughput": { "source": "monitor", "metric": "ByteCount", "aggregation": "total" }
-      },
-      "animation": "flow"
-    }
-  ],
-  "settings": {
-    "refreshIntervalSec": 30,
-    "defaultTimeRange": "5m",
-    "layout": "manual"
-  }
-}
-```
-
-### Custom DiagramSpec 등록
-
-```bash
-# POST로 커스텀 DiagramSpec 저장
-curl -X POST http://localhost:4000/api/live/diagrams \
-  -H "Content-Type: application/json" \
-  -d @my-diagram.json
-
-# 확인
-curl http://localhost:4000/api/live/diagrams
-
-# 스냅샷 조회
-curl "http://localhost:4000/api/live/snapshot?diagramId=my-infra"
-```
-
-### Metric Binding Sources
-
-| Source | Description | Example |
-|--------|-------------|---------|
-| `monitor` | Azure Monitor Metrics REST | `{ source: "monitor", metric: "Percentage CPU", aggregation: "avg" }` |
-| `appInsights` | Application Insights metrics | `{ source: "appInsights", metric: "requests/failed", aggregation: "rate" }` |
-| `composite` | Health rules (weighted evaluation) | `{ source: "composite", rules: [...] }` |
-| `logAnalytics` | KQL query (Phase 3) | `{ source: "logAnalytics", kql: "..." }` |
-
----
-
-## 6. Troubleshooting
-
-### API returns mock data instead of real data
-
-1. 해당 도메인의 `AZURE_*_ENABLED=true` 설정 확인
-2. `AZURE_AD_TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` 설정 확인
-3. `AZURE_SUBSCRIPTION_IDS` 설정 확인
-4. API 응답의 `note` 필드에서 에러 메시지 확인
-
-### CORS error
-
-```env
-CORS_ORIGIN=http://localhost:3000
-```
-
-### OBO token error
-
-- API App Registration에 `Azure Service Management > user_impersonation` delegated 권한 추가
-- Admin consent 완료 확인
-- Client secret 만료 여부 확인
-
-### Live Diagram shows all "unknown" health
-
-- `AZURE_LIVE_DIAGRAM_ENABLED=true` 확인
-- DiagramSpec의 `azureResourceId`가 실제 Azure 리소스 ID와 일치하는지 확인
-- `/api/live/status` 엔드포인트로 설정 상태 확인
-
-### Build errors
-
-```bash
-# Typecheck
-npm run typecheck
-
-# 캐시 초기화
-rm -rf apps/web/.next
-npm run build
-```
-
----
-
-## 7. Production Deployment
-
-### Environment Variables (Production)
-
-```env
-# Web
-NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain.com
-NEXT_PUBLIC_AZURE_AD_REDIRECT_URI=https://app.yourdomain.com
-
-# API
-CORS_ORIGIN=https://app.yourdomain.com
-PORT=4000
-
-# All domain flags
-AZURE_COST_MANAGEMENT_ENABLED=true
-AZURE_SECURITY_ENABLED=true
-AZURE_HEALTH_ENABLED=true
-AZURE_LIVE_DIAGRAM_ENABLED=true
-```
-
-### Build
-
-```bash
-npm run build
-```
-
-- API: `apps/api/dist/` (Node.js)
-- Web: `apps/web/.next/` (Next.js standalone)
-
-### Docker (예시)
-
-```dockerfile
-# API
-FROM node:20-slim
-WORKDIR /app
-COPY apps/api/dist ./dist
-COPY apps/api/package.json .
-COPY node_modules ./node_modules
-CMD ["node", "dist/index.js"]
-```
-
----
-
-## 8. 현재 구현 상태
-
-| Domain | API Service | Routes | Mock Data | Frontend Page | Azure API |
-|--------|------------|--------|-----------|---------------|-----------|
-| Architecture | `azure.ts` | `/api/graph/*` | Yes | `/architecture` | Resource Graph |
-| Network | `network.ts` | `/api/network/*` | Yes | `/network` | Log Analytics |
-| Cost | `cost.ts` | `/api/cost/*` | Yes | `/cost` | Cost Management |
-| Security | `security.ts` | `/api/security/*` | Yes | `/security` | Defender |
-| Health | `health.ts` | `/api/health/*` | Yes | `/health` | Resource Health |
-| Live Diagram | `liveAggregator.ts` | `/api/live/*` | Yes | `/live-diagram` | Monitor + Alerts |
-| Reservations | `reservations.ts` | `/api/reservations/*` | Yes | (architecture내) | Consumption |
-| ArgoCD | `argocd.ts` | `/api/argocd/*` | N/A | `/argocd` | ArgoCD REST |
+| 증상 | 확인 |
+|---|---|
+| 로그인 후에도 예시 데이터 | 토큰이 API에 안 감 — 웹 `NEXT_PUBLIC_AZURE_AD_API_SCOPE`·dev 서버 재시작 ([error-catalog](../troubleshooting/error-catalog.md) AUTH) |
+| 403 `no_platform_role` | 앱 역할 미할당 (개발은 `AUD_DEFAULT_ROLE=viewer`) |
+| CORS 오류 | `CORS_ORIGIN`에 웹 주소 |
+| 연결 오류 `connection_*` | 설정 › Azure 연결 › 점검 — 코드별 조치는 [troubleshooting.md](../integrations/azure/troubleshooting.md) |

@@ -9,15 +9,15 @@ export function isInferredEdge(e: Pick<DiagramEdgeSpec, "edgeKind" | "evidence">
 }
 
 /** What the toolbar's "연결선" menu switches. Every edge belongs to exactly one layer. */
-export type EdgeLayer = "config" | "privateLink" | "privateLinkUsage" | "ingress" | "egress" | "hybrid" | "peering" | "publicIp" | "inferred";
+export type EdgeLayer = "config" | "privateLink" | "privateLinkUsage" | "ingress" | "egress" | "udr" | "hybrid" | "peering" | "publicIp" | "inferred";
 
-export const EDGE_LAYERS: readonly EdgeLayer[] = ["config", "privateLink", "privateLinkUsage", "ingress", "egress", "hybrid", "peering", "publicIp", "inferred"];
+export const EDGE_LAYERS: readonly EdgeLayer[] = ["config", "privateLink", "privateLinkUsage", "ingress", "egress", "udr", "hybrid", "peering", "publicIp", "inferred"];
 
 /**
  * Configured links and observed Private Link use are on by default; public IP exposure and guesses are opt-in.
  * (Observed use comes from logs, added after layout — lib/plUsage.ts — never from the spec.)
  */
-export const DEFAULT_EDGE_LAYERS: ReadonlySet<EdgeLayer> = new Set<EdgeLayer>(["config", "privateLink", "privateLinkUsage", "ingress", "egress", "hybrid", "peering"]);
+export const DEFAULT_EDGE_LAYERS: ReadonlySet<EdgeLayer> = new Set<EdgeLayer>(["config", "privateLink", "privateLinkUsage", "ingress", "egress", "udr", "hybrid", "peering"]);
 
 const isPublicIp = (n: DiagramNodeSpec | undefined) => n?.resourceKind === "publicIP" || n?.icon === "publicIP";
 
@@ -28,6 +28,8 @@ export function edgeLayer(e: DiagramEdgeSpec, nodeById: ReadonlyMap<string, Diag
   if (e.edgeKind === "peering") return "peering";
   // VPN gateway → on-premises site (S2S, catalog EDGE-09)
   if (e.edgeKind === "hybrid") return "hybrid";
+  // Subnet → the next hop its route table names (configuration, SEC-04 / NET-07)
+  if (e.edgeKind === "udr-route") return "udr";
   if (e.edgeKind === "outbound-internet" || e.edgeKind === "natgw-association" || e.flowType === "egress") return "egress";
   if (isPublicIp(nodeById.get(e.source)) || isPublicIp(nodeById.get(e.target))) return "publicIp";
   // Inbound = lines that start at the Internet; LB / App Gateway → backend routing is configuration
@@ -39,7 +41,7 @@ export function edgeLayer(e: DiagramEdgeSpec, nodeById: ReadonlyMap<string, Diag
 /** Kinds whose direction means something (traffic or a dependency goes one way). Associations get no arrowhead. */
 export function isDirectedEdge(e: Pick<DiagramEdgeSpec, "edgeKind" | "flowType" | "evidence">): boolean {
   if (isInferredEdge(e)) return false;
-  if (e.edgeKind === "routes" || e.edgeKind === "privateLink" || e.edgeKind === "privateLinkUsage" || e.edgeKind === "outbound-internet") return true;
+  if (e.edgeKind === "routes" || e.edgeKind === "privateLink" || e.edgeKind === "privateLinkUsage" || e.edgeKind === "outbound-internet" || e.edgeKind === "udr-route") return true;
   return e.flowType === "ingress" || e.flowType === "control";
 }
 

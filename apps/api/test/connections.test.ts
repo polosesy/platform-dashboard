@@ -146,7 +146,7 @@ test("federation: the service-account token is read on every request and used as
   assert.deepEqual(calls, [`assertion:${APP}:sa-token-1`, `assertion:${APP}:sa-token-2`], "rotated token picked up; the customer's app id, not ours");
   delete files[TOKEN];
   await assert.rejects(provider.token(e, c, "https://management.azure.com/.default"), (x: { code?: string; message: string }) => x.code === "connection_unconfigured" && !x.message.includes(TOKEN));
-  assert.equal(mapCredentialError(new Error("AADSTS700213: No matching federated identity record found for presented assertion subject 'system:serviceaccount:aud:aud-api'")).code, "connection_federation_mismatch");
+  assert.equal(mapCredentialError(new Error("AADSTS700213: No matching federated identity record found for presented assertion subject 'system:serviceaccount:aud-dashboard:aud-dashboard'")).code, "connection_federation_mismatch");
   assert.equal(mapCredentialError(new Error("AADSTS70021: No matching federated identity record found for presented assertion.")).code, "connection_federation_mismatch");
 });
 

@@ -1,3 +1,8 @@
+---
+status: current
+owner: platform-auth
+last-verified: 2026-10-15
+---
 # 연결 확인
 
 > **대상**: 플랫폼 관리자 · **소요 시간**: 2분 · **필요 권한**: 플랫폼 역할 `AUD.Admin`

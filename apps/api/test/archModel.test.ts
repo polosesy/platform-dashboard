@@ -137,7 +137,8 @@ test("placement: subnets, lanes, regions", () => {
   assert.equal(r(PE).subnetId, A1);
   const kc = model.regions.find((x) => x.key === "koreacentral")!;
   const eu = model.regions.find((x) => x.key === "eastus")!;
-  assert.deepEqual(kc.edge.sort(), [LB_PUB, NAT].sort(), "public LB and NAT sit in the edge lane");
+  assert.deepEqual(kc.edge, [LB_PUB], "a public entry sits in the (left) entry lane");
+  assert.deepEqual(kc.egress, [NAT], "a NAT gateway sits in the (right) outbound lane");
   assert.equal(kc.paas.data.length, 5);
   assert.deepEqual(kc.paas.other, [ODD], "unmapped kinds go to PaaS › other");
   assert.deepEqual(eu.paas.security, [KV]);
@@ -166,7 +167,7 @@ test("lines: configuration relationships only, NAT is egress-only, SNAT pair is 
   assert.deepEqual(kinds("privateLink"), [`${PE}->${KV}`]);
   assert.equal(kinds("peering").length, 1);
   assert.deepEqual(kinds("outbound"), [`${A2}->${NAT}`]);
-  assert.deepEqual(kinds("egress"), [`${NAT}->${internetId("koreacentral")}`], "NAT with a public IP → the Internet (configuration)");
+  assert.deepEqual(kinds("egress"), [`${NAT}->${m.internetOutId("koreacentral")}`], "NAT with a public IP → the outbound Internet (configuration)");
   assert.ok(!model.edges.some((e) => e.target === NAT && (e.kind === "exposure" || e.kind === "ingress")));
   for (const e of model.edges) assert.ok(!["contains", "attached-to", "bound-to"].includes(e.kind));
 });

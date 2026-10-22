@@ -29,11 +29,32 @@ type MetricAlertResource = {
         operator?: string;
         threshold?: number;
         metricNamespace?: string;
+        timeAggregation?: string;
+        dimensions?: Array<{ name?: string; operator?: string; values?: string[] }>;
       }>;
     };
+    windowSize?: string;
+    evaluationFrequency?: string;
+    autoMitigate?: boolean;
     description?: string;
   };
 };
+
+/** How Azure evaluates a metric rule — aggregation, window, frequency, dimension filters (shown next to the condition:
+ *  a card that reads the newest minute can disagree with a rule that judges five) */
+export function metricRuleEvaluation(p: MetricAlertResource["properties"]): NonNullable<AlertRuleInfo["evaluation"]> {
+  const all = p.criteria?.allOf ?? [];
+  const aggs = [...new Set(all.map((c) => c.timeAggregation).filter((x): x is string => !!x))];
+  const dims = all.flatMap((c) => (c.dimensions ?? []).map((d) =>
+    `${d.name ?? "?"} ${d.operator === "Exclude" ? "≠" : "="} ${(d.values ?? []).join(", ") || "*"}`));
+  return {
+    ...(aggs.length ? { aggregation: aggs.join(", ") } : {}),
+    ...(p.windowSize ? { windowSize: p.windowSize } : {}),
+    ...(p.evaluationFrequency ? { frequency: p.evaluationFrequency } : {}),
+    ...(dims.length ? { dimensions: dims } : {}),
+    ...(p.autoMitigate != null ? { autoMitigate: p.autoMitigate } : {}),
+  };
+}
 
 type ScheduledQueryRule = {
   id: string;
@@ -181,6 +202,7 @@ export async function collectAlertRules(
         severity: rule.properties.severity,
         signalType: "Metric",
         condition: buildConditionString(rule.properties.criteria),
+        evaluation: metricRuleEvaluation(rule.properties),
         targetResourceId: scopes[0] ?? "",
         enabled: rule.properties.enabled,
         affectedNodeIds: matchedNodeIds,

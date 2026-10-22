@@ -4,6 +4,7 @@ import { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } fr
 import ReactFlow, {
   Background,
   Controls,
+  EdgeLabelRenderer,
   MiniMap,
   ReactFlowProvider,
   MarkerType,
@@ -30,6 +31,9 @@ import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
 import { isUnusedBadge, liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
 import { routeEdges } from "@/lib/liveRoute";
+import { recentAlertChip } from "@/lib/liveAlerts";
+import { commitPlan, livePlan, type ArrangeContainer, type LivePlan } from "@/lib/liveArrange";
+import type { Arrangement } from "@/lib/archArrange";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { usageThresholds } from "@/lib/liveMetricFormat";
 import { useReducedMotion } from "@/lib/useReducedMotion";
@@ -87,6 +91,16 @@ type LiveCanvasProps = {
   onWafToggle?: (nodeId: string) => void;
   /** A WAF sub-card: the policy ("p:<name>"), "none", "unknown", or the overview (null) */
   onWafSelect?: (nodeId: string, key: string | null) => void;
+  /** The user's arrangement applied to the layout (lib/liveArrange) — absent = automatic */
+  arrangement?: Arrangement;
+  /** "배치 편집": cards, subnets, VNets and side-lane cards drag inside their container; panels / hover / comets off */
+  editMode?: boolean;
+  /** A drop the rules allow → the new arrangement (the page keeps it, undoable) */
+  onArrange?: (next: Arrangement, containerId: string) => void;
+  /** Edit mode: the shape clicked — its own box (a subnet's grid, a lane) and the box it moves in (the page's tools) */
+  onEditSelect?: (sel: { id: string; own?: ArrangeContainer; parent?: ArrangeContainer } | null) => void;
+  /** Edit mode: a refused drop's reason (i18n key) for the page's notice */
+  onArrangeNotice?: (key: string | null) => void;
 };
 
 const NO_WAF_OPEN: ReadonlySet<string> = new Set();
@@ -131,6 +145,11 @@ function LiveCanvasInner({
   wafOpen = NO_WAF_OPEN,
   onWafToggle,
   onWafSelect,
+  arrangement,
+  editMode = false,
+  onArrange,
+  onEditSelect,
+  onArrangeNotice,
 }: LiveCanvasProps) {
   const { t } = useI18n();
   const reduceMotion = useReducedMotion();
@@ -164,7 +183,9 @@ function LiveCanvasInner({
   const [wafAll, setWafAll] = useState<ReadonlySet<string>>(() => new Set());
   const wafCards = useMemo(() => new Map([...wafOpen].map((id) => [id, wafSubCards(nodeById.get(id)?.metadata, { all: wafAll.has(id) })] as const).filter(([, c]) => c.length)), [wafOpen, wafAll, nodeById]);
   const attachBelow = useMemo(() => new Map([...wafCards].map(([id, c]) => [id, wafAttachHeight(c.length)] as const)), [wafCards]);
-  const layout = useMemo(() => liveLayout(spec, { expandedEmpty, attachBelow }), [spec, expandedEmpty, attachBelow]);
+  const layout = useMemo(() => liveLayout(spec, { expandedEmpty, attachBelow, arrangement }), [spec, expandedEmpty, attachBelow, arrangement]);
+  // Read by the node build (ref: entering / leaving edit mode does not rebuild every node — the effect below patches)
+  const editRef = useRef(editMode);
   const onWafToggleRef = useRef(onWafToggle);
   const onWafSelectRef = useRef(onWafSelect);
   useLayoutEffect(() => { onWafToggleRef.current = onWafToggle; onWafSelectRef.current = onWafSelect; });
@@ -403,7 +424,7 @@ function LiveCanvasInner({
         region: n.icon === "vnet" ? n.location : undefined,
         nsgBadges: nsgByTarget.get(n.id)?.map((b) => ({ nodeId: b.nodeId, label: b.label, icon: b.icon as GroupNodeData["icon"], azureResourceId: b.azureResourceId })),
         onNsgSelect: handleBadgeSelect,
-        egress: egressVia ? { via: egressVia, name: n.metadata?.egressName, natId: n.metadata?.natGwBadgeId } : undefined,
+        egress: egressVia ? { via: egressVia, name: n.metadata?.egressName, natId: n.metadata?.natGwBadgeId ?? n.metadata?.egressTargetId, ...(n.metadata?.egressNatBypassed === "true" ? { natBypassed: true } : {}) } : undefined,
         nicCount: layout.nicCount.get(n.id),
         peerings: parsePeerings(n.metadata?.peerings),
         peerFit: n.icon === "vnet" ? peeringChipFit(box?.w ?? 0, parsePeerings(n.metadata?.peerings).length) : 0,
@@ -412,10 +433,14 @@ function LiveCanvasInner({
         nameParts: n.icon === "subnet" ? nameInfo.get(n.id)?.parts : undefined,
         focused: n.id === selectedRef.current,
       };
+      const gw = box?.w ?? n.width ?? 400, gh = box?.h ?? n.height ?? 200;
       out.push({
-        id: n.id, type: "group", ...placeOf(n), draggable: false, selectable: true,
+        id: n.id, type: "group", ...placeOf(n), selectable: true,
+        // Edit mode: subnets / VNets move by their header (class ld-drag) inside their container
+        draggable: editRef.current && layout.arrange.containerOf.has(n.id), dragHandle: ".ld-drag",
         // The wrapper lets pointer events through; the header (pointer-events: auto) stays clickable
-        style: { width: box?.w ?? n.width ?? 400, height: box?.h ?? n.height ?? 200, pointerEvents: "none" },
+        width: gw, height: gh,
+        style: { width: gw, height: gh, pointerEvents: "none" },
         data,
       });
     }
@@ -476,6 +501,7 @@ function LiveCanvasInner({
         healthScore: live?.healthScore ?? 0.5,
         metrics: live?.metrics ?? {},
         hasAlert: (live?.activeAlertIds.length ?? 0) > 0,
+        alertRecent: recentAlertChip(currentSnapshot?.alertHistory, n.id),
         sparklines: live?.sparklines,
         endpoint: n.endpoint,
         subResources: n.subResources,
@@ -514,7 +540,13 @@ function LiveCanvasInner({
         relation: relationOf.get(n.id),
         impact: impactRolesRef.current.get(n.id),
       };
-      out.push({ id: n.id, type: "live", ...placeOf(n), draggable: false, zIndex: 10, data });
+      const cb = pos(n.id);
+      out.push({
+        id: n.id, type: "live", ...placeOf(n), zIndex: 10, data,
+        draggable: editRef.current && layout.arrange.containerOf.has(n.id),
+        // A known size: React Flow hides a node it has not measured yet, so a rebuild (every drop) would flicker
+        ...(cb ? { width: cb.w, height: cb.h } : {}),
+      });
       // WAF policy sub-cards right after their card (React Flow wants parents first): room kept in the inbound
       // lane, an overlay elsewhere (VMSS instance precedent)
       const subs = wafCards.get(n.id);
@@ -541,6 +573,54 @@ function LiveCanvasInner({
     return () => cancelAnimationFrame(rafId);
   }, [spec, layout, renderedIds, nsgByTarget, handleBadgeSelect, onSubResourceSelect, stableVmssExpand, toggleEmpty, setNodes, names, nameInfo, relationOf, wafCards, stableWafToggle, stableWafSelect, stableWafToggleAll]);
 
+  // ── Edit mode on / off: only the draggable flag changes (no rebuild); hover and panels are off while editing ──
+  useEffect(() => {
+    editRef.current = editMode;
+    setNodes((prev) => prev.map((n) => {
+      const want = editMode && layout.arrange.containerOf.has(n.id);
+      return (n.draggable ?? false) === want ? n : { ...n, draggable: want };
+    }));
+    if (editMode) { setHoveredNodeId(null); setHoveredGroupId(null); }
+  }, [editMode, layout, setNodes]);
+
+  // ── Arrange: drag inside the container, the plan drawn over the canvas, commit on release ──
+  const [plan, setPlan] = useState<LivePlan | null>(null);
+  const planRef = useRef<LivePlan | null>(null);
+  const frame = useRef(0);
+  const centreOf = (node: FlowNode): [number, number] => {
+    const a = node.positionAbsolute ?? node.position;
+    const r = layout.abs.get(node.id);
+    return [a.x + (node.width ?? r?.w ?? 0) / 2, a.y + (node.height ?? r?.h ?? 0) / 2];
+  };
+  const handleDrag = useCallback((_e: React.MouseEvent, node: FlowNode) => {
+    if (!editRef.current) return;
+    cancelAnimationFrame(frame.current);
+    const at = centreOf(node);
+    frame.current = requestAnimationFrame(() => {
+      const p = livePlan(layout.arrange, node.id, at);
+      planRef.current = p;
+      setPlan(p);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout]);
+  const handleDragStop = useCallback((_e: React.MouseEvent, node: FlowNode) => {
+    cancelAnimationFrame(frame.current);
+    const p = livePlan(layout.arrange, node.id, centreOf(node)) ?? planRef.current;
+    planRef.current = null;
+    setPlan(null);
+    const c = p ? layout.arrange.containers.get(p.containerId) : undefined;
+    if (p && c && !p.refused && p.next && arrangement !== undefined && onArrange) {
+      onArrange(commitPlan(arrangement, c, p.next), c.id);
+      onArrangeNotice?.(null);
+      return;
+    }
+    if (p?.refused && p.refused !== "noChange") onArrangeNotice?.(`ld.edit.refused.${p.refused}`);
+    // Not moved: back to its place (the layout did not change, so no rebuild would do it)
+    const box = layout.items.get(node.id);
+    if (box) setNodes((prev) => prev.map((n) => (n.id === node.id ? { ...n, position: { x: box.x, y: box.y } } : n)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, arrangement, onArrange, onArrangeNotice, setNodes]);
+
   // ── Selection → full-name tag: only the previously and newly selected nodes get new data ──
   useEffect(() => {
     const prevId = selectedRef.current;
@@ -557,6 +637,8 @@ function LiveCanvasInner({
   // Keyboard selection (Tab to a card, Enter) opens the panel like a click does
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     onNodesChange(changes);
+    // Arranging: a click selects for the edit tools only (onNodeClick) — no panel
+    if (editRef.current) return;
     for (const c of changes) {
       if (c.type !== "select" || !c.selected) continue;
       const node = rfRef.current.getNode(c.id);
@@ -581,6 +663,7 @@ function LiveCanvasInner({
           healthScore: live.healthScore ?? 0.5,
           metrics: live.metrics ?? {},
           hasAlert: (live.activeAlertIds?.length ?? 0) > 0,
+          alertRecent: recentAlertChip(snapshot.alertHistory, n.id),
           sparklines: live.sparklines,
           powerState: live.powerState,
           basis: live.basis,
@@ -599,6 +682,7 @@ function LiveCanvasInner({
           JSON.stringify(prev_.liveSpec?.facts ?? null) === JSON.stringify(next.liveSpec?.facts ?? null) &&
           prev_.liveSpec?.instancesTarget === next.liveSpec?.instancesTarget &&
           prev_.hasAlert === next.hasAlert &&
+          JSON.stringify(prev_.alertRecent ?? null) === JSON.stringify(next.alertRecent ?? null) &&
           prev_.metricsState === next.metricsState &&
           sameMetrics(prev_.metrics, next.metrics) &&
           lastSparkTs(prev_.sparklines) === lastSparkTs(next.sparklines)
@@ -750,7 +834,7 @@ function LiveCanvasInner({
   const handleNodeMouseLeave = useCallback(() => { setHoveredNodeId(null); setHoveredGroupId(null); }, [setHoveredGroupId, setHoveredNodeId]);
 
   return (
-    <div className={styles.canvasWrap} ref={wrapRef}>
+    <div className={styles.canvasWrap} ref={wrapRef} data-edit={editMode ? "arrange" : undefined}>
       {/* Comet tail gradients, one per colour (url(#ld-ptail-*) from every edge). Not display:none — Firefox drops it */}
       <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
         <defs>
@@ -770,17 +854,27 @@ function LiveCanvasInner({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={(_e, node) => {
+          if (editMode) {
+            const own = layout.arrange.containers.get(node.id);
+            const parentId = layout.arrange.containerOf.get(node.id);
+            const parent = parentId ? layout.arrange.containers.get(parentId) : undefined;
+            onEditSelect?.(own || parent ? { id: node.id, own, parent } : null);
+            return;
+          }
           if (node.type === "vmssInstance") onVmssInstanceSelect?.(node.data as VmssInstanceNodeData);
           else if (node.type === "wafPolicy") { const d = node.data as WafPolicyNodeData; stableWafSelect(d.parentId, d.card.key); }
           else if (node.type !== "lane" && node.type !== "emptySubnets") onNodeSelect(node.id);
         }}
         onEdgeClick={(_e, edge) => onEdgeSelect?.(edge.id)}
-        onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); }}
-        onNodeMouseEnter={handleNodeMouseEnter}
-        onNodeMouseLeave={handleNodeMouseLeave}
+        onPaneClick={() => { onNodeSelect(null); onEdgeSelect?.(null); if (editMode) onEditSelect?.(null); }}
+        onNodeMouseEnter={editMode ? undefined : handleNodeMouseEnter}
+        onNodeMouseLeave={editMode ? undefined : handleNodeMouseLeave}
+        onNodeDrag={handleDrag}
+        onNodeDragStop={handleDragStop}
+        autoPanOnNodeDrag={false}
         onMove={(_e, vp) => applyLod(vp.zoom)}
         onInit={(rf) => applyLod(rf.getZoom())}
-        nodesDraggable={false}
+        nodesDraggable={editMode}
         minZoom={0.05}
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
@@ -788,6 +882,7 @@ function LiveCanvasInner({
         elevateEdgesOnSelect={true}
       >
         <Background gap={20} size={1} color={rgba("ink", 0.06)} />
+        {editMode && plan ? <ArrangeOverlay plan={plan} /> : null}
         <Controls />
         {showMiniMap && (
           <MiniMap
@@ -812,6 +907,19 @@ function LiveCanvasInner({
         {showMiniMap ? "⊟" : "⊞"}
       </button>
     </div>
+  );
+}
+
+/** Where a dragged shape would land: its container (dashed), the target cell or the insertion bar; red = refused */
+function ArrangeOverlay({ plan }: { plan: LivePlan }) {
+  const bad = plan.refused === "side" || plan.refused === "alone";
+  const r = (x: { x: number; y: number; w: number; h: number }) => ({ transform: `translate(${x.x}px, ${x.y}px)`, width: x.w, height: x.h });
+  return (
+    <EdgeLabelRenderer>
+      <div className={styles.arrangeArea} style={r(plan.area)} />
+      {plan.target ? <div className={styles.arrangeTarget} data-bad={bad || undefined} style={r(plan.target)} /> : null}
+      {plan.bar ? <div className={styles.arrangeBar} data-bad={bad || undefined} style={r(plan.bar)} /> : null}
+    </EdgeLabelRenderer>
   );
 }
 

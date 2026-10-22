@@ -40,8 +40,11 @@ services:
     environment:
       PORT: "4000"
       API_BIND_HOST: 127.0.0.1
+      # Team layouts of the infrastructure diagram (one JSON per subscription) — the only writable mount
+      AUD_ARRANGEMENT_DIR: /var/lib/aud/arrangements
     volumes:
       - ./config:/etc/aud:ro
+      - ./state/arrangements:/var/lib/aud/arrangements
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 30s

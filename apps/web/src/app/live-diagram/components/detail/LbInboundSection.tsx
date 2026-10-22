@@ -35,11 +35,14 @@ export function LbInboundSection({ node, spec, metrics, measured, usage, loading
       mono
       copy={fe.ip}
       main={fe.ip}
-      sub={fe.bytes == null
-        ? t(measured ? "ld.lbin.fe.notMeasured" : "ld.lbin.fe.metricsOff")
-        : fe.bytes === 0
-          ? t("ld.lbin.fe.zero")
-          : t("ld.lbin.fe.bytes", { bytes: formatBytes(fe.bytes), syn: fe.syn ?? "—" })}
+      sub={[
+        fe.bytes == null
+          ? t(measured ? "ld.lbin.fe.notMeasured" : "ld.lbin.fe.metricsOff")
+          : fe.bytes === 0
+            ? t("ld.lbin.fe.zero")
+            : t("ld.lbin.fe.bytes", { bytes: formatBytes(fe.bytes), syn: fe.syn ?? "—" }),
+        fe.ruleBound === false ? t("ld.lbin.fe.noRule") : null,
+      ].filter(Boolean).join(" · ")}
     />
   );
   const reasonText = (g: UnresolvedGroup): string => {
@@ -77,6 +80,20 @@ export function LbInboundSection({ node, spec, metrics, measured, usage, loading
       <Group title={t("ld.lbin.frontends")}>
         {f.frontends.map(feLine)}
         <div className={styles.dpMuted}>{t("ld.lbin.metricNote")}</div>
+        <div className={styles.dpMuted}>{t("ld.lbin.probeNote")}</div>
+      </Group>
+      {/* UDR next hop (configuration): traffic sent this way is real but invisible to the LB byte / SYN metrics */}
+      <Group title={t("ld.lbin.udr")}>
+        {f.udr?.state === "unreadable" ? <div className={styles.dpMuted}>{t("ld.lbin.udr.unreadable")}</div>
+          : f.udr && f.udr.entries.length ? (
+            <>
+              {f.udr.entries.slice(0, 10).map((e) => (
+                <TwoLine key={`${e.vnet}/${e.subnet}/${e.frontendIp}`} main={`${e.subnet} (${e.vnet})`} sub={`${e.routeTable} · ${e.prefixes.join(", ")} → ${e.frontendIp}`} />
+              ))}
+              {f.udr.subnets > 10 ? <div className={styles.dpMuted}>{t("ld.lbin.udr.more", { count: f.udr.subnets - 10 })}</div> : null}
+              <div className={styles.dpMuted}>{t("ld.lbin.udr.note")}</div>
+            </>
+          ) : <div className={styles.dpMuted}>{t("ld.lbin.udr.none")}</div>}
       </Group>
       <Group title={t("ld.lbin.configured")}>
         {f.configured.length ? f.configured.map((c) => (

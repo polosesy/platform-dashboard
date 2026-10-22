@@ -1,6 +1,16 @@
+---
+status: archived
+owner: platform
+last-verified: 2026-03-12
+archived: 2026-10-22
+reason: OBO 시대 연동 가이드 — 로그인(SSO)과 Azure 연결이 분리되며 인증 흐름·RBAC·환경 변수·도메인 API 설명이 맞지 않음
+replaced-by: ../../integrations/azure/overview.md
+---
+> **보관 문서 (2026-10-22)** — 현재 플랫폼과 맞지 않습니다. 사유: OBO 시대 연동 가이드 — 로그인(SSO)과 Azure 연결이 분리되며 인증 흐름·RBAC·환경 변수·도메인 API 설명이 맞지 않음. 현재 문서: [Azure 연동 개요](../../integrations/azure/overview.md). 이 문서를 근거로 설정하지 마세요.
+
 # Azure API Integration & Troubleshooting Guide
 
-> **로그인(SSO·플랫폼 역할)과 Azure 연결(누구의 자격 증명으로 Azure를 읽는지)은 [docs/integrations/azure](../integrations/azure/overview.md)가 기준입니다.**
+> **로그인(SSO·플랫폼 역할)과 Azure 연결(누구의 자격 증명으로 Azure를 읽는지)은 [docs/integrations/azure](../../integrations/azure/overview.md)가 기준입니다.**
 > 이 문서의 OBO·로그인 정책 설명(3장)은 `delegated` 연결(사용자 위임)에만 해당합니다. 기본(`platform`)은 사용자에게 Azure 권한이 필요 없고, 5장의 역할은 **연결의 서비스 주체**에 부여합니다.
 
 > "Failed to load: Failed to fetch" 에러의 원인 분석과 Azure 실연동 설정 가이드

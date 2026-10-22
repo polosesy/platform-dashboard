@@ -98,7 +98,7 @@ test("card: the ladder — callers known, traffic with no known source, 0 measur
   assert.deepEqual(chip(edges, undefined, null), [["ld.lbin.chip.callers", 1]], "the App Gateway's backend pool names the frontend (configuration)");
   assert.deepEqual(chip(edges, undefined, resp(true)), [["ld.lbin.chip.callers", 2]], "configured + observed");
   assert.deepEqual(chip(noAgw, { feIn0: 52_000 }, resp(false)), [["ld.lbin.chip.sourceUnknown", null]]);
-  assert.deepEqual(chip(noAgw, { feIn0: 0 }, resp(false)), [["ld.lbin.chip.none", null]]);
+  assert.deepEqual(chip(noAgw, { feIn0: 0 }, resp(false)), [["ld.lbin.chip.zeroBytes", null]], "0 bytes is said as LB bytes 0, never 'no inbound'");
   assert.deepEqual(chip(noAgw, { feIn0: null }, null), [["ld.lbin.chip.notMeasured", null]], "null is not 0");
   assert.deepEqual(W.lbInboundChips(W.lbInboundFacts(byId.get("backend")!, edges, byId, {}, null)), [], "not an LB → nothing");
   const pubOnly = { ...lb, metadata: { frontends: JSON.stringify([{ kind: "public", ip: "203.0.113.9" }]) } };
@@ -111,4 +111,21 @@ test("lines: observed callers → LB only when both ends are drawn, in the obser
   assert.deepEqual(lines.map((l) => [l.source, l.target, l.edgeKind, l.protocol, l.evidence]), [["vm1", "lbi", "privateLinkUsage", "lbFlow", "observed"]]);
   assert.equal(W.lbInboundEdges(resp(true), new Set(["lbi"])).length, 0);
   assert.equal(W.lbInboundEdges(null, new Set(["vm1", "lbi"])).length, 0);
+});
+
+test("card: a UDR next hop to this internal LB (configuration) replaces the bytes chip — UDR traffic is not in the LB metrics", () => {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const lb = byId.get("lbi")!;
+  const udr = JSON.stringify({ state: "ok", routeTables: 1, subnets: 2, prefixes: 2, entries: [{ subnet: "snet-app", vnet: "spoke", routeTable: "rt-spoke", prefixes: ["0.0.0.0/0", "10.0.0.0/8"], frontendIp: "10.152.3.20" }] });
+  const withUdr = { ...lb, metadata: { ...lb.metadata, udrNextHop: udr } };
+  const by2 = new Map(byId).set("lbi", withUdr);
+  const noAgw = edges.filter((e) => e.source !== "agw");
+  const chips = (es: DiagramEdgeSpec[], n = withUdr) => W.lbInboundChips(W.lbInboundFacts(n, es, by2, { feIn0: 0 }, null)).map((c) => [c.key, c.vars?.count ?? null]);
+  assert.deepEqual(chips(noAgw), [["ld.lbin.chip.udr", 2]]);
+  assert.deepEqual(chips(edges), [["ld.lbin.chip.callers", 1], ["ld.lbin.chip.udr", 2]]);
+  const none = { ...lb, metadata: { ...lb.metadata, udrNextHop: JSON.stringify({ state: "ok", routeTables: 0, subnets: 0, prefixes: 0, entries: [] }) } };
+  assert.deepEqual(chips(noAgw, none), [["ld.lbin.chip.zeroBytes", null]], "no UDR → the bytes chip");
+  const junk = { ...lb, metadata: { ...lb.metadata, udrNextHop: "{not json" } };
+  assert.equal(W.lbInboundFacts(junk, noAgw, by2, {}, null)?.udr, null, "malformed metadata is ignored");
+  assert.equal(W.lbInboundFacts(withUdr, noAgw, by2, {}, null)?.frontends[0]?.ruleBound, true, "rule binding of the frontend is carried");
 });

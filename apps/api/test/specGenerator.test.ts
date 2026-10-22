@@ -130,3 +130,31 @@ test("spec: a managed cluster is never put in a subnet by resource group; its pr
   assert.notEqual(aks.metadata?.placement, "rg-guess");
   assert.ok(!spec.nodes.some((x) => x.metadata?.archRole === "aks-control-plane"), "no synthetic API server node");
 });
+
+test("spec: UDR routes — one line per (subnet, next hop) with its prefixes; a 0.0.0.0/0 UDR is the subnet's exit before default outbound (NET-09)", async () => {
+  const g = structuredClone(graph) as ArchitectureGraph;
+  const def = g.nodes.find((x) => x.id === SN_DEF)!;
+  def.metadata = {
+    ...def.metadata,
+    egress: { via: "appliance", targetId: LBI, holder: "ilb", nextHopIp: "10.0.2.10", evidence: "udr", bgpMayOverride: false },
+    udrRoutes: {
+      state: "ok", routeTable: { name: "rt-legacy", bgpPropagation: true }, total: 3,
+      routes: [
+        { prefix: "0.0.0.0/0", nextHopType: "VirtualAppliance", nextHopIp: "10.0.2.10", target: { id: LBI, kind: "ilb" } },
+        { prefix: "10.0.0.0/8", nextHopType: "VirtualAppliance", nextHopIp: "10.0.2.10", target: { id: LBI, kind: "ilb" } },
+        { prefix: "192.0.2.0/24", nextHopType: "None" },
+      ],
+    },
+  };
+  const { spec } = await generateDiagramSpec(g, "00000000-0000-0000-0000-000000000000", "manual");
+  const sub = spec.nodes.find((x) => x.azureResourceId?.toLowerCase() === SN_DEF)!;
+  const lbi = spec.nodes.find((x) => x.azureResourceId?.toLowerCase() === LBI)!;
+  const udr = spec.edges.filter((x) => x.edgeKind === "udr-route");
+  assert.equal(udr.length, 1);
+  assert.deepEqual([udr[0]!.source, udr[0]!.target], [sub.id, lbi.id]);
+  assert.deepEqual(udr[0]!.route, { routeTable: "rt-legacy", prefixes: ["0.0.0.0/0", "10.0.0.0/8"], nextHopIp: "10.0.2.10", hop: "appliance", firstExit: true });
+  assert.equal(sub.metadata?.egressVia, "appliance");
+  assert.equal(sub.metadata?.egressTargetId, lbi.id);
+  assert.ok(JSON.parse(sub.metadata!.udrRoutes!).routes.length === 3, "the whole table rides on the subnet for its panel");
+  assert.ok(!spec.edges.some((x) => x.edgeKind === "outbound-internet" && x.source === sub.id), "no 'default outbound (retiring)' line: the UDR comes first");
+});
