@@ -23,6 +23,8 @@ const GUID = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 const ROLES = ["viewer", "operator", "admin"] as const;
 
 const ConnectionSchema = z.object({
+  /** Multi-cloud seam (docs/architecture/multi-cloud.md): only Azure today — a file without it is Azure */
+  provider: z.literal("azure").default("azure"),
   key: z.string().regex(/^[a-z0-9-]{2,32}$/, "2–32 characters: a-z 0-9 -"),
   displayName: z.string().min(1).max(80),
   tenantId: GUID,
@@ -141,7 +143,7 @@ export function getConnections(env: Env): AzureConnection[] {
     list = parseConnections(JSON.parse(readFileSync(path, "utf8")), env);
   } else {
     list = [{
-      key: "home", displayName: "Home", tenantId: (env.AZURE_AD_TENANT_ID ?? "").toLowerCase(), mode: env.AUD_HOME_CONNECTION_MODE,
+      provider: "azure", key: "home", displayName: "Home", tenantId: (env.AZURE_AD_TENANT_ID ?? "").toLowerCase(), mode: env.AUD_HOME_CONNECTION_MODE,
       subscriptions: envSubscriptions(env), logAnalyticsWorkspaces: [], roles: [...ROLES],
     }];
   }

@@ -24,6 +24,8 @@ export type ConnectionCheckStatus = "ok" | "warning" | "failed";
 export type CredentialKind = "platform" | "delegated" | "secret" | "certificate" | "federatedKubernetes";
 
 export type AzureConnectionOption = {
+  /** Multi-cloud seam: always "azure" today (packages/types/src/cloud.ts) */
+  provider?: import("./cloud.js").CloudProvider;
   key: string;
   displayName: string;
   /** Directory (tenant) name as declared in the connections file — absent when not declared */

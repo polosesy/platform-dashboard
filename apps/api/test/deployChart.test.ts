@@ -89,3 +89,10 @@ test("no tenant data in the chart or its rendering: placeholders only", () => {
     local.forEach((v, i) => assert.ok(v === "home" || !lower.includes(v), `${f}: contains local connection value #${i}`));
   }
 });
+
+test(".dockerignore keeps local secrets and notes out of any build context (docker build . / az acr build .)", () => {
+  const lines = new Set(read(".dockerignore").split("\n").map((l) => l.trim()));
+  for (const must of [".env", ".env.*", "config/", ".secrets/", "onprem.txt", "**/*.pem", "**/*.key", ".claude/", "apps/api/.probe/", "deploy/docker/*.env", "deploy/docker/tls/"]) {
+    assert.ok(lines.has(must), `.dockerignore lacks ${must}`);
+  }
+});

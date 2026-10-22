@@ -17,7 +17,7 @@ import { archCategoryOf, labelWidth, PAAS_ORDER, type PaasCategory } from "./arc
 import { isInferredEdge } from "./liveScope";
 import { isOutboundOnlyLb } from "./liveBackends";
 import type { Arrangement } from "./archArrange";
-import { applySequence, assignCells, liveKey, ruleOfClass, type ArrangeContainer, type ArrangeView, type CellRule } from "./liveArrange";
+import { applySequence, assignCells, liveKey, looseKey, ruleOfClass, SUBNET_DEFAULT_KEY, type ArrangeContainer, type ArrangeView, type CellRule, type ColsTarget } from "./liveArrange";
 
 export const LIVE = {
   CARD_W: 220,
@@ -228,6 +228,10 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
   const userOrder = (k: string) => opts.arrangement?.order.get(k);
   /** Subnet id → its grid's column count as drawn (for the arrange view) */
   const gridCols = new Map<string, number>();
+  /** VNets with unconnected subnets (their column control) */
+  const looseVnets = new Set<string>();
+  /** The user's cap on every subnet's card columns (a subnet's own value wins) */
+  const subnetCap = opts.arrangement?.grid.get(SUBNET_DEFAULT_KEY)?.cols;
   const hidden = new Set<string>();
   const nicCount = new Map<string, number>();
   const childrenOf = new Map<string, DiagramNodeSpec[]>();
@@ -419,9 +423,11 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     };
 
     // ── Step 5: cards inside a subnet — lines leave on the side they go ──
-    const subnetBox = (s: DiagramNodeSpec, band?: number): PackNode<Shape> => {
+    const subnetBox = (s: DiagramNodeSpec, band?: number, evenW?: number): PackNode<Shape> => {
       const cards = cardsOf.get(s.id)!;
-      const cols = Math.min(LIVE.SUBNET_COLS, Math.max(1, Math.ceil(Math.sqrt(cards.length))));
+      const autoCols = Math.min(LIVE.SUBNET_COLS, Math.max(1, Math.ceil(Math.sqrt(cards.length))));
+      const cols = subnetCap ? Math.max(1, Math.min(autoCols, subnetCap)) : autoCols;
+      const boxMinW = Math.max(LIVE.CARD_W + 2 * LIVE.PAD, evenW ?? 0);
       const myLayer = band != null ? meta.subnet.get(s.id)?.layer ?? 0 : 0;
       const classOf = (c: DiagramNodeSpec): CardClass => {
         let l = false, r = false;
@@ -451,7 +457,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
           row.forEach((x, c) => { if (x) last = c; });
           return wrap(`row:${s.id}:${i}`, "row", row.slice(0, last + 1).map((x, c) => (x ? sizeLeaf(byId.get(x)!) : spacer(`${s.id}:u:${i}:${c}`))), LIVE.GAP);
         });
-        return box({ id: s.id, kind: "subnet" }, uRows, { head: LIVE.SUBNET_HEAD, dir: "col", maxW: Infinity, minW: LIVE.CARD_W + 2 * LIVE.PAD });
+        return box({ id: s.id, kind: "subnet" }, uRows, { head: LIVE.SUBNET_HEAD, dir: "col", maxW: Infinity, minW: boxMinW });
       }
       const rows: PackNode<Shape>[][] = [];
       const used = new Set<string>();
@@ -470,9 +476,12 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
           // the left reaches it without crossing the source card
           const leftFirst = targets.filter((t) => meta.cardClass.get(t.id) === "L");
           const others = targets.filter((t) => meta.cardClass.get(t.id) !== "L");
+          // A column cap: the left-reached targets get rows of their own (a row never gets wider than the cap)
+          const ownRows = subnetCap != null && leftFirst.length + 1 + Math.min(1, others.length) > cols;
+          if (ownRows) for (const t of leftFirst) rows.push([sizeLeaf(t)]);
           for (let i = 0; i < others.length || i === 0; i += cols - 1) {
             const chunk = others.slice(i, i + cols - 1).map(sizeLeaf);
-            const head = i === 0 ? [...leftFirst.map(sizeLeaf), sizeLeaf(src)] : [spacer(`${s.id}:${src.id}:${i}`)];
+            const head = i === 0 ? [...(ownRows ? [] : leftFirst.map(sizeLeaf)), sizeLeaf(src)] : [spacer(`${s.id}:${src.id}:${i}`)];
             rows.push([...head, ...chunk]);
             if (!others.length) break;
           }
@@ -482,6 +491,9 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       const rest = cards.filter((c) => !used.has(c.id));
       if (cols === 1) {
         for (const c of rest) rows.push([sizeLeaf(c)]);
+        // One column: right-linked cards still take their slots in their targets' order
+        const R1 = rest.filter((c) => meta.cardClass.get(c.id) === "R");
+        if (R1.length > 1) meta.rSlots.set(s.id, R1.map((c) => c.id));
       } else {
         const L = rest.filter((c) => meta.cardClass.get(c.id) === "L");
         const R = rest.filter((c) => meta.cardClass.get(c.id) === "R");
@@ -508,7 +520,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       }
       gridCols.set(s.id, Math.max(1, ...rows.map((r) => r.length)));
       const rowBoxes = rows.map((row, i) => wrap(`row:${s.id}:${i}`, "row", row, LIVE.GAP));
-      return box({ id: s.id, kind: "subnet" }, rowBoxes, { head: LIVE.SUBNET_HEAD, dir: "col", maxW: Infinity, minW: LIVE.CARD_W + 2 * LIVE.PAD });
+      return box({ id: s.id, kind: "subnet" }, rowBoxes, { head: LIVE.SUBNET_HEAD, dir: "col", maxW: Infinity, minW: boxMinW });
     };
 
     // ── Step 4: bands (never wrapped) stacked in one connected block; isolated subnets after ──
@@ -534,17 +546,27 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     const empties = subs.filter((s) => cardsOf.get(s.id)!.length === 0).sort((a, b) => subTie(a.id, b.id));
     // No configured link: one regular grid in a fixed order (tier: entry → compute → data / PE → management,
     // then name), below the connected flow — never squeezed into the gaps beside it
-    const isolatedNodes = [...isolated].sort(subTie).map((sid) => subnetBox(byId.get(sid)!));
+    // The user's column count for them (lib/liveArrange looseKey): rows of exactly that many, every subnet as wide
+    // as the widest so the columns line up
+    const lc = opts.arrangement?.grid.get(looseKey(keyOf(v.id)))?.cols;
+    const looseSubs = [...[...isolated].sort(subTie).map((sid) => byId.get(sid)!), ...(empties.length < LIVE.FOLD_EMPTY_AT ? empties : [])];
+    const evenW = lc ? Math.max(0, ...looseSubs.map((x) => measure(subnetBox(x)).w)) : undefined;
+    const isolatedNodes = [...isolated].sort(subTie).map((sid) => subnetBox(byId.get(sid)!, undefined, evenW));
     const direct = (childrenOf.get(v.id) ?? []).filter((c) => !isGroup(c) && !laneOf.has(c.id)).sort(byCard).map((c) => { const z = cardSize(c); return leaf(c.id, z.w, z.h); });
     const loose: PackNode<Shape>[] = [...isolatedNodes, ...direct];
     const expanded = !!opts.expandedEmpty?.has(v.id);
     const fold = empties.length >= LIVE.FOLD_EMPTY_AT;
     // One or two empty subnets just follow the others; more get their own section at the bottom of the VNet
-    if (!fold) loose.push(...empties.map((s) => subnetBox(s)));
+    if (!fold) loose.push(...empties.map((s) => subnetBox(s, undefined, evenW)));
     else if (!expanded) for (const e of empties) hidden.add(e.id);
+    if (loose.length || (fold && expanded)) looseVnets.add(v.id);
     const main: PackNode<Shape>[] = [...(block ? [block] : []), ...loose];
     const rowWrap = (id: string, children: PackNode<Shape>[], maxW: number): PackNode<Shape> =>
-      box({ id, kind: "wrap" }, children, { head: 0, pad: 0, gap: LIVE.GAP, framed: false, dir: "row", maxW });
+      lc ? colRows(id, children, 0) : box({ id, kind: "wrap" }, children, { head: 0, pad: 0, gap: LIVE.GAP, framed: false, dir: "row", maxW });
+    /** Rows of exactly `lc` children, stacked (the user's column count) */
+    const colRows = (id: string, children: PackNode<Shape>[], minW: number): PackNode<Shape> =>
+      box({ id, kind: "wrap" }, Array.from({ length: Math.ceil(children.length / lc!) }, (_, i) => wrap(`${id}:r${i}`, "row", children.slice(i * lc!, (i + 1) * lc!), LIVE.GAP)),
+        { head: 0, pad: 0, gap: LIVE.GAP, framed: minW > 0, dir: "col", maxW: Infinity, ...(minW > 0 ? { minW } : {}) });
     /** The VNet for one wrap width: the connected flow, the unconnected grid, then (bottom-left) the empty-subnet row */
     const vnetFor = (maxW: number): PackNode<Shape> => {
       const content: PackNode<Shape>[] = [];
@@ -554,8 +576,9 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
         // wrap width (picked below for the VNet's shape) decides how many go on one row
         const sectionW = Math.max(maxW, blockW, ...loose.map((k) => measure(k).w + 2 * LIVE.PAD));
         content.push(block
-          ? box({ id: `isolated:${v.id}`, kind: "section", label: "ld.section.isolated", vnetId: v.id, count: loose.length }, loose, {
-              head: LIVE.LANE_HEAD, pad: LIVE.PAD, gap: LIVE.GAP, dir: "row", maxW: sectionW - 2 * LIVE.PAD, minW: blockW,
+          ? box({ id: `isolated:${v.id}`, kind: "section", label: "ld.section.isolated", vnetId: v.id, count: loose.length },
+              lc ? Array.from({ length: Math.ceil(loose.length / lc) }, (_, i) => wrap(`isolated:${v.id}:r${i}`, "row", loose.slice(i * lc, (i + 1) * lc), LIVE.GAP)) : loose, {
+              head: LIVE.LANE_HEAD, pad: LIVE.PAD, gap: LIVE.GAP, dir: lc ? "col" : "row", maxW: lc ? Infinity : sectionW - 2 * LIVE.PAD, minW: blockW,
             })
           : rowWrap(`main:${v.id}`, loose, maxW));
       }
@@ -563,7 +586,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
         const summary: PackNode<Shape> = { t: "leaf", shape: { id: `empty-subnets:${v.id}`, kind: "summary", vnetId: v.id, subnetIds: empties.map((e) => e.id), names: empties.map((e) => e.label), expanded }, w: LIVE.SUMMARY_W, h: LIVE.SUMMARY_H };
         const section: PackNode<Shape>[] = [summary];
         // Opened: same-size boxes in a grid as wide as the subnets above (never wider)
-        if (expanded) section.push(rowWrap(`empties:${v.id}`, empties.map((s) => subnetBox(s)), Math.max(maxW, LIVE.CARD_W + 2 * LIVE.PAD)));
+        if (expanded) section.push(rowWrap(`empties:${v.id}`, empties.map((s) => subnetBox(s, undefined, lc ? Math.max(0, ...empties.map((x) => measure(subnetBox(x)).w)) : undefined)), Math.max(maxW, LIVE.CARD_W + 2 * LIVE.PAD)));
         content.push(box({ id: `emptySection:${v.id}`, kind: "wrap" }, section, { head: 0, pad: 0, gap: LIVE.GAP / 2, framed: false, dir: "col", maxW: Infinity }));
       }
       // A VNet with peerings has a second header row for them (fixed height: chips never wrap)
@@ -696,8 +719,11 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
       const base = `lane:${kind}${category ? ":" + category : ""}`;
       // Unused · detached: public IPs first (billed while unused), then NSGs, then the rest — by name within a kind
       const cards = list.slice().sort(kind === "unused" ? byUnused : byCard);
+      // The user's column count (1–2) for the lanes whose order is theirs too — one per kind, every segment
+      const u = kind === "paas" || kind === "outside" || kind === "ghost" ? opts.arrangement?.grid.get(base)?.cols : undefined;
+      const c = u ? Math.max(1, Math.min(u, 2, list.length)) : cols(list.length);
       return box({ id: segs.length > 1 ? `${base}@${key}` : base, kind: "lane", lane: kind, label, category, vnetId: key }, cards.map((n) => { const sz = cardSize(n); return leaf(n.id, sz.w, sz.h); }), {
-        head: LIVE.LANE_HEAD, maxW: cols(list.length) * LIVE.CARD_W + (cols(list.length) - 1) * LIVE.GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD,
+        head: LIVE.LANE_HEAD, maxW: c * LIVE.CARD_W + (c - 1) * LIVE.GAP, minW: LIVE.CARD_W + 2 * LIVE.PAD,
       });
     });
   };
@@ -1056,6 +1082,26 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     for (const id of members) containerOf.set(id, l.id);
   }
 
+  const colsTargets = new Map<string, ColsTarget>();
+  for (const [sid, n] of gridCols) {
+    const hasCards = [...items.values()].some((b) => b.parent === sid && byId.get(b.id) && !isGroup(byId.get(b.id)!));
+    if (!hasCards || !abs.has(sid)) continue;
+    const k = keyOf(sid);
+    colsTargets.set(sid, { kind: "subnet", storeKey: k, cols: n, user: opts.arrangement?.grid.get(k)?.cols != null, max: LIVE.SUBNET_COLS });
+  }
+  for (const l of lanes) {
+    if (l.lane !== "paas" && l.lane !== "outside" && l.lane !== "ghost") continue;
+    const xs = new Set([...items.values()].filter((b) => b.parent === l.id).map((b) => b.x));
+    if (xs.size === 0 || [...items.values()].filter((b) => b.parent === l.id).length < 2) continue;
+    const k = laneStoreKey({ lane: l.lane, category: l.category });
+    colsTargets.set(l.id, { kind: "lane", storeKey: k, cols: xs.size, user: opts.arrangement?.grid.get(k)?.cols != null, max: 2 });
+  }
+  for (const vid of looseVnets) {
+    const k = looseKey(keyOf(vid));
+    const u = opts.arrangement?.grid.get(k)?.cols;
+    colsTargets.set(vid, { kind: "loose", storeKey: k, cols: u ?? 0, user: u != null, max: 3 });
+  }
+
   const top = placed.filter((p) => p.shape.kind !== "wrap" && p.shape.kind !== "spacer" && !drawnParent(p));
   const minX = Math.min(0, ...top.map((p) => p.x));
   const minY = Math.min(0, ...top.map((p) => p.y));
@@ -1065,7 +1111,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     items, lanes, sections, summaries, hidden, nicCount, abs, placeMeta: meta,
     bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
     reservedBelow: new Set(laneMembers.ingress.map((n) => n.id).filter((id) => reserveOf(id) > 0)),
-    arrange: { containerOf, containers, abs },
+    arrange: { containerOf, containers, abs, cols: colsTargets },
   };
 }
 

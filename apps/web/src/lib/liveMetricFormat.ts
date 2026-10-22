@@ -28,6 +28,11 @@ export const METRIC_META: Record<string, { label: string; unit: MetricUnit }> = 
   latency: { label: "ld.metric.latency", unit: "ms" },
   backend: { label: "ld.metric.backend", unit: "%" },
   errorRate: { label: "ld.metric.errorRate", unit: "%" },
+  // Front Door Standard/Premium: origin probe health per routed origin group (the panel names the group)
+  probe0: { label: "ld.metric.afdProbe0", unit: "%" },
+  probe1: { label: "ld.metric.afdProbe1", unit: "%" },
+  probe2: { label: "ld.metric.afdProbe2", unit: "%" },
+  probe3: { label: "ld.metric.afdProbe3", unit: "%" },
   load: { label: "ld.metric.load", unit: "%" },
   snat: { label: "ld.metric.snat", unit: "%" },
   fwHealth: { label: "ld.metric.fwHealth", unit: "%" },
@@ -81,7 +86,7 @@ export const CARD_CELLS: Record<string, readonly string[]> = {
   appInsights: ["requests", "errorRate"],
   agc: ["requests", "healthyTargets"], dns: ["queries"],
   // Front Door Standard/Premium binding set (the card kind is frontDoor)
-  frontDoorAfd: ["requests", "backend"],
+  frontDoorAfd: ["requests", "errorRate"],
   nsg: [], nic: [], logAnalytics: [], bastion: [], paas: [],
   vnetGateway: ["bandwidth"], onPremSite: ["bitsIn", "bitsOut"],
 };
@@ -228,7 +233,8 @@ export function cellTone(key: string, metrics: Record<string, number | null>, ru
 
 /** The card's cells: the kind's table, else (unknown kinds) a usage pair or the bound metrics with the trend first */
 export function cardCells(kind: string, bound: readonly string[], trendKey?: string): string[] {
-  const table = CARD_CELLS[kind];
+  // Front Door Standard/Premium has no "backend" (probes are per origin group): requests and the users' 5xx share
+  const table = kind === "frontDoor" && !bound.includes("backend") && bound.includes("errorRate") ? CARD_CELLS.frontDoorAfd : CARD_CELLS[kind];
   // The table applies when the spec binds its metrics (diagrams from Azure are normalised by the API); the sample
   // diagram keeps its own keys
   if (table && (table.length === 0 || table.some((k) => bound.includes(k)))) return [...table];

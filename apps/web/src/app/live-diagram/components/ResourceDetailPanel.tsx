@@ -475,7 +475,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         {kind === "vnet" ? <PeeringSection key={node.id} node={node} focusKey={focusPeeringKey} onOpenVnet={onOpenVnet} onAddVnet={onAddVnet} /> : null}
         {kind === "vnetGateway" || kind === "onPremSite" ? <HybridSection node={node} spec={spec} onSelectNode={onSelectNode} /> : null}
         {kind === "agc" ? <AgcFacts node={node} /> : null}
-        {kind === "frontDoor" ? <FrontDoorFacts node={node} /> : null}
+        {kind === "frontDoor" ? <FrontDoorFacts node={node} metrics={liveNode?.metrics} /> : null}
         {kind === "frontDoor" || kind === "appGateway" ? <WafSummarySection node={node} onWafSelect={onWafSelect} /> : null}
         {kind === "aks" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}

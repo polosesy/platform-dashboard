@@ -17,7 +17,7 @@ import { internetInboundExposure, mostExposed, routesWidenVnetTag, type NsgInput
 import { agcFacts, resolveAgcCluster, type AgcChildRow } from "./agc.js";
 import { resolveAgwWaf } from "./agwWaf.js";
 import { resourceSpec } from "./resourceSpec.js";
-import { activeRoutes, fetchFrontDoorConfig, resolveAfdOrigins, resolveAfdWaf, wafPolicyFacts } from "./frontDoorConfig.js";
+import { afdOriginGroups, activeRoutes, fetchFrontDoorConfig, resolveAfdOrigins, resolveAfdWaf, wafPolicyFacts } from "./frontDoorConfig.js";
 import { resolveSubnetEgress, resolveSubnetRoutes, udrNextHopsToIlb, type ApplianceHolder, type RouteTableIn, type UdrSubnet } from "./subnetEgress.js";
 import type { ArchitectureEdge, ArchitectureGraph, ArchitectureNode, AzureSubscriptionOption, GraphNodeKind, InboundExposure } from "@aud/types";
 
@@ -1382,10 +1382,13 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           waf: resolveAfdWaf(fd.azureId ?? fd.id, cfg, wafById),
           origins: cfg.origins.length, externalOrigins: res.external, ambiguousOrigins: res.ambiguous,
           endpointHosts: cfg.endpoints.filter((e) => e.enabled).map((e) => e.hostName).slice(0, 10),
+          // Origin groups: routed or not, probe settings, and which are read for probe health (probe<i> bindings)
+          originGroups: afdOriginGroups(cfg).slice(0, 40),
           // Every origin by name for the panel: its group, host, state and the resource it was matched to (if any)
           originList: cfg.origins.slice(0, 100).map((o) => {
             const link = res.links.find((l) => l.origin === o.name && l.group === o.group);
-            const used = cfg.routes.some((r) => r.enabled && r.originGroup === o.group);
+            // Routed = an enabled route on an enabled endpoint (a disabled endpoint takes no traffic)
+            const used = activeRoutes(cfg).some((r) => r.originGroup === o.group);
             return {
               name: o.name, group: o.group, host: o.hostName,
               state: !o.enabled ? "disabled" : !used ? "unrouted" : link ? "linked" : "external",

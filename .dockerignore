@@ -16,3 +16,17 @@ SESSION_SUMMARY.md
 skill.md
 **/*.pem
 **/*.pfx
+# Local access material and notes (SSH keys, server addresses, real-environment notes) — a build from the working
+# folder (az acr build ., docker build .) must never upload them
+.secrets/
+onprem.txt
+**/*.key
+**/*.ppk
+**/id_rsa*
+**/id_ed25519*
+**/*_ed25519
+**/*_ed25519.pub
+*.local.md
+local/
+deploy/docker/tls/
+state/

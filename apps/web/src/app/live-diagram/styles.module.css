@@ -2967,3 +2967,4 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 .canvasWrap[data-edit="arrange"] :global(.ld-drag) { cursor: grab; }
 /* Buttons inside cards (WAF badge, VMSS expand, NSG chip) do nothing while arranging */
 .canvasWrap[data-edit="arrange"] :global(.react-flow__node-live) button { pointer-events: none; }
+.arrangeCols { display: inline-flex; align-items: center; gap: 6px; }

@@ -23,7 +23,7 @@ import styles from "./styles.module.css";
 import { Button, EmptyState, Notice, PageHeader, Segmented, Select, Toggle } from "@/components/ui";
 import { useStoredArrangement } from "@/lib/useStoredArrangement";
 import { EMPTY_ARRANGEMENT } from "@/lib/archArrange";
-import { liveArrangementStatus, liveKey, resetContainer, setGridCols, type ArrangeContainer } from "@/lib/liveArrange";
+import { liveArrangementStatus, liveKey, resetContainer, setBoxCols, setGridCols, SUBNET_DEFAULT_KEY, type ArrangeContainer, type ColsTarget } from "@/lib/liveArrange";
 
 /** Built-in example diagram (sample resources and values) */
 const SAMPLE_DIAGRAM_ID = "prod-infra";
@@ -335,7 +335,7 @@ export default function LiveDiagramPage() {
   const arr = useStoredArrangement(`aud.live.arrange.v1:${diagramId || "none"}`);
   const [editMode, setEditMode] = useState(false);
   const [applyManual, setApplyManual] = useState(true);
-  const [editSel, setEditSel] = useState<{ id: string; own?: ArrangeContainer; parent?: ArrangeContainer } | null>(null);
+  const [editSel, setEditSel] = useState<{ id: string; own?: ArrangeContainer; parent?: ArrangeContainer; cols?: ColsTarget } | null>(null);
   const [arrangeNotice, setArrangeNotice] = useState<string | null>(null);
   const changeEditMode = useCallback((on: boolean) => {
     setEditMode(on);
@@ -891,14 +891,34 @@ export default function LiveDiagramPage() {
             <>
               <Button size="sm" variant="ghost" onClick={arr.undo} disabled={!arr.canUndo} title="Ctrl+Z">{t("arch.edit.undo")}</Button>
               <Button size="sm" variant="ghost" onClick={arr.redo} disabled={!arr.canRedo} title="Ctrl+Shift+Z">{t("arch.edit.redo")}</Button>
-              {editSel?.own?.kind === "grid" ? (
-                <Segmented
-                  label={t("ld.edit.cols")}
-                  value={String(arr.arrangement.grid.get(editSel.own.storeKey)?.cols ?? "auto")}
-                  onChange={(v) => { const own = editSel.own as Extract<ArrangeContainer, { kind: "grid" }>; arr.commit(setGridCols(arr.arrangement, own, v === "auto" ? null : Number(v))); }}
-                  items={[{ id: "auto", label: t("ld.edit.colsAuto") }, { id: "1", label: "1" }, { id: "2", label: "2" }, { id: "3", label: "3" }]}
-                />
-              ) : null}
+              {/* Every subnet's card columns (a cap — a subnet's own value wins) */}
+              <Segmented
+                label={t("ld.edit.cardColsAll")}
+                value={String(arr.arrangement.grid.get(SUBNET_DEFAULT_KEY)?.cols ?? "auto")}
+                onChange={(v) => arr.commit(setBoxCols(arr.arrangement, SUBNET_DEFAULT_KEY, v === "auto" ? null : Number(v)))}
+                items={[{ id: "auto", label: t("ld.edit.cardColsAllAuto") }, { id: "1", label: t("ld.edit.colsN", { n: 1 }) }, { id: "2", label: t("ld.edit.colsN", { n: 2 }) }]}
+              />
+              {/* The selected box's columns: a subnet (its cards, 1–3), a side lane (1–2), a VNet's unconnected subnets */}
+              {editSel?.cols ? (() => {
+                const c = editSel.cols;
+                const grid = (editSel.own?.kind === "grid" ? editSel.own : editSel.parent?.kind === "grid" ? editSel.parent : undefined) as Extract<ArrangeContainer, { kind: "grid" }> | undefined;
+                const set = (n: number | null) => arr.commit(c.kind === "subnet" && grid ? setGridCols(arr.arrangement, grid, n) : setBoxCols(arr.arrangement, c.storeKey, n));
+                const label = t(c.kind === "subnet" ? "ld.edit.cols" : c.kind === "lane" ? "ld.edit.laneCols" : "ld.edit.looseCols");
+                return (
+                  <span className={styles.arrangeCols} title={t(c.kind === "lane" ? "ld.edit.laneColsHint" : c.kind === "subnet" ? "ld.edit.subnetColsHint" : "ld.edit.looseColsHint")}>
+                    <span className={styles.arrangeHint}>{label}</span>
+                    <Segmented
+                      label={label}
+                      value={String(arr.arrangement.grid.get(c.storeKey)?.cols ?? "auto")}
+                      onChange={(v) => set(v === "auto" ? null : Number(v))}
+                      items={[
+                        { id: "auto", label: c.cols && !c.user ? t("ld.edit.colsAutoN", { n: c.cols }) : t("ld.edit.colsAuto") },
+                        ...Array.from({ length: c.max }, (_, i) => ({ id: String(i + 1), label: t("ld.edit.colsN", { n: i + 1 }) })),
+                      ]}
+                    />
+                  </span>
+                );
+              })() : null}
               {editSel?.own && (arr.arrangement.grid.has(editSel.own.storeKey) || arr.arrangement.order.has(editSel.own.storeKey)) ? (
                 <Button size="sm" variant="ghost" onClick={() => arr.commit(resetContainer(arr.arrangement, editSel.own!.storeKey))}>{t(editSel.own.kind === "grid" ? "ld.edit.resetSubnet" : "ld.edit.resetBox")}</Button>
               ) : null}

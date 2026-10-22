@@ -98,6 +98,18 @@ kubectl auth can-i get secrets --as <connection-object-id>        # no
 
 화면: 설정 › Azure 연결 › 점검(관리자) — 자격 증명 '페더레이션', 클러스터 점검 reach·entra·clusterUserRole ok, 읽기 규칙 전부 ok, Secret·exec 경고 없음.
 
+### 시험 배포 — 프라이빗 클러스터에 GitOps 없이 올리고 로컬 포트 포워딩으로 보기
+
+정식 경로(GitOps)에 앞서 하루짜리 시험을 할 때의 순서입니다(실제로 해 본 절차 — 값은 자리표시자).
+
+1. **이미지**: 레지스트리 방화벽이 허용 IP만 받으면 `az acr build`(ACR Tasks)는 거부될 수 있습니다(실행기 IP가 목록에 없음 — '신뢰할 수 있는 서비스 허용'은 Tasks를 포함하지 않음). 그때는 Docker 엔진이 있는 곳(온프렘 서버 `scripts/onprem.sh build`)에서 빌드 → `docker save`(OCI 레이아웃 tar) → **허용된 IP의 PC**에서 [`crane`](https://github.com/google/go-containerregistry) `push <폴더>` (토큰은 `az acr login --expose-token` → `crane auth login --password-stdin`, 임시 `DOCKER_CONFIG`에 두고 끝나면 삭제). 시험 이미지는 별도 경로(`test/aud-dashboard`)에.
+2. **신원**: 고객 쪽 연결 = 사용자 할당 관리 ID + FIC(주체 `system:serviceaccount:aud-dashboard:aud-dashboard`) — 구독 Owner로 만들 수 있음(앱 등록 FIC와 달리 Entra 앱 관리자 불필요). 역할은 **필요한 리소스 그룹에만**(한 구독에 운영 리소스도 있으면 구독 전체 Reader 금지), 클러스터 Cluster User Role, 작업 영역 Log Analytics Reader. 시험에서 홈 연결을 쓰지 않으면 `homeSubscriptionIds: ""` + SA `client-id`·`tenant-id` = 고객 관리 ID(홈 읽기만 실패, 고객 클러스터 화면은 비밀 없이 동작).
+3. **클러스터 적용**: PC가 프라이빗 API에 못 닿으면 `az aks command invoke --file`(관리자 그룹 멤버)로 `namespace.yaml` → `aud-dashboard-reader.yaml`(주체 = 관리 ID의 **principalId**) → `helm template … -f values-test.yaml` 결과(`--dry-run=server` 먼저). command invoke의 실행 계정은 impersonate 권한이 없어 `kubectl auth can-i --as`는 4번의 kubectl로 확인.
+4. **로컬 포트 포워딩**: Bastion의 IP 연결 터널은 22·3389만 허용 → **점프박스를 SSH 경유지로**: `az network bastion tunnel --target-resource-id <점프박스> --resource-port 22 --port 2222` → `az ssh vm --ip 127.0.0.1 --port 2222 -- -N -L 8443:<API 서버 PE IP>:443`(VM Administrator/User Login) → kubeconfig 서버 `https://127.0.0.1:8443` + `--tls-server-name=<privateFQDN>` + `kubelogin convert-kubeconfig -l azurecli` → `kubectl -n aud-dashboard port-forward svc/aud-dashboard 3000:80`. 점프박스에는 아무것도 설치하지 않음.
+   - 이 과정은 `scripts/aks-test.sh connect`(PowerShell: `.\scripts\aks-test.ps1 connect` — PowerShell은 `.sh`를 직접 못 돌려 Git for Windows bash로 실행)가 한 번에 함. `check` = 같은 터널로 `/readyz` 한 번 보고 닫음. 이름은 gitignore된 `.secrets/aks-test.env`(`AUD_AKS_RG`·`AUD_AKS_NAME`·`AUD_BASTION_NAME`·`AUD_BASTION_RG`·`AUD_JUMPBOX_VM` …, 스크립트 머리 주석), 작업 파일(kubeconfig·known_hosts·로그·렌더링한 values)은 `.secrets/aks-test/`. 3000번을 쓰는 온프렘 터널·개발 서버를 먼저 끔. Ctrl-C로 닫을 때 Windows 프로세스 트리째 끝냄(`kill`만으로는 az·ssh가 남아 포트를 쥠).
+5. **로그인**: 값 `publicUrl: "http://localhost:3000"`(등록된 SPA 리디렉션과 정확히 같게) — 리디렉션·CORS 둘 다. 운영 모드라 테스트 사용자에게 앱 역할(`AUD.*`) 필요.
+6. **정리**: 네임스페이스·ClusterRole/Binding → 역할 할당 → FIC → 관리 ID → 시험 이미지 경로. `scripts/aks-test.sh cleanup`('yes' 확인 후, 이름은 `AUD_TEST_IDENTITY`·`AUD_TEST_FIC`·`AUD_TEST_ACR`). GitOps 밖 수동 객체라 ArgoCD가 지우지 않음 — 시험 당일 정리.
+
 ## 9. 문제 해결
 
 | 증상 | 원인 → 조치 |

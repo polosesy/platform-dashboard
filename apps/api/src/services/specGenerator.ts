@@ -23,6 +23,7 @@ import type {
   SubResourceKind,
 } from "@aud/types";
 import { inferImplicitEdges } from "./dependencyInference.js";
+import { MAX_PROBED_GROUPS } from "./frontDoorConfig.js";
 import { backendServerKeys } from "./backendMembers.js";
 import { wafMetadata, type WafCoverage } from "./wafCoverage.js";
 import { specJson, type SpecFact } from "./resourceSpec.js";
@@ -160,10 +161,13 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
     latency: mon("TotalLatency", "avg", { optional: true }),
     health: health(...atLeast("backend", 90, 1)),
   },
-  // Front Door Standard/Premium (microsoft.cdn/profiles): origin health and 5xx share (frontdoor/monitor-front-door-reference)
+  // Front Door Standard/Premium (microsoft.cdn/profiles): requests and the 5xx share users got decide the state;
+  // origin probe health is read per routed origin group (probe<i>, afdProbeBindings) and can warn, never go red —
+  // probes fail where users do not (a non-200 answer to the probe path; with every origin failing Front Door sends
+  // traffic anyway). No profile-wide OriginHealthPercentage: it mixes every probed group, routed or not
+  // (frontdoor/monitor-front-door-reference · frontdoor/health-probes)
   frontDoorAfd: {
     requests: mon("RequestCount", "total"),
-    backend: mon("OriginHealthPercentage", "avg", { optional: true }),
     errorRate: mon("Percentage5XX", "avg", { optional: true }),
     latency: mon("TotalLatency", "avg", { optional: true }),
     // WAF verdicts over an hour, the whole profile (EDGE-10) — panel only, never a health input: a spike is an attack
@@ -171,7 +175,10 @@ export const NODE_BINDINGS: Record<string, Record<string, MetricBinding>> = {
     wafBlock: mon("WebApplicationFirewallRequestCount", "total", { filter: "Action eq 'Block'", window: "PT1H", optional: true }),
     wafLog: mon("WebApplicationFirewallRequestCount", "total", { filter: "Action eq 'Log'", window: "PT1H", optional: true }),
     wafTotal: mon("WebApplicationFirewallRequestCount", "total", { window: "PT1H", optional: true }),
-    health: health(...atLeast("backend", 90, 10), ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests"))),
+    health: health(
+      ...under("errorRate", 5, 25, ENOUGH_REQUESTS("requests")),
+      ...Array.from({ length: MAX_PROBED_GROUPS }, (_, i) => rule(`probe${i}`, ">=", 90, "warning")),
+    ),
   },
   // VPN gateway: S2S bandwidth (AverageBandwidth is bytes/s → bit/s); state comes from Resource Health
   vnetGateway: {
@@ -323,9 +330,25 @@ export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "ico
   const kind = n.resourceKind ?? n.icon;
   if (kind === "publicIP" && n.metadata?.unused === "true") return NOT_MEASURED;
   if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
-  if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return NODE_BINDINGS.frontDoorAfd!;
+  if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return { ...NODE_BINDINGS.frontDoorAfd!, ...afdProbeBindings(n.metadata?.originGroups) };
   if (kind === "lb") return { ...NODE_BINDINGS.lb!, ...privateFrontendBindings(n.metadata?.frontends) };
   return NODE_BINDINGS[kind] ?? n.bindings ?? NOT_MEASURED;
+}
+
+/**
+ * Probe health of the origin groups an active route uses with probes on (`probe<i>` = metadata originGroups'
+ * probeIndex): OriginHealthPercentage filtered by the OriginGroup dimension, averaged over five minutes (one bucket —
+ * a probe every 30–100 s per POP). Groups with probes off have no samples and are not read.
+ */
+export function afdProbeBindings(groupsJson: string | undefined): Record<string, MetricBinding> {
+  let groups: Array<{ name?: string; probeIndex?: number }> = [];
+  try { groups = JSON.parse(groupsJson ?? "[]") as typeof groups; } catch { return {}; }
+  const out: Record<string, MetricBinding> = {};
+  for (const g of groups) {
+    if (g.probeIndex == null || !g.name || g.probeIndex >= MAX_PROBED_GROUPS) continue;
+    out[`probe${g.probeIndex}`] = mon("OriginHealthPercentage", "avg", { filter: `OriginGroup eq '${g.name.replace(/'/g, "''")}'`, window: "PT5M", optional: true });
+  }
+  return out;
 }
 
 /** Private frontends read per LB (more are summed by nobody — the panel lists them one by one) */
@@ -2859,6 +2882,7 @@ export async function generateDiagramSpec(
         Object.assign(out, wafMetadata(meta.waf as WafCoverage | undefined));
         if (Array.isArray(meta.endpointHosts)) out.endpointHosts = JSON.stringify(meta.endpointHosts);
         if (Array.isArray(meta.originList)) out.originList = JSON.stringify(meta.originList);
+        if (Array.isArray(meta.originGroups)) out.originGroups = JSON.stringify(meta.originGroups);
         n.metadata = { ...n.metadata, ...out };
       }
       if (n.resourceKind === "vmss") {

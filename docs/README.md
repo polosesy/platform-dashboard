@@ -26,6 +26,7 @@ last-verified: 2026-10-22
 ## 아키텍처 — `architecture/`
 
 - [GLOSSARY.md](architecture/GLOSSARY.md) — 용어 사전
+- [multi-cloud.md](architecture/multi-cloud.md) — 멀티클라우드(Azure·AWS·GCP) 분석·단계별 계획 (초안, Phase 0 구현) · 참고 그림 [`image/aws-azure-gcp-system.gif`](image/aws-azure-gcp-system.gif)
 - [azure-resource-relationships.md](architecture/azure-resource-relationships.md) — 리소스 관계 사전 핵심(코드가 쓰는 행)
 - 영역별 관계 사전: [network-core.md](architecture/relationships/network-core.md) · [network-edge.md](architecture/relationships/network-edge.md) · [compute-containers.md](architecture/relationships/compute-containers.md) · [app-integration.md](architecture/relationships/app-integration.md) · [data.md](architecture/relationships/data.md) · [identity-security-monitoring.md](architecture/relationships/identity-security-monitoring.md) (+ `relationships/catalog.json`)
 

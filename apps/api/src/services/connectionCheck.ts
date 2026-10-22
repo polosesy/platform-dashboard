@@ -140,6 +140,7 @@ const SAMPLE_QUERY =
 
 /** What a caller may see of a connection: the full tenant id only with `fullTenantId` (admins) */
 export const connectionOption = (env: Env, c: AzureConnection, opts: { fullTenantId?: boolean } = {}): AzureConnectionOption => ({
+  provider: "azure",
   key: c.key,
   displayName: c.displayName,
   ...(c.tenantName ? { tenantName: c.tenantName } : {}),

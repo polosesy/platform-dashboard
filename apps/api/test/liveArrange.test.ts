@@ -130,3 +130,100 @@ test("VNets: the user's order wins over hub-first; reset forgets it", () => {
   assert.deepEqual(order(L.liveLayout(two, { arrangement: A.resetContainer(moved, "vnets") })), members);
   assert.deepEqual(A.liveArrangementStatus(moved, new Set(two.nodes.map((n) => n.azureResourceId!.toLowerCase()))), { boxes: 1, stale: 0 });
 });
+
+// ── Column counts (1열·2열): every subnet's cards, a side lane, a VNet's unconnected subnets ──
+
+const overlapFree = (lay: ReturnType<typeof L.liveLayout>) => {
+  const rs = [...lay.items.values()];
+  for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) {
+    const a = rs[i]!, b = rs[j]!;
+    if (a.parent !== b.parent) continue;
+    assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} / ${b.id}`);
+  }
+};
+const xsOf = (lay: ReturnType<typeof L.liveLayout>, ids: string[]) => new Set(ids.map((id) => lay.abs.get(id)!.x));
+const withGrid = (entries: Array<[string, number]>): Arrangement => ({ ...AA.EMPTY_ARRANGEMENT, grid: new Map(entries.map(([k, cols]) => [k, { cols }] as const)) });
+
+test("every subnet's cards in 1 column (a cap); a subnet's own value wins", () => {
+  const auto = L.liveLayout(flow());
+  assert.ok(xsOf(auto, ["w1", "w2", "w3", "w4"]).size > 1, "automatic: more than one column");
+  const one = L.liveLayout(flow(), { arrangement: withGrid([[A.SUBNET_DEFAULT_KEY, 1]]) });
+  assert.equal(xsOf(one, ["w1", "w2", "w3", "w4"]).size, 1);
+  overlapFree(one);
+  const web = one.arrange.cols.get("web")!;
+  assert.equal(web.kind, "subnet");
+  const own = L.liveLayout(flow(), { arrangement: withGrid([[A.SUBNET_DEFAULT_KEY, 1], [web.storeKey, 2]]) });
+  assert.equal(xsOf(own, ["w1", "w2", "w3", "w4"]).size, 2, "the subnet's own 2 columns");
+});
+
+test("a PaaS lane in 2 columns: cards side by side inside the lane, no overlaps; reset → 1 column", () => {
+  const nodes: DiagramNodeSpec[] = [vnet("v"), subnet("pe", "v")];
+  const edges: DiagramEdgeSpec[] = [];
+  for (const i of [1, 2, 3, 4]) {
+    nodes.push(node(`pe${i}`, { parentId: "pe", icon: "privateEndpoint", resourceKind: "privateEndpoint", azureResourceId: arm("Microsoft.Network/privateEndpoints", `pe${i}`) }));
+    nodes.push(node(`st${i}`, { icon: "storage", resourceKind: "storage", azureResourceId: arm("Microsoft.Storage/storageAccounts", `st${i}`) }));
+    edges.push({ ...edge(`pl${i}`, `pe${i}`, `st${i}`), edgeKind: "privateLink" });
+  }
+  const s = spec(nodes, edges);
+  const auto = L.liveLayout(s);
+  const laneId = auto.arrange.containerOf.get("st1")!;
+  const target = auto.arrange.cols.get(laneId)!;
+  assert.deepEqual([target.kind, target.cols, target.max], ["lane", 1, 2]);
+  const two = L.liveLayout(s, { arrangement: withGrid([[target.storeKey, 2]]) });
+  assert.equal(xsOf(two, ["st1", "st2", "st3", "st4"]).size, 2);
+  const lane = two.lanes.find((l) => l.id === laneId)!;
+  assert.equal(lane.w, 2 * L.LIVE.CARD_W + L.LIVE.GAP + 2 * L.LIVE.PAD);
+  overlapFree(two);
+  assert.equal(two.arrange.cols.get(laneId)!.user, true);
+  const reset = L.liveLayout(s, { arrangement: A.resetContainer(withGrid([[target.storeKey, 2]]), target.storeKey) });
+  assert.equal(xsOf(reset, ["st1", "st2", "st3", "st4"]).size, 1);
+});
+
+test("a VNet's unconnected subnets: 1 column lines up, 2 columns even widths; the same input gives the same layout", () => {
+  const s = spec([
+    ...flow().nodes,
+    subnet("iso1", "v"), vm("i1", "iso1"), subnet("iso2", "v"), vm("i2", "iso2"), vm("i2b", "iso2"), vm("i2c", "iso2"),
+    subnet("iso3", "v"), vm("i3", "iso3"), subnet("iso4", "v"), vm("i4", "iso4"),
+  ], flow().edges);
+  const key = L.liveLayout(s).arrange.cols.get("v")!;
+  assert.equal(key.kind, "loose");
+  const one = L.liveLayout(s, { arrangement: withGrid([[key.storeKey, 1]]) });
+  assert.equal(xsOf(one, ["iso1", "iso2", "iso3", "iso4"]).size, 1);
+  const two = L.liveLayout(s, { arrangement: withGrid([[key.storeKey, 2]]) });
+  assert.equal(xsOf(two, ["iso1", "iso2", "iso3", "iso4"]).size, 2);
+  assert.equal(new Set(["iso1", "iso2", "iso3", "iso4"].map((id) => two.abs.get(id)!.w)).size, 1, "even widths");
+  overlapFree(two);
+  assert.deepEqual([...L.liveLayout(s, { arrangement: withGrid([[key.storeKey, 2]]) }).items], [...two.items]);
+  // The column keys survive serialisation and are not stale
+  const a = withGrid([[A.SUBNET_DEFAULT_KEY, 1], [key.storeKey, 2], ["lane:paas:data", 2]]);
+  assert.equal(AA.serializeArrangement(AA.parseArrangement(AA.serializeArrangement(a))), AA.serializeArrangement(a));
+  assert.equal(A.liveArrangementStatus(a, new Set()).stale, 0);
+  assert.deepEqual(A.setBoxCols(a, key.storeKey, null).grid.has(key.storeKey), false);
+});
+
+test("a subnet's own column count re-flows its cards (1 column → 2 puts cards side by side)", () => {
+  const one = L.liveLayout(flow(), { arrangement: withGrid([[A.SUBNET_DEFAULT_KEY, 1]]) });
+  const g = one.arrange.containers.get("web")! as Extract<arrNs.ArrangeContainer, { kind: "grid" }>;
+  const two = L.liveLayout(flow(), { arrangement: A.setGridCols(withGrid([[A.SUBNET_DEFAULT_KEY, 1]]), g, 2) });
+  assert.equal(xsOf(two, ["w1", "w2", "w3", "w4"]).size, 2);
+  overlapFree(two);
+});
+
+test("cards all linked from the left (an LB's backends): the user's 2 columns spreads them; back to 1 column stacks them", () => {
+  const s = spec([
+    vnet("v"), subnet("lbi", "v"), subnet("app", "v"),
+    node("lb", { parentId: "lbi", icon: "lb", resourceKind: "lb", azureResourceId: arm("Microsoft.Network/loadBalancers", "lb") }),
+    vm("a1", "app"), vm("a2", "app"), vm("a3", "app"),
+  ], [edge("e1", "lb", "a1"), edge("e2", "lb", "a2"), edge("e3", "lb", "a3")]);
+  const auto = L.liveLayout(s);
+  const g = auto.arrange.containers.get("app")! as Extract<arrNs.ArrangeContainer, { kind: "grid" }>;
+  assert.ok(["a1", "a2", "a3"].every((id) => g.rules.get(id) === "first"), "all linked from the left");
+  assert.equal(xsOf(auto, ["a1", "a2", "a3"]).size, 1, "automatic: one column (the side rule)");
+  const two = L.liveLayout(s, { arrangement: A.setGridCols(AA.EMPTY_ARRANGEMENT, g, 2) });
+  assert.equal(xsOf(two, ["a1", "a2", "a3"]).size, 2, "the user's choice wins");
+  overlapFree(two);
+  const g2 = two.arrange.containers.get("app")! as Extract<arrNs.ArrangeContainer, { kind: "grid" }>;
+  const back = L.liveLayout(s, { arrangement: A.setGridCols(A.setGridCols(AA.EMPTY_ARRANGEMENT, g, 2), g2, 1) });
+  assert.equal(xsOf(back, ["a1", "a2", "a3"]).size, 1);
+  assert.equal(two.arrange.cols.get("app")!.cols, 2);
+});

@@ -23,6 +23,9 @@ sso:
   apiClientId: "<aud-api-app-client-id>"
 
 host: "<dashboard-host>"                 # https://<host>/ is the SPA redirect URI and the API's CORS origin
+# The browser's URL when it is not https://<host>/ — e.g. a port-forward test: "http://localhost:3000" (Entra allows
+# http only for localhost; it must equal a registered SPA redirect URI exactly). Used as is for both
+publicUrl: ""
 homeSubscriptionIds: "<home-subscription-ids>"   # home connection only; customer subscriptions belong in connections
 platform:
   oidcIssuer: "<this-cluster-oidc-issuer-url>"    # display only: the connection check prints FIC JSON with it

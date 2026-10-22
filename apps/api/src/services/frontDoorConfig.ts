@@ -34,8 +34,18 @@ export type AfdRoute = {
 };
 /** EDGE-10: a WAF security policy — the WAF policy and the domains (afdEndpoints/… or customDomains/…) it covers */
 export type AfdSecurityPolicy = { wafPolicyId: string; domains: string[]; patterns: string[] };
+/** An origin group's health probe (null = probes disabled — Front Door then sends no probe and emits no
+ *  OriginHealthPercentage for the group; Learn: "Health probes") */
+export type AfdProbe = { path: string; method: string; protocol: string; intervalSec: number };
+export type AfdGroup = {
+  /** As Azure writes it — metric dimension values use this spelling */
+  name: string;
+  probe: AfdProbe | null;
+};
 export type AfdConfig = {
   endpoints: Array<{ name: string; hostName: string; enabled: boolean }>;
+  /** Origin groups with their probe settings (undefined = an older cache entry) */
+  groups?: AfdGroup[];
   routes: AfdRoute[];
   origins: AfdOrigin[];
   /** null = the security policies could not be read (never "no WAF"); undefined = not asked (tests, old cache) */
@@ -151,6 +161,15 @@ export async function fetchFrontDoorConfig(fetcher: Fetcher, profileId: string, 
     }
     const cfg: AfdConfig = {
       endpoints: endpoints.map((e) => ({ name: e.name ?? "", hostName: String(e.properties?.hostName ?? ""), enabled: String(e.properties?.enabledState ?? "Enabled") !== "Disabled" })),
+      groups: groups.map((g) => {
+        const hp = g.properties?.healthProbeSettings as { probePath?: string; probeRequestType?: string; probeProtocol?: string; probeIntervalInSeconds?: number } | null | undefined;
+        return {
+          name: g.name ?? "",
+          probe: hp && hp.probeProtocol && hp.probeProtocol !== "NotSet"
+            ? { path: hp.probePath ?? "/", method: hp.probeRequestType ?? "HEAD", protocol: hp.probeProtocol, intervalSec: hp.probeIntervalInSeconds ?? 0 }
+            : null,
+        };
+      }),
       routes, origins, securityPolicies,
       customDomainHosts: Object.fromEntries(customDomains.filter((d) => d.id).map((d) => [String(d.id).toLowerCase(), String(d.properties?.hostName ?? d.name ?? "")])),
     };
@@ -205,6 +224,36 @@ export function resolveAfdOrigins(
   }
   const groups = new Set(cfg.origins.map((o) => o.group));
   return { links, external, ambiguous, unusedGroups: [...groups].filter((g) => !used.has(g)).length };
+}
+
+/** Origin groups read per group for probe health (each is one more metric request) */
+export const MAX_PROBED_GROUPS = 4;
+
+export type AfdGroupFacts = {
+  name: string;
+  /** An enabled route on an enabled endpoint sends traffic to it */
+  routed: boolean;
+  probe: AfdProbe | null;
+  origins: number;
+  enabledOrigins: number;
+  /** Index of its probe metric binding (probe<i>), when read */
+  probeIndex?: number;
+};
+
+/**
+ * Origin groups as the panel lists them (routed first, then name) and which of them are read for probe health:
+ * routed, probes on, at least one enabled origin — at most MAX_PROBED_GROUPS. A profile-wide OriginHealthPercentage
+ * mixes every probed group (an unrouted or test group at 0 % painted a working service red) and has no samples for
+ * groups with probes off. Pure.
+ */
+export function afdOriginGroups(cfg: AfdConfig): AfdGroupFacts[] {
+  const routed = new Set(activeRoutes(cfg).map((r) => r.originGroup));
+  const facts = (cfg.groups ?? []).map((g) => {
+    const mine = cfg.origins.filter((o) => o.group === g.name.toLowerCase());
+    return { name: g.name, routed: routed.has(g.name.toLowerCase()), probe: g.probe, origins: mine.length, enabledOrigins: mine.filter((o) => o.enabled).length };
+  }).sort((a, b) => Number(b.routed) - Number(a.routed) || byCode(a.name.toLowerCase(), b.name.toLowerCase()));
+  let i = 0;
+  return facts.map((f) => (f.routed && f.probe && f.enabledOrigins > 0 && i < MAX_PROBED_GROUPS ? { ...f, probeIndex: i++ } : f));
 }
 
 /** Enabled routes on enabled endpoints — what actually takes traffic */

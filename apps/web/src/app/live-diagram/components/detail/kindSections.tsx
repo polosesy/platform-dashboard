@@ -280,9 +280,22 @@ export function AgcFacts({ node }: { node: DiagramNodeSpec }) {
 }
 
 /** Front Door Standard/Premium (EDGE-04..07): routes and origins read from ARM; origins matched only when exactly one */
-export function FrontDoorFacts({ node }: { node: DiagramNodeSpec }) {
+export function FrontDoorFacts({ node, metrics }: { node: DiagramNodeSpec; metrics?: Record<string, number | null> }) {
   const { t } = useI18n();
   const m = node.metadata ?? {};
+  // Origin groups: routed or not, probe settings and the probe health read for routed groups (probe<i>)
+  type GroupFacts = { name: string; routed: boolean; probe: { path: string; method: string; protocol: string; intervalSec: number } | null; enabledOrigins: number; probeIndex?: number };
+  const groupFacts = new Map(parseArr<GroupFacts>(m.originGroups).map((g) => [g.name.toLowerCase(), g] as const));
+  const probeLine = (g: GroupFacts | undefined): { main: string; sub?: string; warn?: boolean } | null => {
+    if (!g) return null;
+    if (!g.routed) return { main: t("ld.afd.probe.unrouted") };
+    if (!g.probe) return { main: t("ld.afd.probe.off"), sub: t("ld.afd.probe.offHint") };
+    const how = t("ld.afd.probe.settings", { protocol: g.probe.protocol, method: g.probe.method, path: g.probe.path, s: g.probe.intervalSec });
+    if (g.probeIndex == null) return { main: t("ld.afd.probe.notRead"), sub: how };
+    const v = metrics?.[`probe${g.probeIndex}`];
+    if (v == null) return { main: t("ld.afd.probe.noData"), sub: how };
+    return { main: t("ld.afd.probe.value", { v: Math.round(v) }), sub: `${how}${v < 90 ? ` · ${t("ld.afd.probe.lowHint")}` : ""}`, warn: v < 90 };
+  };
   const hosts = parseArr<string>(m.endpointHosts);
   const origins = parseArr<{ name: string; group: string; host: string; state: "linked" | "external" | "unrouted" | "disabled"; target?: string }>(m.originList);
   return (
@@ -305,7 +318,11 @@ export function FrontDoorFacts({ node }: { node: DiagramNodeSpec }) {
         </KV>
       ) : m.origins ? <KV label={t("ld.afd.origins")}>{t("ld.afd.originSplit", { n: m.origins, ext: m.externalOrigins ?? "0", amb: m.ambiguousOrigins ?? "0" })}</KV> : null}
       {[...groupBy(origins, (o) => o.group)].map(([group, list]) => (
-        <Group key={group} title={t("ld.afd.group", { name: group, n: list.length })}>
+        <Group key={group} title={t("ld.afd.group", { name: groupFacts.get(group)?.name ?? group, n: list.length })}>
+          {(() => {
+            const p = probeLine(groupFacts.get(group));
+            return p ? <TwoLine main={p.warn ? `▲ ${p.main}` : p.main} sub={p.sub} /> : null;
+          })()}
           {list.map((o) => (
             <TwoLine key={`${o.group}/${o.name}`} main={o.host} mono copy={o.host}
               sub={[o.name, o.target ? `→ ${o.target}` : null, t(`ld.afd.origin.${o.state}`)].filter(Boolean).join(" · ")} />

@@ -109,10 +109,21 @@ export type ArrangeContainer =
     }
   | { kind: "list"; id: string; storeKey: string; area: ARect; members: readonly string[]; keys: ReadonlyMap<string, string> };
 
+/** A box whose column count the user may set: a subnet's cards (1–3), a side lane (1–2), a VNet's unconnected
+ *  subnets (1–3) */
+export type ColsTarget = { kind: "subnet" | "lane" | "loose"; storeKey: string; cols: number; user: boolean; max: number };
+
+/** Every subnet's card columns at most this (a cap — small subnets stay narrow); a subnet's own value wins */
+export const SUBNET_DEFAULT_KEY = "default:subnet";
+/** A VNet's unconnected subnets ("연결 없음" section, the plain grid, opened empty subnets) */
+export const looseKey = (vnetKey: string) => `isolated:${vnetKey}`;
+
 export type ArrangeView = {
   /** Movable shape id → its container id */
   containerOf: ReadonlyMap<string, string>;
   containers: ReadonlyMap<string, ArrangeContainer>;
+  /** Shape id (subnet, lane, VNet) → its column control */
+  cols: ReadonlyMap<string, ColsTarget>;
   /** Absolute rectangles (liveLayout abs) */
   abs: ReadonlyMap<string, ARect>;
 };
@@ -194,15 +205,35 @@ export function commitPlan(a: Arrangement, c: ArrangeContainer, next: NonNullabl
   return { ...a, order };
 }
 
-/** A subnet's column count (1–3); its cards re-flow in reading order (cells that no longer fit move) */
+/** A subnet's column count (1–3) chosen by the user: its cards fill exactly that many columns in their reading
+ *  order — the choice wins over the side rules (cards all linked from the left would otherwise all stay in the
+ *  first column, so "2 columns" changed nothing); lines may then pass behind a neighbour card. Auto (null) forgets
+ *  the subnet's grid */
 export function setGridCols(a: Arrangement, c: Extract<ArrangeContainer, { kind: "grid" }>, cols: number | null): Arrangement {
   const grid = new Map(a.grid);
   if (cols == null) grid.delete(c.storeKey);
   else {
+    const order = [...c.cells].sort(([, [ac, ar]], [, [bc, br]]) => ar - br || ac - bc).map(([id]) => id);
     const cells = new Map<string, readonly [number, number]>();
-    for (const [id, cell] of c.cells) cells.set(c.keys.get(id) ?? id, cell);
+    order.forEach((id, i) => cells.set(c.keys.get(id) ?? id, [i % cols, Math.floor(i / cols)]));
     grid.set(c.storeKey, { cols, cells });
   }
+  return { ...a, grid };
+}
+
+/** The column control for a clicked shape: its own, else its container's (a card → its subnet or lane) */
+export function colsTargetFor(view: ArrangeView, id: string): ColsTarget | undefined {
+  return view.cols.get(id) ?? (view.containerOf.has(id) ? view.cols.get(view.containerOf.get(id)!) : undefined);
+}
+
+/** Set (or clear with null) a box's column count, keeping anything else stored for it */
+export function setBoxCols(a: Arrangement, storeKey: string, cols: number | null): Arrangement {
+  const grid = new Map(a.grid);
+  const cur = grid.get(storeKey);
+  if (cols == null) {
+    if (cur?.cells?.size) grid.set(storeKey, { cells: cur.cells });
+    else grid.delete(storeKey);
+  } else grid.set(storeKey, { ...(cur ?? {}), cols });
   return { ...a, grid };
 }
 

@@ -69,6 +69,13 @@ export function resolveEvidence(i: EvidenceInput): Evidence {
   }
   if (i.rh === "Unavailable") { risk = worst(risk, "critical"); reasons.push("ld.ev.rhUnavailable"); riskBasis = "resourceHealth"; }
   if (i.rh === "Degraded") { risk = worst(risk, "warning"); reasons.push("ld.ev.rhDegraded"); if (riskBasis !== "resourceHealth" && riskBasis !== "alert" && !i.judged) riskBasis = "resourceHealth"; }
+  // Front Door: a probe failing while users get answers (Front Door sends traffic to every origin when all fail —
+  // Learn "Health probes"); the usual cause is a probe path that does not answer 200 (a redirect to a login, 405 on HEAD)
+  if (i.kind === "frontDoor") {
+    const probes = Object.entries(i.metrics).filter(([k, v]) => /^probe\d$/.test(k) && v != null).map(([, v]) => v!);
+    const req = i.metrics.requests ?? null, err = i.metrics.errorRate ?? null;
+    if (probes.some((v) => v < 90) && req != null && req >= 20 && err != null && err < 5) reasons.push("ld.ev.afdProbeFailOpen");
+  }
   if (risk === "warning" || risk === "critical") return { health: risk, basis: riskBasis, reasons };
 
   if (i.judged && i.health === "ok") return { health: "ok", basis: "metric", reasons };

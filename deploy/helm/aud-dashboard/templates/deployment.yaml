@@ -57,7 +57,7 @@ spec:
             - { name: AUD_WEB_TENANT_ID, value: {{ .Values.sso.tenantId | quote }} }
             - { name: AUD_WEB_CLIENT_ID, value: {{ .Values.sso.spaClientId | quote }} }
             - { name: AUD_WEB_API_SCOPE, value: {{ printf "api://%s/Azure.Read.All" .Values.sso.apiClientId | quote }} }
-            - { name: AUD_WEB_REDIRECT_URI, value: {{ printf "https://%s/" .Values.host | quote }} }
+            - { name: AUD_WEB_REDIRECT_URI, value: {{ .Values.publicUrl | default (printf "https://%s/" .Values.host) | quote }} }
             {{- with .Values.web.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -87,7 +87,7 @@ spec:
             - { name: AZURE_AD_CLIENT_ID, value: {{ .Values.sso.apiClientId | quote }} }
             - { name: AUD_AUTH_AUDIENCES, value: {{ printf "api://%s" .Values.sso.apiClientId | quote }} }
             - { name: AZURE_SUBSCRIPTION_IDS, value: {{ .Values.homeSubscriptionIds | quote }} }
-            - { name: CORS_ORIGIN, value: {{ printf "https://%s" .Values.host | quote }} }
+            - { name: CORS_ORIGIN, value: {{ (.Values.publicUrl | default (printf "https://%s" .Values.host)) | trimSuffix "/" | quote }} }
             # AZURE_CLIENT_ID + AZURE_FEDERATED_TOKEN_FILE come from the workload identity webhook
             - { name: AUD_PLATFORM_CREDENTIAL, value: workloadIdentity }
             - { name: AUD_PLATFORM_OIDC_ISSUER, value: {{ .Values.platform.oidcIssuer | quote }} }

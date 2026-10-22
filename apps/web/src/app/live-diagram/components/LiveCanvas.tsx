@@ -32,7 +32,7 @@ import { useI18n } from "@/lib/i18n";
 import { isUnusedBadge, liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
 import { routeEdges } from "@/lib/liveRoute";
 import { recentAlertChip } from "@/lib/liveAlerts";
-import { commitPlan, livePlan, type ArrangeContainer, type LivePlan } from "@/lib/liveArrange";
+import { colsTargetFor, commitPlan, livePlan, type ArrangeContainer, type ColsTarget, type LivePlan } from "@/lib/liveArrange";
 import type { Arrangement } from "@/lib/archArrange";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { usageThresholds } from "@/lib/liveMetricFormat";
@@ -98,7 +98,7 @@ type LiveCanvasProps = {
   /** A drop the rules allow → the new arrangement (the page keeps it, undoable) */
   onArrange?: (next: Arrangement, containerId: string) => void;
   /** Edit mode: the shape clicked — its own box (a subnet's grid, a lane) and the box it moves in (the page's tools) */
-  onEditSelect?: (sel: { id: string; own?: ArrangeContainer; parent?: ArrangeContainer } | null) => void;
+  onEditSelect?: (sel: { id: string; own?: ArrangeContainer; parent?: ArrangeContainer; cols?: ColsTarget } | null) => void;
   /** Edit mode: a refused drop's reason (i18n key) for the page's notice */
   onArrangeNotice?: (key: string | null) => void;
 };
@@ -858,7 +858,8 @@ function LiveCanvasInner({
             const own = layout.arrange.containers.get(node.id);
             const parentId = layout.arrange.containerOf.get(node.id);
             const parent = parentId ? layout.arrange.containers.get(parentId) : undefined;
-            onEditSelect?.(own || parent ? { id: node.id, own, parent } : null);
+            const cols = colsTargetFor(layout.arrange, node.id);
+            onEditSelect?.(own || parent || cols ? { id: node.id, own, parent, cols } : null);
             return;
           }
           if (node.type === "vmssInstance") onVmssInstanceSelect?.(node.data as VmssInstanceNodeData);
