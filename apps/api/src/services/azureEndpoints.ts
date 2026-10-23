@@ -19,7 +19,15 @@ import type { AzureEndpoint } from "./policyInsights.js";
 const endpointCache = new CacheManager<{ endpoints: AzureEndpoint[] }>(10, 600_000);
 const clusterCache = new CacheManager<ClusterContext>(10, 300_000);
 
-export type ClusterContext = { containment: ClusterContainment; apiServerIps: string[] };
+/**
+ * `identity` stays inside the API (workload identity map): the OIDC issuer is compared byte-exact against federated
+ * credentials and only ever leaves masked.
+ */
+export type ClusterContext = {
+  containment: ClusterContainment;
+  apiServerIps: string[];
+  identity: { issuerUrl: string | null; oidcEnabled: boolean | null; wiEnabled: boolean | null };
+};
 
 /** Resource Graph type → [display label, property path of the public host name] */
 const PAAS_TYPES: Record<string, [string, (p: Record<string, unknown>) => string | undefined]> = {
@@ -57,7 +65,7 @@ async function resolveAll(host: string): Promise<string[]> {
   }
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -113,6 +121,8 @@ type ManagedCluster = {
     networkProfile?: { outboundType?: string };
     apiServerAccessProfile?: { enablePrivateCluster?: boolean; authorizedIPRanges?: string[] } | null;
     agentPoolProfiles?: Array<{ count?: number }>;
+    oidcIssuerProfile?: { enabled?: boolean; issuerURL?: string } | null;
+    securityProfile?: { workloadIdentity?: { enabled?: boolean } | null } | null;
   };
 };
 
@@ -150,6 +160,12 @@ export async function getClusterContext(env: Env, bearerToken: string | undefine
       resources: [],
     },
     apiServerIps: fqdn ? await resolveAll(fqdn) : [],
+    // ARM omits unset profiles: absent = off (the api-version returns both when set)
+    identity: {
+      issuerUrl: p.oidcIssuerProfile?.issuerURL ?? null,
+      oidcEnabled: !!p.oidcIssuerProfile?.enabled,
+      wiEnabled: !!p.securityProfile?.workloadIdentity?.enabled,
+    },
   };
   clusterCache.set(cacheKey, ctx);
   return ctx;

@@ -1,7 +1,10 @@
 import type { Env } from "../env.js";
 import type { WorkloadHealth, ResourceUsage, NodeResourceSummary } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory.js";
+import { CacheManager, bearerKeyPrefix, cachePrefix } from "../infra/cacheManager.js";
+import { clusterConnection, getArmFetcherAuto, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory.js";
+import { homeConnection } from "../infra/connectionRegistry.js";
+import { HttpError, safeMessage } from "../infra/requestParams.js";
+import { pickScope, scopeMatchers } from "./promScope.js";
 import { debug } from "../infra/logger.js";
 import { clusterMonitorAccounts, prometheusQueryEndpoint } from "./clusterMonitoring.js";
 
@@ -30,53 +33,80 @@ type PromQueryResult = {
   errorType?: string;
 };
 
-const endpointCache = new CacheManager<string>(10, 10 * 60_000); // 10min TTL
 const promWorkloadCache = new CacheManager<Map<string, Partial<WorkloadHealth>>>(5, 60_000);
 const promNodeCache = new CacheManager<Map<string, Partial<NodeResourceSummary>>>(5, 60_000);
 
 // ── Auto-discover Prometheus query endpoint ──
 
-export async function resolvePrometheusEndpoint(
-  env: Env,
-  bearerToken: string | undefined,
-  clusterId: string,
-): Promise<string | null> {
-  // 1) 명시적 환경변수 우선
-  if (env.AZURE_PROMETHEUS_ENDPOINT) {
-    return env.AZURE_PROMETHEUS_ENDPOINT;
-  }
+export type PrometheusTarget =
+  | { state: "ok"; endpoint: string }
+  | { state: "noWorkspace" | "forbidden" | "failed"; message?: string };
 
-  // 2) AKS 클러스터 ARM → Azure Monitor workspace → Prometheus query endpoint
-  if (!clusterId || !clusterId.toLowerCase().startsWith("/subscriptions/")) {
-    return null;
-  }
+const targetCache = new CacheManager<PrometheusTarget>(20, 10 * 60_000);
 
-  const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:prom-ep:${clusterId.toLowerCase()}`;
-  const cached = endpointCache.get(cacheKey);
+/**
+ * The cluster's own Azure Monitor workspace query endpoint — DCR associations → rules → monitoring accounts
+ * (clusterMonitoring.ts), first with an endpoint (sorted ids — deterministic). Never another environment's workspace.
+ * `AZURE_PROMETHEUS_ENDPOINT` applies only to clusters of the home connection (a customer cluster is never read from
+ * the home deployment's endpoint). Failures are states, not exceptions (signin_required still throws).
+ */
+export async function resolvePrometheusTarget(env: Env, bearerToken: string | undefined, clusterId: string): Promise<PrometheusTarget> {
+  if (!clusterId || !clusterId.toLowerCase().startsWith("/subscriptions/")) return { state: "noWorkspace" };
+  if (env.AZURE_PROMETHEUS_ENDPOINT && clusterConnection(env, clusterId).connection.key === homeConnection(env).key) {
+    return { state: "ok", endpoint: env.AZURE_PROMETHEUS_ENDPOINT };
+  }
+  const cacheKey = `${cachePrefix(bearerToken)}:prom-ep:${clusterId.toLowerCase()}`;
+  const cached = targetCache.get(cacheKey);
   if (cached) return cached;
-
+  let target: PrometheusTarget;
   try {
     const fetcher = await getArmFetcherAuto(env, bearerToken);
-    // The cluster's own workspace(s) — DCR associations → rules → monitoring accounts (clusterMonitoring.ts).
-    // Several: the first that has a query endpoint (sorted ids — deterministic); none → no Prometheus, never another
-    // environment's workspace from the same subscription.
     const accounts = await clusterMonitorAccounts(fetcher, clusterId);
     debug(`[prometheus] ${accounts.length} Azure Monitor workspace(s) associated with the cluster`);
-    for (const id of accounts) {
+    target = { state: "noWorkspace" };
+    for (const id of [...accounts].sort()) {
       const ep = await prometheusQueryEndpoint(fetcher, id).catch(() => null);
-      if (ep) {
-        endpointCache.set(cacheKey, ep);
-        return ep;
-      }
+      if (ep) { target = { state: "ok", endpoint: ep }; break; }
     }
-    debug("[prometheus] no associated workspace with a query endpoint");
-    return null;
   } catch (err) {
-    debug(`[prometheus] endpoint resolve error: ${err instanceof Error ? err.message.slice(0, 160) : String(err).slice(0, 160)}`);
-    return null;
+    if (err instanceof HttpError && err.code === "signin_required") throw err;
+    const message = safeMessage(err);
+    debug(`[prometheus] endpoint resolve error: ${message.slice(0, 160)}`);
+    const forbidden = (err instanceof HttpError && (err.status === 401 || err.status === 403)) || /^ARM 40[13]/.test(message);
+    target = { state: forbidden ? "forbidden" : "failed", message };
   }
+  if (target.state === "ok" || target.state === "noWorkspace") targetCache.set(cacheKey, target);
+  return target;
 }
+
+/** The endpoint, or null for any non-ok state (workload / node panels) */
+export async function resolvePrometheusEndpoint(env: Env, bearerToken: string | undefined, clusterId: string): Promise<string | null> {
+  const t = await resolvePrometheusTarget(env, bearerToken, clusterId).catch(() => null);
+  return t?.state === "ok" ? t.endpoint : null;
+}
+
+// ── Cluster scope (services/promScope.ts) ──
+
+const familyScopeCache = new CacheManager<string | null>(50, 10 * 60_000);
+
+/**
+ * Label matchers that keep one metric family to this cluster and one collector: `group by (cluster, job) (<metric>)`
+ * → `pickScope`. null = the workspace holds several clusters and none is this one (answer nothing rather than mix).
+ * "" = the family has no cluster label (whole workspace — a single-cluster workspace).
+ */
+export async function familyMatchers(fetcher: PrometheusFetcher, endpoint: string, clusterId: string, metric: string, cacheKeyPrefix: string): Promise<string | null> {
+  const key = `${cacheKeyPrefix}:prom-scope:${clusterId.toLowerCase()}:${metric}`;
+  const hit = familyScopeCache.get(key);
+  if (hit !== undefined) return hit;
+  const resp = (await fetcher.query(endpoint, `group by (cluster, job, collector) (${metric})`)) as PromQueryResult;
+  const rows = (resp.data?.result ?? []).map((r) => ({ cluster: r.metric.cluster, job: r.metric.job, collector: r.metric.collector }));
+  const scope = pickScope(rows, clusterId.split("/").pop() ?? "");
+  const m = scope === "ambiguous" ? null : scope ? scopeMatchers(scope) : "";
+  familyScopeCache.set(key, m);
+  return m;
+}
+
+const withScope = (m: string, rest: string) => [m, rest].filter(Boolean).join(",");
 
 // ── Workload metrics via PromQL ──
 
@@ -91,24 +121,27 @@ export async function collectPrometheusWorkloadMetrics(
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:prom:workloads:${endpoint}`;
+  // Keyed by cluster: one workspace can hold several clusters (the endpoint alone mixed them)
+  const cacheKey = `${prefix}:prom:workloads:${clusterId.toLowerCase()}`;
   const cached = promWorkloadCache.get(cacheKey);
   if (cached) return { metrics: cached, available: true };
 
   try {
-    const fetcher = await getPrometheusFetcherAuto(env, bearerToken);
+    const fetcher = await getPrometheusFetcherAuto(env, bearerToken, clusterId);
     const result = new Map<string, Partial<WorkloadHealth>>();
+    const M = await familyMatchers(fetcher, endpoint, clusterId, "container_cpu_usage_seconds_total", prefix);
+    if (M === null) return { metrics: new Map(), available: false };
 
-    // CPU usage per workload (namespace/workload)
+    // CPU usage per workload (namespace/workload) — [5m] = 5 samples at a 60 s scrape interval
     const cpuQuery = `
 sum by (namespace, pod) (
-  rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])
+  rate(container_cpu_usage_seconds_total{${withScope(M, 'container!="", container!="POD"')}}[5m])
 ) * 1000`;
 
     // Memory usage per workload
     const memQuery = `
 sum by (namespace, pod) (
-  container_memory_working_set_bytes{container!="", container!="POD"}
+  container_memory_working_set_bytes{${withScope(M, 'container!="", container!="POD"')}}
 ) / 1024 / 1024`;
 
     const [cpuResp, memResp] = await Promise.allSettled([
@@ -181,24 +214,27 @@ export async function collectPrometheusNodeMetrics(
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:prom:nodes:${endpoint}`;
+  const cacheKey = `${prefix}:prom:nodes:${clusterId.toLowerCase()}`;
   const cached = promNodeCache.get(cacheKey);
   if (cached) return { metrics: cached, available: true };
 
   try {
-    const fetcher = await getPrometheusFetcherAuto(env, bearerToken);
+    const fetcher = await getPrometheusFetcherAuto(env, bearerToken, clusterId);
     const result = new Map<string, Partial<NodeResourceSummary>>();
+    const M = await familyMatchers(fetcher, endpoint, clusterId, "node_cpu_seconds_total", prefix);
+    if (M === null) return { metrics: new Map(), available: false };
+    const sel = (rest = "") => `{${withScope(M, rest)}}`;
 
     // node-exporter series carry `instance` (IP:port), not `node` — the aggregator maps IPs to node names
     // Node CPU usage %
-    const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`;
+    const cpuQuery = `100 - (avg by (instance) (rate(node_cpu_seconds_total${sel('mode="idle"')}[5m])) * 100)`;
     // Node Memory usage %
-    const memQuery = `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`;
+    const memQuery = `100 * (1 - node_memory_MemAvailable_bytes${sel()} / node_memory_MemTotal_bytes${sel()})`;
     // Node Disk usage %
-    const diskQuery = `100 - ((node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"}) * 100)`;
+    const diskQuery = `100 - ((node_filesystem_avail_bytes${sel('mountpoint="/",fstype!="rootfs"')} / node_filesystem_size_bytes${sel('mountpoint="/",fstype!="rootfs"')}) * 100)`;
     // Node Network I/O
-    const netRxQuery = `sum by (instance) (rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*|flannel.*|cali.*|cbr.*"}[5m]))`;
-    const netTxQuery = `sum by (instance) (rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*|flannel.*|cali.*|cbr.*"}[5m]))`;
+    const netRxQuery = `sum by (instance) (rate(node_network_receive_bytes_total${sel('device!~"lo|veth.*|docker.*|flannel.*|cali.*|cbr.*"')}[5m]))`;
+    const netTxQuery = `sum by (instance) (rate(node_network_transmit_bytes_total${sel('device!~"lo|veth.*|docker.*|flannel.*|cali.*|cbr.*"')}[5m]))`;
 
     const [cpuResp, memResp, diskResp, netRxResp, netTxResp] = await Promise.allSettled([
       fetcher.query(endpoint, cpuQuery) as Promise<PromQueryResult>,

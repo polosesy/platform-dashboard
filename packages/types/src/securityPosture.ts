@@ -55,9 +55,19 @@ export type PostureAlert = {
   detectedAt: string;
   description: string;
   resources: PostureResourceRef[];
+  /** Defender's remediation steps (plain text) */
+  remediation?: string[];
+  /** The entity Defender names as compromised (GUIDs masked) */
+  entity?: string;
+  /** Kubernetes entities of the alert */
+  k8s?: { namespace?: string; pod?: string; container?: string };
+  /** First activity (StartTimeUtc) — `detectedAt` is when it was generated */
+  firstAt?: string;
+  /** Defender portal link of this alert */
+  portalUrl?: string;
 };
 
-export type PostureSection = "recommendations" | "score" | "controls" | "compliance" | "plans" | "alerts";
+export type PostureSection = "recommendations" | "affected" | "score" | "controls" | "compliance" | "plans" | "alerts";
 export type PostureGap = { section: PostureSection; message: string };
 
 export type SecurityPostureResponse = {
@@ -66,6 +76,12 @@ export type SecurityPostureResponse = {
   score: { current: number; max: number; percentage: number } | null;
   controls: SecureScoreControl[];
   recommendations: PostureRecommendation[];
+  /**
+   * Distinct unhealthy resources per severity (`dcount` of the resource id). The sum of `unhealthy` over
+   * recommendations counts one resource once per recommendation — a container image with 40 CVE
+   * recommendations counted 40 times. null = not read (gap) or sample data.
+   */
+  affected?: { High: number; Medium: number; Low: number } | null;
   compliance: PostureComplianceStandard[];
   plans: PostureDefenderPlan[];
   alerts: PostureAlert[];

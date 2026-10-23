@@ -1,6 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $np := .Values.networkPolicy }}
-# Baseline for the dashboard namespace. Audit first (no default deny, name *-audit), watch Hubble drops, then enforce.
+# Baseline for the dashboard namespace. Audit first (no default deny, name *-audit) — nothing is dropped then: judge
+# from policy-verdict allowed-by (allow-any only = blocked when enforced; docs/deployment/kubernetes.md §9), then enforce.
 # FQDN rules need the DNS L7 rule. Not needed: IMDS (no managed identity endpoint — tokens are federated), the
 # registry (the kubelet pulls images)
 apiVersion: cilium.io/v2

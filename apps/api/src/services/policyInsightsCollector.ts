@@ -1,3 +1,4 @@
+import { HttpError } from "../infra/requestParams.js";
 import type { HubbleFlowSet, PolicyInsightsResponse } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
@@ -46,6 +47,10 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   if (flowsR.status === "fulfilled") {
     flows = flowsR.value;
     if (flows.coverage.nodesObserved === 0) { flowsError = tr("Hubble agent에서 flow를 읽지 못했습니다", "No flows could be read from the Hubble agents"); flows = null; }
+  } else if (flowsR.reason instanceof HttpError && flowsR.reason.code === "hubble_exec_disabled") {
+    // Not a failure: this deployment does not exec into cilium agents and the cluster sends no flow logs — the code
+    // lets the UI say "not collected" (how to get it) instead of "could not read"
+    flowsError = `hubble_exec_disabled — ${tr("이 배포는 Hubble exec를 쓰지 않고 ACNS 흐름 로그도 없음", "this deployment does not use Hubble exec and the cluster sends no ACNS flow logs")}`;
   } else {
     flowsError = msg(flowsR.reason);
   }
@@ -64,6 +69,7 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
     const m = /\/resourcegroups\/([^/]+)\/.*\/managedclusters\/([^/]+)$/i.exec(clusterId);
     ctx = {
       apiServerIps: [],
+      identity: { issuerUrl: null, oidcEnabled: null, wiEnabled: null },
       containment: {
         subscription: null,
         resourceGroup: m?.[1] ?? "",

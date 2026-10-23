@@ -109,10 +109,11 @@ function fakeArm(fail: string[] = [], calls = { n: 0 }) {
     postJson: async <T>(_url: string, body: unknown): Promise<T> => {
       calls.n++;
       const q = (body as { query: string }).query;
-      const section = q.includes("securescorecontrols") ? "controls" : q.includes("securescores") ? "score" : q.includes("regulatorycompliance") ? "compliance" : q.includes("pricings") ? "plans" : q.includes("alerts") ? "alerts" : "recommendations";
+      const section = q.includes("dcount(rid)") ? "affected" : q.includes("securescorecontrols") ? "controls" : q.includes("securescores") ? "score" : q.includes("regulatorycompliance") ? "compliance" : q.includes("pricings") ? "plans" : q.includes("alerts") ? "alerts" : "recommendations";
       if (fail.includes(section)) throw new Error(`ARM 403: no access to scope '/subscriptions/${SUB}/resourceGroups/rg' for ${SUB}`);
       const data: Record<string, unknown[]> = {
         recommendations: [{ key: "k1", title: "Rec", sev: "High", unhealthy: 2, healthy: 1, md: { categories: ["Networking"] }, samples: [{ id: VM }] }],
+        affected: [{ sev: "High", n: 1 }],
         score: [{ s: { current: 8.78, max: 43 } }],
         controls: [{ dn: "C", s: { current: 1, max: 4 }, u: 2 }],
         compliance: [{ name: "SOC-2", st: "Failed", p: 3, f: 1 }],
@@ -132,7 +133,7 @@ test("collectPosture: failed sections become masked gaps, never leaking subscrip
   const json = JSON.stringify(out);
   assert.ok(!json.includes("/subscriptions/"), json);
   assert.ok(!GUID_RE.test(json.replace(/"key":"[^"]*"/g, "")), "no GUIDs outside assessment keys");
-  await assert.rejects(collectPosture(fakeArm(["recommendations", "score", "controls", "compliance", "plans", "alerts"]), [SUB]), (e: Error) => !GUID_RE.test(e.message) && !e.message.includes("/subscriptions/"));
+  await assert.rejects(collectPosture(fakeArm(["recommendations", "affected", "score", "controls", "compliance", "plans", "alerts"]), [SUB]), (e: Error) => !GUID_RE.test(e.message) && !e.message.includes("/subscriptions/"));
   assert.equal(safeMessage(new Error(`denied on /subscriptions/${SUB}/x, id ${SUB}`)), "denied on [scope], id …5555");
 });
 
@@ -163,7 +164,16 @@ test("tryGetSecurityPosture: concurrent identical requests share one set of quer
   const env = baseEnv({ AZURE_SECURITY_SP_FALLBACK: "true", AUD_ANONYMOUS_SP: "true", AZURE_SUBSCRIPTION_IDS: "22222222-2222-2222-2222-222222222222" });
   const [a, b] = await Promise.all([tryGetSecurityPosture(env, undefined, undefined, deps), tryGetSecurityPosture(env, undefined, undefined, deps)]);
   assert.equal(a, b);
-  assert.equal(calls.n, 6);
+  assert.equal(calls.n, 7, "seven sections, one query each");
+});
+
+test("affected resources are distinct ids per severity, not the sum over recommendations", async () => {
+  const p = await collectPosture(fakeArm(), [SUB]);
+  assert.equal(p.recommendations[0]!.unhealthy, 2, "findings: one resource per recommendation");
+  assert.deepEqual(p.affected, { High: 1, Medium: 0, Low: 0 });
+  const failed = await collectPosture(fakeArm(["affected"]), [SUB]);
+  assert.equal(failed.affected, null, "a failed count is null (not collected), never the sum");
+  assert.ok(failed.gaps.some((g) => g.section === "affected"));
 });
 
 test("env: AZURE_SECURITY_SP_FALLBACK parses as a real boolean and defaults off", () => {

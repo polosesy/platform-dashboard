@@ -1,7 +1,7 @@
 import * as k8s from "@kubernetes/client-node";
 import { Writable } from "stream";
 import type { Env } from "../env.js";
-import type { HubbleFlow, HubbleEndpoint, HubbleFlowSet } from "@aud/types";
+import type { HubbleFlow, HubbleEndpoint, HubbleEventKind, HubbleFlowSet } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { HttpError } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
@@ -10,7 +10,9 @@ import type { Lang } from "../infra/lang.js";
 // Async code: pick the text directly (L() is only valid inside withLang)
 const pick = (lang: Lang, ko: string, en: string) => (lang === "en" ? en : ko);
 import { loadKubeConfig } from "./kubernetes.js";
-import { assertHubbleExecAllowed } from "./aksAccess.js";
+import { assertHubbleExecAllowed, hubbleExecDecision } from "./aksAccess.js";
+import { flowLogsAvailability, getFlowsFromLogs } from "./containerNetworkLogs.js";
+import { parsePolicyRef } from "./hubbleAudit.js";
 import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCoverage, type AgentBatch } from "./hubbleMerge.js";
 
 // ──────────────────────────────────────────────────────────────
@@ -298,6 +300,16 @@ export async function getHubbleFlows(
     type: opts?.type?.toLowerCase(),
   };
   const limit = opts?.last ?? Math.min(env.HUBBLE_FLOW_LIMIT, 10_000);
+  // No exec here: ACNS container network logs when the cluster sends them (services/containerNetworkLogs.ts) —
+  // otherwise the 501 below (the UI asks /api/hubble/sources first and shows the metrics view instead)
+  if (!hubbleExecDecision(env, azureResourceId).allowed && (await flowLogsAvailability(env, bearerToken, azureResourceId)).state === "ok") {
+    const logKey = `${prefix}:hubble-logflows:${azureResourceId}:${filters.ns}:${filters.verdict}:${filters.type ?? ""}:${limit}`;
+    const hit = flowsCache.get(logKey);
+    if (hit) return hit;
+    const set = await getFlowsFromLogs(env, bearerToken, azureResourceId, { limit, namespace: filters.ns || undefined, verdict: filters.verdict || undefined, type: filters.type });
+    flowsCache.set(logKey, set);
+    return set;
+  }
   assertHubbleExecAllowed(env, azureResourceId);
   // Every filter that changes the hubble query must be part of the key
   const cacheKey = `${prefix}:hubble-flows:${azureResourceId}:${filters.ns}:${filters.verdict}:${filters.type ?? ""}:${limit}`;
@@ -670,6 +682,7 @@ export function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
         sourceIp: ip?.source ? String(ip.source) : undefined,
         destinationIp: ip?.destination ? String(ip.destination) : undefined,
         tcpFlags: tcp?.flags ? Object.keys(tcp.flags as Record<string, unknown>).sort().join(",") : undefined,
+        ...policyFields(flow),
       });
     } catch (e) {
       // 파싱 실패 줄은 스킵 (최초 1건만 로깅)
@@ -680,6 +693,24 @@ export function parseHubbleJsonOutput(raw: string): HubbleFlow[] {
   }
 
   return flows;
+}
+
+const EVENT_KINDS: Record<number, HubbleEventKind> = { 1: "drop", 4: "trace", 5: "policy-verdict", 129: "l7" };
+
+/** Event kind, policy match, allowed-by (in the flow's direction) and DNS names — what policy judgement reads */
+function policyFields(flow: Record<string, unknown>): Pick<HubbleFlow, "eventKind" | "policyMatch" | "allowedBy" | "destinationNames"> {
+  const typeNo = Number((flow.event_type as Record<string, unknown> | undefined)?.type ?? NaN);
+  const eventKind = Number.isFinite(typeNo) ? EVENT_KINDS[typeNo] ?? "other" : undefined;
+  const dir = String(flow.traffic_direction ?? "").toUpperCase();
+  const by = dir === "INGRESS" ? flow.ingress_allowed_by : dir === "EGRESS" ? flow.egress_allowed_by : (flow.egress_allowed_by ?? flow.ingress_allowed_by);
+  const match = Number(flow.policy_match_type);
+  const names = Array.isArray(flow.destination_names) ? flow.destination_names.map(String).filter(Boolean) : [];
+  return {
+    ...(eventKind ? { eventKind } : {}),
+    ...(Number.isFinite(match) && match > 0 ? { policyMatch: match } : {}),
+    ...(Array.isArray(by) && by.length ? { allowedBy: by.map(parsePolicyRef) } : {}),
+    ...(names.length ? { destinationNames: names } : {}),
+  };
 }
 
 // Cilium reserved identity → 사람이 읽을 수 있는 이름 매핑

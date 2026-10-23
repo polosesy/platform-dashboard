@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-22
+last-verified: 2026-10-23
 covers: [deploy/helm/aud-dashboard, deploy/kubernetes, docs/integrations/azure/templates/aks]
 ---
 # Kubernetes(AKS) 배포 — 클러스터 안 네임스페이스
@@ -79,9 +79,11 @@ az identity federated-credential create -g <home-rg> --identity-name <home-uami>
 
 - 파드: 65532, `runAsNonRoot`, 읽기 전용 루트, `drop ALL`, `allowPrivilegeEscalation: false`, seccomp RuntimeDefault, `automountServiceAccountToken: false`(Kubernetes API 토큰 없음 — 클러스터 읽기는 Entra 토큰), CPU 제한 없음(메모리 제한만). PSA restricted 통과.
 - 비밀 값 없음: 연결 파일은 ID·이름만, 토큰은 웹후크가 api 컨테이너에만 투영(`skip-containers: web`).
-- 클러스터 권한은 list만 — Secret·ConfigMap·exec·쓰기 없음. Pod 로그·Hubble exec는 opt-in([aks.md](../integrations/azure/aks.md)).
+- 클러스터 권한은 list만 — Secret·ConfigMap·exec·쓰기 없음. Pod 로그·Hubble exec는 opt-in([aks.md](../integrations/azure/aks.md)). exec 없이 Hubble 화면은 ACNS 흐름 로그 또는 Hubble 메트릭(Managed Prometheus)으로 동작 — 고객 연결 신원에 그 작업 영역의 Monitoring Data Reader, 흐름 로그는 Log Analytics Reader(클러스터 리소스 범위).
 - 송신(443): `login.microsoftonline.com`·`management.azure.com`·`api.loganalytics.io`·`*.<region>.prometheus.monitor.azure.com`·`azure.status.microsoft`·`rssfeed.azure.status.microsoft` + kube-dns·API 서버. IMDS·레지스트리는 필요 없음. Kubernetes 클라이언트는 `HTTPS_PROXY`를 쓰지 않음.
 - 사용자 접근: 게이트웨이 앞 WAF/IP 제한 + 앱 역할(역할 없으면 403 `no_platform_role`).
+- DNS: 파드 `dnsConfig` `ndots: "1"`(값 `dnsConfig`, `null` = 클러스터 기본). 송신 이름이 모두 점 2개 이상인 외부 이름이라 그대로 먼저 물음 — 조회 1번에 질의 2개(A·AAAA). 기본 `ndots:5`는 검색 접미사 4개(`<ns>.svc.cluster.local`·`svc.cluster.local`·`cluster.local`·노드의 `*.internal.cloudapp.net`)를 먼저 붙여 질의 10개(8개 NXDOMAIN), 중간값 21ms → 7ms(2026-10-23 Hubble로 측정). 이름 끝에 점(`management.azure.com.`)은 대안이 아님 — ARM·Entra가 TLS를 끊음(ECONNRESET). IPv4 전용 클러스터는 `{ name: no-aaaa }`(glibc 2.36+)를 더할 수 있음(선택).
+- API 서버 연결은 재사용하지 않음: `@kubernetes/client-node` 1.x가 쓰는 node-fetch 2는 살아 있는 소켓의 chunked(gzip) 응답에 거짓 "Premature close"를 냄 — keep-alive 에이전트 풀을 넣었다가 목록 5/20개가 비어 '클러스터 데이터 일부 누락'이 났음(2026-10-23, 되돌림). DNS 비용은 ndots 1로 낮게 유지, 일시 오류(연결 끊김·429·5xx)는 목록마다 한 번 재시도(`infra/k8sRetry.ts`).
 
 ## 7. 수집 데이터
 
@@ -119,7 +121,34 @@ kubectl auth can-i get secrets --as <connection-object-id>        # no
 | `cluster_dns_unresolved` | 파드가 이 클러스터 밖(다른 VNet)에 있음 — 같은 클러스터에 두거나 DNS 영역 링크 |
 | `aks_rbac_forbidden` | ClusterRoleBinding 주체가 앱 ID(clientId) — **개체 ID**여야 함 |
 | 브라우저 로그인 루프 | SPA 리디렉션 URI·`host` 불일치, 또는 http(MSAL은 https 필요) |
-| 네트워크 정책 강제 후 끊김 | 감사 단계의 Hubble DROPPED를 보고 빠진 FQDN·API 서버 /32 추가 |
+| 네트워크 정책 강제 후 끊김 | 관찰본(`-audit`)은 아무것도 버리지 않아 DROPPED로는 알 수 없음 → 아래 '관찰 → 강제' 목록이 빌 때까지 빠진 FQDN·API 서버 /32 추가 |
+| 시작 직후 `getaddrinfo EAI_AGAIN` | DNS(또는 Cilium DNS 프록시)가 아직 준비 안 됨 — `dnsConfig`가 렌더링됐는지, Hubble DNS 기록 확인 |
+
+### 관찰(`enforce: false`) → 강제 전환 판단
+
+관찰본은 `enableDefaultDeny: false`라 Cilium이 '모두 허용(allow-any)' 규칙을 덧붙여 아무것도 버리지 않습니다. 일반 흐름(trace)에는 정책 일치가 없어 `policy-verdict:none`으로 보이고, 목적지 IP로 짐작하면 틀립니다. 대신 **새 연결마다 한 번 나오는 policy-verdict 이벤트**의 `egress_allowed_by`/`ingress_allowed_by`(Cilium 1.15+)를 봅니다(2026-10-23 AKS ACNS Cilium 1.19.8에서 확인):
+
+| allowed_by | 일치 종류 | 강제하면 |
+|---|---|---|
+| 이름 있는 정책(`aud-dashboard-baseline-audit` …) | 2 (L3+L4) 등 | 통과 |
+| `reserved:io.cilium.policy.derived-from=allow-any-egress`(또는 `-ingress`)만 | 4 (all) | **막힘** |
+| `allow-localhost-ingress`(kubelet 프로브) | 1 | 통과(항상) |
+
+화면: AKS 모니터링 › Hubble › 보안 '정책을 강제하면 막힐 연결'(Hubble exec가 켜진 연결만). exec가 꺼진 운영에서는 운영자가 직접:
+
+```bash
+for p in $(kubectl -n kube-system get po -l k8s-app=cilium -o name); do
+  kubectl -n kube-system exec "$p" -c cilium-agent -- hubble observe --type policy-verdict     --namespace aud-dashboard --last 10000 -o jsonpb; done |
+jq -r '.flow | select(.event_type.type==5) as $f
+ | (if $f.traffic_direction=="EGRESS" then $f.egress_allowed_by else $f.ingress_allowed_by end) as $by
+ | select($by != null and ($by|length)>0 and all($by[]; (.name//"")=="" and
+     any(.labels[]?; test("derived-from=allow-any-(egress|ingress)$"))))
+ | [$f.traffic_direction, ($f.source.workloads[0].name // $f.source.pod_name // $f.IP.source),
+    (($f.destination_names//[])|join(",")), $f.IP.destination,
+    (($f.l4.TCP.destination_port // $f.l4.UDP.destination_port)|tostring)] | @tsv' | sort | uniq -c | sort -rn
+```
+
+업무 주기 전체(배치·일일 작업 포함) 동안 결과가 비면 `networkPolicy.enforce: true`. 노드 버퍼는 새 연결만 담고 오래 열린 연결은 정책을 건 뒤 다시 열 때 판정되므로, 관찰본을 적용한 뒤 워크로드를 한 번 재시작하세요. DNS 이름이 비어 있는 world 목적지(하드코딩 IP)는 FQDN 규칙으로 허용할 수 없습니다. `allowed_by`가 아예 없으면 Cilium 1.15 미만 — 일치 종류(4 = 막힘)로만 추정합니다.
 
 나머지는 [error-catalog.md](../troubleshooting/error-catalog.md).
 

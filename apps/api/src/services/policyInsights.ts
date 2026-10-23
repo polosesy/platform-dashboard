@@ -95,7 +95,7 @@ export const riskDict = (): RbacRiskDef[] => [
   { key: "pv", label: L("PV 생성", "PV creation"), raw: "persistentvolumes: create", grade: "warn" },
   { key: "ns", label: L("Namespace 수정", "Namespace changes"), raw: "namespaces: update/patch", grade: "warn" },
 ];
-const GRADE = Object.fromEntries(riskDict().map((r) => [r.key, r.grade])) as Record<RbacRiskKey, "crit" | "warn">;
+export const GRADE = Object.fromEntries(riskDict().map((r) => [r.key, r.grade])) as Record<RbacRiskKey, "crit" | "warn">;
 const riskLabel = (k: RbacRiskKey): string => riskDict().find((r) => r.key === k)?.label ?? k;
 const WEIGHT_SCORE: Record<RiskWeight, number> = { crit: 3, warn: 2, low: 1 };
 
@@ -159,7 +159,7 @@ export function rbacRiskKeys(rules: InvRbacRule[], roleName: string): { keys: Rb
   return { keys: [...keys].sort((a, b) => order.indexOf(a) - order.indexOf(b)), conditional: [...cond], rules: [...hit] };
 }
 
-function roleRules(inv: PolicyInventory, roleRef: { kind: string; name: string }, namespace?: string): InvRbacRule[] {
+export function roleRules(inv: PolicyInventory, roleRef: { kind: string; name: string }, namespace?: string): InvRbacRule[] {
   const role = inv.roles.find((r) => r.kind === roleRef.kind && r.name === roleRef.name && (roleRef.kind === "ClusterRole" || r.namespace === namespace));
   return role?.rules ?? [];
 }

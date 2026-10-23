@@ -4,6 +4,7 @@ import type { KubernetesClusterInfo } from "@aud/types";
 import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes.js";
 import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
+import { collectWorkloadIdentity } from "../services/workloadIdentityCollector.js";
 import { queryLang } from "../infra/lang.js";
 import { HttpError, assertArmResourceId, isSigninRequired, queryArmResourceId, querySubscriptionId, respondWithFallback, safeMessage, sendError } from "../infra/requestParams.js";
 
@@ -73,6 +74,17 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
       res.json(await collectPolicyInsights(env, req.auth?.bearerToken, clusterId, queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "policy_insights_failed", "kubernetes");
+    }
+  });
+
+  // Workload identity map: pods → ServiceAccount → federated credential → managed identity → Azure roles (WI-01…16).
+  // Read when the tab opens; ?scan=subscription also checks other identities of the cluster's subscription (capped)
+  router.get("/api/kubernetes/policies/workload-identity", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await collectWorkloadIdentity(env, req.auth?.bearerToken, clusterId, queryLang(req), { scan: req.query.scan === "subscription" }));
+    } catch (e: unknown) {
+      sendError(res, e, "workload_identity_failed", "kubernetes");
     }
   });
 

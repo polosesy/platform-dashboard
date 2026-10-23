@@ -22,11 +22,15 @@ const r = (apiGroup: string, resource: string, methods: string[], custom?: true)
 export const K8S_READ_SURFACE: ReadRule[] = [
   r("", "namespaces", ["listNamespace"]),
   r("", "nodes", ["listNode"]),
+  // Workload identity map: only the azure.workload.identity/* annotations are kept (never other annotations or secrets)
+  r("", "serviceaccounts", ["listServiceAccountForAllNamespaces"]),
   r("", "pods", ["listPodForAllNamespaces", "listNamespacedPod"]),
   r("", "services", ["listServiceForAllNamespaces", "listNamespacedService"]),
   r("", "endpoints", ["listNamespacedEndpoints"]),
   r("", "resourcequotas", ["listResourceQuotaForAllNamespaces"]),
   r("", "limitranges", ["listLimitRangeForAllNamespaces"]),
+  // Warning events of a workload (AKS keeps ~1 h): type · reason · object · count — the message goes to operators only
+  r("", "events", ["listEventForAllNamespaces", "listNamespacedEvent"]),
   r("apps", "deployments", ["listDeploymentForAllNamespaces"]),
   r("apps", "statefulsets", ["listStatefulSetForAllNamespaces"]),
   r("apps", "daemonsets", ["listDaemonSetForAllNamespaces"]),

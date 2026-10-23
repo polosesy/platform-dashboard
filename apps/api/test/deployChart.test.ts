@@ -54,6 +54,15 @@ test("the pod is hardened: non-root, read-only root, no escalation, no capabilit
   assert.match(read("deploy/kubernetes/namespace.yaml"), /pod-security\.kubernetes\.io\/enforce: restricted/, "namespace PSA restricted");
 });
 
+test("pod DNS: ndots 1 (2 queries per external lookup, not 10), switchable off", (t) => {
+  assert.match(read(RENDERED), /dnsConfig:[^\n]*\n\s+options:\n\s+- name: ndots\n\s+value: "1"/);
+  const helm = spawnSync("helm", ["version", "--short"], { encoding: "utf8" });
+  if (helm.status !== 0) return t.skip("helm not installed");
+  const r = spawnSync("helm", ["template", "aud-dashboard", CHART, "--set", "dnsConfig=null"], { cwd: ROOT, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /dnsConfig:/, "null restores the cluster default");
+});
+
 test("every env name the chart sets is read by the code", () => {
   const y = read(RENDERED);
   const names = [...y.matchAll(/- \{ name: ([A-Z_]+), value:/g)].map((m) => m[1]!);

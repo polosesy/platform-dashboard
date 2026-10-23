@@ -94,7 +94,13 @@ function RiskBody({ result, clusterName, insights, label }: { result: ReturnType
   return (
     <>
       {gaps.filter((g) => g !== "recommendations" && g !== "alerts").map((g) => (
-        <Notice key={g} tone="warning" title={t(`risk.gap.${g}`)}>{t(`risk.gapHint.${g}`)}</Notice>
+        // Not collected by design (info, how to get it) vs a read that failed (warning, what failed)
+        <Notice key={g} tone={g === "hubbleNotCollected" ? "info" : "warning"} title={t(`risk.gap.${g}`)}>
+          {t(`risk.gapHint.${g}`)}
+          {g === "insightsPartial" && result.gapDetails?.length ? (
+            <ul className={s.gapList}>{result.gapDetails.map((d) => <li key={d}>{d}</li>)}</ul>
+          ) : null}
+        </Notice>
       ))}
 
       <Panel title={t("risk.scope", { name: clusterName })}>

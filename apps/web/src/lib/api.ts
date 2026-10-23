@@ -44,6 +44,9 @@ export class ApiError extends Error {
   }
 }
 
+/** An answer that asking again will not change (400 bad input · 401/403 · 404 · 501 off for this deployment) */
+export const isPermanentApiError = (e: unknown): boolean => e instanceof ApiError && [400, 401, 403, 404, 501].includes(e.status);
+
 /** What the page should ask the user to do for an API error (null = nothing about sign-in) */
 export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection" | "aksCredential"
   // AKS sign-in and reach (API services/aksAccess.ts, docs/integrations/azure/aks.md)

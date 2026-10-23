@@ -45,6 +45,8 @@ function packetKey(f: HubbleFlow): string {
     f.isReply ? "r" : "",
     f.verdict,
     l7,
+    // A policy-verdict event and the trace event of the same SYN share everything else — keep both
+    f.eventKind ?? "",
   ].join("|");
 }
 

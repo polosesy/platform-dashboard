@@ -5,6 +5,9 @@ import { collectServiceMap, collectNetworkSummary, collectSecuritySummary } from
 import type { HubbleStatusResponse, HubbleFlowsResponse } from "@aud/types";
 import { queryArmResourceId, queryInt, queryString, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
+import { getHubbleSources } from "../services/hubbleSources.js";
+import { getHubbleMetricsSummary } from "../services/hubbleMetrics.js";
+import { getLokiDrops } from "../services/lokiLogs.js";
 
 export function registerHubbleRoutes(router: Router, env: Env) {
   // ── Status — Hubble Relay 연결 상태 ──
@@ -16,6 +19,42 @@ export function registerHubbleRoutes(router: Router, env: Env) {
       res.json(data);
     } catch (e: unknown) {
       sendError(res, e, "hubble_status_failed", "hubble");
+    }
+  });
+
+  // ── Sources — exec / ACNS flow logs / Hubble metrics: what the views can read for this cluster ──
+  router.get("/api/hubble/sources", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getHubbleSources(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "hubble_sources_failed", "hubble");
+    }
+  });
+
+  // ── Metrics summary — Hubble metrics in Managed Prometheus (no exec, no edges) ──
+  router.get("/api/hubble/metrics-summary", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getHubbleMetricsSummary(env, req.auth?.bearerToken, clusterId, queryInt(req, "window", 15, 1, 1440)));
+    } catch (e: unknown) {
+      sendError(res, e, "hubble_metrics_failed", "hubble");
+    }
+  });
+
+  // ── Drops from Loki (hubble-flow-exporter → {job="hubble-flows"}) + the exporter pipeline's health ──
+  router.get("/api/hubble/loki-drops", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const minutes = queryInt(req, "window", 60, 1, 1440);
+      // AMW cross-check: Hubble counted drops in the same window (hubble_drop_total) — the metrics view's 60 m figure
+      const amw = async () => {
+        const m = await getHubbleMetricsSummary(env, req.auth?.bearerToken, clusterId, 60);
+        return m.state === "ok" && !m.missing.includes("hubble_drop_total") ? m.dropsByReason.reduce((a, d) => a + d.count, 0) : null;
+      };
+      res.json(await getLokiDrops(env, req.auth?.bearerToken, clusterId, minutes, amw));
+    } catch (e: unknown) {
+      sendError(res, e, "loki_drops_failed", "hubble");
     }
   });
 

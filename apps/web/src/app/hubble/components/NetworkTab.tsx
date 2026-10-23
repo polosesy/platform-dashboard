@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { HubbleNetworkSummary } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
@@ -31,16 +32,13 @@ export function NetworkTab({ clusterId }: Props) {
       setData(resp);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return !isPermanentApiError(e);
     } finally {
       setLoading(false);
     }
   }, [clusterId, getApiToken, locale]);
 
-  useEffect(() => {
-    fetch_();
-    const iv = setInterval(fetch_, 30_000);
-    return () => clearInterval(iv);
-  }, [fetch_]);
+  usePolling(fetch_, 30_000);
 
   if (loading && !data) {
     return (

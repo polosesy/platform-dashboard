@@ -255,7 +255,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
                   <Pill tone={i.sev}>{num(i.id)} {t(`ins.sev.${i.sev}`)}</Pill>
                   <span className={styles.cardNum}>{KIND_LABEL[i.kind]} · {t("ins.combos.checksN", { n: i.findingIds.length })}{s === "closed" ? ` · ${t("ins.combos.state.closed")}` : s === "reduced" ? ` · ${t("ins.combos.state.reducedShort")}` : ""}</span>
                 </div>
-                <div className={styles.cardTitle}>{i.title}</div>
+                <div className={styles.cardTitle} title={i.title}>{i.title}</div>
                 <div className={styles.cardMeta}>
                   {evidenceOf(i).map(([k, txt]) => <Pill key={txt} tone={k === "unk" ? "unk" : "ev"}>{k === "unk" ? "? " : ""}{txt}</Pill>)}
                   {i.actions[0] && <Pill tone={i.actions[0].risk} title={t("ins.combos.fixRiskHint")}>{t("ins.combos.fixRisk")}: {i.actions[0].riskLabel}</Pill>}
@@ -275,7 +275,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
                 <button key={i.id} className={`${styles.card} ${styles.dim}`} data-sev={i.sev} aria-label={`${num(i.id)} ${KIND_LABEL[i.kind]}: ${i.title} — ${t("ins.combos.showUnfiltered")}`}
                   onClick={() => { setOwner("all"); setQuickOnly(false); select(i.id, true); }}>
                   <span className={styles.cardNum}>{num(i.id)}</span>
-                  <span className={styles.dimT}>{KIND_LABEL[i.kind]} · {i.title}</span>
+                  <span className={styles.dimT} title={i.title}>{KIND_LABEL[i.kind]} · {i.title}</span>
                 </button>
               ))}
             </>

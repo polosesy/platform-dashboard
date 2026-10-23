@@ -138,6 +138,26 @@ test("routes with sample data answer an anonymous caller with the sample and not
   assert.deepEqual(body, { items: [], source: "mock", note: "signin_required" });
 });
 
+test("a signed-in caller never gets sample numbers for a failed live read; samples always say so", async () => {
+  const call = async (load: () => Promise<{ items: number[] } | null>, bearer?: string) => {
+    let body: unknown; let status = 200;
+    const res = { req: { auth: bearer ? { bearerToken: bearer } : undefined }, headersSent: false, writableEnded: false,
+      json: (b: unknown) => { body = b; }, status(s: number) { status = s; return this; }, setHeader() {} };
+    await respondWithFallback(res as never, load, { items: [42] }, "t");
+    return { status, body };
+  };
+  const throttled = await call(async () => { throw new Error("ARM 429: 429: Too many requests. Please retry."); }, "tok");
+  assert.equal(throttled.status, 429);
+  assert.deepEqual((throttled.body as { error: string }).error, "azure_throttled");
+  const denied = await call(async () => { throw new Error("ARM 401: RBACAccessDenied: The client does not have authorization"); }, "tok");
+  assert.equal(denied.status, 403);
+  assert.equal((denied.body as { error: string }).error, "azure_forbidden");
+  assert.equal((await call(async () => { throw new Error("socket hang up"); }, "tok")).status, 502);
+  assert.deepEqual((await call(async () => null, "tok")).body, { items: [42], source: "mock", note: "mock data" }, "feature off: labelled sample");
+  assert.deepEqual((await call(async () => null)).body, { items: [42], source: "mock", note: "signin_required" });
+  assert.deepEqual((await call(async () => ({ items: [1] }), "tok")).body, { items: [1] });
+});
+
 test("diagram store: a user's diagram is theirs; anonymous sees only the public samples", () => {
   const spec = (id: string) => ({ version: "1", id, name: id, createdAt: "", updatedAt: "", groups: [], settings: { refreshIntervalSec: 30, defaultTimeRange: "5m", layout: "manual" as const }, nodes: [], edges: [] });
   saveDiagramSpec(spec("sample-x"));

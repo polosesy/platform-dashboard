@@ -40,7 +40,8 @@ export type RecommendationRow = {
 export type ControlRow = { dn: string; s?: { current?: number; max?: number } | null; u?: number; h?: number; w?: number };
 export type ComplianceRow = { name: string; st?: string; p?: number; f?: number; k?: number };
 export type PlanRow = { name: string; tier?: string; sub?: string };
-export type AlertRow = { id: string; dn?: string; sev?: string; st?: string; intent?: string; t?: string; dsc?: string; rids?: unknown };
+export type AlertRow = { id: string; dn?: string; sev?: string; st?: string; intent?: string; t?: string; dsc?: string; rids?: unknown;
+  rem?: unknown; ce?: string; ent?: unknown; t0?: string; uri?: string };
 
 const DOMAIN_BY_CATEGORY: Record<string, PostureDomain> = {
   identityandaccess: "identity",
@@ -169,6 +170,30 @@ export function mapPlans(rows: PlanRow[]): PostureDefenderPlan[] {
     .sort((a, b) => Number(b.tier === "Standard") - Number(a.tier === "Standard") || a.name.localeCompare(b.name));
 }
 
+/** Remediation, compromised entity, Kubernetes entities, first activity, portal link (all optional, GUIDs masked) */
+export function alertExtras(r: AlertRow): Pick<PostureAlert, "remediation" | "entity" | "k8s" | "firstAt" | "portalUrl"> {
+  const rem = (Array.isArray(r.rem) ? r.rem : typeof r.rem === "string" ? [r.rem] : [])
+    .map((x) => plainText(x, 400)).filter((x): x is string => !!x).slice(0, 8);
+  const k8s: NonNullable<PostureAlert["k8s"]> = {};
+  for (const e of Array.isArray(r.ent) ? r.ent : []) {
+    const o = (e ?? {}) as Record<string, unknown>;
+    const type = String(o.Type ?? o.type ?? "").toLowerCase();
+    const name = str(o.Name ?? o.name);
+    if (!name) continue;
+    if (type === "k8s-namespace" && !k8s.namespace) k8s.namespace = name;
+    if (type === "k8s-pod" && !k8s.pod) k8s.pod = name;
+    if (type === "container" && !k8s.container) k8s.container = name;
+  }
+  const uri = str(r.uri);
+  return {
+    ...(rem.length ? { remediation: rem } : {}),
+    ...(str(r.ce) ? { entity: maskGuids(str(r.ce)!) } : {}),
+    ...(Object.keys(k8s).length ? { k8s } : {}),
+    ...(str(r.t0) ? { firstAt: str(r.t0)! } : {}),
+    ...(uri && /^https:\/\/portal\.azure\.com\//.test(uri) ? { portalUrl: uri } : {}),
+  };
+}
+
 export function mapAlerts(rows: AlertRow[]): PostureAlert[] {
   const sev = (v: unknown): PostureAlert["severity"] => {
     const s = String(v ?? "").toLowerCase();
@@ -189,6 +214,7 @@ export function mapAlerts(rows: AlertRow[]): PostureAlert[] {
         detectedAt: r.t ?? "",
         description: plainText(r.dsc, 600) ?? "",
         resources,
+        ...alertExtras(r),
       };
     })
     .sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
@@ -221,6 +247,10 @@ const Q = {
     " samples=make_list_if(pack('id', rid, 'n', tostring(properties.resourceDetails.ResourceName), 't', tostring(properties.resourceDetails.ResourceType))," +
     " st=='Unhealthy' and isnotempty(rid), 5)" +
     " by key=name, title=tostring(properties.displayName), sev=tostring(properties.metadata.severity)",
+  // One resource once per severity — the recommendations' unhealthy counts repeat it per recommendation
+  affected:
+    `${A} | extend st=tostring(properties.status.code), rid=tolower(tostring(properties.resourceDetails.Id)), sev=tostring(properties.metadata.severity)` +
+    " | where st == 'Unhealthy' and isnotempty(rid) | summarize n=dcount(rid) by sev",
   score: "securityresources | where type == 'microsoft.security/securescores' and name == 'ascScore' | project s=properties.score",
   controls:
     "securityresources | where type == 'microsoft.security/securescores/securescorecontrols'" +
@@ -233,7 +263,8 @@ const Q = {
   alerts:
     "securityresources | where type == 'microsoft.security/locations/alerts' | where tostring(properties.Status) in ('Active','InProgress')" +
     " | project id, dn=tostring(properties.AlertDisplayName), sev=tostring(properties.Severity), st=tostring(properties.Status)," +
-    " intent=tostring(properties.Intent), t=tostring(properties.TimeGeneratedUtc), dsc=tostring(properties.Description), rids=properties.ResourceIdentifiers" +
+    " intent=tostring(properties.Intent), t=tostring(properties.TimeGeneratedUtc), dsc=tostring(properties.Description), rids=properties.ResourceIdentifiers," +
+    " rem=properties.RemediationSteps, ce=tostring(properties.CompromisedEntity), ent=properties.Entities, t0=tostring(properties.StartTimeUtc), uri=tostring(properties.AlertUri)" +
     " | order by t desc | take 200",
 };
 
@@ -249,8 +280,9 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: st
       return [];
     }
   };
-  const [rec, score, controls, compliance, plans, alerts] = await Promise.all([
+  const [rec, affected, score, controls, compliance, plans, alerts] = await Promise.all([
     run<RecommendationRow>("recommendations", Q.recommendations),
+    run<{ sev?: string; n?: number }>("affected", Q.affected),
     run<{ s?: { current?: number; max?: number; percentage?: number } }>("score", Q.score),
     run<ControlRow>("controls", Q.controls),
     run<ComplianceRow>("compliance", Q.compliance),
@@ -258,7 +290,7 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: st
     run<AlertRow>("alerts", Q.alerts),
   ]);
   // Every section failed → let the route fall back to mock data with the (masked) reason
-  if (gaps.length === 6) throw new Error(gaps[0]!.message);
+  if (gaps.length === Object.keys(Q).length) throw new Error(gaps[0]!.message);
 
   // With several subscriptions, sum the per-subscription scores
   const scoreRows = score.map((r) => r.s ?? {});
@@ -270,6 +302,11 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: st
     score: scoreRows.length ? { current: Math.round(current * 100) / 100, max, percentage: max > 0 ? Math.round((current / max) * 1000) / 10 : 0 } : null,
     controls: mapControls(controls),
     recommendations: mapRecommendations(rec),
+    affected: gaps.some((g) => g.section === "affected") ? null : {
+      High: num(affected.find((r) => r.sev === "High")?.n),
+      Medium: num(affected.find((r) => r.sev === "Medium")?.n),
+      Low: num(affected.find((r) => r.sev === "Low")?.n),
+    },
     compliance: mapCompliance(compliance),
     plans: mapPlans(plans),
     alerts: mapAlerts(alerts),

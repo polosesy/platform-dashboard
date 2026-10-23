@@ -12,6 +12,7 @@ import { aksApiToken, anonymousSpAllowed, clusterConnection, getArmFetcherAuto, 
 import { HttpError, parseSubscriptionIds } from "../infra/requestParams.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
+import { redactLogText } from "./logRedaction.js";
 import {
   aksClusterProfile,
   k8sError,
@@ -206,6 +207,8 @@ export async function loadKubeConfig(
     credentialTenantId: tokenTenantId,
   });
   await assertReachable(env, bearerToken, plan.host, profile);
+  // No keep-alive agent pool: node-fetch 2 (inside client-node) breaks chunked responses on reused sockets
+  // ("Premature close" — infra/k8sRetry.ts); transient failures get one retry where lists are read
   if (plan.kind === "static") return sanitizeKubeconfig(kc);
   return tokenKubeConfig(kc, await aksApiToken(env, bearerToken, azureResourceId));
 }
@@ -544,7 +547,12 @@ export async function listAllNamespacePods(
 //    — ContainerLogV2 불필요, kubelet에서 직접 조회
 // ────────────────────────────────────────────
 
-export async function readPodLogs(
+/** Pod logs with secrets masked (services/logRedaction.ts) — the only export; the raw read stays inside */
+export async function readPodLogs(...args: Parameters<typeof readPodLogsRaw>): Promise<string> {
+  return redactLogText(await readPodLogsRaw(...args)).text;
+}
+
+async function readPodLogsRaw(
   env: Env,
   bearerToken: string | undefined,
   azureResourceId: string,

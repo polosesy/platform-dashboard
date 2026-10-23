@@ -1,4 +1,5 @@
 import { withLang, type Lang } from "../infra/lang.js";
+import { k8sFailureReason, withK8sRetry } from "../infra/k8sRetry.js";
 import * as k8s from "@kubernetes/client-node";
 import type { Env } from "../env.js";
 import type { KubernetesPolicyResponse } from "@aud/types";
@@ -157,6 +158,25 @@ function ciliumSpecs(obj: Record<string, unknown>): InvCiliumSpec[] {
   }));
 }
 
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What the azure-workload-identity webhook injected into a running pod — only the token file variable's name and the
+ * client / tenant GUIDs are kept; no other environment variable (names or values) leaves this function.
+ */
+export function wiTraces(containers: Array<{ env?: Array<{ name: string; value?: string }> }>): { wi?: { tokenFile: boolean; clientId?: string; tenantId?: string } } {
+  let tokenFile = false;
+  let clientId: string | undefined, tenantId: string | undefined;
+  for (const c of containers) {
+    for (const e of c.env ?? []) {
+      if (e.name === "AZURE_FEDERATED_TOKEN_FILE") tokenFile = true;
+      else if (e.name === "AZURE_CLIENT_ID" && e.value && GUID_RE.test(e.value)) clientId ??= e.value.toLowerCase();
+      else if (e.name === "AZURE_TENANT_ID" && e.value && GUID_RE.test(e.value)) tenantId ??= e.value.toLowerCase();
+    }
+  }
+  return tokenFile || clientId ? { wi: { tokenFile, ...(clientId ? { clientId } : {}), ...(tenantId ? { tenantId } : {}) } } : {};
+}
+
 export async function collectClusterPolicies(
   env: Env,
   bearerToken: string | undefined,
@@ -202,13 +222,14 @@ export async function collectPolicyInventory(
   /** List one resource kind; failures are recorded instead of thrown. `missingOk` = 404 means "not installed". */
   async function list<T>(label: string, fn: () => Promise<{ items?: T[] }>, missingOk = false): Promise<{ items: T[]; ok: boolean }> {
     try {
-      const r = await fn();
+      // One retry for a transient failure: a blip must not turn into an empty list (missing issues)
+      const r = await withK8sRetry(fn);
       return { items: r.items ?? [], ok: true };
     } catch (e) {
       const status = statusOf(e);
       if (label === "Namespace") namespaceError = e;
       if (!(missingOk && status === 404)) {
-        unavailable.push(`${label}${status ? ` (HTTP ${status})` : ""}`);
+        unavailable.push(`${label} (${k8sFailureReason(e)})`);
         console.warn(`[k8s-policy] ${label} list failed:`, status ?? (e instanceof Error ? e.message : e));
       }
       return { items: [], ok: false };
@@ -263,6 +284,8 @@ export async function collectPolicyInventory(
       labels: labelsOf(p.metadata),
       phase: p.status?.phase,
       hostNetwork: p.spec?.hostNetwork === true,
+      ...(p.spec?.serviceAccountName ? { serviceAccountName: p.spec.serviceAccountName } : {}),
+      ...wiTraces(p.spec?.containers ?? []),
     })),
     workloads: [
       ...deployments.items.map((d) => toWorkload("Deployment", d)),

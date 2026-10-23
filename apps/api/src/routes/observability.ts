@@ -7,6 +7,13 @@ import {
   getObservabilityNodes,
 } from "../services/observabilityAggregator.js";
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
+import { getObservabilityStack } from "../services/observabilityStack.js";
+import { getObservabilitySources } from "../services/observabilitySources.js";
+import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
+import { listWarningEvents } from "../services/kubeEvents.js";
+import { getWorkloadLogs } from "../services/lokiLogs.js";
+import { podLogNamespaceAllowed } from "../services/aksAccess.js";
+import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
   ObservabilityStatusResponse,
@@ -41,6 +48,67 @@ function requireQuery(req: Request, names: string[]): string[] {
 }
 
 export function registerObservabilityRoutes(router: Router, env: Env) {
+  // Stack — the customer's collection pipeline (Alloy, Loki, Tempo, Pyroscope, KSM, scrape targets) from the cluster's
+  // Azure Monitor workspace; states only, never sample data (services/observabilityStack.ts)
+  // Heatmap — one tile per workload, the customer's container-map signals (services/workloadHeatmap.ts)
+  router.get("/api/observability/heatmap", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getWorkloadHeatmap(env, req.auth?.bearerToken, clusterId, queryInt(req, "window", 60, 1, 1440)));
+    } catch (e: unknown) {
+      sendError(res, e, "heatmap_failed", "observability");
+    }
+  });
+
+  // Warning kube events (Kubernetes API, ~1 h) — the message only for operators, redacted
+  router.get("/api/observability/events", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const messages = roleAtLeast(callerOf(env, req.auth?.bearerToken)?.role ?? null, "operator");
+      res.json(await listWarningEvents(env, req.auth?.bearerToken, clusterId, {
+        namespace: queryString(req, "namespace"), workload: queryString(req, "workload"), messages,
+      }));
+    } catch (e: unknown) {
+      sendError(res, e, "events_failed", "observability");
+    }
+  });
+
+  // Workload log stream from the cluster's Loki — the pod-log gate: operator + the connection's allowed namespaces
+  router.get("/api/observability/workload-logs", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [namespace, workload] = requireQuery(req, ["namespace", "workload"]);
+      if (!podLogNamespaceAllowed(env, clusterId, namespace!)) {
+        throw new HttpError(403, "pod_log_namespace_denied", "Logs of this namespace are not read for this connection (aks.podLogNamespaces)");
+      }
+      const pods = (queryString(req, "pods") ?? "").split(",").filter(Boolean).slice(0, 20);
+      res.json(await getWorkloadLogs(env, req.auth?.bearerToken, clusterId, {
+        namespace: namespace!, workload: workload!, pods, errorsOnly: queryString(req, "errorsOnly") !== "false", minutes: queryInt(req, "minutes", 60, 1, 1440),
+      }));
+    } catch (e: unknown) {
+      sendError(res, e, "workload_logs_failed", "observability");
+    }
+  });
+
+  // Loki · Tempo · Pyroscope · Grafana: read / link only / blocked / not set up (Loki /ready probe cached per cluster)
+  router.get("/api/observability/sources", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getObservabilitySources(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_sources_failed", "observability");
+    }
+  });
+
+  router.get("/api/observability/stack", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_stack_failed", "observability");
+    }
+  });
+
   // Status — data source connectivity check
   router.get("/api/observability/status", (_req: Request, res: Response) => {
     const workspaceId = env.AZURE_CONTAINER_INSIGHTS_WORKSPACE_ID ?? env.AZURE_LOG_ANALYTICS_WORKSPACE_ID ?? null;

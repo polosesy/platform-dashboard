@@ -6,6 +6,8 @@ import { useI18n } from "@/lib/i18n";
 import { issueNum, type InsightLabels, type InsightsNav, type TFn } from "./model";
 import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, type InspectorModel, type InspectorRow } from "./Inspector";
+import { WEIGHT_GLYPH, cellText, hitCount, showsCellText, sortRows, splitFactors, textColumns, visibleFactors, type HeatSort } from "./heatView";
+import { Segmented } from "@/components/ui";
 import styles from "./insights.module.css";
 
 export type HeatSel = { row: string; key: RiskFactorKey | null };
@@ -83,8 +85,9 @@ function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFa
     );
   }
   const comboKeys = new Set(r.combos.flatMap((c) => c.keys));
-  const factorRows: InspectorRow[] = groups.flatMap((g) => data.factors.filter((x) => x.group === g).map((x) => ({
-    k: `${comboKeys.has(x.key) ? "◆ " : ""}${g} · ${x.label}`, v: r.cells[x.key] ?? none, ev: r.cells[x.key] ? x.ev : undefined, off: !r.cells[x.key], key: comboKeys.has(x.key),
+  const { hits, nonHits } = splitFactors(r, data.factors);
+  const factorRows: InspectorRow[] = groups.flatMap((g) => hits.filter((x) => x.group === g).map((x) => ({
+    k: `${comboKeys.has(x.key) ? "◆ " : ""}${g} · ${x.label}`, v: r.cells[x.key] ?? none, ev: x.ev, key: comboKeys.has(x.key),
   })));
   const out = net.edges.filter((e) => e.from === r.id), inn = net.edges.filter((e) => e.to === r.id);
   const ext = out.filter((e) => e.cls === "cloud" || e.cls === "internet").slice(0, 3);
@@ -97,7 +100,10 @@ function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFa
     chips: r.combos.length ? <>{r.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />)}</> : undefined,
     sections: [
       ...cellSections,
-      { h: t("ins.heat.factors", { n: data.factors.filter((x) => r.cells[x.key]).length, m: data.factors.length }), rows: factorRows, grid: true },
+      { h: t("ins.heat.factors", { n: hits.length, m: data.factors.length }), rows: factorRows },
+      ...(nonHits.length ? [{ h: t("ins.heat.nonHits", { n: nonHits.length }), body: (
+        <details className={styles.nonHits}><summary>{t("ins.heat.nonHitsShow")}</summary>{nonHits.map((x) => `${x.group} · ${x.label}`).join(" · ")}</details>
+      ) }] : []),
       { h: t("ins.heat.netImages"), rows: [
         { k: t("ins.heat.conn"), v: net.available ? t("ins.heat.inOut", { out: out.length, in: inn.length }) : t("ins.heat.noHubble"), ev: net.available ? "obs" : "unk", src: hubbleLabel(net.coverage) },
         { k: t("ins.heat.topExternal"), v: ext.map((e) => `${nodeLabel(e.to)} ${e.ports.join(",")}`).join(" · ") || t("ins.heat.notObserved") },
@@ -116,10 +122,15 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
   const lb = useInsightLabels();
   const { EVK, hubbleLabel } = lb;
   const none = t("ins.heat.none");
-  const rows = data.rows.filter((r) => showManaged || !r.managed);
+  const [sortBy, setSortBy] = useState<HeatSort>("risk");
+  const [showEmpty, setShowEmpty] = useState(false);
+  const rows = sortRows(data.rows.filter((r) => showManaged || !r.managed), data.factors, sortBy);
   const user = data.rows.filter((r) => !r.managed);
   const managedCount = data.rows.length - user.length;
-  const F = data.factors;
+  // Columns nobody hits are folded (toggle) — the matrix shows what matters at a glance
+  const F = visibleFactors(rows, data.factors, showEmpty);
+  const emptyCols = data.factors.length - visibleFactors(rows, data.factors, false).length;
+  const txtCols = textColumns(rows, data.factors);
   const groups = [...new Set(F.map((f) => f.group))];
   const [focus, setFocus] = useState({ r: 0, c: 0 });
   const [tip, setTip] = useState("");
@@ -174,6 +185,13 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
           <div className={styles.sub}>{t("ins.heat.sub")}</div>
         </div>
         <div className={styles.ctrls}>
+          <Segmented label={t("ins.heat.sort")} value={sortBy} onChange={setSortBy}
+            items={[{ id: "risk" as HeatSort, label: t("ins.heat.sortRisk") }, { id: "name" as HeatSort, label: t("ins.heat.sortName") }]} />
+          {emptyCols > 0 && (
+            <button className={styles.fchip} aria-pressed={showEmpty} onClick={() => setShowEmpty(!showEmpty)}>
+              {showEmpty ? t("ins.heat.hideEmptyCols", { n: emptyCols }) : t("ins.heat.showEmptyCols", { n: emptyCols })}
+            </button>
+          )}
           <button className={styles.fchip} aria-pressed={showManaged} onClick={() => onShowManaged(!showManaged)}>
             {showManaged ? t("ins.heat.hideManaged", { n: managedCount }) : t("ins.heat.showManaged", { n: managedCount })}
           </button>
@@ -183,6 +201,7 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
         {rows.length === 0 ? (
           <div className={styles.notice}>{t("ins.heat.noWorkloads")}</div>
         ) : (
+          <div className={styles.heatLayout} data-open={!!openRow || undefined}>
           <div className={styles.heatWrap}>
             <table className={styles.heat} role="grid" aria-label={t("ins.heat.title")} onFocus={(e) => { const t = (e.target as HTMLElement).dataset.tip; if (t) setTip(t); }}>
               <thead>
@@ -200,7 +219,7 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
                       <span className={styles.tot}>{user.filter((r) => r.cells[f.key]).length}/{user.length}</span>
                     </th>
                   ))}
-                  <th scope="col" style={{ textAlign: "left" }}>{t("ins.heat.combosCol")}</th>
+                  <th scope="col" style={{ textAlign: "left" }}>{t("ins.heat.summaryCol")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -233,36 +252,38 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
                               onKeyDown={(e) => onKey(e, ri, ci)}
                               onMouseEnter={() => setTip(`${r.name} · ${f.label}: ${v ?? none}`)}
                             >
+                              {v ? (
+                                <span className={styles.cellTxt}><b aria-hidden="true">{WEIGHT_GLYPH[r.weights[f.key] ?? f.weight] ?? "●"}</b>{showsCellText(r, f, txtCols) ? cellText(v) : null}</span>
+                              ) : <span className={styles.cellNone} aria-hidden="true">·</span>}
                               {v && f.ev === "obs" && <span className={styles.obsDot} />}
                             </td>
                           );
                         })}
                         <td className={styles.combosCell}>
-                          {r.combos.length ? r.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />) : <span className={styles.muted}>-</span>}
+                          <span className={styles.muted}>{t("ins.heat.summary", { n: hitCount(r, data.factors) })}</span>
+                          {r.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />)}
                         </td>
                       </tr>
-                      {open && openRow && (
-                        <tr className={styles.heatX}>
-                          <td colSpan={F.length + 2}>
-                            <div className={styles.hxInner}>
-                              <Inspector model={heatModel(data, openRow, sel!.key, nav, t, lb)} onClose={closeDetail} cols />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          {/* Detail drawer: beside the matrix on wide screens, below it on narrow ones — the matrix stays readable */}
+          {openRow && (
+            <aside className={styles.heatDrawer} aria-label={openRow.name}>
+              <Inspector model={heatModel(data, openRow, sel!.key, nav, t, lb)} onClose={closeDetail} />
+            </aside>
+          )}
+          </div>
         )}
         <div className={styles.heatTip} aria-live="polite">{tip}</div>
         <div className={styles.legend}>
-          <span><i style={{ background: "#e9a48c" }} />{t("ins.heat.legendCrit")}</span>
-          <span><i style={{ background: "#f0d7a9" }} />{t("ins.heat.legendWarn")}</span>
-          <span><i style={{ background: "#e4e3e0" }} />{t("ins.weight.low")}</span>
-          <span><i style={{ boxShadow: "inset 0 0 0 2px var(--ink)", background: "#fff" }} />{t("ins.heat.legendCombo")}</span>
+          <span><i className={styles.lgCrit}>{WEIGHT_GLYPH.crit}</i>{t("ins.heat.legendCrit")}</span>
+          <span><i className={styles.lgWarn}>{WEIGHT_GLYPH.warn}</i>{t("ins.heat.legendWarn")}</span>
+          <span><i className={styles.lgLow}>{WEIGHT_GLYPH.low}</i>{t("ins.weight.low")}</span>
+          <span><i className={styles.lgCombo} />{t("ins.heat.legendCombo")}</span>
           <span><EvidenceChip ev="obs" text="●" /> {t("ins.heat.legendObs")}</span>
           <span>{t("ins.heat.legendCount", { n: user.length })}</span>
         </div>

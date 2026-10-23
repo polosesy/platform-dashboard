@@ -36,7 +36,8 @@ import type {
   HubbleFlow,
   HubbleFlowsResponse,
 } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
@@ -643,16 +644,13 @@ export function ServiceMapTab({ clusterId }: Props) {
       setMapData(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return !isPermanentApiError(e);
     } finally {
       setLoading(false);
     }
   }, [clusterId, getApiToken, timeWindow, nsFilter, locale]);
 
-  useEffect(() => {
-    fetchMap();
-    const iv = setInterval(fetchMap, 30_000);
-    return () => clearInterval(iv);
-  }, [fetchMap]);
+  usePolling(fetchMap, 30_000);
 
   // 필터 변경 시 캐시 + fingerprint 초기화 (새로운 레이아웃 필요)
   useEffect(() => {
@@ -745,15 +743,11 @@ export function ServiceMapTab({ clusterId }: Props) {
       );
       // Same rule as the map edges: replies would show server→client with an ephemeral port
       setFlows(data.flows.filter((f) => !f.isReply));
-    } catch { /* 무시 — map 오류와 별개 */ }
+    } catch (e) { return !isPermanentApiError(e); /* 무시 — map 오류와 별개 */ }
     finally { setFlowsLoading(false); }
   }, [clusterId, getApiToken, nsFilter, verdictFilter, locale]);
 
-  useEffect(() => {
-    fetchFlows();
-    const iv = setInterval(fetchFlows, 15_000);
-    return () => clearInterval(iv);
-  }, [fetchFlows]);
+  usePolling(fetchFlows, 15_000);
 
   // 검색 필터된 flows
   const filteredFlows = useMemo(() => {

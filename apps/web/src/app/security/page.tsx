@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { PostureDomain } from "@aud/types";
-import { LoadingState, Panel, Stat } from "@/components/ui";
+import { EmptyState, LoadingState, Panel, Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { useSecurity } from "./SecurityContext";
 import { DOMAINS, PostureNotices, SecurityHeader, SeverityBadge, useGap, useLabel } from "./components";
@@ -17,9 +17,13 @@ export default function SecurityOverviewPage() {
   const complianceGap = useGap("compliance");
   const plansGap = useGap("plans");
   const alertsGap = useGap("alerts");
+  const scoreGap = useGap("score");
+  const controlsGap = useGap("controls");
 
   const recs = posture?.recommendations ?? [];
-  const affected = (sev: string) => recs.filter((r) => r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
+  // Findings = sum of unhealthy over recommendations (a resource once per recommendation); resources = distinct ids
+  const findings = (sev: string) => recs.filter((r) => r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
+  const resources = (sev: "High" | "Medium" | "Low") => posture?.affected?.[sev] ?? null;
   const kinds = (sev: string) => recs.filter((r) => r.severity === sev).length;
   const failedControls = (posture?.compliance ?? []).reduce((n, c) => n + c.failed, 0);
   const paidPlans = (posture?.plans ?? []).filter((p) => p.tier === "Standard").length;
@@ -33,6 +37,9 @@ export default function SecurityOverviewPage() {
   const href = (d: PostureDomain) => (d === "identity" ? "/security/identity" : `/security/findings?domain=${d}`);
 
   const top = recs.slice(0, 6);
+  // Secure score, its controls and compliance standards are subscription-level resources: a connection that reads
+  // only some resource groups sees none of them (no rows — not an error, not zero)
+  const controls = (posture?.controls ?? []).filter((c) => c.maxScore > 0);
 
   return (
     <div className={s.page}>
@@ -43,30 +50,43 @@ export default function SecurityOverviewPage() {
         <LoadingState />
       ) : (
         <>
+          {/* KPI standard: the value line is a number or "—"; why there is no number goes on the hint line */}
           <div className={s.stats}>
-            <Stat
-              label={t("sec.score")}
-              value={posture.score ? `${posture.score.percentage}%` : "—"}
-              hint={posture.score ? `${posture.score.current} / ${posture.score.max}` : t("sec.scoreUnavailable")}
-              tone={posture.score ? (posture.score.percentage < 40 ? "high" : posture.score.percentage < 70 ? "medium" : "success") : undefined}
-            />
-            <Link href="/security/findings" className={s.statLink}>
-              <Stat label={t("sec.affectedHigh")} value={recGap ? notCollected : affected("High").toLocaleString()} hint={t("sec.recTypes", { n: kinds("High") })} tone="high" />
-            </Link>
-            <Link href="/security/findings" className={s.statLink}>
-              <Stat label={t("sec.affectedMedium")} value={recGap ? notCollected : affected("Medium").toLocaleString()} hint={t("sec.recTypes", { n: kinds("Medium") })} tone="medium" />
-            </Link>
-            <Link href="/security/findings" className={s.statLink}>
-              <Stat label={t("sec.affectedLow")} value={recGap ? notCollected : affected("Low").toLocaleString()} hint={t("sec.recTypes", { n: kinds("Low") })} />
-            </Link>
+            <div className={s.statLink}>
+              <Stat
+                label={t("sec.score")}
+                value={posture.score && !scoreGap ? `${posture.score.percentage}%` : "—"}
+                hint={scoreGap ? notCollected : posture.score ? `${posture.score.current} / ${posture.score.max}` : t("sec.scoreNotVisible")}
+                tone={posture.score && !scoreGap ? (posture.score.percentage < 40 ? "high" : posture.score.percentage < 70 ? "medium" : "success") : undefined}
+              />
+            </div>
+            {(["High", "Medium", "Low"] as const).map((sev) => {
+              const n = resources(sev);
+              return (
+                <Link key={sev} href="/security/findings" className={s.statLink}>
+                  <Stat
+                    label={t(`sec.affected${sev}`)}
+                    value={recGap ? "—" : (n ?? findings(sev)).toLocaleString()}
+                    hint={recGap ? notCollected : n === null
+                      ? t("sec.recTypes", { n: kinds(sev) })
+                      : t("sec.affectedHint", { n: kinds(sev), f: findings(sev).toLocaleString() })}
+                    tone={sev === "High" ? "high" : sev === "Medium" ? "medium" : undefined}
+                  />
+                </Link>
+              );
+            })}
             <Link href="/security/threats" className={s.statLink}>
-              <Stat label={t("sec.activeThreats")} value={alertsGap ? notCollected : posture.alerts.length} />
+              <Stat label={t("sec.activeThreats")} value={alertsGap ? "—" : posture.alerts.length} hint={alertsGap ? notCollected : t("sec.alertsHint")} />
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
-              <Stat label={t("sec.failedControls")} value={complianceGap ? notCollected : failedControls} hint={t("sec.standards", { n: posture.compliance.length })} />
+              <Stat
+                label={t("sec.failedControls")}
+                value={complianceGap || !posture.compliance.length ? "—" : failedControls}
+                hint={complianceGap ? notCollected : posture.compliance.length ? t("sec.standards", { n: posture.compliance.length }) : t("sec.noStandardsVisible")}
+              />
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
-              <Stat label={t("sec.coverage")} value={plansGap ? notCollected : `${paidPlans} / ${posture.plans.length}`} hint={t("sec.coverageHint", { n: posture.plans.length })} />
+              <Stat label={t("sec.coverage")} value={plansGap ? "—" : `${paidPlans} / ${posture.plans.length}`} hint={plansGap ? notCollected : t("sec.coverageHint", { n: posture.plans.length })} />
             </Link>
           </div>
 
@@ -109,7 +129,10 @@ export default function SecurityOverviewPage() {
               </ul>
             </Panel>
             <Panel title={t("sec.controls")} sub={t("sec.controlsHint")}>
-              {posture.controls.filter((c) => c.maxScore > 0).map((c) => (
+              {controlsGap
+                ? <EmptyState title={notCollected}>{t("sec.controlsFailedHint")}</EmptyState>
+                : controls.length === 0 && <EmptyState title={t("sec.controlsEmpty")}>{t("sec.controlsEmptyHint")}</EmptyState>}
+              {controls.map((c) => (
                 <div key={c.controlName} className={s.control}>
                   <span>{c.controlName}</span>
                   <span className={s.num}>{c.currentScore} / {c.maxScore} · {t("sec.issues", { n: c.unhealthyResourceCount })}</span>

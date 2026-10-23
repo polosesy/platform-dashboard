@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/part-of: azure-unified-dashboard
 rules:
   - apiGroups: [""]
-    resources: [endpoints, limitranges, namespaces, nodes, pods, resourcequotas, services]
+    resources: [endpoints, events, limitranges, namespaces, nodes, pods, resourcequotas, serviceaccounts, services]
     verbs: [list]
   - apiGroups: [apps]
     resources: [daemonsets, deployments, statefulsets]

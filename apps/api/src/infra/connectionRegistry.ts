@@ -57,11 +57,38 @@ const ConnectionSchema = z.object({
    *   hubbleExec         Hubble flows by exec into cilium-agent (≈ node access) — customer connections only with this
    *   podLogNamespaces   namespaces whose pod logs may be read from the cluster (kubelet); others → Container Insights.
    *                      Unset: every namespace for the home connection, none for customer connections
+   *   observability.grafana  the customer's Azure Managed Grafana: endpoint + datasource UIDs — links into Explore
+   *                      only (AKS 모니터링 › 관측 스택); nothing is read from Grafana
+   *   observability.loki     the cluster's own Loki, read in-cluster (workload logs, Hubble drops from
+   *                      hubble-flow-exporter) — cluster-internal URL only, behind the pod-log gate
+   *   observability.logErrors  the collector's log-ERROR counter in the workspace (site-specific name) and the
+   *                      label that names the app pod (heatmap 'log ERROR')
    */
   aks: z.object({
     allowLocalAccount: z.boolean().optional(),
     hubbleExec: z.boolean().optional(),
     podLogNamespaces: z.array(z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/, "a namespace name")).optional(),
+    observability: z.object({
+      grafana: z.object({
+        endpoint: z.string().regex(/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.grafana\.azure\.com\/?$/i, "an https://<name>.<region>.grafana.azure.com endpoint"),
+        datasources: z.object({
+          prometheus: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+          loki: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+          tempo: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+          pyroscope: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+        }).strict().default({}),
+      }).strict().optional(),
+      loki: z.object({
+        // In-cluster only: <svc>.<ns>[.svc[.cluster.local]] or a private address — never a public endpoint
+        url: z.string().regex(/^https?:\/\/([a-z0-9-]+\.[a-z0-9-]+(\.svc(\.cluster\.local)?)?|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d{1,5})?\/?$/,
+          "an in-cluster http(s)://<service>.<namespace>[.svc]:<port> or private address"),
+        tenant: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+      }).strict().optional(),
+      logErrors: z.object({
+        metric: z.string().regex(/^[a-zA-Z_:][a-zA-Z0-9_:]{0,199}$/, "a Prometheus metric name"),
+        podLabel: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/).optional(),
+      }).strict().optional(),
+    }).strict().optional(),
   }).strict().optional(),
 }).strict();
 

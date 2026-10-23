@@ -189,9 +189,13 @@ function userLogFetcher(env: Env, bearerToken: string): LogAnalyticsFetcher {
   );
 }
 
-function userPrometheusFetcher(env: Env, bearerToken: string): PrometheusFetcher {
-  // Azure Monitor workspaces are read by the home connection (per-connection Prometheus is later)
-  return buildPrometheusFetcher(() => connectionToken(env, bearerToken, homeConnection(env), PROMETHEUS_SCOPE));
+/**
+ * A cluster's Azure Monitor workspace is read with the cluster's connection (its subscription) — a customer cluster's
+ * workspace with the customer identity, never the home one (no fallback to another connection). No cluster: home.
+ */
+function userPrometheusFetcher(env: Env, bearerToken: string, clusterArmId?: string): PrometheusFetcher {
+  const connection = clusterArmId ? connectionFor(env, subscriptionInPath(clusterArmId)) : homeConnection(env);
+  return buildPrometheusFetcher(() => connectionToken(env, bearerToken, connection, PROMETHEUS_SCOPE));
 }
 
 // ── Signed-in user (verified token) ──
@@ -204,8 +208,8 @@ export async function getLogAnalyticsFetcher(env: Env, bearerToken: string): Pro
   return userLogFetcher(env, bearerToken);
 }
 
-export async function getPrometheusFetcher(env: Env, bearerToken: string): Promise<PrometheusFetcher> {
-  return userPrometheusFetcher(env, bearerToken);
+export async function getPrometheusFetcher(env: Env, bearerToken: string, clusterArmId?: string): Promise<PrometheusFetcher> {
+  return userPrometheusFetcher(env, bearerToken, clusterArmId);
 }
 
 // ── Anonymous (dev switch only) — the platform credential ──
@@ -247,8 +251,9 @@ export async function getLogAnalyticsFetcherAuto(env: Env, bearerToken: string |
   return getAnonymousLogFetcher(env);
 }
 
-export async function getPrometheusFetcherAuto(env: Env, bearerToken: string | undefined): Promise<PrometheusFetcher> {
-  if (bearerToken) return userPrometheusFetcher(env, bearerToken);
+/** `clusterArmId`: the cluster whose workspace is read — its connection's identity (pass it whenever there is one) */
+export async function getPrometheusFetcherAuto(env: Env, bearerToken: string | undefined, clusterArmId?: string): Promise<PrometheusFetcher> {
+  if (bearerToken) return userPrometheusFetcher(env, bearerToken, clusterArmId);
   if (!anonymousSpAllowed(env)) throw signinRequired();
   return buildPrometheusFetcher(() => anonymousToken(env, PROMETHEUS_SCOPE));
 }

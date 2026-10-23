@@ -15,5 +15,6 @@ export * from "./observability.js";
 export * from "./hubble.js";
 export * from "./policy.js";
 export * from "./policyInsights.js";
+export * from "./workloadIdentity.js";
 export * from "./featureCatalog.js";
 export * from "./cloud.js";

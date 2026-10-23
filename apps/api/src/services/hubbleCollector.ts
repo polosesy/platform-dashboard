@@ -14,6 +14,7 @@ import type {
 } from "@aud/types";
 import { getHubbleFlows } from "./hubbleClient.js";
 import { loadKubeConfig } from "./kubernetes.js";
+import { summarizeEnforceReadiness } from "./hubbleAudit.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 
 // ──────────────────────────────────────────────────────────────
@@ -486,11 +487,15 @@ export async function collectSecuritySummary(
   timeWindowMinutes = 5,
   lang: Lang = "ko",
 ): Promise<HubbleSecuritySummary> {
-  const { flows: allFlows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
-    last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
-    lang,
-  });
+  const last = Math.min(env.HUBBLE_FLOW_LIMIT, 10_000);
+  // Policy-verdict events (one per new connection) are rare among trace events — read them on their own, over the
+  // whole buffer: what enforcing would block (services/hubbleAudit.ts). A failure there leaves only that section out.
+  const [{ flows: allFlows, coverage }, verdictSet] = await Promise.all([
+    getHubbleFlows(env, bearerToken, clusterId, { last, lang }),
+    getHubbleFlows(env, bearerToken, clusterId, { last, lang, type: "policy-verdict" }).catch(() => null),
+  ]);
   const flows = withinTimeWindow(allFlows, timeWindowMinutes);
+  const enforceReadiness = verdictSet ? summarizeEnforceReadiness(verdictSet.flows) : undefined;
 
   const allowed = flows.filter((f) => f.verdict === "FORWARDED").length;
   const denied = flows.filter((f) => f.verdict === "DROPPED").length;
@@ -556,6 +561,7 @@ export async function collectSecuritySummary(
     generatedAt: new Date().toISOString(),
     timeWindowMinutes,
     policyVerdicts: { allowed, denied, audit },
+    ...(enforceReadiness ? { enforceReadiness } : {}),
     topDenied,
     identityFlows,
     coverage,

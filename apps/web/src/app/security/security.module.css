@@ -12,12 +12,14 @@
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-auto-rows: 1fr; /* a wrapped row keeps the same card height */
   gap: 12px;
 }
 
 .statLink {
-  display: block;
+  display: grid; /* the Stat inside fills the cell: every KPI card in the row has the same height */
   border-radius: var(--radius-md);
+  color: inherit;
 }
 
 .statLink:hover > * {
@@ -34,7 +36,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch; /* the two panels end on one line */
 }
 
 @media (max-width: 1100px) {
@@ -46,7 +48,9 @@
 /* ── domain cards ── */
 .domains {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* auto-fit: the cards share the full width (auto-fill left an empty column after five areas) */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 10px;
 }
 
@@ -504,4 +508,37 @@
 
 .rowSev {
   display: inline-flex;
+}
+
+/* ── 위협 탐지: grouped expandable alert rows — what / where / when on one row, no horizontal scroll ── */
+.alertBar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-bottom: 10px; }
+.alertHead {
+  appearance: none; width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 14px;
+}
+.alertHead:hover { background: var(--panel-sunken); }
+.alertHead:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row[data-open] .alertHead { background: var(--accent-soft); }
+.alertMain { display: grid; gap: 4px; min-width: 0; }
+.alertMain .alertTitle { overflow-wrap: anywhere; }
+.alertMain .alertDesc {
+  margin-top: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.alertMeta { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.alertMeta > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.alertTimes {
+  margin-left: 8px; padding: 1px 7px; font-size: 11px; font-weight: 700; border-radius: var(--radius-pill);
+  background: var(--panel-sunken); color: var(--muted); white-space: nowrap;
+}
+.alertWhen { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.alertBody { display: grid; gap: 8px; padding: 4px 14px 14px 14px; font-size: 13px; }
+.alertFull { margin: 0; line-height: 1.55; overflow-wrap: anywhere; }
+.alertH { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.alertSteps { margin: 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.alertInstances { margin: 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.alertRes { margin-left: 6px; }
+.alertLink { margin-left: 8px; color: var(--accent); }
+@media (max-width: 640px) {
+  .alertHead { grid-template-columns: auto minmax(0, 1fr); }
+  .alertWhen { grid-column: 2; }
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { HubbleCoverage, HubbleFlowsResponse, HubbleFlow } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
@@ -56,16 +57,13 @@ export function FlowsTab({ clusterId }: Props) {
       setCoverage(data.coverage);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return !isPermanentApiError(e);
     } finally {
       setLoading(false);
     }
   }, [clusterId, nsFilter, verdictFilter, getApiToken, locale]);
 
-  useEffect(() => {
-    fetchFlows();
-    const iv = setInterval(fetchFlows, 15_000);
-    return () => clearInterval(iv);
-  }, [fetchFlows]);
+  usePolling(fetchFlows, 15_000);
 
   const namespaces = useMemo(() => {
     const ns = new Set<string>();

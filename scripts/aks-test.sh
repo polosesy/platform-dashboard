@@ -22,7 +22,8 @@ export MSYS_NO_PATHCONV=1
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 [ -f .secrets/aks-test.env ] && . .secrets/aks-test.env
-WORK="$PWD/.secrets/aks-test"
+# C:/... form: under MSYS_NO_PATHCONV the Windows programs (az, kubectl, ssh) read /c/Users/... as C:\c\Users\...
+WORK="$(cygpath -m "$PWD/.secrets/aks-test" 2>/dev/null || echo "$PWD/.secrets/aks-test")"
 mkdir -p "$WORK"
 
 RG="${AUD_AKS_RG:?set AUD_AKS_RG (or .secrets/aks-test.env)}"

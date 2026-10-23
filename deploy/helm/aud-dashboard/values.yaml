@@ -63,6 +63,13 @@ podDisruptionBudget:
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []
+# Pod DNS. Every name the API calls is external with >= 2 dots (management.azure.com, login.microsoftonline.com …):
+# ndots 1 asks the name as-is first — 2 queries per lookup instead of 10 with the Kubernetes default ndots 5
+# (A + AAAA for each of 4 search suffixes, all NXDOMAIN, then the real name; measured with Hubble). Trailing dots are
+# not an alternative: ARM and Entra reset TLS for "management.azure.com.". null = the cluster default.
+dnsConfig:
+  options:
+    - { name: ndots, value: "1" }
 
 # ArgoCD sync waves: config (-1) → workload (0) → routing (1)
 syncWaves: true

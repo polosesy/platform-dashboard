@@ -255,3 +255,182 @@ export type WorkloadDetailResponse = {
   /** 서비스 엔드포인트 */
   endpoints: WorkloadEndpointInfo[];
 };
+
+// ── Observability stack (services/observabilityStack.ts): the customer's own collection pipeline ──
+// Alloy (metrics/logs/profiles), alloy-traces (OTLP → Tempo, span metrics), Loki, Tempo, Pyroscope, kube-state-metrics,
+// node-exporter, Hubble — all read from metrics already in the cluster's Azure Monitor workspace. Never a number
+// that was not measured: a check without series is "unknown", a component without series "notDetected".
+
+export type StackState = "ok" | "degraded" | "down" | "stale" | "notDetected" | "unknown";
+
+export type StackComponentKind = "alloy" | "loki" | "tempo" | "pyroscope" | "kubeStateMetrics" | "nodeExporter" | "hubble" | "amaMetrics";
+
+export type StackCheckId =
+  | "remoteWriteFailed" | "remoteWriteLag" | "remoteWritePending" | "componentsUnhealthy" | "configLoad"
+  | "logsSent" | "logsDropped" | "spansAccepted" | "spansRefused" | "spansExportFailed" | "profilesSent"
+  | "lokiIngest" | "tempoSpans" | "tempoDiscarded" | "targetsDown" | "ksmAge" | "ciliumUnreachable";
+
+export type StackCheck = {
+  id: StackCheckId;
+  state: StackState;
+  /** null = no series (not measured) */
+  value: number | null;
+  unit: "ratio" | "seconds" | "perSecond" | "bytesPerSecond" | "count";
+  /** The exact query behind the value (opened in Grafana Explore when configured) */
+  promql: string;
+};
+
+export type StackComponent = {
+  kind: StackComponentKind;
+  /** Workload name (e.g. two Alloy deployments: collection and traces) */
+  name: string;
+  namespace: string | null;
+  state: StackState;
+  pods: { pod: string; version: string | null }[];
+  checks: StackCheck[];
+};
+
+export type ObservabilityStackResponse = {
+  clusterId: string;
+  generatedAt: string;
+  windowMinutes: number;
+  /** Same states as the Hubble metrics view (workspace / permission / scope) */
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  message?: string;
+  cluster: string | null;
+  components: StackComponent[];
+  /** Scrape targets per job (`up`) and the ones down now */
+  targets: { job: string; total: number; down: number }[];
+  downTargets: { job: string; namespace: string | null; pod: string | null }[];
+  /** From the connections file `aks.observability.grafana` — links only, nothing read from Grafana */
+  grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
+};
+
+// ── Data sources (services/observabilitySources.ts) — what the dashboard reads vs only links to ──
+
+export type ObservabilitySourceKind = "loki" | "tempo" | "pyroscope" | "grafana";
+/** read = the dashboard reads it now · link = Grafana Explore link only · blocked = configured, refused/timed out · error = reached, not ready · off = not set up */
+export type ObservabilitySourceState = "read" | "link" | "blocked" | "error" | "off";
+export type ObservabilitySource = {
+  kind: ObservabilitySourceKind;
+  state: ObservabilitySourceState;
+  /** Shipping seen in the workspace metrics (관측 스택) — null: not known */
+  pipeline: "seen" | "notSeen" | null;
+  /** Grafana Explore for the datasource, or Grafana itself — links only */
+  href?: string;
+  /** error only: "HTTP 503" — never a response body */
+  detail?: string;
+};
+export type ObservabilitySourcesResponse = { clusterId: string; generatedAt: string; lokiCheckedAt: string | null; sources: ObservabilitySource[] };
+
+// ── Workload heatmap (services/workloadHeatmap.ts) — the customer's Grafana "container map" as one map ──
+
+export type HeatMetric = "ready" | "memory" | "cpu" | "restarts" | "oldGen" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
+
+/**
+ * stopped = 0/0 replicas (scaled to zero) · noTraffic = 5xx with no requests · notInstrumented = this workload does
+ * not expose the metric (not Java/Spring) · notMeasured = the family is absent from the workspace, or no limit/request
+ */
+export type HeatLevel = "ok" | "warn" | "danger" | "stopped" | "noTraffic" | "notInstrumented" | "notMeasured";
+
+export type HeatCell = {
+  value: number | null;
+  level: HeatLevel;
+  /** The pod (or connection pool) that set the value — worst first */
+  worstPod?: string;
+  pool?: string;
+  /** Last container termination was OOMKilled */
+  oom?: boolean;
+  code?: "noLimit" | "noRequest";
+};
+
+export type HeatWorkload = {
+  namespace: string;
+  workload: string;
+  kind: string | null;
+  basis: "owner" | "pattern";
+  replicas: { ready: number | null; desired: number | null };
+  /** Worst level over the measured cells */
+  worst: HeatLevel;
+  cells: Record<HeatMetric, HeatCell>;
+  pods: { pod: string; ready: boolean | null; restarts: number | null; memory: number | null; cpu: number | null; oom: boolean }[];
+};
+
+export type WorkloadHeatmapResponse = {
+  clusterId: string;
+  generatedAt: string;
+  windowMinutes: number;
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  message?: string;
+  cluster: string | null;
+  thresholds: Record<HeatMetric, { warn: number; danger: number }>;
+  /** Workloads at danger per metric — null = the metric is not measured in this workspace */
+  flags: { metric: HeatMetric; count: number | null }[];
+  workloads: HeatWorkload[];
+  missing: HeatMetric[];
+  grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
+};
+
+// ── Kube events (services/kubeEvents.ts) ──
+
+export type KubeEvent = {
+  time: string;
+  type: "Warning" | "Normal";
+  reason: string;
+  kind: string;
+  namespace: string;
+  name: string;
+  count: number;
+  /** Operators only, redacted (probe bodies, secret names can appear) */
+  message?: string;
+};
+
+export type KubeEventsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  /** k8sApi: live events (AKS keeps about an hour) */
+  source: "k8sApi";
+  events: KubeEvent[];
+  messages: boolean;
+};
+
+// ── Workload logs (services/lokiLogs.ts) — the cluster's Loki, read in-cluster with the pod-log gate ──
+
+export type LokiState = "ok" | "notConfigured" | "unreachable" | "failed";
+
+export type LogLine = {
+  time: string;
+  level: "error" | "warn" | "info" | "unknown";
+  text: string;
+  pod?: string;
+  traceId?: string;
+};
+
+export type WorkloadLogsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: LokiState;
+  message?: string;
+  lines: LogLine[];
+  /** Exception classes in the window (Loki-side count) */
+  exceptions: { cls: string; count: number }[];
+  truncated: boolean;
+  /** Values replaced by redaction (tokens, keys, passwords) */
+  redactions: number;
+  windowMinutes: number;
+};
+
+/** Hubble drops from Loki (hubble-flow-exporter → `{job="hubble-flows"}`) */
+export type LokiDropsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: LokiState;
+  message?: string;
+  windowMinutes: number;
+  drops: { source: string; destination: string; port: number; protocol: string; reason: string; count: number; lastSeen: string }[];
+  flowLines: number;
+  /** relay `node_status` NODE_ERROR lines in the window — the exporter's own health */
+  relayErrors: number;
+  /** AMW hubble_drop_total rose but Loki holds no flow lines → the exporter pipeline is broken */
+  pipelineBroken: boolean | null;
+};

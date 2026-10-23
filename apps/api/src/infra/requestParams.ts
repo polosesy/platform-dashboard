@@ -40,9 +40,24 @@ export function sendError(res: Response, e: unknown, fallbackCode: string, logTa
 export const isSigninRequired = (e: unknown) => e instanceof HttpError && e.code === "signin_required";
 
 /**
- * Serve live Azure data, falling back to mock data (with the failure in `note`)
- * when the loader returns null or throws. Validation errors (HttpError) still
- * produce their HTTP status. Guards against writing to an already-closed response.
+ * An Azure call failure (fetcher message `ARM|LogAnalytics <status>: …`) as a coded error: 429 → 429
+ * `azure_throttled`, 401/403 → 403 `azure_forbidden` (the connection lacks the role), anything else → 502
+ * `azure_upstream_failed`. Messages are masked.
+ */
+export function upstreamError(e: unknown): HttpError {
+  if (e instanceof HttpError) return e;
+  const message = safeMessage(e);
+  const status = Number(/^(?:ARM|LogAnalytics|Prometheus)\s+(\d{3})\b/.exec(message)?.[1] ?? 0);
+  if (status === 429) return new HttpError(429, "azure_throttled", message);
+  if (status === 401 || status === 403) return new HttpError(403, "azure_forbidden", message);
+  return new HttpError(502, "azure_upstream_failed", message);
+}
+
+/**
+ * Live Azure data; sample data only when there is nothing live to show and the response says so
+ * (`source:"mock"` + `note`): the loader returns null (feature off, or not signed in) or the caller must sign in.
+ * A failure of a live read is an error response (`upstreamError`) — never sample numbers dressed as the
+ * caller's (the cost page showed sample totals under an Azure 429). Guards against an already-closed response.
  */
 export async function respondWithFallback<T extends object>(
   res: Response,
@@ -52,14 +67,19 @@ export async function respondWithFallback<T extends object>(
 ): Promise<void> {
   let body: object;
   try {
-    body = (await load()) ?? fallback;
+    const live = await load();
+    if (live) body = live;
+    else {
+      const signedIn = !!(res.req as Request | undefined)?.auth?.bearerToken;
+      const note = (fallback as { note?: unknown }).note;
+      body = { ...fallback, source: "mock", note: signedIn ? (typeof note === "string" && note ? note : "mock data") : "signin_required" };
+    }
   } catch (e: unknown) {
     if (isSigninRequired(e)) body = { ...fallback, source: "mock", note: "signin_required" };
-    else if (e instanceof HttpError) return sendError(res, e, logTag);
     else {
-      const message = safeMessage(e);
-      console.error(`[${logTag}] falling back to mock data:`, message);
-      body = { ...fallback, note: message };
+      const err = upstreamError(e);
+      if (!(e instanceof HttpError)) console.error(`[${logTag}] ${err.code}:`, err.message);
+      return sendError(res, err, logTag);
     }
   }
   if (res.headersSent || res.writableEnded) return;

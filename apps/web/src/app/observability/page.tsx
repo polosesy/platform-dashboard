@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type {
   ObservabilityOverview,
+  ObservabilitySourcesResponse,
   ObservabilityWorkloadsResponse,
   ObservabilityNodesResponse,
 } from "@aud/types";
@@ -16,12 +17,14 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { HubbleTab } from "./components/HubbleTab";
-import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Select, Tabs } from "@/components/ui";
+import { StackTab } from "./components/StackTab";
+import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
+import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 
-type Tab = "overview" | "workloads" | "infra" | "logs" | "hubble";
+type Tab = "overview" | "workloads" | "infra" | "logs" | "hubble" | "stack";
 
-const TABS: Tab[] = ["overview", "workloads", "infra", "logs", "hubble"];
+const TABS: Tab[] = ["overview", "workloads", "infra", "logs", "hubble", "stack"];
 
 export default function ObservabilityPage() {
   const { t, locale } = useI18n();
@@ -30,6 +33,8 @@ export default function ObservabilityPage() {
   // Free-text cluster ID (used when the cluster list is unavailable) — committed on blur / Enter
   const [clusterDraft, setClusterDraft] = useState<string | null>(null);
   const [selectedWorkload, setSelectedWorkload] = useState<string | null>(null);
+  // 워크로드: heatmap (Azure Monitor workspace — every workload) or the list (Container Insights)
+  const [wlView, setWlView] = useState<"heatmap" | "list">("heatmap");
 
   const clusterName = clusters.find((c) => c.id === clusterId)?.name ?? clusterId;
   const query = useApiQuery(clusterId ? `observability:${clusterId}` : null, async (token) => {
@@ -40,6 +45,11 @@ export default function ObservabilityPage() {
     ]);
     return { clusterId, overview, workloads, nodes, fetchedAt: new Date() };
   });
+  // Loki · Tempo · Pyroscope · Grafana: read / link only / blocked (light, separate from the overview)
+  const sourcesQ = useApiQuery(clusterId ? `obs-sources:${clusterId}` : null, (token) =>
+    fetchJsonWithBearer<ObservabilitySourcesResponse>(apiUrl("/api/observability/sources", { clusterId }), token),
+  );
+  const sources = sourcesQ.data?.clusterId === clusterId ? sourcesQ.data : null;
   // Only show data belonging to the selected cluster
   const current = query.data?.clusterId === clusterId ? query.data : undefined;
   const overview = current?.overview ?? null;
@@ -72,7 +82,14 @@ export default function ObservabilityPage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        meta={lastRefresh ? <span>{t("common.updated")} {lastRefresh.toLocaleTimeString(dateLocale(locale))}</span> : null}
+        meta={
+          lastRefresh || dsStatus || sources ? (
+            <span className={styles.metaRow}>
+              {lastRefresh ? <span>{t("common.updated")} {lastRefresh.toLocaleTimeString(dateLocale(locale))}</span> : null}
+              <DataSourceBadges status={dsStatus} sources={sources} />
+            </span>
+          ) : null
+        }
         actions={
           <>
             {clusters.length > 0 ? (
@@ -90,15 +107,13 @@ export default function ObservabilityPage() {
                 />
               </label>
             )}
-            <Button onClick={query.reload} disabled={loading || !clusterId}>
+            <Button onClick={() => { query.reload(); sourcesQ.reload(); }} disabled={loading || !clusterId}>
               {loading ? t("common.loading") : t("common.refresh")}
             </Button>
           </>
         }
       />
 
-      {/* Data source badges */}
-      {dsStatus && <DataSourceBadges status={dsStatus} />}
 
       {/* Error */}
       <ErrorNotice error={error} />
@@ -112,7 +127,7 @@ export default function ObservabilityPage() {
       )}
 
       {/* Tabs */}
-      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble") && (
+      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble" || tab === "stack" || tab === "workloads") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 
@@ -120,7 +135,14 @@ export default function ObservabilityPage() {
             <OverviewTab data={overview} onWorkloadSelect={handleWorkloadSelect} />
           )}
 
-          {tab === "workloads" && workloadsResp && (
+          {tab === "workloads" && (
+            <Segmented label={t("ob.hm.view")} value={wlView} onChange={setWlView}
+              items={[{ id: "heatmap", label: t("ob.hm.view.heatmap") }, { id: "list", label: t("ob.hm.view.list") }]} />
+          )}
+
+          {tab === "workloads" && wlView === "heatmap" && <WorkloadHeatmap clusterId={clusterId} />}
+
+          {tab === "workloads" && wlView === "list" && workloadsResp && (
             <WorkloadsTab
               workloads={workloadsResp.workloads}
               onWorkloadSelect={handleWorkloadSelect}
@@ -142,6 +164,8 @@ export default function ObservabilityPage() {
           {tab === "hubble" && (
             <HubbleTab clusterId={clusterId} />
           )}
+
+          {tab === "stack" && <StackTab clusterId={clusterId} />}
         </>
       )}
     </div>

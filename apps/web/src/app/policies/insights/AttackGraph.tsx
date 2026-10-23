@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { edgeKey } from "./model";
 import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip } from "./Inspector";
+import { captionWidth, laneBounds, placeEdgeLabels, shortLabel, textWidth } from "./graphLabels";
 import styles from "./insights.module.css";
 
 export type GraphSel = { kind: "node" | "edge"; id: string };
@@ -78,6 +79,22 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
     }
   });
 
+  // Lanes: tinted bands with a header (title · node count) and solid separators — the columns read as areas
+  const lanes = laneBounds(COLS.map((_, i) => colX(i)), GW);
+  const perCol = COLS.map((_, i) => issue.nodes.filter((n) => n.col === i).length);
+  // Edge labels: chips above the nodes, placed off nodes / captions / each other; blocked ones first (state must show)
+  const blockedTag = t("ins.graph.blocked");
+  const chips = issue.edges.flatMap((e) => {
+    const a = pos.get(e.from), b = pos.get(e.to);
+    if (!a || !b || !e.label) return [];
+    const k = edgeKey(e);
+    const cut = cutDone.has(k);
+    const text = `${!cut && e.cut ? "⊗ " : ""}${shortLabel(e.label)}`;
+    const w = textWidth(text) + 12 + (cut ? textWidth(blockedTag) + 10 : 0);
+    return [{ e, k, cut, text, req: { key: k, from: { x: a.x + 24, y: a.y }, to: { x: b.x - 24, y: b.y }, w, h: 17, priority: cut ? 2 : e.cut ? 1 : 0 } }];
+  });
+  const boxes = placeEdgeLabels(chips.map((c) => c.req), [...pos.values()].map((p) => ({ x: p.x, y: p.y, captionW: captionWidth(p.n.label, wrap2(p.n.sub)) })));
+
   const keyAct = (e: KeyboardEvent, s: GraphSel) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(s); }
     if (e.key === "Escape") { e.preventDefault(); onEscape(); }
@@ -92,19 +109,19 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
           </marker>
         ))}
       </defs>
-      {COLS.map((c, i) => <text key={c} className={styles.colh} x={colX(i)} y={18} textAnchor="middle">{c}</text>)}
-      {COLS.slice(1).map((_, i) => <line key={i} x1={(colX(i) + colX(i + 1)) / 2} y1={28} x2={(colX(i) + colX(i + 1)) / 2} y2={GH - 8} stroke="var(--line)" strokeDasharray="2 4" />)}
+      <g aria-hidden="true">
+        {lanes.map((l, i) => <rect key={`band${i}`} className={i % 2 ? styles.laneOdd : styles.laneEven} x={l.x0} y={0} width={l.x1 - l.x0} height={GH} />)}
+        {lanes.map((l, i) => <rect key={`head${i}`} className={styles.laneHead} x={l.x0} y={0} width={l.x1 - l.x0} height={28} />)}
+        {COLS.map((c, i) => (
+          <text key={c} className={styles.colh} x={colX(i)} y={18} textAnchor="middle">{c}{perCol[i] ? ` · ${perCol[i]}` : ""}</text>
+        ))}
+        {lanes.slice(1).map((l, i) => <line key={`sep${i}`} className={styles.laneSep} x1={l.x0} y1={0} x2={l.x0} y2={GH} />)}
+      </g>
       {issue.edges.map((e) => {
         const a = pos.get(e.from), b = pos.get(e.to);
         if (!a || !b) return null;
         const x0 = a.x + 24, x1 = b.x - 24, mx = (x0 + x1) / 2;
         const d = `M${x0},${a.y} C${mx},${a.y} ${mx},${b.y} ${x1},${b.y}`;
-        // Fan-out and column-skipping edges crowd the source label: anchor the label near the target
-        const fan = issue.edges.filter((x) => x.from === e.from).length > 1;
-        const skip = b.n.col - a.n.col > 1;
-        const near = skip || fan;
-        const lx = near ? x1 - (skip ? 64 : 46) : mx;
-        const ly = near ? b.y - 12 : (a.y + b.y) / 2 - 7;
         const k = edgeKey(e);
         const cut = cutDone.has(k);
         const on = edgeOn(e);
@@ -122,12 +139,6 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
               onKeyDown={(ev) => keyAct(ev, { kind: "edge", id: k })}
             />
             <path className={styles.vis} d={d} fill="none" stroke={EDGE_COLOR[e.ev]} strokeWidth={e.ev === "obs" ? 2.6 : 2} strokeDasharray={EDGE_DASH[e.ev]} opacity={cut ? 0.25 : e.ev === "unk" ? 0.6 : 0.95} markerEnd={`url(#arr-${e.ev})`} pointerEvents="none" />
-            {e.label && <text className={`${styles.elabel} ${styles.halo}`} x={lx} y={ly} textAnchor="middle" pointerEvents="none" textDecoration={cut ? "line-through" : undefined}>{e.label}</text>}
-            {cut ? (
-              <g transform={`translate(${lx},${ly + 13})`} pointerEvents="none"><circle r={9} fill="var(--surface)" stroke="var(--ok)" strokeWidth={2} /><path d="M-4 -4 L4 4 M4 -4 L-4 4" stroke="var(--ok)" strokeWidth={2} /></g>
-            ) : e.cut ? (
-              <g transform={`translate(${lx},${ly + 13})`} pointerEvents="none"><title>{t("ins.graph.cut")}</title><circle r={8} fill="var(--surface)" stroke="var(--accent)" strokeWidth={2} /><path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="var(--accent)" strokeWidth={1.6} /></g>
-            ) : null}
           </g>
         );
       })}
@@ -164,6 +175,23 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
           </g>
         );
       })}
+      {/* Edge label chips — above nodes; a dimmed edge keeps a faint label, a blocked edge keeps a struck label + tag */}
+      <g pointerEvents="none">
+        {chips.map(({ e, k, cut, text }) => {
+          const box = boxes.get(k);
+          if (!box) return null;
+          const tw = textWidth(text);
+          return (
+            <g key={`lbl:${k}`} className={styles.elChip} data-dim={!edgeOn(e) || undefined} data-cut={cut || undefined} data-rec={(!cut && e.cut) || undefined}>
+              <title>{`${e.label}${cut ? ` — ${blockedTag}` : e.cut ? ` — ${t("ins.graph.cut")}` : ""}`}</title>
+              <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={4} />
+              <text x={box.x + 6} y={box.y + 12}>{text}</text>
+              {cut && <line className={styles.elStrike} x1={box.x + 5} y1={box.y + 8.5} x2={box.x + 7 + tw} y2={box.y + 8.5} />}
+              {cut && <text className={styles.elTag} x={box.x + 14 + tw} y={box.y + 12}>{blockedTag}</text>}
+            </g>
+          );
+        })}
+      </g>
     </svg>
   );
 }

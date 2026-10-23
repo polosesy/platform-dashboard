@@ -975,3 +975,41 @@
 .subTabs {
   margin-bottom: 16px;
 }
+
+/* ── Hubble metrics view (no exec, no flow logs): workload grid ── */
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.metricCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.metricCardHead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; min-width: 0; }
+.metricCardHead strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricMeta { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricNote { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
+.metricCardBody {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+.metricCardBody dt { color: var(--muted); }
+.metricCardBody dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.metricBad { color: var(--danger); font-weight: 600; }
+.metricWarn { color: var(--warning); font-weight: 600; }
+.enablePanel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.enablePanel summary { cursor: pointer; font-weight: 600; }
+.enablePanel pre { white-space: pre; overflow-x: auto; padding: 8px; background: var(--surface-2, var(--surface)); border-radius: var(--radius-sm); }

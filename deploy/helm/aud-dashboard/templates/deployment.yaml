@@ -37,6 +37,10 @@ spec:
         fsGroup: 65532                                   # the projected token file readable by 65532
         seccompProfile: { type: RuntimeDefault }
       terminationGracePeriodSeconds: 20
+      {{- with .Values.dnsConfig }}
+      dnsConfig:                                         # values.yaml: ndots 1 — 2 DNS queries per lookup, not 10
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

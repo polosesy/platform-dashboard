@@ -20,6 +20,7 @@ const SOURCE_LABEL: Record<HubbleCoverage["source"], string> = {
   agents: "hb.cov.src.agents",
   relay: "hb.cov.src.relay",
   "api-proxy": "hb.cov.src.apiProxy",
+  "flow-logs": "hb.cov.src.flowLogs",
 };
 
 /**

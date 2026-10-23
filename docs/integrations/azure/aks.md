@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-19
-covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts]
+last-verified: 2026-10-23
+covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts]
 ---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)
 
@@ -99,8 +99,12 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 
 ```json
 { "key": "custb", "mode": "servicePrincipal", "...": "...",
-  "aks": { "podLogNamespaces": ["app"], "allowLocalAccount": false, "hubbleExec": false } }
+  "aks": { "podLogNamespaces": ["app"], "allowLocalAccount": false, "hubbleExec": false,
+           "observability": { "grafana": { "endpoint": "https://<grafana-name>.<region>.grafana.azure.com",
+             "datasources": { "prometheus": "<uid>", "loki": "<uid>", "tempo": "<uid>", "pyroscope": "<uid>" } } } } }
 ```
+
+`observability.grafana`(선택)는 고객 Azure Managed Grafana로 가는 **링크만** 만듭니다(AKS 모니터링 › 관측 스택의 값마다 그 PromQL로 Explore). 대시보드는 Grafana를 읽지 않으므로 Grafana 역할·송신 규칙이 필요 없습니다. 주소는 `https://*.grafana.azure.com`만 받습니다.
 
 ## 5. 설정 — 수동 (Portal)
 
@@ -115,7 +119,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 |---|---|---|---|---|
 | 클러스터 정보(Entra·프라이빗 여부) | Reader | 구독 | ARM GET | `inventory` |
 | kubeconfig(서버 주소·CA) | Azure Kubernetes Service Cluster User Role | **클러스터** | `listClusterUserCredential` — Entra 클러스터에서는 비밀 없음 | `aksCredential` |
-| 객체 브라우저·정책 점검·노드 | `aud-dashboard-reader` (ClusterRole, list) | 클러스터 | 24개 리소스 목록 | — |
+| 객체 브라우저·정책 점검·노드·워크로드 ID | `aud-dashboard-reader` (ClusterRole, list) | 클러스터 | 26개 리소스 목록 — ServiceAccount는 워크로드 ID 매핑용(주석 중 `azure.workload.identity/*`만 보관) | — |
 | Pod 로그 | `aud-dashboard-pod-logs` (Role, `pods/log` get) | 네임스페이스 | 연결 옵션 `aks.podLogNamespaces`에도 있어야 함 | — |
 
 **내장 `view`를 쓰지 않는 이유**: `view`는 ConfigMap을 읽습니다. 실제 고객 클러스터에서 `argocd-cm`에 비밀번호가 평문으로 있던 사례가 있습니다. **AKS RBAC Reader**(Azure RBAC 내장)는 roles/bindings를 못 읽어 정책 점검의 RBAC 영역이 비게 됩니다.
@@ -144,7 +148,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
    | 연결 | 자격 증명 | 비밀 / 인증서 / 페더레이션 | 비밀이면 페더레이션 자격 증명 JSON |
 
    ARM은 설정하지 않은 프로필을 응답에서 빼므로 클러스터를 읽었는데 값이 없으면 '꺼짐', 클러스터를 못 읽으면 모두 '확인 못 함'입니다
-5. 대시보드 쪽 확인(관리자): **설정 › Azure 연결 › 점검 › 클러스터 권한 점검** — 연결의 자격 증명으로 로그인한 뒤 `SelfSubjectAccessReview`로 읽기 범위 규칙 24개·Pod 로그·Hubble exec(켠 경우)를 묻고, Secret 읽기·exec·`*` 권한이 있으면 경고합니다. 로그인 단계에서 막히면 이유가 그대로 나옵니다(`AKS Cluster User Role` 없음 → 자격 증명 권한 없음, 로컬 계정 클러스터 → 거부됨, 네트워크 → API 서버에 닿지 않음)
+5. 대시보드 쪽 확인(관리자): **설정 › Azure 연결 › 점검 › 클러스터 권한 점검** — 연결의 자격 증명으로 로그인한 뒤 `SelfSubjectAccessReview`로 읽기 범위 규칙 26개·Pod 로그·Hubble exec(켠 경우)를 묻고, Secret 읽기·exec·`*` 권한이 있으면 경고합니다. 로그인 단계에서 막히면 이유가 그대로 나옵니다(`AKS Cluster User Role` 없음 → 자격 증명 권한 없음, 로컬 계정 클러스터 → 거부됨, 네트워크 → API 서버에 닿지 않음)
 
 ## 9. 문제 해결
 
@@ -160,7 +164,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | 403 `aks_local_account_refused` | Entra 연동 없음(관리자 인증서) | Entra 연동 켜기. 불가피하면 검토 후 `aks.allowLocalAccount: true` |
 | 501 `aad_cluster_unsupported` | 구형 Entra 연동 | AKS 관리형 Entra로 전환 |
 | 502 `aks_server_mismatch` / `aks_server_id_mismatch` / `aks_kubeconfig_invalid` / `aks_token_audience` | kubeconfig가 안전 점검 실패 → 토큰을 보내지 않음 | 클러스터 FQDN·CA 확인, 재현되면 보안 사고로 취급 |
-| 501 `hubble_exec_disabled` | Hubble exec 꺼짐 | §11 — Hubble 메트릭·ACNS 흐름 로그 |
+| 501 `hubble_exec_disabled` | Hubble exec 꺼짐 — 화면은 `/api/hubble/sources`로 다른 출처를 고름(아래) | §11 — Hubble 메트릭·ACNS 흐름 로그 |
 | 403 `pod_log_namespace_denied` | 이 네임스페이스는 kubelet 로그를 읽지 않음 → Container Insights로 대체 | `aks.podLogNamespaces` + §4-3 |
 
 ## 10. 교체
@@ -178,6 +182,8 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 **Q. 왜 kubelogin을 실행하지 않나요?** API 호스트에서 외부 프로그램을 실행하면 그 프로그램이 호스트의 모든 신원을 쓸 수 있습니다. kubelogin이 하는 일(AKS 서버 앱 토큰 받기)을 API가 연결의 자격 증명으로 직접 하므로 결과는 같고 실행 파일은 없습니다.
 
 **Q. 왜 Hubble exec가 기본으로 꺼져 있나요?** `cilium-agent`는 노드 최고 권한 파드입니다. 그 안에서 명령을 실행할 수 있다는 것은 사실상 노드 장악 권한이고, RBAC로 "hubble 명령만"으로 좁힐 수 없습니다. Defender for Containers도 이 행동을 감시합니다. 그래서 프로덕션 기본은 꺼짐(`HUBBLE_EXEC_ENABLED`), 켜도 **홈 연결**이나 `aks.hubbleExec: true`인 연결만, 역할은 kube-system 한정 [`aud-dashboard-hubble-exec`](./templates/aks/aud-dashboard-hubble-exec.yaml)입니다. 대안: Hubble 메트릭(Managed Prometheus — 집계값, 흐름 단위 아님), ACNS 컨테이너 네트워크 로그(흐름 단위, ACNS 비용).
+
+**Q. exec 없이 Hubble 화면은 무엇을 보여 주나요?** API `GET /api/hubble/sources`가 출처를 고릅니다: exec(허용될 때) › **ACNS 흐름 로그**(클러스터 ARM ID로 `ContainerNetworkLogs`를 리소스 중심 조회, 최근 1시간 행이 있을 때 — 서비스 맵·흐름·보안 탭이 그대로 동작) › **Hubble 메트릭**(클러스터의 데이터 수집 규칙이 가리키는 Azure Monitor 작업 영역, `GET /api/hubble/metrics-summary`) › 없음. ACNS 메트릭은 한 줄에 `source` **또는** `destination` 하나만 붙어(둘 다 있는 줄 0개 — 2026-10-23 실측) 연결선·개별 흐름은 만들 수 없고, 워크로드별 보낸·받은 이벤트·드롭 이유·policy_denied·DNS 오류만 보여 줍니다(짝지어 선을 긋지 않음). 워크로드는 `kube_pod_owner` → `kube_replicaset_owner`로 묶고(없으면 이름 패턴, '이름으로 추정' 표시), 작업 영역의 `cluster` 라벨로 범위를 좁히며(값이 AKS 이름과 다르고 하나뿐이면 별칭, 여럿이면 거부), 같은 데이터를 두 수집기가 모으면 job 하나만 셉니다. 작업 영역은 **그 클러스터 연결의 신원**으로 읽습니다(Monitoring Data Reader). 흐름 로그는 고객이 `ContainerNetworkLog`(acn.azure.com/v1alpha1, 클러스터 범위)를 적용해야 쌓입니다 — 화면에 복사용 YAML, 대시보드는 클러스터에 쓰지 않습니다.
 
 **Q. 로컬 계정 클러스터는 왜 거부하나요?** Entra 연동이 없으면 Cluster User Role로 받은 kubeconfig가 **클러스터 관리자 인증서**입니다. 읽기 대시보드가 쓰기 권한까지 갖게 되고, 회수하려면 클러스터 CA를 교체해야 합니다.
 
@@ -201,3 +207,32 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | 빈 클러스터 | — | 전부 실패해도 성공 응답(버그) | **전부 실패 = 오류** |
 
 후속 과제: ~~연결 점검에 클러스터별 SelfSubjectAccessReview(과도 권한 경고)~~ (완료 — §8 확인 4), 에이전트 없는 대체 데이터(Container Insights·kube-state-metrics), ACNS 흐름 로그 수집기, Azure RBAC용 사용자 지정 역할 JSON, ~~페더레이션 자격 증명~~ (완료 — Kubernetes 서비스 계정, connect-tenant B-2), ~~연동 준비 상태~~ (완료 — §8 확인 4), 사용자 OBO Pod 로그, 아웃바운드 에이전트 Tier, Azure Policy 준수 상태(`policyresources`).
+
+## 부록 — 워크로드 ID 매핑 (AKS 보안 점검 › ID·권한 › 워크로드 ID)
+
+파드 → ServiceAccount → 페더레이션 자격 증명(FIC) → 사용자 할당 관리 ID → Azure 역할 할당을 한 흐름도로 보여 줍니다(`GET /api/kubernetes/policies/workload-identity`, 탭을 열 때만 읽음).
+
+- **읽는 것**: ServiceAccount 목록(주석 중 `azure.workload.identity/client-id`·`tenant-id`·`service-account-token-expiration`만 보관), 파드의 웹후크 흔적(환경 변수 `AZURE_FEDERATED_TOKEN_FILE`은 이름만, `AZURE_CLIENT_ID`·`AZURE_TENANT_ID`는 GUID 형식만 — 다른 환경 변수는 이름·값 모두 버림), 클러스터 ARM의 `oidcIssuerProfile`·`securityProfile.workloadIdentity`, Resource Graph로 client-id → 관리 ID와 `authorizationresources` 역할 할당(`AtScopeAboveAndBelow`, PIM 적격 할당 제외), 관리 ID마다 ARM `federatedIdentityCredentials`(api-version 2024-11-30, 5분 캐시 — 리소스당 GET 0.5 rps 제한).
+- **권한**: 클러스터 안은 `aud-dashboard-reader`(serviceaccounts list 추가 — 갱신 전에는 파드 환경 변수로 연결하고 'SA 없음' 판정은 하지 않음), Azure는 **Reader**(`*/read`로 FIC·관리 ID·역할 할당 읽기 — 읽을 권한이 있는 범위의 할당만 보임).
+- **판정**: 일치는 바이트 단위(문서: issuer·subject·audience는 "case-sensitively match") — 공백·끝 슬래시·대소문자만 다른 값은 일치가 아니라 WI-04. client-id가 관리 ID로 안 찾아지면 앱 등록인지 다른 구독 관리 ID인지 구분하지 않고 '미확인'(Graph 권한 없음).
+- **응답에 없는 것**: 구독 ID·principalId·관리 ID ARM ID·전체 GUID(client/tenant ID는 끝 4자리, 발급자 URL은 마스킹).
+
+| 규칙 | 조건 | 근거 문서 |
+|---|---|---|
+| WI-01 / 02 | 관리 ID의 FIC 20개(한도) / 16개 이상(대시보드 기준) | [workload-identity-federation-considerations](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-considerations) — "A maximum of 20 federated identity credentials can be added to an application or user-assigned managed identity." |
+| WI-03 | SA에 client-id 주석이 있는데 이 클러스터·이 SA의 FIC가 없음 | 같은 문서 — subject가 틀려도 생성은 성공하고 토큰 교환 때 실패 |
+| WI-04 | FIC가 거의 일치(공백·끝 슬래시·대소문자) | [workload-identity-federation](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation) — "must case-sensitively match" |
+| WI-05 | 이 클러스터를 신뢰하는 FIC인데 그 SA가 없음 | considerations — issuer·subject 조합 |
+| WI-06 | audience가 `api://AzureADTokenExchange` 하나가 아님 (`api://AKSIdentityBinding`은 참고) | considerations — single audience, recommended value |
+| WI-07 | 주석 SA를 쓰는 워크로드의 파드 템플릿에 `azure.workload.identity/use: "true"` 없음 | [workload-identity-overview](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview) |
+| WI-08 | 주석 SA가 있는데 클러스터 OIDC 발급자·워크로드 ID가 꺼짐 | workload-identity-overview |
+| WI-09 | tenant-id 주석 ≠ 관리 ID 테넌트 | workload-identity-overview |
+| WI-10 | 관리 ID 하나를 여러 SA·다른 발급자가 함께 씀(지원되는 다대일 구성 — 권한이 다르면 분리) | [managed-identity-best-practice-recommendations](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/managed-identity-best-practice-recommendations) |
+| WI-11 | Owner·User Access Administrator·RBAC Administrator·Contributor 할당 (역할 정의 ID로 판정, 범위별 심각도) | [RBAC best practices](https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices) |
+| WI-12 | 사용자 지정 역할 Actions에 `*` | RBAC best practices |
+| WI-13 | SA가 클러스터 고권한(K8s RBAC, 그룹 경유 포함)과 Azure ID를 함께 가짐 | [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) |
+| WI-14 | 그 네임스페이스에서 다른 주체가 exec·토큰 발급 가능 → 이 Azure ID를 쓸 수 있음 | managed identity best practices — 코드를 실행할 수 있으면 그 ID를 쓴다 |
+| WI-15 | 관리 ID 지역이 FIC 미지원 지역 | considerations |
+| WI-16 | 실행 중인 파드의 주입 상태가 SA 설정과 다름(재시작 필요) | workload-identity-overview — "you must restart the pod" |
+
+**권장**(공식 문서 기준): 워크로드마다 관리 ID를 나누고 업무 역할을 리소스 그룹·리소스 범위로, 같은 관리 ID에 FIC를 만들 때는 순차적으로(동시 생성은 409), 생성 직후 몇 초~몇 분은 `AADSTS70021`이 날 수 있음, 역할 변경은 최대 10분 뒤 반영, 쓰지 않는 FIC(WI-05)는 삭제해 20개 한도를 확보.

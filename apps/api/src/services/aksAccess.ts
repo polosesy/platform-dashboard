@@ -221,11 +221,19 @@ export const hubbleExecSwitch = (env: Env) => env.HUBBLE_EXEC_ENABLED ?? env.NOD
  * then the home connection or a customer connection that opted in (`aks.hubbleExec`). Throws 501 hubble_exec_disabled.
  */
 export function assertHubbleExecAllowed(env: Env, clusterArmId: string): void {
-  if (!hubbleExecSwitch(env)) {
+  const d = hubbleExecDecision(env, clusterArmId);
+  if (d.reason === "deployment") {
     throw new HttpError(501, "hubble_exec_disabled", "Hubble exec is off for this deployment (HUBBLE_EXEC_ENABLED) — use Hubble metrics (Managed Prometheus) or ACNS flow logs");
   }
-  const { connection } = clusterConnection(env, clusterArmId);
-  if (!isHome(connection) && connection.aks?.hubbleExec !== true) {
+  if (d.reason === "connection") {
     throw new HttpError(501, "hubble_exec_disabled", "Hubble exec is not allowed for this connection (aks.hubbleExec) — use Hubble metrics (Managed Prometheus) or ACNS flow logs");
   }
+}
+
+/** The same gate without throwing — which Hubble source a view can use (services/hubbleSources.ts) */
+export function hubbleExecDecision(env: Env, clusterArmId: string): { allowed: boolean; reason?: "deployment" | "connection" } {
+  if (!hubbleExecSwitch(env)) return { allowed: false, reason: "deployment" };
+  const { connection } = clusterConnection(env, clusterArmId);
+  if (!isHome(connection) && connection.aks?.hubbleExec !== true) return { allowed: false, reason: "connection" };
+  return { allowed: true };
 }

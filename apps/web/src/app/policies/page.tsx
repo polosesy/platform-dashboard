@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import type { KubernetesPolicyResponse, PolicyCategory, PolicyInsightsResponse, PolicySeverity } from "@aud/types";
+import type { KubernetesPolicyResponse, PolicyCategory, PolicyInsightsResponse, PolicySeverity, WorkloadIdentityResponse } from "@aud/types";
 import styles from "./styles.module.css";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -18,6 +18,7 @@ import { PolicyOverview } from "./insights/PolicyOverview";
 import { NetworkMap } from "./insights/NetworkMap";
 import { PermissionMatrix } from "./insights/PermissionMatrix";
 import { KbomPanel } from "./insights/KbomPanel";
+import { WorkloadIdentityPanel } from "./insights/WorkloadIdentityPanel";
 import type { HeatSel } from "./insights/RiskHeatmap";
 import type { InsightsNav } from "./insights/model";
 import insightStyles from "./insights/insights.module.css";
@@ -60,6 +61,12 @@ function Policies() {
   const insightsQuery = useApiQuery(clusterId ? `k8s-policy-insights:${clusterId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<PolicyInsightsResponse>(apiUrl("/api/kubernetes/policies/insights", { clusterId, lang: locale }), token),
   );
+  // Workload identity map: read only when its tab opens (Azure lookups per identity); scan = other identities too
+  const [wiScan, setWiScan] = useState(false);
+  const wiQuery = useApiQuery(tab === "workloadIdentity" && clusterId ? `k8s-wi:${clusterId}:${locale}:${wiScan}` : null, (token) =>
+    fetchJsonWithBearer<WorkloadIdentityResponse>(apiUrl("/api/kubernetes/policies/workload-identity", { clusterId, lang: locale, ...(wiScan ? { scan: "subscription" } : {}) }), token),
+  );
+  const wi = wiQuery.data?.clusterId === clusterId ? wiQuery.data : undefined;
   // Only show data that belongs to the selected cluster
   const data = query.data?.clusterId === clusterId ? query.data : undefined;
   const insights = insightsQuery.data?.clusterId === clusterId ? insightsQuery.data : undefined;
@@ -98,6 +105,7 @@ function Policies() {
     setIssueId("");
     setNetSel(null);
     setChecked(new Set());
+    setWiScan(false);
   };
 
   const findings = useMemo(() => (data?.findings ?? []).filter((f) => showSystem || !f.system), [data, showSystem]);
@@ -122,7 +130,7 @@ function Policies() {
               options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.location})` }))}
             />
             <Toggle checked={showSystem} onChange={setShowSystem} title={t("pol.systemHint")}>{t("pol.showSystem")}</Toggle>
-            <Button onClick={() => { query.reload(); insightsQuery.reload(); }} disabled={!clusterId || query.loading || insightsQuery.loading}>
+            <Button onClick={() => { query.reload(); insightsQuery.reload(); if (tab === "workloadIdentity") wiQuery.reload(); }} disabled={!clusterId || query.loading || insightsQuery.loading}>
               {query.loading || insightsQuery.loading ? t("pol.checking") : t("pol.recheck")}
             </Button>
           </>
@@ -233,6 +241,15 @@ function Policies() {
               namespaces={namespaces}
               ciliumInstalled={data.capabilities.ciliumInstalled}
             />
+          )}
+          {tab === "workloadIdentity" && (
+            wi ? (
+              <div className={insightStyles.root}>
+                <WorkloadIdentityPanel data={wi} showSystem={showSystem} onScan={() => setWiScan(true)} scanning={wiQuery.loading} />
+              </div>
+            ) : wiQuery.error
+              ? <div className={styles.error}>{t("wi.failed")}: {wiQuery.error}</div>
+              : <div className={styles.loading}>{t("wi.loading")}</div>
           )}
           {tab === "rbac" && <RbacPanel roles={data.rbac.roles} bindings={data.rbac.bindings} showSystem={showSystem} />}
           {tab === "psa" && <PsaPanel namespaces={namespaces} />}

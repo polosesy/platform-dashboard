@@ -128,6 +128,10 @@ spec:
         fsGroup: 65532                                   # the projected token file readable by 65532
         seccompProfile: { type: RuntimeDefault }
       terminationGracePeriodSeconds: 20
+      dnsConfig:                                         # values.yaml: ndots 1 — 2 DNS queries per lookup, not 10
+        options:
+        - name: ndots
+          value: "1"
       containers:
         - name: web
           image: <acr>/<path>/aud-dashboard:<semver>-<sha7>
@@ -211,7 +215,8 @@ spec:
         - { name: next-cache, emptyDir: { sizeLimit: 128Mi } }
         - { name: connections, configMap: { name: aud-dashboard-connections } }
 ---
-# Baseline for the dashboard namespace. Audit first (no default deny, name *-audit), watch Hubble drops, then enforce.
+# Baseline for the dashboard namespace. Audit first (no default deny, name *-audit) — nothing is dropped then: judge
+# from policy-verdict allowed-by (allow-any only = blocked when enforced; docs/deployment/kubernetes.md §9), then enforce.
 # FQDN rules need the DNS L7 rule. Not needed: IMDS (no managed identity endpoint — tokens are federated), the
 # registry (the kubelet pulls images)
 apiVersion: cilium.io/v2

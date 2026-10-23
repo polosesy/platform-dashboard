@@ -264,7 +264,8 @@ export function Stat({ label, value, hint, tone }: { label: ReactNode; value: Re
     <div className={cx(s.stat, tone && s[`statTone_${tone}`])}>
       <div className={s.statLabel}>{label}</div>
       <div className={s.statValue}>{value}</div>
-      {hint ? <div className={s.statHint}>{hint}</div> : null}
+      {/* The hint row is always there (empty = a blank line) so cards in one row line up */}
+      <div className={s.statHint} aria-hidden={hint ? undefined : true}>{hint ?? "\u00a0"}</div>
     </div>
   );
 }

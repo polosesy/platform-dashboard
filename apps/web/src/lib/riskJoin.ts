@@ -47,7 +47,8 @@ export type RiskRow = {
   uncertain: boolean;
 };
 
-export type RiskGap = "recommendations" | "alerts" | "hubble" | "azureMatch" | "clusterNotInGraph" | "insightsPartial";
+/** hubbleNotCollected = Hubble exec is off for the deployment and no flow logs: not a failure — how to get it */
+export type RiskGap = "recommendations" | "alerts" | "hubble" | "hubbleNotCollected" | "azureMatch" | "clusterNotInGraph" | "insightsPartial";
 
 export type IntegratedRisk = {
   mode: "live" | "sample";
@@ -84,6 +85,8 @@ export type IntegratedRisk = {
     egressTargets: number;
   };
   gaps: RiskGap[];
+  /** insightsPartial: the cluster data that could not be read (e.g. "Kubernetes Service (HTTP 403)") */
+  gapDetails?: string[];
 };
 
 export type RiskJoinInput = {
@@ -172,7 +175,7 @@ export function joinRisk(input: RiskJoinInput): IntegratedRisk {
   if (posture.gaps.some((g) => g.section === "alerts")) gaps.push("alerts");
   const hubbleGap = !insights.network.available || insights.gaps.some((g) => /^hubble/i.test(g));
   const azureGap = !insights.network.azureMatched || insights.gaps.some((g) => /^azure/i.test(g));
-  if (hubbleGap) gaps.push("hubble");
+  if (hubbleGap) gaps.push(insights.gaps.some((g) => /hubble_exec_disabled/.test(g)) ? "hubbleNotCollected" : "hubble");
   if (azureGap) gaps.push("azureMatch");
 
   const empty: IntegratedRisk = {
@@ -319,6 +322,7 @@ export function joinRisk(input: RiskJoinInput): IntegratedRisk {
 
   return {
     mode: "live",
+    ...(otherGaps.length ? { gapDetails: otherGaps } : {}),
     rows: out,
     stats: {
       issues: insights.issues.length,

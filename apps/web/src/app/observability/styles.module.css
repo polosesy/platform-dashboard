@@ -11,33 +11,22 @@
 
 
 /* ── Data Source Status ── */
-.dsBadges {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-}
-
+.metaRow { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.dsBadges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; padding: 0; list-style: none; }
 .dsBadge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel-solid); color: var(--muted);
 }
-.dsBadgeOk {
-  background: rgba(16,137,62,0.10);
-  color: rgba(16,137,62,0.90);
-  border: 1px solid rgba(16,137,62,0.25);
-}
-.dsBadgeOff {
-  background: rgba(20,21,23,0.06);
-  color: rgba(20,21,23,0.40);
-  border: 1px solid rgba(20,21,23,0.12);
-}
+.dsBadge a { color: inherit; text-decoration: none; }
+.dsBadge a:hover { text-decoration: underline; }
+.dsRead { color: var(--success); border-color: rgba(var(--success-rgb), 0.35); }
+.dsLink { color: var(--accent); }
+.dsBlocked { background: var(--danger-soft); border-color: rgba(var(--danger-rgb), 0.45); color: var(--danger); }
+.dsError { background: var(--warning-soft); border-color: rgba(var(--warning-rgb), 0.5); color: var(--warning-strong); }
+.dsOff { border-style: dashed; }
+.dsWord { font-weight: 700; }
+.dsExtra { margin-left: 2px; color: var(--accent) !important; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .noDataBanner {
   padding: 32px;
@@ -579,3 +568,120 @@
   font-size: 13px;
   color: var(--ink);
 }
+
+/* ── 관측 스택 (StackTab): same card standard as the security overview — equal rows, a value or "not measured" ── */
+.stack { display: grid; gap: 14px; min-width: 0; }
+.stackHead { display: flex; gap: 10px; align-items: flex-start; }
+.stackHead > :first-child { flex: 1; min-width: 0; }
+.stackStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); grid-auto-rows: 1fr; gap: 12px; }
+.stackGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; align-items: stretch; }
+.stackCard {
+  display: grid; grid-template-rows: auto 1fr auto; gap: 8px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
+}
+.stackCardHead { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; min-width: 0; }
+.stackCardName { display: grid; gap: 2px; min-width: 0; }
+.stackCardName strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stackChecks { display: grid; gap: 4px; margin: 0; font-size: 12px; }
+.stackCheck { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+.stackCheck dt { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stackCheck dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.stackBad { color: var(--danger); font-weight: 700; }
+.stackWarn { color: var(--warning); font-weight: 700; }
+.stackMuted { color: var(--muted); font-size: 12px; }
+.stackLink { margin-left: 6px; font-size: 12px; color: var(--accent); }
+.stackTitle { margin: 6px 0 0; font-size: 14px; }
+.stackTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stackTable th, .stackTable td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.stackTable td:not(:first-child), .stackTable th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.stackList { margin: 6px 0; padding-left: 18px; }
+
+/* ── Workload heatmap (WorkloadHeatmap / WorkloadHeatPanel) — equal tiles, glyph + colour, never colour alone ── */
+.hm { display: grid; gap: 12px; min-width: 0; }
+/* Controls · signal strip · needs attention · namespace cards that flow side by side — colour only for warn/danger */
+.hmBar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.hmMeta { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.hmThreshold { margin: -4px 0 0; font-size: 12px; color: var(--muted); }
+.hmSignals { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 24px; }
+.hmSignal {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; font: inherit; font-size: 12px; cursor: pointer;
+  color: inherit; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel-solid);
+}
+.hmSignal strong { font-variant-numeric: tabular-nums; }
+.hmSignal[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hmSignal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hmSignalDanger { background: var(--danger-soft); border-color: rgba(var(--danger-rgb), 0.5); }
+.hmSignalWarn { background: var(--warning-soft); border-color: rgba(var(--warning-rgb), 0.55); }
+.hmQuiet { margin: 0; font-size: 12px; color: var(--muted); }
+.hmNotMeasured { text-decoration: underline dotted; text-underline-offset: 3px; }
+.hmAttention { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
+.hmAttnHead { margin: 0; font-size: 13px; }
+.hmAttnList { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.hmAttnRow {
+  all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 20px minmax(0, 18rem) minmax(0, 1fr); gap: 10px;
+  align-items: center; padding: 4px 8px; font-size: 13px; cursor: pointer; border: 1px solid transparent; border-radius: var(--radius-xs);
+}
+.hmAttnRow:focus-visible, .hmAttnRow[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hmAttnRow:hover { background: var(--panel-sunken); }
+.hmAttnDanger { border-left: 3px solid var(--danger); }
+.hmAttnDanger .hmAttnGlyph { color: var(--danger); }
+.hmAttnWarn { border-left: 3px solid var(--warning); }
+.hmAttnWarn .hmAttnGlyph { color: var(--warning-strong); }
+.hmAttnGlyph { font-weight: 800; text-align: center; }
+.hmAttnName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmAttnWhy { color: var(--warning-strong); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.hmLayout[data-open] { grid-template-columns: minmax(0, 1fr) minmax(340px, 34%); }
+@media (max-width: 1100px) { .hmLayout[data-open] { grid-template-columns: minmax(0, 1fr); } }
+.hmPanelWrap { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; min-width: 0; }
+.hmGroups { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; align-items: start; min-width: 0; }
+.hmNs { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); min-width: 0; overflow: hidden; }
+.hmNsDanger { box-shadow: inset 3px 0 0 var(--danger); }
+.hmNsWarn { box-shadow: inset 3px 0 0 var(--warning); }
+.hmNsWide { grid-column: span 2; }
+@media (max-width: 700px) { .hmNsWide { grid-column: auto; } }
+.hmNsHead {
+  display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700;
+  background: var(--panel-sunken); border-bottom: 1px solid var(--border);
+}
+.hmNsName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmNsCounts { display: inline-flex; gap: 8px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+.hmWarnText { color: var(--warning-strong); font-weight: 700; }
+.hmGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 4px; padding: 8px; }
+.hmTile {
+  all: unset; box-sizing: border-box; display: grid; gap: 1px; height: 40px; padding: 4px 8px; min-width: 0; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--panel-solid);
+}
+.hmTile:focus-visible, .hmTile[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hmTile[aria-pressed="true"] { box-shadow: 0 0 0 4px var(--accent-soft); }
+.hmTileName { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmTileValue { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmTileValueStrong { color: var(--warning-strong); font-weight: 700; }
+.hmWarn { background: var(--warning-soft); border-color: rgba(var(--warning-rgb), 0.55); border-left: 3px solid var(--warning); }
+.hmDanger { background: var(--danger-soft); border-color: rgba(var(--danger-rgb), 0.55); border-left: 3px solid var(--danger); }
+.hmDanger .hmTileValueStrong { color: var(--danger); }
+.hmNeutral { background: var(--panel-sunken); color: var(--muted); }
+.hmDashed { background: var(--panel-sunken); border-style: dashed; border-color: var(--border-strong); }
+.hmHatched {
+  background: repeating-linear-gradient(135deg, var(--panel-sunken) 0 6px, rgba(var(--ink-rgb), 0.04) 6px 12px);
+}
+.hmLegend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.hmLegend li { display: inline-flex; align-items: center; gap: 6px; }
+.hmSwatch { display: inline-grid; place-items: center; width: 22px; height: 16px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; }
+.hmPanel {
+  display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--panel-solid);
+}
+.hmPanel th { white-space: nowrap; }
+.hmPanelHead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.hmCells { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px; margin: 0; }
+.hmCell { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 13px; }
+.hmCell dt { color: var(--muted); }
+.hmCell dd { margin: 0; padding: 2px 6px; border-radius: 4px; border: 1px solid transparent; overflow-wrap: anywhere; }
+.hmEvents { margin: 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; }
+.hmMsg { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.hmLog { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; max-height: 420px; overflow: auto; }
+.hmLog li { padding: 4px 6px; border-left: 3px solid var(--border); }
+.hmLogError { border-left-color: var(--danger) !important; }
+.hmLogWarn { border-left-color: var(--warning) !important; }
+.hmPre { margin: 2px 0 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hmChip { display: inline-block; margin: 0 6px 4px 0; padding: 1px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 999px; }

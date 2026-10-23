@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-16
+last-verified: 2026-10-23
 covers: [apps/api/src/services/featureCatalog.ts]
 ---
 # Azure 연결 권한 표
@@ -23,6 +23,7 @@ covers: [apps/api/src/services/featureCatalog.ts]
 | 기능 (화면) | 역할 | 범위 | 왜 필요한가 | 점검 키 |
 |---|---|---|---|---|
 | 리소스 목록·구성도·라이브 다이어그램 구성 | **Reader** | 구독 | Resource Graph·ARM 읽기 | `inventory` |
+| 워크로드 ID 매핑(관리 ID·페더레이션 자격 증명·역할 할당) | **Reader** | 관리 ID가 있는 구독 | `*/read` — 관리 ID의 `federatedIdentityCredentials` 목록, Resource Graph `authorizationresources`(읽을 권한이 있는 범위의 할당만, PIM 적격 할당 제외) | `inventory` |
 | 메트릭·알림·리소스 상태 | **Monitoring Reader** (Reader에 포함) | 구독 | Azure Monitor 메트릭·알림 규칙·Resource Health | `metrics` |
 | 로그(Traffic Analytics·Container Insights·Private Link 사용 근거) | **Log Analytics Reader** | 작업 영역 (또는 구독) | KQL 쿼리 | `logs` |
 | 보안 개요·권고·위협·규정 준수 | **Security Reader** (Reader로도 대부분) | 구독 | Defender for Cloud | `security` |

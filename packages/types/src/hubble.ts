@@ -51,6 +51,66 @@ export type HubbleFlow = {
   sourceIp?: string;
   destinationIp?: string;
   tcpFlags?: string;
+  /** Hubble event kind (`event_type.type`: 1 drop · 4 trace · 5 policy-verdict · 129 l7) */
+  eventKind?: HubbleEventKind;
+  /** policy-verdict events: Cilium's policy match type (1 L3 · 2 L3+L4 · 3 L4 · 4 all/wildcard …) */
+  policyMatch?: number;
+  /** policy-verdict events (Cilium ≥ 1.15): the rules that allowed it, in the flow's direction */
+  allowedBy?: HubblePolicyRef[];
+  /** Names the DNS proxy saw for the destination IP (toFQDNs) */
+  destinationNames?: string[];
+};
+
+export type HubbleEventKind = "trace" | "drop" | "policy-verdict" | "l7" | "other";
+
+/** One entry of `egress_allowed_by` / `ingress_allowed_by`: a named policy, or a rule Cilium derived itself */
+export type HubblePolicyRef = {
+  name?: string;
+  namespace?: string;
+  kind?: string;
+  /** `io.cilium.policy.derived-from` of a synthetic rule (allow-any-egress, allow-localhost-ingress …) */
+  derivedFrom?: string;
+};
+
+/**
+ * What a connection's policy-verdict says about enforcing (services/hubbleAudit.ts):
+ * policy = a named policy allows it · auditOnly = passed only by the allow-any rule an audit policy
+ * (`enableDefaultDeny: false`) or no policy leaves — blocked once a default-deny policy selects it ·
+ * default = a rule Cilium always keeps (kubelet probes) · dropped = dropped by policy now · unknown
+ */
+export type HubbleJudgementKind = "policy" | "auditOnly" | "default" | "dropped" | "unknown";
+export type HubblePolicyJudgement = {
+  kind: HubbleJudgementKind;
+  /** `namespace/name` of the allowing policies (`cluster/name` for clusterwide) */
+  policies: string[];
+  /** allowedBy = Cilium's own record · verdict = the event verdict · estimate = match type only (Cilium < 1.15) */
+  basis: "allowedBy" | "verdict" | "estimate" | "none";
+};
+
+/** Connections that would be blocked when the policy is enforced, from policy-verdict events */
+export type HubbleEnforceReadiness = {
+  /** policy-verdict events (one per new connection) still in the agents' buffers */
+  verdictEvents: number;
+  /** Time span of those events — connections older than this, or long-lived ones, are not in it */
+  oldest: string | null;
+  newest: string | null;
+  /** The agents report allowed-by (Cilium ≥ 1.15) — otherwise the counts are estimates from the match type */
+  allowedBySupported: boolean;
+  counts: Record<HubbleJudgementKind, number>;
+  byPolicy: { policy: string; count: number }[];
+  wouldDrop: {
+    direction: "INGRESS" | "EGRESS" | "UNKNOWN";
+    /** The selected workload (`namespace/workload`) */
+    subject: string;
+    /** The other side: DNS names, workload, reserved identity or IP */
+    peer: string;
+    peerNames: string[];
+    peerIdentity: number;
+    port: number;
+    protocol: string;
+    count: number;
+    lastSeen: string;
+  }[];
 };
 
 // ── Collection coverage ──
@@ -74,7 +134,7 @@ export type HubbleNodeCoverage = {
  * node's buffer lasts.
  */
 export type HubbleCoverage = {
-  source: "agents" | "relay" | "api-proxy";
+  source: "agents" | "relay" | "api-proxy" | "flow-logs";
   nodesObserved: number;
   nodesTotal: number;
   nodes: HubbleNodeCoverage[];
@@ -251,6 +311,8 @@ export type HubbleSecuritySummary = {
     direction: "INGRESS" | "EGRESS" | "UNKNOWN";
   }[];
   /** identity 기반 플로우 매트릭스 */
+  /** From policy-verdict events: what enforcing would block (absent when no verdict events were read) */
+  enforceReadiness?: HubbleEnforceReadiness;
   identityFlows: {
     sourceIdentity: number;
     sourceLabel: string;
@@ -276,4 +338,67 @@ export type HubbleStatusResponse = {
   /** cilium agents found in the cluster (nodeCount = agents that answered) */
   nodesTotal: number;
   message: string;
+};
+
+// ── Sources without Hubble exec (services/hubbleSources.ts) ──
+
+/** Where the Hubble views read from: exec on the agents · ACNS flow logs (Log Analytics) · Hubble metrics (Managed Prometheus) */
+export type HubbleDataSource = "exec" | "flowLogs" | "metrics" | "none";
+
+export type HubbleMetricsState = "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+export type HubbleLogsState = "ok" | "notEnabled" | "forbidden" | "failed";
+
+export type HubbleSourcesResponse = {
+  clusterId: string;
+  generatedAt: string;
+  selected: HubbleDataSource;
+  exec: { allowed: boolean; reason?: "deployment" | "connection" };
+  /** ContainerNetworkLogs rows for this cluster in the last hour (resource-centric query) */
+  flowLogs: { state: HubbleLogsState; rows1h: number | null; newest: string | null };
+  metrics: { state: HubbleMetricsState; message?: string };
+};
+
+/** A pod resolved to its workload: owner metrics (kube_pod_owner → ReplicaSet → Deployment) or the name pattern */
+export type HubbleWorkloadRef = { namespace: string; workload: string; kind: string | null; basis: "owner" | "pattern" };
+
+/** Per workload, counted in the window (Hubble events — not connections). null = the metric family is not collected */
+export type HubbleMetricsWorkload = HubbleWorkloadRef & {
+  pods: number;
+  /** Events the workload sent (series with `source`) / received (series with `destination`) */
+  egressEvents: number;
+  ingressEvents: number;
+  drops: number | null;
+  policyDenied: number | null;
+  dnsErrors: number | null;
+};
+
+export type HubbleMetricsSummary = {
+  clusterId: string;
+  generatedAt: string;
+  windowMinutes: number;
+  state: HubbleMetricsState;
+  message?: string;
+  /** How the series were scoped to this cluster: exact `cluster` label, a sole other value (alias) or no label */
+  /** `collector`: set when two collectors write the same series (Alloy relabels KSM / node-exporter to the
+   *  ama-metrics job names, so only this label tells them apart) — one is counted, never both */
+  scope: { cluster: string | null; job: string | null; collector?: string | null; basis: "exact" | "alias" | "unscoped" } | null;
+  /** Metric families absent from the workspace — their fields are null, never 0 */
+  missing: string[];
+  /** hubble_lost_events_total in the window — > 0 means the counts are understated */
+  lostEvents: number | null;
+  workloads: HubbleMetricsWorkload[];
+  /** Events not attributed to a workload, kept so totals add up: the label is not a pod (IP, reserved identity) /
+   *  the series names neither side (host, world — most of the trace events) */
+  unattributed: { egressEvents: number; ingressEvents: number; unlabelledEvents: number };
+  byVerdict: { forwarded: number; dropped: number; redirected: number; error: number };
+  protocols: { protocol: string; events: number }[];
+  dropsByReason: { reason: string; count: number }[];
+  /** policy_denied drops per workload and side */
+  policyDenied: (HubbleWorkloadRef & { direction: "EGRESS" | "INGRESS"; count: number })[];
+  /** type="policyverdict" events — no match / allowed-by labels, so they cannot tell what enforcing would block */
+  policyVerdictEvents: { forwarded: number; dropped: number; redirected: number };
+  /** DNS responses that were not "No Error", by the pod the series names (CoreDNS = the server side) */
+  dnsErrors: { rcode: string; namespace: string; workload: string; side: "server" | "client"; count: number }[];
+  /** Series cut at the row limit */
+  truncated: boolean;
 };

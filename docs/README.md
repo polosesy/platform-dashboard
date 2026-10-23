@@ -35,6 +35,7 @@ last-verified: 2026-10-22
 - [observability-instrumentation-guide.md](observability/observability-instrumentation-guide.md) — AKS 메트릭·로그 계측과 수집 경로
 - [hubble-guide.md](observability/hubble-guide.md) · [hubble-troubleshooting.md](observability/hubble-troubleshooting.md) — Pod 트래픽(Hubble)
 - [vnet-flow-logs.md](observability/vnet-flow-logs.md) — VNet 트래픽(흐름 로그·Traffic Analytics)
+- [aks-monitoring-integration.md](observability/aks-monitoring-integration.md) — 워크로드 히트맵·kube 이벤트·Loki 로그 스트림·Hubble 드롭·AKS 관리형 파드 연동
 
 ## 문제 해결 — `troubleshooting/`
 
