@@ -24,7 +24,7 @@
     "d3-transition": "^3.0.1",
     "geist": "1.8.1",
     "html-to-image": "1.11.11",
-    "next": "16.1.6",
+    "next": "16.4.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "reactflow": "^11.11.4"

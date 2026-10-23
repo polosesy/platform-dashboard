@@ -11,8 +11,8 @@
 # per request). The cluster build swaps the base images for the customer's hardened (DHI) mirror:
 #   --build-arg NODE_BUILD_IMAGE=<acr>/common-resource/dhi-node:<ver>-dev --build-arg NODE_RUNTIME_IMAGE=<acr>/common-resource/dhi-node:<ver>
 # The runtime stage only COPYs (a hardened runtime image has no shell or npm).
-ARG NODE_BUILD_IMAGE=node:24.13.0-bookworm-slim
-ARG NODE_RUNTIME_IMAGE=node:24.13.0-bookworm-slim
+ARG NODE_BUILD_IMAGE=node:24.22.1-bookworm-slim
+ARG NODE_RUNTIME_IMAGE=node:24.22.1-bookworm-slim
 
 # ── build: install everything, compile the API, build the web as a standalone server ──
 FROM ${NODE_BUILD_IMAGE} AS build

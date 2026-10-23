@@ -191,3 +191,18 @@ test("queries keep GUIDs only, capped, quoted; webhook traces keep only names an
   assert.deepEqual(t, { wi: { tokenFile: true, clientId: CLIENT_A } });
   assert.deepEqual(wiTraces([{ env: [{ name: "AZURE_CLIENT_ID", value: "not-a-guid" }] }]), {});
 });
+
+test("WI-14 is one finding per identity and namespace; cluster-admin-only reach is informational", () => {
+  const i = input();
+  i.serviceAccounts!.push({ namespace: "app", name: "api2-sa", annotations: { "azure.workload.identity/client-id": CLIENT_A }, labels: {} });
+  i.inventory.workloads.push(wl("app", "api2", "api2-sa", true));
+  i.fics.get(UAMI_A.toLowerCase())!.items.push(fic("api2", "system:serviceaccount:app:api2-sa"));
+  const r = buildWorkloadIdentityMap(i);
+  const app = r.findings.filter((f) => f.rule === "WI-14" && f.refs.includes("sa:app/api-sa"));
+  assert.equal(app.length, 1, "api-sa and api2-sa share one finding");
+  assert.ok(app[0]!.refs.includes("sa:app/api2-sa"));
+  assert.notEqual(app[0]!.sev, "info", "devs can exec (not only cluster-admin)");
+  // ops: the only other subject is worker-sa through cluster-admin → informational
+  const ops = r.findings.find((f) => f.rule === "WI-14" && f.refs.includes("sa:ops/ops-sa"))!;
+  assert.equal(ops.sev, "info");
+});

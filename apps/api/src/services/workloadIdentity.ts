@@ -446,14 +446,34 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
           L("클러스터 안 권한으로 다른 워크로드를 장악하면 Azure 권한까지 이어집니다.", "Taking over workloads in the cluster leads on to the Azure permissions."),
           L("SA 권한을 줄이세요.", "Reduce the service account's permissions."), `kubectl auth can-i --list --as=system:serviceaccount:${s.namespace}:${s.name}`);
       }
-      if (s.canUseIdentity.length) {
-        const priv = worstRole.get(idn.id);
-        add("WI-14", priv === "crit" || priv === "warn" ? "warn" : "low", "perm", `${s.id}:use`, [s.id, idn.id],
-          L(`${s.namespace}에서 다른 주체 ${s.canUseIdentity.length}개가 이 SA로 코드를 실행할 수 있음`, `${s.canUseIdentity.length} other subjects can run code as this SA in ${s.namespace}`),
-          s.canUseIdentity.slice(0, 3).map((c) => `${c.subject} (${c.binding})`).join(" · "),
-          L("pods/exec·serviceaccounts/token 권한을 줄이세요 — 그 주체는 이 Azure ID를 쓸 수 있습니다.", "Reduce pods/exec and serviceaccounts/token grants — those subjects can use this Azure identity."));
-      }
+      // WI-14 is reported once per (identity, namespace) below — the same subjects reach every SA of a namespace
     }
+  }
+  // WI-14 — one finding per (identity, namespace): who else can run code as those service accounts. Subjects that
+  // only get there through cluster-admin can do anything anyway → informational; exec/token grants below that → low
+  // (warn when the identity holds a privileged Azure role)
+  const useGroups = new Map<string, { idn: WiIdentity; ns: string; sas: WiServiceAccount[]; subjects: Map<string, WiServiceAccount["canUseIdentity"][number]> }>();
+  for (const s of sas) {
+    if (!s.identityId || !s.canUseIdentity.length) continue;
+    const k = `${s.identityId}|${s.namespace}`;
+    const g = useGroups.get(k) ?? { idn: identityNodes.get(s.identityId)!, ns: s.namespace, sas: [] as WiServiceAccount[], subjects: new Map<string, WiServiceAccount["canUseIdentity"][number]>() };
+    g.sas.push(s);
+    for (const c of s.canUseIdentity) g.subjects.set(`${c.subject}|${c.binding}`, c);
+    useGroups.set(k, g);
+  }
+  for (const g of useGroups.values()) {
+    const subjects = [...g.subjects.values()];
+    const adminOnly = subjects.every((c) => c.keys.includes("clusterAdmin"));
+    const priv = worstRole.get(g.idn.id);
+    const sevOf: WiSeverity = adminOnly ? "info" : priv === "crit" || priv === "warn" ? "warn" : "low";
+    const names = g.sas.map((s) => s.name);
+    add("WI-14", sevOf, "perm", `${g.idn.id}:${g.ns}:use`, [g.idn.id, ...g.sas.map((s) => s.id)],
+      L(`${g.ns}에서 다른 주체 ${subjects.length}개가 SA ${names.length}개(${names.slice(0, 3).join(", ")}${names.length > 3 ? " …" : ""})로 코드를 실행할 수 있음${adminOnly ? " — 클러스터 관리자뿐" : ""}`,
+        `${subjects.length} other subjects can run code as ${names.length} SAs in ${g.ns} (${names.slice(0, 3).join(", ")}${names.length > 3 ? " …" : ""})${adminOnly ? " — cluster admins only" : ""}`),
+      subjects.slice(0, 5).map((c) => `${c.subject} (${c.binding} — ${c.keys.join(", ")})`).join(" · "),
+      adminOnly
+        ? L("cluster-admin 주체는 원래 모든 권한을 가집니다 — 관리자 그룹 구성원을 최소로 유지하세요.", "cluster-admin subjects can do anything anyway — keep the admin group membership minimal.")
+        : L("pods/exec·serviceaccounts/token 권한을 줄이세요 — 그 주체는 이 Azure ID를 쓸 수 있습니다.", "Reduce pods/exec and serviceaccounts/token grants — those subjects can use this Azure identity."));
   }
   for (const w of workloads) {
     const sa = sas.find((s) => s.id === w.saId);

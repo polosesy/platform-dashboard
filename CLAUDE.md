@@ -98,6 +98,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 - **생애 주기**(`infra/lifecycle.ts` 순수): `GET /healthz`(API, CORS·인증 앞·`/api` 밖, Azure 안 부름) · 웹 `/healthz`(웹만)·`/readyz`(127.0.0.1:4000/healthz 2초, 실패 503 — Azure는 안 봄). API 프로브는 루프백이라 exec. SIGTERM/SIGINT → `server.close` → 5초 뒤 `closeAllConnections`(SSE) → 10초 강제 종료. 운영에서 처리 못 한 예외는 종료(끊긴 소켓 ECONNRESET·EPIPE·ECONNABORTED만 무시), `killPortHolder`는 Windows 개발 때만
 - **런타임 로그인 설정**(`web/lib/runtimeConfig.ts` 순수 → `layout.tsx`가 `await connection()` 후 읽어 `Providers config` → `lib/webConfig.tsx` 컨텍스트 → `msalConfigFor`·`loginRequestFor`·`useApiToken`): `AUD_WEB_TENANT_ID`·`AUD_WEB_CLIENT_ID`·`AUD_WEB_API_SCOPE`·`AUD_WEB_REDIRECT_URI`(없으면 페이지 origin, https 또는 http://localhost만) → 빌드 때 `NEXT_PUBLIC_AZURE_AD_*`는 개발 대체값. 폰트는 `geist` 패키지(빌드에 인터넷 불필요)
 - **플랫폼 자격 증명** `AUD_PLATFORM_CREDENTIAL=certificate|secret|workloadIdentity`(미설정 = 인증서 > 비밀 > 토큰 파일, 명시했는데 입력 없으면 시작 실패) — `workloadIdentity` = 사용자 할당 관리 ID(`AUD_PLATFORM_CLIENT_ID`, 없으면 웹후크의 `AZURE_CLIENT_ID` — SSO 앱 `AZURE_AD_CLIENT_ID`는 토큰 대상으로 유지)의 `ClientAssertionCredential`(토큰 파일 요청마다), `platformCredentialKind`·연결 점검 `identity.platformCredential`·시작 로그
+- **보안 패치 기준**: Node.js ≥ 24.22.1(2026-10-21 보안 릴리스 — Brotli RCE·TLS 호스트 이름 우회 등)·Next.js ≥ 16.4.2(rewrites 요청 밀반입) — `runtimeSecurity.test.ts`가 Dockerfile `ARG`·`next` 버전을 검사, 고객 DHI 미러도 같은 최소 버전. API의 fetch·node-fetch는 br을 요청하지 않아도 받으면 풂(클러스터 안 Loki는 평문)
 - 문서 `docs/deployment/container.md`(12절 — 온프렘 절차·문제 해결·AKS 차이)
 
 ## Hubble (Cilium 네트워크 관측)
