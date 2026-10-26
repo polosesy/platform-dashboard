@@ -328,10 +328,12 @@ export type ObservabilitySourcesResponse = { clusterId: string; generatedAt: str
 export type HeatMetric = "ready" | "memory" | "cpu" | "restarts" | "oldGen" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
 
 /**
- * stopped = 0/0 replicas (scaled to zero) · noTraffic = 5xx with no requests · notInstrumented = this workload does
- * not expose the metric (not Java/Spring) · notMeasured = the family is absent from the workspace, or no limit/request
+ * stopped = nothing to run (code: scaledToZero 0/0 replicas · noNodes a DaemonSet no node matches · noPods its other
+ * cells) · noBaseline = usage measured but no limit / request to judge it by (value null, `abs` holds the usage) ·
+ * noTraffic = 5xx with no requests · notInstrumented = this workload does not expose the metric (not Java/Spring) ·
+ * notMeasured = the family is absent from the workspace, or no series for this workload
  */
-export type HeatLevel = "ok" | "warn" | "danger" | "stopped" | "noTraffic" | "notInstrumented" | "notMeasured";
+export type HeatLevel = "ok" | "warn" | "danger" | "noBaseline" | "stopped" | "noTraffic" | "notInstrumented" | "notMeasured";
 
 export type HeatCell = {
   value: number | null;
@@ -341,7 +343,9 @@ export type HeatCell = {
   pool?: string;
   /** Last container termination was OOMKilled */
   oom?: boolean;
-  code?: "noLimit" | "noRequest";
+  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods";
+  /** Memory: working-set bytes · CPU: cores — of the pod that set the value (or the busiest pod when there is no ratio) */
+  abs?: number;
 };
 
 export type HeatWorkload = {
@@ -353,7 +357,11 @@ export type HeatWorkload = {
   /** Worst level over the measured cells */
   worst: HeatLevel;
   cells: Record<HeatMetric, HeatCell>;
-  pods: { pod: string; ready: boolean | null; restarts: number | null; memory: number | null; cpu: number | null; oom: boolean }[];
+  pods: {
+    pod: string; ready: boolean | null; restarts: number | null; memory: number | null; cpu: number | null; oom: boolean;
+    /** Working-set bytes / CPU cores (null = no series) — shown when there is no limit / request ratio */
+    memBytes?: number | null; cpuCores?: number | null;
+  }[];
 };
 
 export type WorkloadHeatmapResponse = {

@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-10-23
-covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloadHeatView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+last-verified: 2026-10-26
+covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -33,20 +33,24 @@ covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloa
 
 ## 2. 워크로드 히트맵 (AKS 모니터링 › 워크로드 › 히트맵)
 
-고객 Grafana '컨테이너 맵'을 한 장으로, **문제 먼저**: 신호 요약 한 줄(울린 신호만 색 칩 — 누르면 그 신호로 칠함, 나머지는 '문제 없음: …'·'미측정: …' 글자) → **주의 필요** 목록(위험 먼저, `ns / 워크로드`와 이유 '메모리 96% · 재시작 3') → 네임스페이스 카드가 옆으로 흐르는 배치(가장 나쁜 카드 먼저, 문제 카드만 왼쪽 강조선, 타일 16개 넘으면 2칸). 타일은 작게(이름 + 값 하나, 네임스페이스 접두 생략, 종류는 툴팁), **색은 주의·위험에만**(정상은 무채색 — 화면 전체가 초록이던 문제), 기호가 항상 상태를 함께 보임. 모든 워크로드를 그림(Grafana 통계 패널은 48개 중 26개만 그렸음), '문제만' 토글은 기본 꺼짐. 신호 선택은 묶은 선택 상자 하나(쿠버네티스·Java/Spring·로그). 타일을 누르면 오른쪽 상세(값·파드·Warning 이벤트·로그 스트림 — ERROR 먼저, 예외 클래스 상위 10, trace ID → Tempo 링크), 방향키로 타일 이동·Esc로 닫기. 보기 모델은 `apps/web/src/lib/workloadHeatView.ts`(순수, `workloadHeatView.test.ts`).
+고객 Grafana '컨테이너 맵'을 한 장으로, **문제 먼저**: 요약 한 줄(판정 알약 '● 주의 필요 없음'/'■ 위험 n · 주의 m' + 울린 신호만 칩 — 누르면 그 신호로 칠함, 나머지는 '정상 신호 n개'·'미측정 신호 n개' 글자(목록은 툴팁) + 범례) → **주의 필요** 목록(있을 때만 — 위험 먼저, `ns / 워크로드`와 이유 '메모리 96% · 재시작 3') → 네임스페이스 카드 **모자이크**(가장 나쁜 카드 먼저; 바깥 격자 = 타일 칸 132px·4px 행, 카드는 자기 타일 수만큼 √(2.2n)열 안팎(빈칸 가장 적은 열)·높이만큼 행을 차지, `grid-auto-flow: dense`로 작은 카드가 큰 카드 옆 빈자리를 채움 — 타일 1개 네임스페이스는 타일 1칸 폭, 열 수는 너비에 따라 `mosaicColumns`·`cardShape`). 타일 = **라이브 다이어그램 카드 문법**(흰 바탕 + 왼쪽 상태 띠 + 기호: ● 정상 초록 · ▲ 주의 · ■ 위험 · ○ 실행 대상 없음 · ◎ 측정됨·판정 기준 없음 · ? 미측정 점선 · – 계측 없음 빗금), 주의·위험 값은 색 알약, 이름은 네임스페이스 접두와 카드 공통 접두(`sharedPrefix`, 머리글에 '· 접두…')를 뺌, 종류는 툴팁. 기호가 항상 상태를 함께 보임. 모든 워크로드를 그림(Grafana 통계 패널은 48개 중 26개만 그렸음), '문제만' 토글은 기본 꺼짐. 신호 선택은 묶은 선택 상자 하나(쿠버네티스·Java/Spring·로그). 타일을 누르면 오른쪽 상세(값·파드·Warning 이벤트·로그 스트림 — ERROR 먼저, 예외 클래스 상위 10, trace ID → Tempo 링크), 방향키로 타일 이동·Esc로 닫기. 보기 모델은 `apps/web/src/lib/workloadHeatView.ts`(순수, `workloadHeatView.test.ts`).
 
 | 신호 | 계산(파드별 → 워크로드의 가장 나쁜 파드) | 주의 / 위험 |
 |---|---|---|
-| 가용 | KSM ready/desired (Deployment·StatefulSet·DaemonSet), 0/0 = 중지됨 | <1 / 0 |
-| 메모리 | 컨테이너 WS / memory limit (limit 없음 = 미측정) + 마지막 종료 OOMKilled | 80% / 90% |
-| CPU | 사용 / request (request 없음 = 미측정) | 100% / 150% |
+| 가용 | KSM ready/desired (Deployment·StatefulSet·DaemonSet). 목표 0 = 실행 대상 없음 — DaemonSet은 '대상 노드 없음'(`noNodes`), 그 밖은 '0개로 줄임'(`scaledToZero`), 나머지 신호는 '파드 없음'(`noPods`) | <1 / 0 |
+| 메모리 | 컨테이너 WS / memory limit (+ 바이트 `abs`) + 마지막 종료 OOMKilled. limit 없음 = **측정됨·기준 없음**(`noBaseline` — 사용량 Mi만, 색 없음) | 80% / 90% |
+| CPU | 사용 / request (+ 코어 `abs`). request 없음 = 측정됨·기준 없음(m = 1/1000 코어) | 100% / 150% |
 | 재시작 | `changes(restarts[기간])` 합 | 1 / 5 |
 | Old Gen | `jvm_memory_usage_after_gc` | 70% / 85% |
 | HTTP 5xx | 워크로드 전체 5xx / 전체 요청(`/actuator` 제외), 요청 0 = 트래픽 없음 | 0.5% / 1% |
 | 로그 ERROR | 수집기가 만든 ERROR 카운터(연결 파일 `aks.observability.logErrors`)의 기간 증가 — 기간 중 생긴 시계열도 전부 셈 | 1 / 50 |
 | 커넥션 풀 | Hikari active/max (가장 나쁜 풀), pending | 70% / 90%, pending ≥1 |
 
-Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 그 지표 묶음이 아예 없으면 '미측정'. 완료된 파드(Job, `az aks command invoke`)는 가용 판정에서 뺍니다. 메트릭 묶음 존재는 묶음마다 따로 셉니다(`a or b`는 이름을 무시하고 라벨이 같은 시계열을 지움 — Hubble 메트릭 쪽에도 있던 버그).
+Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 그 지표 묶음이 아예 없으면 '미측정'. 완료된 파드(Job, `az aks command invoke`)는 타일·파드 행을 만들지 않음 — 이미 있는 워크로드의 로그 ERROR 수에만 더함(예전엔 재시작·cAdvisor 행이 `command-…` 타일을 '? 미측정'으로 만들었음).
+
+**실측(2026-10-26, stg)**: Windows 노드가 없는 클러스터의 Windows 전용 DaemonSet 10개와 `retina-agent`(노드 조건 `kubernetes.azure.com/ebpf-dataplane NotIn cilium` — Cilium 노드를 피함)는 목표 0 — 예전엔 '0/0 0/0'·'? 미측정'으로 보였음, 이제 기본 숨김('대상 노드가 없는 DaemonSet n개 숨김 · 보이기'). AKS 관리 `cilium`·`acns-security-agent`는 컨테이너에 requests·limits가 아예 없음(`kubectl get ds -o jsonpath` 확인) — 비율이 없으니 사용량(예: 366Mi·49m)만.
+
+**로그 스트림**(패널, `WorkloadLogStream` + 순수 `apps/web/src/lib/logView.ts`): 같은 메시지(수·ID만 다른 것 포함 — `logSignature`)는 한 줄 '×n'(처음~마지막 시각·파드 수), 줄 = 로거가 되풀이한 앞 시각을 뺀 메시지(logback `… LEVEL … - 메시지`는 메시지만), 2줄 말줄임, 누르면 첫 줄 전체·앱 코드 스택(`▸ 클래스.메서드 (파일:줄)`, 패키지는 툴팁, 라이브러리 프레임은 'n개 더 보기')·Caused by·원문 복사·trace. 예외 클래스 칩 = 거르기. 스크롤은 패널 하나(목록 자체 스크롤 없음). 가리기는 MDC `[TOKEN-ID:…]`·세션 ID도(`logRedaction.ts`). 메트릭 묶음 존재는 묶음마다 따로 셉니다(`a or b`는 이름을 무시하고 라벨이 같은 시계열을 지움 — Hubble 메트릭 쪽에도 있던 버그).
 
 ### 데이터 소스 칩 (페이지 머리)
 

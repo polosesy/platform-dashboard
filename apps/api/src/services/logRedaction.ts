@@ -1,6 +1,7 @@
 // Secrets that applications print by mistake, masked before a log line leaves the API (pure) — kubelet pod logs and
 // Loki lines alike. Over-masking a value is better than shipping a credential to a browser: JWTs, bearer tokens,
-// key=value secrets (password, token, api key, storage AccountKey, SAS sig), PEM blocks, 88-character base64 keys.
+// key=value secrets (password, token, api key, storage AccountKey, SAS sig; token / session ids too — a Spring MDC
+// "[TOKEN-ID:…]" names the caller's session), PEM blocks, 88-character base64 keys.
 
 const MASK = "[REDACTED]";
 
@@ -9,7 +10,7 @@ const RULES: RegExp[] = [
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT (header.payload.signature)
   /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
   // key=value / key: value / "key":"value" — the value only
-  /((?:password|passwd|pwd|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|AccountKey|SharedAccessKey|SharedAccessSignature|sig)\s*["']?\s*[:=]\s*["']?)([^\s"'&;,}]{4,})/gi,
+  /((?:password|passwd|pwd|secret|client[_-]?secret|token(?:[_-]?id)?|session[_-]?id|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|AccountKey|SharedAccessKey|SharedAccessSignature|sig)\s*["']?\s*[:=]\s*["']?)([^\s"'&;,})\]]{4,})/gi,
   /\b[A-Za-z0-9+/]{86}==/g, // 64-byte keys in base64 (storage account keys)
 ];
 

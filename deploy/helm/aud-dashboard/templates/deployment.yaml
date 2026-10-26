@@ -100,6 +100,7 @@ spec:
             - { name: AUD_AUDIT_LOG, value: stdout }
             - { name: AZURE_LIVE_DIAGRAM_ENABLED, value: {{ .Values.features.liveDiagram | quote }} }
             - { name: AZURE_SECURITY_ENABLED, value: {{ .Values.features.security | quote }} }
+            - { name: AUD_ADVISORY_FEEDS, value: {{ .Values.features.advisoryFeeds | quote }} }
             {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -15,7 +15,7 @@ export type NavIcon =
   | "home" | "cloud" | "waypoints" | "helm" | "lock" | "coins"
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
-  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key";
+  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -49,6 +49,8 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     key: "security", labelKey: "nav.group.security", icon: "lock", items: [
       item("/security/risk", "securityRisk", "radar", "nav.section.crossRisk"),
+      // Urgent vulnerability news (CISA KEV · NVD · Node.js · PHP) checked against this platform's runtime, images and Defender
+      item("/security/advisories", "securityAdvisories", "megaphone", "nav.section.crossRisk"),
       item("/security", "securityOverview", "shieldCheck", "nav.section.azureSecurity"),
       item("/security/findings", "securityFindings", "listChecks", "nav.section.azureSecurity"),
       item("/security/identity", "securityIdentity", "fingerprint", "nav.section.azureSecurity"),

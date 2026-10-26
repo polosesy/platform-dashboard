@@ -111,6 +111,15 @@ const EnvSchema = z.object({
   // anonymous requests read live Defender data with the service principal (local verification only).
   AZURE_SECURITY_SP_FALLBACK: envBool(false),
 
+  // 보안 › 긴급 취약점: official public feeds (CISA KEV, NVD, nodejs.org, php.net) read by the API — false in an
+  // air-gapped install (the page then matches only Defender findings and the platform's own runtime)
+  AUD_ADVISORY_FEEDS: envBool(true),
+  // Send the package list (npm / OS package names + versions, Kubernetes and known open-source image versions — never
+  // app image names) to api.osv.dev for exact-version matching. false = keep feeds, skip the SBOM match
+  AUD_ADVISORY_OSV: envBool(true),
+  // Optional NVD API key (raises the public rate limit of 5 requests / 30 s)
+  AUD_NVD_API_KEY: z.string().optional(),
+
   // Live diagram: who uses each Private Endpoint (PaaS access logs + VNet flow logs). Signed-in users only;
   // the SP fallback is for local verification (access logs name callers, so anonymous use is off by default).
   AZURE_PL_USAGE_ENABLED: envBool(true),

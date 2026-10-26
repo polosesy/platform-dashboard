@@ -186,6 +186,7 @@ spec:
             - { name: AUD_AUDIT_LOG, value: stdout }
             - { name: AZURE_LIVE_DIAGRAM_ENABLED, value: "true" }
             - { name: AZURE_SECURITY_ENABLED, value: "true" }
+            - { name: AUD_ADVISORY_FEEDS, value: "true" }
           startupProbe:
             exec:
               command: ["node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -250,6 +251,12 @@ spec:
         - matchPattern: "*.<region>.prometheus.monitor.azure.com"
         - matchName: azure.status.microsoft
         - matchName: rssfeed.azure.status.microsoft
+        - matchName: www.cisa.gov                       # 긴급 취약점 — CISA KEV
+        - matchName: services.nvd.nist.gov
+        - matchName: nodejs.org
+        - matchName: www.php.net
+        - matchName: cveawg.mitre.org                   # CVE.org (CVE Services) records
+        - matchName: api.osv.dev                        # OSV — exact-version match of the package list
       toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
 ---
 apiVersion: gateway.networking.k8s.io/v1

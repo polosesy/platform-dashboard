@@ -54,9 +54,45 @@ test("heatmap: one tile per workload, worst pod / pool, the customer's threshold
   const dns = s.workloads.find((w) => w.workload === "coredns")!;
   assert.deepEqual([dns.cells.ready.level, dns.cells.restarts.value, dns.cells.restarts.level], ["warn", 3, "warn"]);
   assert.deepEqual([dns.cells.oldGen.level, dns.cells.http5xx.level], ["notInstrumented", "notInstrumented"], "not Java — not 0");
-  assert.deepEqual([dns.cells.memory.level, dns.cells.memory.code], ["notMeasured", "noLimit"]);
+  assert.deepEqual([dns.cells.memory.level, dns.cells.memory.code, dns.cells.memory.abs], ["noBaseline", "noLimit", 1], "usage without a limit: bytes, no verdict");
+  assert.equal(dns.cells.cpu.level, "notMeasured", "no CPU series at all — not measured");
   assert.equal(s.workloads.find((w) => w.workload === "batch")!.cells.ready.level, "stopped", "0/0 = stopped, not down");
   assert.ok(!s.workloads.some((w) => w.namespace === "aks-command"), "completed pods (command invoke) are not workloads");
+});
+
+test("heatmap: a DaemonSet no node matches and a Deployment at 0 are 'nothing to run' everywhere — not unmeasured, not OK", () => {
+  const s = aggregateHeatmap(raw({
+    dsReady: [r({ namespace: "kube-system", daemonset: "agent-windows" }, 0), r({ namespace: "kube-system", daemonset: "agent" }, 1)],
+    dsDesired: [r({ namespace: "kube-system", daemonset: "agent-windows" }, 0), r({ namespace: "kube-system", daemonset: "agent" }, 1)],
+    podOwners: [...raw().podOwners!, r({ namespace: "kube-system", pod: "agent-x7k2p", owner_kind: "DaemonSet", owner_name: "agent" }, 1)],
+    active: [...raw().active!, r({ namespace: "kube-system", pod: "agent-x7k2p" }, 1)],
+    memWs: [...raw().memWs!, r({ namespace: "kube-system", pod: "agent-x7k2p", container: "a" }, 300), r({ namespace: "kube-system", pod: "agent-x7k2p", container: "b" }, 100)],
+    cpuUsage: [...raw().cpuUsage!, r({ namespace: "kube-system", pod: "agent-x7k2p" }, 0.04)],
+  }), { logErrors: LE });
+  const win = s.workloads.find((w) => w.workload === "agent-windows")!;
+  assert.deepEqual([win.cells.ready.level, win.cells.ready.code, win.worst], ["stopped", "noNodes", "stopped"]);
+  assert.ok(["memory", "cpu", "restarts", "logErrors", "oldGen"].every((m) => win.cells[m as "memory"].code === "noPods"), "log errors 0 must not turn it green");
+  const batch = s.workloads.find((w) => w.workload === "batch")!;
+  assert.deepEqual([batch.cells.ready.code, batch.worst], ["scaledToZero", "stopped"]);
+  const agent = s.workloads.find((w) => w.workload === "agent")!;
+  assert.deepEqual([agent.cells.memory.level, agent.cells.memory.abs, agent.cells.cpu.level, agent.cells.cpu.abs, agent.worst], ["noBaseline", 400, "noBaseline", 0.04, "ok"]);
+  assert.deepEqual([agent.pods[0]!.memBytes, agent.pods[0]!.cpuCores], [400, 0.04], "containers summed per pod");
+  const api = s.workloads.find((w) => w.workload === "api")!;
+  assert.equal(api.cells.memory.abs, 1, "a ratio keeps the bytes beside it");
+});
+
+test("heatmap: finished pods never make a tile or a pod row, but their log ERRORs still count for a live workload", () => {
+  const base = raw();
+  const s = aggregateHeatmap(raw({
+    podOwners: [...base.podOwners!, r({ namespace: "app", pod: "api-7d9f8c6b5-zzzzz", owner_kind: "ReplicaSet", owner_name: "api-7d9f8c6b5" }, 1)],
+    restarts: [...base.restarts!, r({ namespace: "aks-command", pod: "command-0a1b2c3d" }, 0), r({ namespace: "app", pod: "api-7d9f8c6b5-zzzzz" }, 3)],
+    memWs: [...base.memWs!, r({ namespace: "aks-command", pod: "command-0a1b2c3d", container: "c" }, 5)],
+    logErrors: [...base.logErrors!, r({ namespace: "app", exported_pod: "api-7d9f8c6b5-zzzzz", pod: "alloy-0" }, 6)],
+  }), { logErrors: LE });
+  assert.ok(!s.workloads.some((w) => w.namespace === "aks-command"), "a Succeeded command-invoke pod seen by restarts / cAdvisor");
+  const api = s.workloads.find((w) => w.workload === "api")!;
+  assert.deepEqual(api.pods.map((p) => p.pod), ["api-7d9f8c6b5-bcdfg", "api-7d9f8c6b5-hjklm"], "the replaced pod is not listed");
+  assert.equal(api.cells.logErrors.value, 20, "its ERRORs in the window still belong to the workload");
 });
 
 test("heatmap: missing families are notMeasured with a null flag; flags count the strip's levels", () => {
@@ -96,6 +132,9 @@ test("events: Warning only, the workload's objects, newest first, message only f
 test("redaction: tokens, keys, PEM, SAS — clean lines untouched", () => {
   assert.equal(redactLogLine("Authorization: Bearer abcdefghijklmnop").line, "Authorization: [REDACTED]");
   assert.equal(redactLogLine('{"password":"hunter22"}').line, '{"password":"[REDACTED]"}');
+  assert.equal(redactLogLine("Handler [TENANT-ID:][TOKEN-ID:Q2xvdWR5U2t5Mz][USER-ID:demo.user] - [422]").line,
+    "Handler [TENANT-ID:][TOKEN-ID:[REDACTED]][USER-ID:demo.user] - [422]", "MDC token / session ids");
+  assert.equal(redactLogLine("JSESSIONID=ABCDEF0123456789; sessionId: 5f2c9e1a").line, "JSESSIONID=[REDACTED]; sessionId: [REDACTED]");
   assert.match(redactLogLine("AccountKey=QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=;EndpointSuffix").line, /AccountKey=\[REDACTED\]/);
   assert.match(redactLogLine("url?sv=2022&sig=abcdEFGH1234%3D&se=1").line, /sig=\[REDACTED\]/);
   assert.equal(redactLogLine("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.abcdefghijklmnop").line, "jwt [REDACTED]");

@@ -33,6 +33,10 @@ platform:
 features:
   liveDiagram: true
   security: true
+  # 보안 › 긴급 취약점 reads public feeds (www.cisa.gov, services.nvd.nist.gov, nodejs.org, www.php.net, cveawg.mitre.org —
+  # fixed URLs, GET, CVE IDs only) and sends the package list (names + versions, never app image names) to api.osv.dev
+  # (turn just that off with api.extraEnv AUD_ADVISORY_OSV=false). false = air-gapped: Defender findings and own runtime only
+  advisoryFeeds: true
 
 # Azure connections file (AUD_CONNECTIONS_FILE) — IDs and names only. A customer connection reads with its own app
 # or managed identity via federation (no secret): docs/integrations/azure/connect-tenant.md

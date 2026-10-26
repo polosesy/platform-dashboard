@@ -23,6 +23,7 @@ const PATHS: Record<NavIconName, React.ReactNode> = {
   listChecks: <><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17" /><path d="M10 6h11M10 12h11M10 18h11" /></>,
   fingerprint: <><path d="M6.5 6.5A7.5 7.5 0 0 1 19.5 12v1" /><path d="M4.5 10a7.5 7.5 0 0 0-.3 3.5" /><path d="M8 13a4 4 0 0 1 8 0c0 3-.6 5.6-1.6 7.5" /><path d="M12 13c0 3.2-.7 6-2 8M8.3 17.5c-.4 1.3-1 2.4-1.8 3.3" /></>,
   siren: <><path d="M7 18v-6a5 5 0 0 1 10 0v6" /><path d="M5 18h14v3H5z" /><path d="M12 3v2M4.2 6.2l1.4 1.4M19.8 6.2l-1.4 1.4" /></>,
+  megaphone: <><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1Z" /><path d="M16 9a3 3 0 0 1 0 6M19 6a7 7 0 0 1 0 12" /></>,
   radar: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><path d="M12 12l6-6" /><circle cx="12" cy="12" r="1" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" /></>,
   plug: <><path d="M9 3v5M15 3v5" /><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z" /><path d="M12 17v4" /></>,

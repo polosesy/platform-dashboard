@@ -64,6 +64,8 @@ export const FEATURES: FeatureDef[] = [
   { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs"], preconditions: AKS_PRE, platformRole: "operator" },
   { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec"], preconditions: AKS_PRE },
   { id: "integratedRisk", tier: "enterprise", routes: ["/security/risk"], requires: ["security", "inventory", "aksCredential", "k8sRead"], optional: [] },
+  // Official feeds and the dashboard's own runtime need no Azure permission; Defender findings and cluster images add targets
+  { id: "urgentVulnerabilities", tier: "pro", routes: ["/security/advisories"], requires: [], optional: ["security", "aksCredential", "k8sRead"] },
   { id: "podTraffic", tier: "enterprise", routes: ["/hubble"], requires: ["aksCredential", "hubbleExec"], optional: [], preconditions: AKS_PRE },
   { id: "multiTenantConnections", tier: "enterprise", routes: ["/settings/connections"], requires: [], optional: [] },
 ];

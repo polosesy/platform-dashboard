@@ -34,7 +34,7 @@ test("every page route appears in the menu exactly once", () => {
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 18);
+  assert.equal(routes.length, 19);
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -65,7 +65,7 @@ test("group order and shape: 7 slots, single-item groups are direct links", () =
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble"]);
   assert.deepEqual(
     NAV_GROUPS.find((g) => g.key === "security")!.items.map((i) => i.href),
-    ["/security/risk", "/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance", "/policies"],
+    ["/security/risk", "/security/advisories", "/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance", "/policies"],
   );
 });
 
@@ -79,7 +79,7 @@ test("sections: only in the security group, contiguous, translated, never repeat
       if (s !== secs[i - 1]) { assert.ok(!seen.has(s!), `section ${s} is contiguous`); seen.add(s!); }
     });
     assert.deepEqual([...seen], ["nav.section.crossRisk", "nav.section.azureSecurity", "nav.section.clusterSecurity"]);
-    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.crossRisk", "nav.section.azureSecurity", null, null, null, null, "nav.section.clusterSecurity"]);
+    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.crossRisk", null, "nav.section.azureSecurity", null, null, null, null, "nav.section.clusterSecurity"]);
     for (const it of g.items) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[it.section!]!.ko, `${it.href} label differs from its section heading`);
   }
 });

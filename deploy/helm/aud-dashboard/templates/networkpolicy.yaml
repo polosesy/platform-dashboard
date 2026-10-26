@@ -37,6 +37,14 @@ spec:
         - matchPattern: {{ $np.prometheusPattern | quote }}
         - matchName: azure.status.microsoft
         - matchName: rssfeed.azure.status.microsoft
+        {{- if .Values.features.advisoryFeeds }}
+        - matchName: www.cisa.gov                       # 긴급 취약점 — CISA KEV
+        - matchName: services.nvd.nist.gov
+        - matchName: nodejs.org
+        - matchName: www.php.net
+        - matchName: cveawg.mitre.org                   # CVE.org (CVE Services) records
+        - matchName: api.osv.dev                        # OSV — exact-version match of the package list
+        {{- end }}
         {{- range $np.extraFqdns }}
         - matchName: {{ . | quote }}
         {{- end }}
