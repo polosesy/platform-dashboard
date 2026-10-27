@@ -72,6 +72,11 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
                     <span className={styles.hmCellValue}>{formatCell(m, w, t)}{abs ? ` · ${abs}` : ""}</span>
                     {c.oom ? <Badge tone="high">OOMKilled</Badge> : null}
                     {c.code === "noLimit" || c.code === "noRequest" ? <span className={styles.hmCellNote}>{t(`ob.hm.code.${c.code}`)}</span> : null}
+                    {c.jvm ? (
+                      <span className={styles.hmCellNote} title={t("ob.hm.jvmHint")}>
+                        {t("ob.hm.jvmBreakdown", { limit: formatBytes(c.jvm.limit), heap: formatBytes(c.jvm.heapMax), nonheap: c.jvm.nonheapUsed === null ? "—" : formatBytes(c.jvm.nonheapUsed) })}
+                      </span>
+                    ) : null}
                     {c.worstPod ? <span className={styles.hmCellNote} title={c.worstPod}>{c.pool ? `${c.pool} · ` : ""}{c.worstPod}</span> : null}
                   </dd>
                 </div>

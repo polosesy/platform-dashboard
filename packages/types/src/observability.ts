@@ -325,7 +325,7 @@ export type ObservabilitySourcesResponse = { clusterId: string; generatedAt: str
 
 // ── Workload heatmap (services/workloadHeatmap.ts) — the customer's Grafana "container map" as one map ──
 
-export type HeatMetric = "ready" | "memory" | "cpu" | "restarts" | "oldGen" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
+export type HeatMetric = "ready" | "memory" | "cpu" | "restarts" | "oldGen" | "jvmHeadroom" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
 
 /**
  * stopped = nothing to run (code: scaledToZero 0/0 replicas · noNodes a DaemonSet no node matches · noPods its other
@@ -346,6 +346,8 @@ export type HeatCell = {
   code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods";
   /** Memory: working-set bytes · CPU: cores — of the pod that set the value (or the busiest pod when there is no ratio) */
   abs?: number;
+  /** jvmHeadroom (value = limit − heapMax, bytes): the pod's container memory limit, JVM max heap, non-heap in use */
+  jvm?: { limit: number; heapMax: number; nonheapUsed: number | null };
 };
 
 export type HeatWorkload = {

@@ -8,10 +8,10 @@ import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } fro
 export type HeatView = "worst" | HeatMetric;
 type T = (k: string, v?: Record<string, string | number>) => string;
 
-export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "http5xx", "logErrors", "poolUsage", "poolPending"];
+export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 export const SIGNAL_GROUPS: { id: "k8s" | "app" | "logs"; metrics: HeatMetric[] }[] = [
   { id: "k8s", metrics: ["ready", "memory", "cpu", "restarts"] },
-  { id: "app", metrics: ["oldGen", "http5xx", "poolUsage", "poolPending"] },
+  { id: "app", metrics: ["oldGen", "jvmHeadroom", "http5xx", "poolUsage", "poolPending"] },
   { id: "logs", metrics: ["logErrors"] },
 ];
 /** Same glyphs as the live diagram's cards (lib/liveStatus.ts) — the glyph carries the state, colour only repeats it */
@@ -56,6 +56,7 @@ export function formatCell(metric: HeatMetric, w: HeatWorkload, t: T): string {
   switch (metric) {
     case "memory": case "cpu": case "oldGen": case "poolUsage": return `${Math.round(c.value * 100)}%`;
     case "http5xx": return `${(c.value * 100).toFixed(2)}%`;
+    case "jvmHeadroom": return c.value < 0 ? `-${formatBytes(-c.value)}` : formatBytes(c.value);
     default: return Math.round(c.value).toLocaleString();
   }
 }
@@ -126,7 +127,8 @@ export function attentionRows(ws: HeatWorkload[], view: HeatView): AttentionRow[
   }
   return rows.sort((a, b) =>
     LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || b.signals.length - a.signals.length ||
-    (view !== "worst" ? (b.w.cells[view].value ?? 0) - (a.w.cells[view].value ?? 0) : 0) ||
+    // one signal: the worse value first (higher, except headroom where lower is worse)
+    (view !== "worst" ? ((b.w.cells[view].value ?? 0) - (a.w.cells[view].value ?? 0)) * (view === "jvmHeadroom" ? -1 : 1) : 0) ||
     cmp(heatKey(a.w), heatKey(b.w)));
 }
 
@@ -154,6 +156,7 @@ export function legendLevels(groups: NsGroup[]): HeatLevel[] {
 /** A threshold as text (ready has its own sentence → null) */
 export function formatThreshold(metric: HeatMetric, v: number): string | null {
   if (metric === "ready") return null;
+  if (metric === "jvmHeadroom") return formatBytes(v);
   if (metric === "http5xx") return `${(v * 100).toFixed(1)}%`;
   if (["memory", "cpu", "oldGen", "poolUsage"].includes(metric)) return `${Math.round(v * 100)}%`;
   return String(v);

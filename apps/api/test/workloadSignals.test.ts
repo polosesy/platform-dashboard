@@ -13,6 +13,7 @@ function raw(over: Partial<HeatRaw> = {}): HeatRaw {
   return {
     "family:jvm_memory_usage_after_gc": [r({}, 17)], "family:http_server_requests_seconds_count": [r({}, 40)],
     "family:hikaricp_connections_active": [r({}, 9)], "family:hikaricp_connections_pending": [r({}, 9)],
+    "family:jvm_memory_max_bytes": [r({}, 34)],
     active: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 1), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 1), r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 1)],
     podOwners: [
       r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg", owner_kind: "ReplicaSet", owner_name: "api-7d9f8c6b5" }, 1),
@@ -95,9 +96,33 @@ test("heatmap: finished pods never make a tile or a pod row, but their log ERROR
   assert.equal(api.cells.logErrors.value, 20, "its ERRORs in the window still belong to the workload");
 });
 
+test("heatmap: JVM headroom = memory limit − max heap per running pod; tightest pod; < non-heap in use = danger, < 250Mi = warn", () => {
+  const Mi = 1024 * 1024;
+  const base = raw();
+  const pods = [...base.podOwners!, r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty", owner_kind: "ReplicaSet", owner_name: "pay-5f6d7c8b9" }, 1)];
+  const s = aggregateHeatmap(raw({
+    podOwners: pods,
+    rsOwners: [...base.rsOwners!, r({ namespace: "app", replicaset: "pay-5f6d7c8b9", owner_kind: "Deployment", owner_name: "pay" }, 1)],
+    active: [...base.active!, r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 1)],
+    jvmHeapMax: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 545 * Mi), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 412 * Mi),
+      r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 900 * Mi), r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 100 * Mi)],
+    jvmNonheap: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 193 * Mi), r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 190 * Mi)],
+    podMemLimit: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 750 * Mi), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 850 * Mi),
+      r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 1024 * Mi)],
+  }), { logErrors: LE });
+  const api = s.workloads.find((w) => w.workload === "api")!.cells.jvmHeadroom;
+  assert.deepEqual([api.value, api.level, api.worstPod, api.jvm], [205 * Mi, "warn", "api-7d9f8c6b5-bcdfg", { limit: 750 * Mi, heapMax: 545 * Mi, nonheapUsed: 193 * Mi }], "the tightest pod");
+  const pay = s.workloads.find((w) => w.workload === "pay")!.cells.jvmHeadroom;
+  assert.deepEqual([pay.value, pay.level], [124 * Mi, "danger"], "124Mi left but non-heap already uses 190Mi");
+  const dns = s.workloads.find((w) => w.workload === "coredns")!.cells.jvmHeadroom;
+  assert.deepEqual([dns.level, dns.code], ["noBaseline", "noLimit"], "a JVM without a memory limit has nothing to subtract from");
+  assert.equal(s.flags.find((f) => f.metric === "jvmHeadroom")!.count, 2);
+  assert.match(heatmapQueries('cluster="a"', 60).jvmHeapMax!, /sum by \(namespace, pod\) \(jvm_memory_max_bytes\{cluster="a",area="heap"\} > 0\)/, "G1 pools report -1");
+});
+
 test("heatmap: missing families are notMeasured with a null flag; flags count the strip's levels", () => {
   const s = aggregateHeatmap(raw({ "family:hikaricp_connections_pending": [], poolPending: [] }), {});
-  assert.deepEqual(s.missing, ["logErrors", "poolPending"].sort((a, b) => ["ready", "memory", "cpu", "restarts", "oldGen", "http5xx", "logErrors", "poolUsage", "poolPending"].indexOf(a) - ["ready", "memory", "cpu", "restarts", "oldGen", "http5xx", "logErrors", "poolUsage", "poolPending"].indexOf(b)));
+  assert.deepEqual(s.missing, ["logErrors", "poolPending"].sort((a, b) => ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"].indexOf(a) - ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"].indexOf(b)));
   const flag = (m: string) => s.flags.find((f) => f.metric === m)!.count;
   assert.equal(flag("poolPending"), null);
   assert.equal(flag("logErrors"), null);

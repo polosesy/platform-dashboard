@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-10-26
+last-verified: 2026-10-27
 covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
@@ -42,6 +42,7 @@ covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloa
 | CPU | 사용 / request (+ 코어 `abs`). request 없음 = 측정됨·기준 없음(m = 1/1000 코어) | 100% / 150% |
 | 재시작 | `changes(restarts[기간])` 합 | 1 / 5 |
 | Old Gen | `jvm_memory_usage_after_gc` | 70% / 85% |
+| JVM 여유 | 파드의 컨테이너 메모리 limit − JVM 최대 heap(`jvm_memory_max_bytes{area="heap"} > 0` 합 — G1 eden/survivor는 −1이라 뺌) = metaspace·code cache·스레드·네이티브 메모리 자리, 패널에 limit·heap·지금 non-heap 사용(`jvm_memory_used_bytes{area="nonheap"}`) 풀이. 낮을수록 나쁨, limit 없음 = 기준 없음 | 250Mi 미만 / 지금 non-heap 사용보다 작음(heap이 차면 limit 초과 → OOMKilled) |
 | HTTP 5xx | 워크로드 전체 5xx / 전체 요청(`/actuator` 제외), 요청 0 = 트래픽 없음 | 0.5% / 1% |
 | 로그 ERROR | 수집기가 만든 ERROR 카운터(연결 파일 `aks.observability.logErrors`)의 기간 증가 — 기간 중 생긴 시계열도 전부 셈 | 1 / 50 |
 | 커넥션 풀 | Hikari active/max (가장 나쁜 풀), pending | 70% / 90%, pending ≥1 |

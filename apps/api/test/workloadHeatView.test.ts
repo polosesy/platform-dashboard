@@ -9,7 +9,7 @@ const v = ((hv as { default?: typeof hv }).default ?? hv) as typeof hv;
 const lg = ((lvm as { default?: typeof lvm }).default ?? lvm) as typeof lvm;
 const t = (k: string, p?: Record<string, string | number>) => (p ? `${k}:${JSON.stringify(p)}` : k);
 
-const METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "http5xx", "logErrors", "poolUsage", "poolPending"];
+const METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 function wl(namespace: string, workload: string, cells: Partial<Record<HeatMetric, Partial<HeatCell>>> = {}, worst?: HeatLevel): HeatWorkload {
   const full = Object.fromEntries(METRICS.map((m) => [m, { value: null, level: "notMeasured" as HeatLevel, ...(m === "ready" ? { level: "ok" as HeatLevel } : {}), ...cells[m] }])) as HeatWorkload["cells"];
   const lv = worst ?? (["danger", "warn", "ok"] as HeatLevel[]).find((x) => METRICS.some((m) => full[m].level === x)) ?? "ok";
@@ -76,6 +76,13 @@ test("tile text and names", () => {
   assert.deepEqual(v.legendLevels(v.groupByNamespace(WS, "worst")), ["danger", "warn", "ok"]);
   assert.equal(v.formatThreshold("ready", 1), null);
   assert.equal(v.formatThreshold("http5xx", 0.01), "1.0%");
+  assert.equal(v.formatThreshold("jvmHeadroom", 250 * 1024 * 1024), "250Mi");
+  const tight = wl("app", "orders", { jvmHeadroom: { value: 205 * 1024 * 1024, level: "warn" } });
+  const over = wl("app", "billing", { jvmHeadroom: { value: -40 * 1024 * 1024, level: "danger" } });
+  assert.equal(v.formatCell("jvmHeadroom", tight, t), "205Mi");
+  assert.equal(v.formatCell("jvmHeadroom", over, t), "-40Mi", "a heap larger than the limit");
+  assert.deepEqual(v.attentionRows([tight, wl("app", "cart", { jvmHeadroom: { value: 100 * 1024 * 1024, level: "warn" } })], "jvmHeadroom").map((r) => r.w.workload),
+    ["cart", "orders"], "lower headroom first");
 });
 
 test("dynamic heatmap i18n keys exist in both languages", () => {

@@ -20,7 +20,7 @@ import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
 import { pickScope, promString, scopeMatchers } from "./promScope.js";
 import { ownerIndex, resolveWorkload, type OwnerRow } from "./workloadOwners.js";
 
-export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "http5xx", "logErrors", "poolUsage", "poolPending"];
+export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 
 /** The customer's map thresholds (Grafana container map; JVM / alert standards) — warn at ≥ warn, danger at ≥ danger */
 export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number }> = {
@@ -29,6 +29,8 @@ export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number 
   cpu: { warn: 1, danger: 1.5 },
   restarts: { warn: 1, danger: 5 },
   oldGen: { warn: 0.7, danger: 0.85 },
+  // special (lower is worse): headroom < 250Mi = warn (customer standard), < the non-heap in use now (or ≤ 0) = danger
+  jvmHeadroom: { warn: 250 * 1024 * 1024, danger: 0 },
   http5xx: { warn: 0.005, danger: 0.01 },
   logErrors: { warn: 1, danger: 50 },
   poolUsage: { warn: 0.7, danger: 0.9 },
@@ -37,13 +39,13 @@ export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number 
 
 /** The red-flag strip: which level counts (their strip: memory 90%+, CPU > 1.5×, any restart, pool 80%+ …) */
 const FLAG_AT: Record<HeatMetric, HeatLevel[]> = {
-  ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"],
+  ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["warn", "danger"],
   http5xx: ["danger"], logErrors: ["warn", "danger"], poolUsage: ["danger"], poolPending: ["danger"],
 };
 
 /** Families whose absence makes a metric "notMeasured" for everyone (cAdvisor/KSM ones are always expected) */
 const FAMILY: Partial<Record<HeatMetric, string>> = {
-  oldGen: "jvm_memory_usage_after_gc", http5xx: "http_server_requests_seconds_count",
+  oldGen: "jvm_memory_usage_after_gc", jvmHeadroom: "jvm_memory_max_bytes", http5xx: "http_server_requests_seconds_count",
   poolUsage: "hikaricp_connections_active", poolPending: "hikaricp_connections_pending",
 };
 
@@ -72,6 +74,11 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     dsReady: `max by (namespace, daemonset) (${sel("kube_daemonset_status_number_ready")})`,
     dsDesired: `max by (namespace, daemonset) (${sel("kube_daemonset_status_desired_number_scheduled")})`,
     oldGen: `max by (namespace, pod) (${sel("jvm_memory_usage_after_gc")})`,
+    // JVM headroom: heap max = the pools with a defined maximum (G1 eden/survivor report -1), the pod's largest
+    // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …
+    jvmHeapMax: `sum by (namespace, pod) (${sel("jvm_memory_max_bytes", 'area="heap"')} > 0)`,
+    jvmNonheap: `sum by (namespace, pod) (${sel("jvm_memory_used_bytes", 'area="nonheap"')})`,
+    podMemLimit: `max by (namespace, pod) (${sel("kube_pod_container_resource_limits", 'resource="memory"')})`,
     http5xx: `sum by (namespace, pod) (rate(${sel("http_server_requests_seconds_count", 'status=~"5..",uri!~"/actuator.*"')}[5m]))`,
     httpAll: `sum by (namespace, pod) (rate(${sel("http_server_requests_seconds_count", 'uri!~"/actuator.*"')}[5m]))`,
     poolUsage: `max by (namespace, pod, pool) (${sel("hikaricp_connections_active")}) / on (namespace, pod, pool) (max by (namespace, pod, pool) (${sel("hikaricp_connections_max")}) > 0)`,
@@ -84,6 +91,12 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     q.logErrors = `sum by (namespace, ${logErrors.podLabel}) (clamp_min(max_over_time(${m}${w}) - (${m} offset ${windowMinutes}m or 0 * max_over_time(${m}${w})), 0))`;
   }
   return q;
+}
+
+/** JVM headroom (lower is worse): ≤ 0 or below the non-heap in use now = danger, < 250Mi = warn */
+export function jvmHeadroomLevel(headroom: number, nonheapUsed: number | null): HeatLevel {
+  if (headroom <= 0 || (nonheapUsed !== null && headroom < nonheapUsed)) return "danger";
+  return headroom < HEAT_THRESHOLDS.jvmHeadroom.warn ? "warn" : "ok";
 }
 
 export function levelOf(metric: HeatMetric, value: number): HeatLevel {
@@ -194,6 +207,29 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   worstBy(raw.poolUsage, raise("poolUsage"));
   worstBy(raw.poolPending, raise("poolPending"));
 
+  // JVM headroom per running pod: container memory limit − JVM max heap — what metaspace, code cache, threads and
+  // native buffers live in. The workload shows its tightest pod; a JVM pod without a limit has no headroom to judge
+  const byPod = (rows: PromRow[] | undefined) => new Map((rows ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}`, r.value]));
+  const limitByPod = byPod(raw.podMemLimit);
+  const nonheapByPod = byPod(raw.jvmNonheap);
+  for (const r of raw.jvmHeapMax ?? []) {
+    if (!isActive(r.metric.namespace, r.metric.pod)) continue;
+    const x = podOf(r.metric.namespace, r.metric.pod);
+    if (!x) continue;
+    const key = `${r.metric.namespace}/${r.metric.pod}`;
+    const limit = limitByPod.get(key);
+    const nonheapUsed = nonheapByPod.get(key) ?? null;
+    const cell = x.w.cells.jvmHeadroom;
+    if (limit === undefined || limit <= 0) {
+      if (cell.value === null) x.w.cells.jvmHeadroom = { value: null, level: "noBaseline", code: "noLimit", worstPod: r.metric.pod! };
+      continue;
+    }
+    const headroom = limit - r.value;
+    if (cell.value === null || headroom < cell.value) {
+      x.w.cells.jvmHeadroom = { value: headroom, level: jvmHeadroomLevel(headroom, nonheapUsed), worstPod: r.metric.pod!, jvm: { limit, heapMax: r.value, nonheapUsed } };
+    }
+  }
+
   // 5xx share per workload (all its pods' traffic, not the worst pod)
   const http = new Map<Acc, { err: number; all: number; worstPod?: string; worst: number }>();
   for (const r of raw.httpAll ?? []) {
@@ -264,8 +300,8 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
       w.cells.restarts = { value: totalRestarts, level: totalRestarts > 0 ? levelOf("restarts", totalRestarts) : "ok", ...(totalRestarts > 0 && r ? { worstPod: r.pod } : {}) };
     }
     // Java/Spring signals: present in the workspace but not here = not instrumented
-    for (const metric of ["oldGen", "http5xx", "poolUsage", "poolPending"] as HeatMetric[]) {
-      if (w.cells[metric].value !== null || w.cells[metric].level === "noTraffic") continue;
+    for (const metric of ["oldGen", "jvmHeadroom", "http5xx", "poolUsage", "poolPending"] as HeatMetric[]) {
+      if (w.cells[metric].value !== null || w.cells[metric].level === "noTraffic" || w.cells[metric].level === "noBaseline") continue;
       w.cells[metric] = { value: null, level: families.has(FAMILY[metric]!) ? "notInstrumented" : "notMeasured" };
     }
     // Nothing to run (0 desired, no pods): say why on readiness, "no pods" on the rest — not "not measured", not OK
