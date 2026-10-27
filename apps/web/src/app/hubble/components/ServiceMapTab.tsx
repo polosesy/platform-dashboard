@@ -36,7 +36,7 @@ import type {
   HubbleFlow,
   HubbleFlowsResponse,
 } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
@@ -632,14 +632,8 @@ export function ServiceMapTab({ clusterId }: Props) {
     setError(null);
     try {
       const token = await getApiToken();
-      const params = new URLSearchParams({
-        clusterId,
-        timeWindow: String(timeWindow),
-        lang: locale,
-      });
-      if (nsFilter) params.set("namespace", nsFilter);
       const data = await fetchJsonWithBearer<HubbleServiceMapResponse>(
-        `${apiBaseUrl()}/api/hubble/service-map?${params}`,
+        apiUrl("/api/hubble/service-map", { clusterId, timeWindow, lang: locale, namespace: nsFilter }),
         token,
       );
       setMapData(data);
@@ -735,11 +729,8 @@ export function ServiceMapTab({ clusterId }: Props) {
     setFlowsLoading(true);
     try {
       const token = await getApiToken();
-      const params = new URLSearchParams({ clusterId, limit: "500", lang: locale });
-      if (nsFilter) params.set("namespace", nsFilter);
-      if (verdictFilter) params.set("verdict", verdictFilter);
       const data = await fetchJsonWithBearer<HubbleFlowsResponse>(
-        `${apiBaseUrl()}/api/hubble/flows?${params}`,
+        apiUrl("/api/hubble/flows", { clusterId, limit: 500, lang: locale, namespace: nsFilter, verdict: verdictFilter }),
         token,
       );
       // Same rule as the map edges: replies would show server→client with an ephemeral port

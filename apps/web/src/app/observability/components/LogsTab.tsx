@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { PodLogEntry, ObservabilityLogsResponse, ObservabilityNamespacesResponse, NamespacePodItem } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
@@ -37,10 +37,8 @@ export function LogsTab({ clusterId }: Props) {
     if (!clusterId) return;
     try {
       const token = await getApiToken();
-      const base = apiBaseUrl();
-      const params = new URLSearchParams({ clusterId });
       const data = await fetchJsonWithBearer<ObservabilityNamespacesResponse>(
-        `${base}/api/observability/namespaces?${params}`,
+        apiUrl("/api/observability/namespaces", { clusterId }),
         token,
       );
       setNsPodItems(data.items);
@@ -123,19 +121,8 @@ export function LogsTab({ clusterId }: Props) {
     setError(null);
     try {
       const token = await getApiToken();
-      const base = apiBaseUrl();
-      const params = new URLSearchParams({
-        clusterId,
-        namespace,
-        podName,
-        limit: "300",
-        sinceMinutes: String(sinceMinutes),
-      });
-      if (safeContainer) {
-        params.set("container", safeContainer);
-      }
       const data = await fetchJsonWithBearer<ObservabilityLogsResponse>(
-        `${base}/api/observability/logs?${params}`,
+        apiUrl("/api/observability/logs", { clusterId, namespace, podName, limit: 300, sinceMinutes, container: safeContainer }),
         token,
       );
       setLogs(data.logs);

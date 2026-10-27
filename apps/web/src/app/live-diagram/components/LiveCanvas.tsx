@@ -26,7 +26,7 @@ import type {
   SubResource,
   AksVmssInstance,
 } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
 import { isUnusedBadge, liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
@@ -320,7 +320,7 @@ function LiveCanvasInner({
     if (!vmssInstanceCache.current.has(vmssNodeId)) {
       try {
         const token = await getApiToken().catch(() => null);
-        const url = `${apiBaseUrl()}/api/live/vmss-instances?resourceId=${encodeURIComponent(azureResourceId)}${aksClusterArmId ? `&aksClusterId=${encodeURIComponent(aksClusterArmId)}` : ""}`;
+        const url = apiUrl("/api/live/vmss-instances", { resourceId: azureResourceId, aksClusterId: aksClusterArmId });
         const data = await fetchJsonWithBearer<{ instances: AksVmssInstance[] }>(url, token);
         vmssInstanceCache.current.set(vmssNodeId, data.instances ?? []);
       } catch {

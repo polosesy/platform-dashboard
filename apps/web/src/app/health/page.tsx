@@ -14,7 +14,7 @@ import type {
   RegionalStatusResponse,
   RegionHealthStatus,
 } from "@aud/types";
-import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
@@ -531,7 +531,7 @@ function ServiceStatusPanel({
       // Flat array: [title0, summary0, title1, summary1, ...]
       const texts = data.events.flatMap((evt) => [evt.title, evt.summary ?? ""]);
       const resp = await fetchJsonWithBearer<{ translations?: string[] | null; error?: string; status?: number; freeStatus?: number | "network" }>(
-        `${apiBaseUrl()}/api/health/translate`,
+        apiUrl("/api/health/translate"),
         token,
         { method: "POST", body: JSON.stringify({ texts, to: "ko" }) },
       );

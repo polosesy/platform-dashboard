@@ -9,7 +9,7 @@ import type {
   WorkloadServiceInfo,
   JvmMetrics,
 } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { rgba } from "@/lib/palette";
@@ -223,10 +223,8 @@ export function WorkloadDetailPanel({
     setDetailError(null);
     try {
       const token = await getApiToken();
-      const base = apiBaseUrl();
-      const params = new URLSearchParams({ clusterId, namespace, workloadName: name, kind });
       const data = await fetchJsonWithBearer<WorkloadDetailResponse>(
-        `${base}/api/observability/workloads/detail?${params}`,
+        apiUrl("/api/observability/workloads/detail", { clusterId, namespace, workloadName: name, kind }),
         token,
       );
       setDetail(data);

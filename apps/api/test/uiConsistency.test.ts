@@ -87,3 +87,10 @@ test("modules touched by the redesign use the danger token, not a second red", (
   const offenders = files.filter((f) => /rgba\(\s*196,\s*43,\s*28/.test(read(join(webSrc, f))));
   assert.deepEqual(offenders, []);
 });
+
+test("API URLs are built with apiUrl(path, params) — no hand-joined apiBaseUrl() + query strings outside lib/api.ts", () => {
+  const offenders = walk(webSrc, (f) => /\.tsx?$/.test(f) && rel(f) !== "lib/api.ts")
+    .filter((f) => /apiBaseUrl\(\)/.test(read(f)))
+    .map(rel);
+  assert.deepEqual(offenders, []);
+});

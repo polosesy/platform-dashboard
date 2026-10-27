@@ -89,7 +89,7 @@
 }
 
 .card:hover {
-  border-color: rgba(0, 120, 212, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.4);
   transform: translateY(-1px);
 }
 

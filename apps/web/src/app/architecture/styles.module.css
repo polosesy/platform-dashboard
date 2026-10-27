@@ -176,7 +176,7 @@
 
 .cleanupBtn {
   appearance: none;
-  border: 1px solid rgba(209, 132, 0, 0.35);
+  border: 1px solid rgba(var(--warning-rgb), 0.35);
   background: var(--warning-soft);
   color: var(--warning-strong);
   border-radius: var(--radius-pill);
@@ -268,7 +268,7 @@
   height: 100%;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(var(--paper-rgb), 0.35);
 }
 
 /* Outer boundary (Azure Architecture Center order): outside Azure › subscription › region › VNet › subnet */
@@ -280,7 +280,7 @@
 
 .box_subscription {
   border: 1.5px solid rgba(var(--ink-rgb), 0.32);
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(var(--paper-rgb), 0.4);
   border-radius: 18px;
 }
 
@@ -299,26 +299,26 @@
 }
 
 .box_region {
-  border: 1.5px dashed rgba(20, 21, 23, 0.28);
-  background: rgba(255, 255, 255, 0.28);
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.28);
+  background: rgba(var(--paper-rgb), 0.28);
   border-radius: 16px;
 }
 
 .box_vnet {
-  border: 2px solid rgba(0, 120, 212, 0.5);
-  background: rgba(0, 120, 212, 0.035);
+  border: 2px solid rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.035);
 }
 
 .box_subnet {
-  border: 1.5px dashed rgba(95, 75, 139, 0.45);
-  background: rgba(95, 75, 139, 0.035);
+  border: 1.5px dashed rgba(var(--subnet-rgb), 0.45);
+  background: rgba(var(--subnet-rgb), 0.035);
   border-radius: 10px;
 }
 
 .box_lane,
 .box_global {
   border: 1px solid var(--border);
-  background: rgba(20, 21, 23, 0.025);
+  background: rgba(var(--ink-rgb), 0.025);
 }
 
 .box_group {
@@ -489,7 +489,7 @@
 }
 
 .tile:hover {
-  border-color: rgba(0, 120, 212, 0.5);
+  border-color: rgba(var(--accent-rgb), 0.5);
 }
 
 .tile:focus-visible {
@@ -560,18 +560,18 @@
 }
 
 .tile_pill {
-  border: 2px solid rgba(0, 120, 212, 0.5);
-  background: rgba(240, 247, 253, 0.96);
+  border: 2px solid rgba(var(--accent-rgb), 0.5);
+  background: color-mix(in srgb, var(--accent) 6%, rgba(var(--paper-rgb), 0.96));
 }
 
 .tile_ghost {
   border-style: dashed;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--paper-rgb), 0.7);
   opacity: 0.85;
 }
 
 .tile_internet {
-  border-color: rgba(216, 59, 1, 0.45);
+  border-color: rgba(var(--danger-rgb), 0.45);
   background: #fff7f3;
 }
 
@@ -581,9 +581,9 @@
   height: 22px;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 50% 50%, transparent 52%, rgba(216, 59, 1, 0.8) 54%, rgba(216, 59, 1, 0.8) 62%, transparent 64%),
-    linear-gradient(rgba(216, 59, 1, 0.8), rgba(216, 59, 1, 0.8)) center / 2px 70% no-repeat,
-    linear-gradient(rgba(216, 59, 1, 0.8), rgba(216, 59, 1, 0.8)) center / 70% 2px no-repeat;
+    radial-gradient(circle at 50% 50%, transparent 52%, rgba(var(--danger-rgb), 0.8) 54%, rgba(var(--danger-rgb), 0.8) 62%, transparent 64%),
+    linear-gradient(rgba(var(--danger-rgb), 0.8), rgba(var(--danger-rgb), 0.8)) center / 2px 70% no-repeat,
+    linear-gradient(rgba(var(--danger-rgb), 0.8), rgba(var(--danger-rgb), 0.8)) center / 70% 2px no-repeat;
 }
 
 /* Focus / selection — applied on the React Flow node wrapper */
@@ -598,11 +598,11 @@
 
 .selected .tile {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.25);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
 }
 
 .selected .box {
-  box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.18);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
 }
 
 /* Zoomed far out: boundaries and names only */
@@ -683,15 +683,15 @@
 }
 
 .lb_region {
-  border: 1.5px dashed rgba(20, 21, 23, 0.4);
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.4);
 }
 
 .lb_vnet {
-  border: 2px solid rgba(0, 120, 212, 0.55);
+  border: 2px solid rgba(var(--accent-rgb), 0.55);
 }
 
 .lb_subnet {
-  border: 1.5px dashed rgba(95, 75, 139, 0.55);
+  border: 1.5px dashed rgba(var(--subnet-rgb), 0.55);
 }
 
 .legendLines {

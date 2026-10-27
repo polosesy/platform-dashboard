@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { HubbleCoverage, HubbleFlowsResponse, HubbleFlow } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
@@ -47,11 +47,8 @@ export function FlowsTab({ clusterId }: Props) {
     setError(null);
     try {
       const token = await getApiToken();
-      const params = new URLSearchParams({ clusterId, limit: "2000", lang: locale });
-      if (nsFilter) params.set("namespace", nsFilter);
-      if (verdictFilter) params.set("verdict", verdictFilter);
       const data = await fetchJsonWithBearer<HubbleFlowsResponse>(
-        `${apiBaseUrl()}/api/hubble/flows?${params}`,
+        apiUrl("/api/hubble/flows", { clusterId, limit: 2000, lang: locale, namespace: nsFilter, verdict: verdictFilter }),
         token,
       );
       setFlows(data.flows);

@@ -10,7 +10,7 @@
   --unk: #8b8f94;
   --unk-soft: #eeece7;
   --faint: #8b8f94;
-  --line: rgba(20, 21, 23, 0.12);
+  --line: rgba(var(--ink-rgb), 0.12);
   --line-strong: #c9c5bc;
   --surface: #ffffff;
   --surface-2: #faf9f6;
@@ -42,13 +42,13 @@
 .ctrls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12px; white-space: nowrap; }
 .fchip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; color: inherit; font: inherit; font-size: 12px; }
-.fchip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: rgba(0, 120, 212, 0.08); }
+.fchip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 .linkish { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
 .linkish:hover { text-decoration: underline; }
 .btnGhost { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; color: inherit; font-family: inherit; }
 .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .toggle button { border: none; background: var(--surface); padding: 3px 10px; font-size: 12px; cursor: pointer; color: inherit; font-family: inherit; }
-.toggle button[aria-pressed="true"] { background: rgba(0, 120, 212, 0.1); color: var(--accent); }
+.toggle button[aria-pressed="true"] { background: rgba(var(--accent-rgb), 0.1); color: var(--accent); }
 .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
 .notice { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 12.5px; color: var(--muted); }
 .sr { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -62,8 +62,8 @@
 .pill[data-tone="ev"] { background: var(--surface-2); border-color: var(--line); color: var(--ink); font-weight: 550; }
 
 .evc { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 650; padding: 0 6px; border-radius: 999px; line-height: 17px; border: 1px solid; white-space: nowrap; margin-left: 6px; vertical-align: 1px; }
-.evc[data-ev="obs"] { color: var(--edge-obs); border-color: rgba(0, 99, 177, 0.4); }
-.evc[data-ev="perm"] { color: var(--edge-perm); border-color: rgba(196, 50, 10, 0.4); }
+.evc[data-ev="obs"] { color: var(--edge-obs); border-color: rgba(var(--accent-rgb), 0.4); }
+.evc[data-ev="perm"] { color: var(--edge-perm); border-color: rgba(var(--danger-rgb), 0.4); }
 .evc[data-ev="cfg"] { color: var(--muted); border-color: var(--line-strong); }
 .evc[data-ev="unk"] { color: var(--muted); border-style: dashed; border-color: var(--faint); }
 
@@ -81,7 +81,7 @@
 .recon span { height: 100%; }
 .reconLegend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .reconLegend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
-.position { font-size: 12.5px; padding: 8px 12px; border-radius: 10px; background: rgba(0, 120, 212, 0.08); }
+.position { font-size: 12.5px; padding: 8px 12px; border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); }
 
 /* ── Inspector ── */
 .dcard { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; text-align: left; }
@@ -181,7 +181,7 @@
 .card::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0; background: var(--sevc); }
 .card[data-sev="crit"] { --sevc: var(--crit); }
 .card[data-sev="warn"] { --sevc: var(--warnc); }
-.card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.12); }
+.card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12); }
 .card[data-closed="true"] { opacity: 0.55; }
 .cardTop { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cardNum { font-family: var(--font-geist-mono, monospace); font-size: 12px; color: var(--muted); }

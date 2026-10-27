@@ -18,6 +18,8 @@
   --fault-rgb: 239, 68, 68;
   --canvas-rgb: 247, 248, 250;
   --violet-rgb: 112, 48, 160;
+  --subnet-rgb: 95, 75, 139;
+  --warning-strong-rgb: 154, 97, 0;
 
   --bg: #f6f4ef;
   --panel: rgba(var(--paper-rgb), 0.72);
@@ -40,7 +42,7 @@
   --ok: rgb(var(--ok-rgb));
   /* Darker variants for text on a tinted background (contrast) */
   --accent-strong: #005a9e;
-  --warning-strong: #9a6100;
+  --warning-strong: rgb(var(--warning-strong-rgb));
 
   /* Severity scale (Defender / policy findings) */
   --sev-high: var(--danger);

@@ -27,13 +27,13 @@
 }
 .coverageNote strong { color: var(--fg); font-weight: 600; }
 .coverageWarn {
-  border-color: rgba(183,121,31,0.40);
-  background: rgba(183,121,31,0.07);
+  border-color: rgba(var(--warning-rgb), 0.40);
+  background: rgba(var(--warning-rgb), 0.07);
 }
 .coverageItem { white-space: nowrap; }
 .coverageHint {
   flex-basis: 100%;
-  color: rgba(138,88,14,0.95);
+  color: rgba(var(--warning-strong-rgb), 0.95);
 }
 
 /* ── Status badges ── */
@@ -55,14 +55,14 @@
   gap: 4px;
 }
 .statusOk {
-  background: rgba(16,137,62,0.10);
-  color: rgba(16,137,62,0.90);
-  border: 1px solid rgba(16,137,62,0.25);
+  background: rgba(var(--success-rgb), 0.10);
+  color: rgba(var(--success-rgb), 0.90);
+  border: 1px solid rgba(var(--success-rgb), 0.25);
 }
 .statusOff {
-  background: rgba(20,21,23,0.06);
-  color: rgba(20,21,23,0.40);
-  border: 1px solid rgba(20,21,23,0.12);
+  background: rgba(var(--ink-rgb), 0.06);
+  color: rgba(var(--ink-rgb), 0.40);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
 }
 
 /* ── Tabs ── */
@@ -88,7 +88,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(20,21,23,0.45);
+  color: rgba(var(--ink-rgb), 0.45);
   margin-bottom: 6px;
 }
 
@@ -102,7 +102,7 @@
 .summaryCardSub {
   font-size: 11px;
   margin-top: 4px;
-  color: rgba(20,21,23,0.50);
+  color: rgba(var(--ink-rgb), 0.50);
 }
 
 /* ── Service Map Toolbar ── */
@@ -131,7 +131,7 @@
   font-size: 12px;
   min-width: 160px;
 }
-.mapToolbarSearch::placeholder { color: rgba(20,21,23,0.3); }
+.mapToolbarSearch::placeholder { color: rgba(var(--ink-rgb), 0.3); }
 .mapToolbarRefresh {
   padding: 5px 10px;
   border-radius: 5px;
@@ -145,7 +145,7 @@
 .mapToolbarRefresh:hover { background: var(--surface-2, #f0f0f0); }
 .mapToolbarStats {
   font-size: 11px;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   margin-left: auto;
   white-space: nowrap;
 }
@@ -162,7 +162,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(248,249,250,1);
+  background: rgb(var(--canvas-rgb));
   height: calc(100vh - 380px);
   min-height: 400px;
   flex: 1;
@@ -176,8 +176,8 @@
 
 /* ── Service Map Node ── */
 .svcNode {
-  background: rgba(255,255,255,0.92);
-  border: 1.5px solid rgba(20,21,23,0.12);
+  background: rgba(var(--paper-rgb), 0.92);
+  border: 1.5px solid rgba(var(--ink-rgb), 0.12);
   border-radius: 8px;
   padding: 8px 12px;
   min-width: 150px;
@@ -187,16 +187,16 @@
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 .svcNode:hover {
-  border-color: rgba(0,120,212,0.4);
-  box-shadow: 0 2px 10px rgba(0,120,212,0.15);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.15);
   transform: translateY(-1px);
 }
-.svcNodeOk     { border-color: rgba(16,137,62,0.35); }
-.svcNodeWarn   { border-color: rgba(209,132,0,0.4); }
-.svcNodeCrit   { border-color: rgba(216, 59, 1, 0.4); box-shadow: 0 0 0 1px rgba(216, 59, 1, 0.15); }
+.svcNodeOk     { border-color: rgba(var(--success-rgb), 0.35); }
+.svcNodeWarn   { border-color: rgba(var(--warning-rgb), 0.4); }
+.svcNodeCrit   { border-color: rgba(var(--danger-rgb), 0.4); box-shadow: 0 0 0 1px rgba(var(--danger-rgb), 0.15); }
 .svcNodeSelected {
-  border-color: rgba(0,120,212,0.7) !important;
-  box-shadow: 0 0 0 2px rgba(0,120,212,0.2), 0 2px 12px rgba(0,120,212,0.15) !important;
+  border-color: rgba(var(--accent-rgb), 0.7) !important;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2), 0 2px 12px rgba(var(--accent-rgb), 0.15) !important;
 }
 
 .svcNodeHeader {
@@ -216,7 +216,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(0,120,212,0.6);
+  color: rgba(var(--accent-rgb), 0.6);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -228,8 +228,8 @@
   font-weight: 700;
   padding: 1px 4px;
   border-radius: 3px;
-  background: rgba(20,21,23,0.06);
-  color: rgba(20,21,23,0.5);
+  background: rgba(var(--ink-rgb), 0.06);
+  color: rgba(var(--ink-rgb), 0.5);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -249,7 +249,7 @@
   display: flex;
   gap: 6px;
   font-size: 10px;
-  color: rgba(20,21,23,0.55);
+  color: rgba(var(--ink-rgb), 0.55);
   flex-wrap: wrap;
 }
 
@@ -265,10 +265,10 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.dotGreen  { background: rgba(16,137,62,0.65); }
-.dotRed    { background: rgba(216, 59, 1, 0.70); }
-.dotYellow { background: rgba(209,132,0,0.65); }
-.dotGray   { background: rgba(20,21,23,0.2); }
+.dotGreen  { background: rgba(var(--success-rgb), 0.65); }
+.dotRed    { background: rgba(var(--danger-rgb), 0.70); }
+.dotYellow { background: rgba(var(--warning-rgb), 0.65); }
+.dotGray   { background: rgba(var(--ink-rgb), 0.2); }
 
 /* ── Node Detail Panel ── */
 .detailPanel {
@@ -305,34 +305,34 @@
   background: none;
   font-size: 14px;
   cursor: pointer;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   padding: 2px 6px;
   border-radius: 4px;
 }
-.detailPanelClose:hover { background: rgba(20,21,23,0.06); color: var(--fg); }
+.detailPanelClose:hover { background: rgba(var(--ink-rgb), 0.06); color: var(--fg); }
 
 .detailPanelMeta {
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(20,21,23,0.06);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 .detailPanelMetaRow {
   display: flex;
   justify-content: space-between;
   padding: 3px 0;
-  color: rgba(20,21,23,0.65);
+  color: rgba(var(--ink-rgb), 0.65);
 }
-.detailPanelMetaRow span:first-child { font-weight: 600; color: rgba(20,21,23,0.45); font-size: 11px; }
+.detailPanelMetaRow span:first-child { font-weight: 600; color: rgba(var(--ink-rgb), 0.45); font-size: 11px; }
 
 .detailPanelSection {
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(20,21,23,0.06);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 .detailPanelSectionTitle {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   margin: 0 0 8px;
 }
 
@@ -354,7 +354,7 @@
 }
 .detailMetricLabel {
   font-size: 10px;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   font-weight: 600;
 }
 
@@ -368,9 +368,9 @@
 .detailLabel {
   font-size: 10px;
   padding: 2px 6px;
-  background: rgba(0,120,212,0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border-radius: 3px;
-  color: rgba(0,120,212,0.7);
+  color: rgba(var(--accent-rgb), 0.7);
   font-family: var(--font-mono, 'Cascadia Code', monospace);
 }
 
@@ -385,10 +385,10 @@
   gap: 6px;
   padding: 4px 6px;
   border-radius: 4px;
-  background: rgba(20,21,23,0.02);
+  background: rgba(var(--ink-rgb), 0.02);
   font-size: 11px;
 }
-.detailConnItem:hover { background: rgba(20,21,23,0.04); }
+.detailConnItem:hover { background: rgba(var(--ink-rgb), 0.04); }
 .detailConnDir {
   font-weight: 700;
   font-size: 12px;
@@ -396,8 +396,8 @@
   text-align: center;
   flex-shrink: 0;
 }
-.detailConnIn { color: rgba(0,120,212,0.6); }
-.detailConnOut { color: rgba(16,137,62,0.7); }
+.detailConnIn { color: rgba(var(--accent-rgb), 0.6); }
+.detailConnOut { color: rgba(var(--success-rgb), 0.7); }
 .detailConnName {
   font-weight: 600;
   color: var(--fg);
@@ -408,19 +408,19 @@
 }
 .detailConnProto {
   font-size: 10px;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   font-family: var(--font-mono, monospace);
   white-space: nowrap;
 }
 .detailConnFlows {
   font-variant-numeric: tabular-nums;
-  color: rgba(20,21,23,0.5);
+  color: rgba(var(--ink-rgb), 0.5);
   font-size: 10px;
   white-space: nowrap;
 }
 .detailConnL7 {
   font-size: 9px;
-  color: rgba(0,120,212,0.5);
+  color: rgba(var(--accent-rgb), 0.5);
   font-family: var(--font-mono, monospace);
 }
 
@@ -432,8 +432,8 @@
   padding: 8px 12px;
   margin-top: 8px;
   font-size: 10px;
-  color: rgba(20,21,23,0.45);
-  background: rgba(20,21,23,0.02);
+  color: rgba(var(--ink-rgb), 0.45);
+  background: rgba(var(--ink-rgb), 0.02);
   border-radius: 6px;
   flex-wrap: wrap;
 }
@@ -442,7 +442,7 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(20,21,23,0.35);
+  color: rgba(var(--ink-rgb), 0.35);
 }
 .mapLegendItem {
   display: flex;
@@ -456,7 +456,7 @@
   border-radius: 2px;
 }
 .mapLegendSep {
-  color: rgba(20,21,23,0.15);
+  color: rgba(var(--ink-rgb), 0.15);
   font-size: 12px;
 }
 
@@ -474,7 +474,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgba(20,21,23,0.45);
+  color: rgba(var(--ink-rgb), 0.45);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   position: sticky;
@@ -485,7 +485,7 @@
 
 .flowTable td {
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(20,21,23,0.05);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.05);
   vertical-align: middle;
   font-variant-numeric: tabular-nums;
 }
@@ -498,9 +498,9 @@
 }
 
 .flowRow { transition: background 0.1s; }
-.flowRow:hover { background: rgba(0,120,212,0.03); }
-.flowRowDropped { background: rgba(216, 59, 1, 0.03); }
-.flowRowDropped:hover { background: rgba(216, 59, 1, 0.06); }
+.flowRow:hover { background: rgba(var(--accent-rgb), 0.03); }
+.flowRowDropped { background: rgba(var(--danger-rgb), 0.03); }
+.flowRowDropped:hover { background: rgba(var(--danger-rgb), 0.06); }
 
 .verdictBadge {
   font-size: 10px;
@@ -509,23 +509,23 @@
   border-radius: 3px;
   white-space: nowrap;
 }
-.verdictForwarded { background: rgba(16,137,62,0.10); color: rgba(16,137,62,0.85); }
-.verdictDropped   { background: rgba(216, 59, 1, 0.08); color: var(--danger); }
-.verdictAudit     { background: rgba(209,132,0,0.10); color: rgba(160,100,0,0.90); }
+.verdictForwarded { background: rgba(var(--success-rgb), 0.10); color: rgba(var(--success-rgb), 0.85); }
+.verdictDropped   { background: rgba(var(--danger-rgb), 0.08); color: var(--danger); }
+.verdictAudit     { background: rgba(var(--warning-rgb), 0.10); color: rgba(var(--warning-strong-rgb), 0.90); }
 
 .protocolBadge {
   font-size: 10px;
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(0,120,212,0.08);
-  color: rgba(0,120,212,0.70);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: rgba(var(--accent-rgb), 0.70);
 }
 
 .flowMono {
   font-family: var(--font-mono, 'Cascadia Code', 'Consolas', monospace);
   font-size: 11px;
-  color: rgba(20,21,23,0.65);
+  color: rgba(var(--ink-rgb), 0.65);
 }
 
 /* ── Toolbar ── */
@@ -549,7 +549,7 @@
 
 .toolbarCount {
   font-size: 11px;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   margin-left: auto;
 }
 
@@ -559,7 +559,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(20,21,23,0.50);
+  color: rgba(var(--ink-rgb), 0.50);
   margin: 0 0 12px;
 }
 
@@ -577,13 +577,13 @@
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  color: rgba(20,21,23,0.45);
+  color: rgba(var(--ink-rgb), 0.45);
   border-bottom: 1px solid var(--border);
 }
 
 .dataTable td {
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(20,21,23,0.05);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.05);
   font-variant-numeric: tabular-nums;
 }
 
@@ -603,8 +603,8 @@
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(0,120,212,0.10);
-  color: rgba(0,120,212,0.75);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: rgba(var(--accent-rgb), 0.75);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -614,14 +614,14 @@
 .svcNodeEpCount {
   font-size: 8px;
   font-weight: 700;
-  color: rgba(16,137,62,0.8);
+  color: rgba(var(--success-rgb), 0.8);
   margin-left: 2px;
 }
 
 /* ── Detail Panel: K8s Service ── */
 .detailSvcBlock {
-  background: rgba(0,120,212,0.03);
-  border: 1px solid rgba(0,120,212,0.10);
+  background: rgba(var(--accent-rgb), 0.03);
+  border: 1px solid rgba(var(--accent-rgb), 0.10);
   border-radius: 6px;
   padding: 8px;
   margin-bottom: 8px;
@@ -635,22 +635,22 @@
 .detailSvcName {
   font-weight: 700;
   font-size: 12px;
-  color: rgba(0,120,212,0.85);
+  color: rgba(var(--accent-rgb), 0.85);
 }
 .detailSvcType {
   font-size: 9px;
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(20,21,23,0.06);
-  color: rgba(20,21,23,0.5);
+  background: rgba(var(--ink-rgb), 0.06);
+  color: rgba(var(--ink-rgb), 0.5);
 }
 
 /* ── Detail Panel: Endpoint Table ── */
 .detailEpTable {
   margin-top: 6px;
   font-size: 10px;
-  border-top: 1px solid rgba(20,21,23,0.08);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
   padding-top: 4px;
 }
 .detailEpHeader {
@@ -658,19 +658,19 @@
   grid-template-columns: 2fr 1.2fr 1fr 0.6fr;
   gap: 4px;
   font-weight: 700;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   text-transform: uppercase;
   font-size: 9px;
   letter-spacing: 0.03em;
   padding: 2px 0 4px;
-  border-bottom: 1px solid rgba(20,21,23,0.06);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 .detailEpRow {
   display: grid;
   grid-template-columns: 2fr 1.2fr 1fr 0.6fr;
   gap: 4px;
   padding: 3px 0;
-  border-bottom: 1px solid rgba(20,21,23,0.03);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.03);
 }
 .detailEpRow:last-child { border-bottom: none; }
 .detailEpPod {
@@ -682,10 +682,10 @@
 }
 .detailEpIp {
   font-family: var(--font-mono, monospace);
-  color: rgba(20,21,23,0.6);
+  color: rgba(var(--ink-rgb), 0.6);
 }
 .detailEpNode {
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -707,19 +707,19 @@
 .noDataBanner {
   padding: 32px;
   text-align: center;
-  color: rgba(20,21,23,0.45);
+  color: rgba(var(--ink-rgb), 0.45);
   font-size: 13px;
   border: 1px dashed var(--border);
   border-radius: 8px;
   margin: 20px 0;
 }
-.noDataBanner strong { display: block; margin-bottom: 6px; font-size: 14px; color: rgba(20,21,23,0.6); }
+.noDataBanner strong { display: block; margin-bottom: 6px; font-size: 14px; color: rgba(var(--ink-rgb), 0.6); }
 
 .spinner {
   display: inline-block;
   width: 20px; height: 20px;
-  border: 2px solid rgba(0,120,212,0.2);
-  border-top-color: rgba(0,120,212,0.8);
+  border: 2px solid rgba(var(--accent-rgb), 0.2);
+  border-top-color: rgba(var(--accent-rgb), 0.8);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -731,14 +731,14 @@
   justify-content: center;
   gap: 10px;
   padding: 48px;
-  color: rgba(20,21,23,0.4);
+  color: rgba(var(--ink-rgb), 0.4);
   font-size: 13px;
 }
 
 .errorMsg {
   padding: 16px;
-  background: rgba(216, 59, 1, 0.06);
-  border: 1px solid rgba(216, 59, 1, 0.20);
+  background: rgba(var(--danger-rgb), 0.06);
+  border: 1px solid rgba(var(--danger-rgb), 0.20);
   border-radius: 8px;
   color: var(--danger);
   font-size: 13px;
@@ -771,7 +771,7 @@
   justify-content: space-between;
   font-size: 11px;
   padding: 2px 0;
-  color: rgba(20,21,23,0.55);
+  color: rgba(var(--ink-rgb), 0.55);
 }
 
 /* ── Security donut / identity matrix ── */
@@ -801,7 +801,7 @@
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  color: rgba(20,21,23,0.45);
+  color: rgba(var(--ink-rgb), 0.45);
   margin-top: 4px;
 }
 
@@ -809,15 +809,15 @@
 .nsGroupNode {
   width: 100%;
   height: 100%;
-  border: 1.5px dashed rgba(20,21,23,0.18);
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.18);
   border-radius: 10px;
-  background: rgba(20,21,23,0.02);
+  background: rgba(var(--ink-rgb), 0.02);
   pointer-events: none;
   position: relative;
 }
 .nsGroupExternal {
-  border-color: rgba(107,76,154,0.25);
-  background: rgba(107,76,154,0.03);
+  border-color: rgba(var(--subnet-rgb), 0.25);
+  background: rgba(var(--subnet-rgb), 0.03);
 }
 .nsGroupLabel {
   position: absolute;
@@ -825,11 +825,11 @@
   left: 12px;
   font-size: 11px;
   font-weight: 700;
-  color: rgba(20,21,23,0.35);
+  color: rgba(var(--ink-rgb), 0.35);
   letter-spacing: 0.03em;
 }
 .nsGroupExternal .nsGroupLabel {
-  color: rgba(107,76,154,0.55);
+  color: rgba(var(--subnet-rgb), 0.55);
 }
 
 /* ── Flow Collapse Button ── */
@@ -846,10 +846,10 @@
   text-align: left;
   transition: background 0.15s;
 }
-.flowCollapseBtn:hover { background: rgba(20,21,23,0.03); }
+.flowCollapseBtn:hover { background: rgba(var(--ink-rgb), 0.03); }
 .flowCollapseArrow {
   font-size: 10px;
-  color: rgba(20,21,23,0.35);
+  color: rgba(var(--ink-rgb), 0.35);
   transition: transform 0.2s;
   display: inline-block;
 }
@@ -870,7 +870,7 @@
   font-weight: 500;
   border: none;
   background: var(--surface);
-  color: rgba(20,21,23,0.5);
+  color: rgba(var(--ink-rgb), 0.5);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
@@ -886,12 +886,12 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgba(20,21,23,0.15);
+  background: rgba(var(--ink-rgb), 0.15);
   margin-right: 5px;
   vertical-align: middle;
 }
 .receivingActive {
-  background: rgba(16,137,62,0.7);
+  background: rgba(var(--success-rgb), 0.7);
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse {
@@ -925,12 +925,12 @@
 /* ── Flow Table enhancements ── */
 .flowNs {
   font-size: 10px;
-  color: rgba(20,21,23,0.35);
+  color: rgba(var(--ink-rgb), 0.35);
   font-style: italic;
 }
 .flowRowSelected {
-  background: rgba(0,120,212,0.08) !important;
-  border-left: 2px solid rgba(0,120,212,0.6);
+  background: rgba(var(--accent-rgb), 0.08) !important;
+  border-left: 2px solid rgba(var(--accent-rgb), 0.6);
 }
 .flowRow { cursor: pointer; }
 
@@ -958,7 +958,7 @@
 .flowDetailLabel {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(20,21,23,0.55);
+  color: rgba(var(--ink-rgb), 0.55);
 }
 .flowDetailValue {
   font-size: 12px;
@@ -967,7 +967,7 @@
 }
 .flowDetailDivider {
   height: 1px;
-  background: rgba(20,21,23,0.08);
+  background: rgba(var(--ink-rgb), 0.08);
   margin: 6px 0;
 }
 

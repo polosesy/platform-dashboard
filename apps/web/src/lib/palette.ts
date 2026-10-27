@@ -18,6 +18,7 @@ export const UI = {
   "accent-2": [0, 163, 163],
   danger: [216, 59, 1],
   warning: [209, 132, 0],
+  "warning-strong": [154, 97, 0], // warning text on light backgrounds
   success: [16, 124, 16],
   ok: [16, 124, 16], // healthy / running — same green as success
 } as const satisfies Record<string, Rgb>;

@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import type { LiveAlert, AzureSubscriptionOption, AzureSubscriptionsResponse, AzureConnectionOption, AzureConnectionsResponse, DiagramSpec, LiveDiagramSnapshot, EdgeNetworkDetail, AksNodeCondition, PrivateLinkUsageResponse } from "@aud/types";
 import { useApiQuery } from "@/lib/useApiQuery";
-import { apiBaseUrl, apiUrl, authStateOf, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, authStateOf, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { DEFAULT_EDGE_LAYERS, EDGE_LAYERS, edgeLayer, isInferredEdge, scopeCoverage, scopeImpacts, scopeSpec, type EdgeLayer } from "@/lib/liveScope";
@@ -382,7 +382,7 @@ export default function LiveDiagramPage() {
       .catch(() => null)
       .then((token) =>
         fetchJsonWithBearer<AzureConnectionsResponse>(
-          `${apiBaseUrl()}/api/azure/connections`,
+          apiUrl("/api/azure/connections"),
           token,
         ),
       )
@@ -431,7 +431,7 @@ export default function LiveDiagramPage() {
     try {
       const token = await getApiToken().catch(() => null);
       const resp = await fetchJsonWithBearer<{ ok: boolean; diagram: DiagramSpec; _source?: string }>(
-        `${apiBaseUrl()}/api/live/diagrams/generate`,
+        apiUrl("/api/live/diagrams/generate"),
         token,
         {
           method: "POST",

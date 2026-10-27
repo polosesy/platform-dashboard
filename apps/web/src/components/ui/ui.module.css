@@ -337,25 +337,25 @@
 
 .notice_info {
   background: var(--accent-soft);
-  border-color: rgba(0, 120, 212, 0.22);
+  border-color: rgba(var(--accent-rgb), 0.22);
   border-left-color: var(--accent);
 }
 
 .notice_warning {
   background: var(--warning-soft);
-  border-color: rgba(209, 132, 0, 0.26);
+  border-color: rgba(var(--warning-rgb), 0.26);
   border-left-color: var(--warning);
 }
 
 .notice_danger {
   background: var(--danger-soft);
-  border-color: rgba(216, 59, 1, 0.26);
+  border-color: rgba(var(--danger-rgb), 0.26);
   border-left-color: var(--danger);
 }
 
 .notice_success {
   background: var(--success-soft);
-  border-color: rgba(16, 124, 16, 0.24);
+  border-color: rgba(var(--success-rgb), 0.24);
   border-left-color: var(--success);
 }
 
@@ -422,26 +422,26 @@
 .badge_high {
   background: var(--danger-soft);
   color: var(--danger);
-  border-color: rgba(216, 59, 1, 0.24);
+  border-color: rgba(var(--danger-rgb), 0.24);
 }
 
 .badge_medium {
   background: var(--warning-soft);
   color: var(--warning-strong);
-  border-color: rgba(209, 132, 0, 0.28);
+  border-color: rgba(var(--warning-rgb), 0.28);
 }
 
 .badge_low,
 .badge_info {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: rgba(0, 120, 212, 0.22);
+  border-color: rgba(var(--accent-rgb), 0.22);
 }
 
 .badge_success {
   background: var(--success-soft);
   color: var(--success);
-  border-color: rgba(16, 124, 16, 0.24);
+  border-color: rgba(var(--success-rgb), 0.24);
 }
 
 /* ── Stat tile ── */

@@ -15,7 +15,7 @@ test("JS palette channels equal the --*-rgb tokens in globals.css", () => {
   const kebab = (k: string) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   for (const [k, v] of Object.entries(p.UI)) assert.deepEqual(tokens[k], [...v], `UI ${k}`);
   const vizInCss = Object.keys(tokens).filter((k) => !(k in p.UI));
-  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "peering", "private-link", "violet"], "CSS visualization channels");
+  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "peering", "private-link", "subnet", "violet"], "CSS visualization channels");
   for (const k of vizInCss) {
     const key = Object.keys(p.VIZ).find((x) => kebab(x) === k) as keyof typeof p.VIZ;
     assert.ok(key, `palette VIZ has ${k}`);
@@ -39,13 +39,13 @@ test("rgba / hex helpers", () => {
   assert.equal(p.hex("privateLink"), "#8b5cf6");
 });
 
-test("TSX has no numeric rgb()/rgba() colours — tokens via lib/palette rgba(key, a) (Hubble / AKS 모니터링 used other reds and greens)", () => {
+test("TSX and CSS modules have no numeric rgb()/rgba() colours — CSS rgba(var(--x-rgb), a), TSX lib/palette rgba(key, a) (Hubble / AKS 모니터링 used other reds and greens)", () => {
   const root = new URL("../../web/src/", import.meta.url);
   const hits: string[] = [];
   const walk = (dir: URL) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
-      else if (e.name.endsWith(".tsx")) {
+      else if (e.name.endsWith(".tsx") || e.name.endsWith(".module.css")) {
         const src = readFileSync(new URL(e.name, dir), "utf8");
         for (const m of src.matchAll(/rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}/g)) hits.push(`${e.name}: ${m[0]}`);
       }

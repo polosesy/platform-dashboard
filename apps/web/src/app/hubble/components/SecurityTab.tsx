@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { HubbleSecuritySummary } from "@aud/types";
-import { apiBaseUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
@@ -28,7 +28,7 @@ export function SecurityTab({ clusterId }: Props) {
     try {
       const token = await getApiToken();
       const resp = await fetchJsonWithBearer<HubbleSecuritySummary>(
-        `${apiBaseUrl()}/api/hubble/security-summary?clusterId=${encodeURIComponent(clusterId)}&timeWindow=5&lang=${locale}`,
+        apiUrl("/api/hubble/security-summary", { clusterId, timeWindow: 5, lang: locale }),
         token,
       );
       setData(resp);

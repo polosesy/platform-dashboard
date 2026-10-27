@@ -16,7 +16,7 @@
   grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
 }
@@ -32,7 +32,7 @@
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(var(--paper-rgb), 0.72);
 }
 
 .kpiLabel {
@@ -54,11 +54,11 @@
 }
 
 .kpiUp {
-  color: rgba(216, 59, 1, 0.90);
+  color: rgba(var(--danger-rgb), 0.90);
 }
 
 .kpiDown {
-  color: rgba(16, 137, 62, 0.90);
+  color: rgba(var(--success-rgb), 0.90);
 }
 
 /* ---------- Cards ---------- */
@@ -67,7 +67,7 @@
   grid-column: span 6;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
 }
@@ -76,7 +76,7 @@
   grid-column: span 12;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
 }
@@ -106,12 +106,12 @@
   flex: 1;
   min-width: 0;
   border-radius: 4px 4px 0 0;
-  background: linear-gradient(180deg, rgba(0, 120, 212, 0.72), rgba(0, 120, 212, 0.32));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.72), rgba(var(--accent-rgb), 0.32));
   position: relative;
 }
 
 .trendBar:hover {
-  background: linear-gradient(180deg, rgba(0, 120, 212, 0.92), rgba(0, 120, 212, 0.50));
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.92), rgba(var(--accent-rgb), 0.50));
 }
 
 .trendBarLabel {
@@ -121,7 +121,7 @@
   transform: translateX(-50%);
   font-size: 10px;
   font-weight: 700;
-  color: rgba(0, 120, 212, 0.90);
+  color: rgba(var(--accent-rgb), 0.90);
   white-space: nowrap;
   display: none;
   padding-bottom: 2px;
@@ -164,41 +164,41 @@
 }
 
 .budgetSafe {
-  color: rgba(16, 137, 62, 0.90);
+  color: rgba(var(--success-rgb), 0.90);
 }
 
 .budgetWarn {
-  color: rgba(209, 132, 0, 0.90);
+  color: rgba(var(--warning-rgb), 0.90);
 }
 
 .budgetDanger {
-  color: rgba(216, 59, 1, 0.90);
+  color: rgba(var(--danger-rgb), 0.90);
 }
 
 .budgetBar {
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
-  border: 1px solid rgba(20, 21, 23, 0.08);
-  background: rgba(20, 21, 23, 0.04);
+  border: 1px solid rgba(var(--ink-rgb), 0.08);
+  background: rgba(var(--ink-rgb), 0.04);
 }
 
 .budgetFillSafe {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(16, 137, 62, 0.60), rgba(16, 137, 62, 0.40));
+  background: linear-gradient(90deg, rgba(var(--success-rgb), 0.60), rgba(var(--success-rgb), 0.40));
 }
 
 .budgetFillWarn {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(209, 132, 0, 0.60), rgba(209, 132, 0, 0.40));
+  background: linear-gradient(90deg, rgba(var(--warning-rgb), 0.60), rgba(var(--warning-rgb), 0.40));
 }
 
 .budgetFillDanger {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(216, 59, 1, 0.60), rgba(216, 59, 1, 0.40));
+  background: linear-gradient(90deg, rgba(var(--danger-rgb), 0.60), rgba(var(--danger-rgb), 0.40));
 }
 
 .budgetMeta {
@@ -253,7 +253,7 @@
 .num {
   font-family: var(--font-geist-mono);
   font-size: 12px;
-  color: rgba(20, 21, 23, 0.78);
+  color: rgba(var(--ink-rgb), 0.78);
   text-align: right;
 }
 
@@ -261,7 +261,7 @@
   padding: 10px 12px;
   color: var(--muted);
   font-size: 13px;
-  border: 1px dashed rgba(20, 21, 23, 0.18);
+  border: 1px dashed rgba(var(--ink-rgb), 0.18);
   border-radius: 14px;
 }
 
