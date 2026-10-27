@@ -92,6 +92,7 @@ networkPolicy:
   enabled: false
   enforce: false
   ingressCidrs: ["<ingress-subnet-cidr>"]
+  hubbleUi: false                  # true when the connection sets aks.observability.hubbleUi (egress to kube-system/hubble-ui:8081)
   apiServerCidr: ""                # "<api-server-private-endpoint-ip>/32" — only if Hubble shows kube-apiserver does not match
   prometheusPattern: "*.<region>.prometheus.monitor.azure.com"
   extraFqdns: []                   # e.g. api.cognitive.microsofttranslator.com when a Translator key is set

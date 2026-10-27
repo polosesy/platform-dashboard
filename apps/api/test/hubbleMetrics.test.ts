@@ -97,7 +97,7 @@ test("failure states: 403 forbidden, 429 throttled, anything else failed", () =>
 
 test("source order: exec > flow logs with rows > metrics > none", () => {
   const f = (exec: boolean, logs: "ok" | "notEnabled", metrics: "ok" | "noWorkspace") =>
-    pickSource({ exec: { allowed: exec }, flowLogs: { state: logs, rows1h: logs === "ok" ? 120 : 0, newest: null }, metrics: { state: metrics } });
+    pickSource({ exec: { allowed: exec }, flowLogs: { state: logs, rows1h: logs === "ok" ? 120 : 0, newest: null }, hubbleUi: { state: "notConfigured" }, metrics: { state: metrics } });
   assert.equal(f(true, "ok", "ok"), "exec");
   assert.equal(f(false, "ok", "ok"), "flowLogs");
   assert.equal(f(false, "notEnabled", "ok"), "metrics");

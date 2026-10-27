@@ -12,6 +12,7 @@ const pick = (lang: Lang, ko: string, en: string) => (lang === "en" ? en : ko);
 import { loadKubeConfig } from "./kubernetes.js";
 import { assertHubbleExecAllowed, hubbleExecDecision } from "./aksAccess.js";
 import { flowLogsAvailability, getFlowsFromLogs } from "./containerNetworkLogs.js";
+import { getFlowsFromHubbleUi, hubbleUiConfig, HubbleUiError } from "./hubbleUiSource.js";
 import { parsePolicyRef } from "./hubbleAudit.js";
 import { dedupeObservations, emptyCoverage, mergeAgentBatches, singleSourceCoverage, type AgentBatch } from "./hubbleMerge.js";
 
@@ -309,6 +310,15 @@ export async function getHubbleFlows(
     const set = await getFlowsFromLogs(env, bearerToken, azureResourceId, { limit, namespace: filters.ns || undefined, verdict: filters.verdict || undefined, type: filters.type });
     flowsCache.set(logKey, set);
     return set;
+  }
+  // Then the cluster's Hubble UI (a live sample of the relay through its backend — services/hubbleUiSource.ts)
+  if (!hubbleExecDecision(env, azureResourceId).allowed && hubbleUiConfig(env, azureResourceId)) {
+    try {
+      return await getFlowsFromHubbleUi(env, bearerToken, azureResourceId, { limit, namespace: filters.ns || undefined, verdict: filters.verdict || undefined, type: filters.type });
+    } catch (e) {
+      if (e instanceof HubbleUiError) throw new HttpError(e.state === "unreachable" ? 503 : 502, `hubble_ui_${e.state}`, e.message);
+      throw e;
+    }
   }
   assertHubbleExecAllowed(env, azureResourceId);
   // Every filter that changes the hubble query must be part of the key
@@ -721,9 +731,11 @@ const RESERVED_IDENTITY_NAMES: Record<number, string> = {
   3: "unmanaged",
   4: "health",
   5: "init",
-  6: "kube-apiserver",
-  7: "remote-node",
+  6: "remote-node",     // Cilium numericidentity.go (6 and 7 were swapped)
+  7: "kube-apiserver",
   8: "ingress",
+  9: "world",           // world-ipv4
+  10: "world",          // world-ipv6
 };
 
 function parseEndpoint(raw: Record<string, unknown> | undefined): HubbleEndpoint {

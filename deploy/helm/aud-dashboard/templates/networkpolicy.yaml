@@ -26,6 +26,12 @@ spec:
         - ports: [{ port: "53", protocol: ANY }]
           rules: { dns: [{ matchPattern: "*" }] }
     - toEntities: [kube-apiserver]
+    {{- if $np.hubbleUi }}
+    # AKS 모니터링 › Hubble: a short flow sample through the cluster's Hubble UI (connections file aks.observability.hubbleUi)
+    - toEndpoints:
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, "k8s:k8s-app": hubble-ui }
+      toPorts: [{ ports: [{ port: "8081", protocol: TCP }] }]
+    {{- end }}
     {{- with $np.apiServerCidr }}
     - toCIDR: [{{ . | quote }}]
       toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]

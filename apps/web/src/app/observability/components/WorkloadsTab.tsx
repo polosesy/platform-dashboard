@@ -57,7 +57,7 @@ function LatencyCell({ p95 }: { p95: number | null }) {
   return <span className={styles.apmBadge + " " + cls}>{p95 >= 1000 ? `${(p95/1000).toFixed(1)}s` : `${Math.round(p95)}ms`}</span>;
 }
 
-// ── WorkloadRow (exported for OverviewTab) ──
+// ── WorkloadRow ──
 export function WorkloadRow({
   wl,
   selected,

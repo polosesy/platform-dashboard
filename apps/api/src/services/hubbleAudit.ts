@@ -26,7 +26,8 @@ export function parsePolicyRef(raw: unknown): HubblePolicyRef {
 const ALLOW_ANY = /^allow-any-(egress|ingress)$/;
 /** policy_match_type 4: the wildcard entry — the allow-any rule */
 const MATCH_ALL = 4;
-const RESERVED: Record<number, string> = { 1: "host", 2: "world", 4: "health", 6: "kube-apiserver", 7: "remote-node", 8: "ingress" };
+// Cilium pkg/identity/numericidentity.go — 6 remote-node, 7 kube-apiserver, 9 / 10 world-ipv4 / world-ipv6
+const RESERVED: Record<number, string> = { 1: "host", 2: "world", 4: "health", 6: "remote-node", 7: "kube-apiserver", 8: "ingress", 9: "world", 10: "world" };
 
 /** `namespace/name` of a named policy, `cluster/name` for a clusterwide one; null for a derived rule */
 export function policyLabel(ref: HubblePolicyRef): string | null {

@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-23
+last-verified: 2026-10-27
 covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts]
 ---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)
@@ -105,6 +105,8 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 ```
 
 `observability.grafana`(선택)는 고객 Azure Managed Grafana로 가는 **링크만** 만듭니다(AKS 모니터링 › 관측 스택의 값마다 그 PromQL로 Explore). 대시보드는 Grafana를 읽지 않으므로 Grafana 역할·송신 규칙이 필요 없습니다. 주소는 `https://*.grafana.azure.com`만 받습니다.
+
+`observability.hubbleUi`(선택, `{ "url": "http://hubble-ui.kube-system:80" }`)는 Hubble exec가 꺼진 연결에서 Hubble 흐름·서비스 맵을 **클러스터의 Hubble UI 백엔드**로 읽습니다(Relay 최근 흐름 표본 — Secret·exec·새 RBAC 없음, 대시보드 파드 → `kube-system/hubble-ui:8081` 네트워크만). 자세한 이유·한계는 [AKS 모니터링 연동](../../observability/aks-monitoring-integration.md).
 
 ## 5. 설정 — 수동 (Portal)
 

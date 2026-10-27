@@ -10,7 +10,8 @@ import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
 import { rgba } from "@/lib/palette";
 
-type Props = { clusterId: string };
+/** live = refresh on its own (visible tab, interval); nonce = one new sample on demand (HubbleTab owns both) */
+type Props = { clusterId: string; live?: boolean; nonce?: number };
 
 function formatTime(iso: string) {
   try {
@@ -28,7 +29,7 @@ function VerdictBadge({ verdict }: { verdict: string }) {
   return <span className={`${styles.verdictBadge} ${cls}`}>{verdict}</span>;
 }
 
-export function FlowsTab({ clusterId }: Props) {
+export function FlowsTab({ clusterId, live = false, nonce = 0 }: Props) {
   const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
@@ -59,9 +60,9 @@ export function FlowsTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, nsFilter, verdictFilter, getApiToken, locale]);
+  }, [clusterId, nsFilter, verdictFilter, getApiToken, locale, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  usePolling(fetchFlows, 15_000);
+  usePolling(fetchFlows, 30_000, live);
 
   const namespaces = useMemo(() => {
     const ns = new Set<string>();

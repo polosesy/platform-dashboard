@@ -873,6 +873,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
       // Node resource group (MC_* RG)
       const nodeRgName = safeString(props.nodeResourceGroup);
       if (nodeRgName) nodeMetadata.nodeResourceGroup = nodeRgName;
+      // Cluster power state (Running | Stopped) — a stopped cluster has no nodes, so its node NSG has no NIC
+      const clusterPower = safeString((props.powerState as Record<string, unknown> | undefined)?.code);
+      if (clusterPower) nodeMetadata.powerState = clusterPower;
 
       // Kubernetes version
       const k8sVersion = safeString(props.kubernetesVersion);

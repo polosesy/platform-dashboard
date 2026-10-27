@@ -163,3 +163,26 @@ test("log stream: repeated logger timestamp dropped, logback prefix cut to the m
   assert.equal(lg.frameLabel("at java.base/java.lang.reflect.Method.invoke(Unknown Source)").call, "Method.invoke", "module prefix dropped");
   assert.equal(lg.parseLogText("plain message without a level").summary, "plain message without a level");
 });
+
+test("cluster at a glance: counts only what was measured — idle apart, unmeasured stays null", () => {
+  const cell = (level: string) => ({ value: null, level }) as never;
+  const wl = (name: string, worst: string, pods: Array<{ ready: boolean | null; restarts: number | null; oom?: boolean }>, replicas = { ready: 1, desired: 1 }) => ({
+    namespace: "app", workload: name, kind: "Deployment", basis: "owner", replicas, worst,
+    cells: { ready: cell(worst) }, pods: pods.map((p, i) => ({ pod: `${name}-${i}`, memory: null, cpu: null, oom: false, ...p })),
+  }) as never;
+  const g = v.clusterGlance([
+    wl("a", "danger", [{ ready: false, restarts: 4, oom: true }, { ready: true, restarts: 0 }], { ready: 1, desired: 2 }),
+    wl("b", "warn", [{ ready: true, restarts: null }]),
+    wl("c", "ok", [{ ready: true, restarts: 0 }]),
+    wl("d", "noBaseline", [{ ready: null, restarts: null }]),
+    wl("e", "stopped", []),
+  ]);
+  assert.deepEqual(g.workloads, { total: 4, danger: 1, warn: 1, ok: 1, other: 1, idle: 1 });
+  assert.deepEqual(g.pods, { ready: 3, measured: 4 });
+  assert.equal(g.short, 1);
+  assert.deepEqual(g.restarts, { total: 4, workloads: 1 });
+  assert.deepEqual(g.oom, { pods: 1, workloads: 1 });
+  const none = v.clusterGlance([wl("x", "notMeasured", [{ ready: null, restarts: null }])]);
+  assert.equal(none.pods, null, "no Ready series → null, never 0/0");
+  assert.equal(none.restarts, null, "no restart series → null, never 0");
+});

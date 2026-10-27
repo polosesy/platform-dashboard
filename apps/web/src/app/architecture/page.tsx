@@ -772,9 +772,10 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
         <span><b>{totals.vms}</b> {t("arch.sum.vms")}</span>
         <span><b>{totals.publicIpResources}</b> {t("arch.sum.public")}</span>
         <span><b>{totals.privateEndpoints}</b> {t("arch.sum.pe")}</span>
-        {cleanup ? (
+        {cleanup || totals.managedNsgs ? (
           <button type="button" className={s.cleanupBtn} title={t("arch.sum.cleanupHint")} onClick={() => setSelectedId(CLEANUP)}>
             <b>{cleanup}</b> {t("arch.sum.cleanup")}
+            {totals.managedNsgs ? <span className={s.iDim}> · {t("arch.managedNsg.chip", { n: totals.managedNsgs })}</span> : null}
           </button>
         ) : null}
       </div>

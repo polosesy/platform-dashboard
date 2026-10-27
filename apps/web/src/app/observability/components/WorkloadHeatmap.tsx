@@ -15,7 +15,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
 import {
-  GLYPH, SIGNAL_GROUPS, attentionRows, cardShape, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
+  GLYPH, SIGNAL_GROUPS, attentionRows, cardShape, clusterGlance, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
   legendLevels, levelIn, mosaicColumns, problemSignals, shortName, signalSummary, tileText, type HeatView,
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
@@ -91,6 +91,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
   const allGroups = useMemo(() => groupByNamespace(ws, view), [ws, view]);
   const attn = useMemo(() => attentionRows(ns ? ws.filter((w) => w.namespace === ns) : ws, view), [ws, view, ns]);
   const signals = useMemo(() => (d ? signalSummary(d.flags, ws) : null), [d, ws]);
+  const glance = useMemo(() => clusterGlance(ws), [ws]);
   const sel = ws.find((w) => heatKey(w) === selected) ?? null;
 
   const open = (w: HeatWorkload, from: HTMLElement) => {
@@ -131,8 +132,53 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
   const verdictText = verdict === "ok" ? t("ob.hm.verdictOk")
     : verdict === "danger" ? t("ob.hm.verdictDanger", { d: dangerN, w: attn.length - dangerN }) : t("ob.hm.verdictWarn", { n: attn.length });
 
+  const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : "0%");
+  const gw = glance.workloads;
+  const toggleView = (m: HeatView) => setView(view === m ? "worst" : m);
+
   return (
     <div className={styles.hm}>
+      {/* Cluster at a glance (Datadog's Kubernetes overview): measured numbers only, each opens its view below */}
+      <section className={styles.glance} aria-label={t("ob.gl.title")}>
+        <button type="button" className={styles.glanceTile} data-span="2" data-level={gw.danger ? "danger" : gw.warn ? "warn" : "ok"}
+          aria-pressed={problemsOnly} title={t("ob.gl.workloadsHint")} onClick={() => setProblemsOnly(!problemsOnly)}>
+          <span className={styles.glanceLabel}>{t("ob.gl.workloads")}</span>
+          <span className={styles.glanceValue}>{gw.total}<small> · {t("ob.gl.ns", { n: nsCount })}</small></span>
+          <span className={styles.glanceBar} aria-hidden="true">
+            {(["danger", "warn", "ok", "other"] as const).map((k) => (gw[k] > 0 ? <span key={k} data-level={k === "other" ? "noBaseline" : k} style={{ width: pct(gw[k], gw.total) }} /> : null))}
+          </span>
+          <span className={styles.glanceSub}>
+            <span data-level="danger">{GLYPH.danger} {gw.danger}</span>
+            <span data-level="warn">{GLYPH.warn} {gw.warn}</span>
+            <span data-level="ok">{GLYPH.ok} {gw.ok}</span>
+            {gw.other > 0 && <span data-level="noBaseline">{GLYPH.noBaseline} {gw.other}</span>}
+            {gw.idle > 0 && <span data-level="stopped">{GLYPH.stopped} {gw.idle}</span>}
+          </span>
+        </button>
+        <button type="button" className={styles.glanceTile} data-level={!glance.pods ? "notMeasured" : glance.pods.ready < glance.pods.measured ? "warn" : "ok"}
+          aria-pressed={view === "ready"} onClick={() => toggleView("ready")}>
+          <span className={styles.glanceLabel}>{t("ob.gl.podsReady")}</span>
+          <span className={styles.glanceValue}>{glance.pods ? <>{glance.pods.ready}<small>/{glance.pods.measured}</small></> : "—"}</span>
+          <span className={styles.glanceSub}>{glance.pods ? pct(glance.pods.ready, glance.pods.measured) : t("ob.gl.notMeasured")}</span>
+        </button>
+        <button type="button" className={styles.glanceTile} data-level={glance.short ? "danger" : "ok"} aria-pressed={view === "ready"} onClick={() => toggleView("ready")}>
+          <span className={styles.glanceLabel}>{t("ob.gl.short")}</span>
+          <span className={styles.glanceValue}>{glance.short}</span>
+          <span className={styles.glanceSub}>{t("ob.gl.shortSub")}</span>
+        </button>
+        <button type="button" className={styles.glanceTile} data-level={!glance.restarts ? "notMeasured" : glance.restarts.total ? "warn" : "ok"}
+          aria-pressed={view === "restarts"} onClick={() => toggleView("restarts")}>
+          <span className={styles.glanceLabel}>{t("ob.gl.restarts", { w: t(`ob.hm.window.${win}`) })}</span>
+          <span className={styles.glanceValue}>{glance.restarts ? glance.restarts.total.toLocaleString(dateLocale(locale)) : "—"}</span>
+          <span className={styles.glanceSub}>{glance.restarts ? t("ob.gl.inWorkloads", { n: glance.restarts.workloads }) : t("ob.gl.notMeasured")}</span>
+        </button>
+        <button type="button" className={styles.glanceTile} data-level={glance.oom.pods ? "danger" : "ok"} aria-pressed={view === "memory"} onClick={() => toggleView("memory")}>
+          <span className={styles.glanceLabel}>{t("ob.gl.oom")}</span>
+          <span className={styles.glanceValue}>{glance.oom.pods}</span>
+          <span className={styles.glanceSub}>{t("ob.gl.inWorkloads", { n: glance.oom.workloads })}</span>
+        </button>
+      </section>
+
       {/* Controls: one signal selector (grouped), namespace, window, problems only — meta and refresh on the right */}
       <div className={styles.hmBar}>
         <Select label={t("ob.hm.metric")} value={view} onChange={(v) => setView(v as HeatView)}

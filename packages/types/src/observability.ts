@@ -165,6 +165,12 @@ export type PodLogEntry = {
   stream: "stdout" | "stderr" | "unknown";
 };
 
+/** Where pod logs can come from, in the order the API tries them (services/podLogSources.ts) */
+export type PodLogSource = "loki" | "kubelet" | "containerInsights";
+export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "failed";
+/** One source the API tried for these logs — the page says which answered and why the others did not */
+export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string };
+
 export type ObservabilityLogsResponse = {
   clusterId: string;
   generatedAt: string;
@@ -172,6 +178,12 @@ export type ObservabilityLogsResponse = {
   podName: string;
   namespace: string;
   hasMore: boolean;         // 추가 로그 존재 여부
+  /** The source the lines came from (null = none answered) */
+  source?: PodLogSource | null;
+  /** Every source tried, in order */
+  attempts?: PodLogAttempt[];
+  /** Lines whose secrets were masked (logRedaction.ts) */
+  redactions?: number;
 };
 
 // ── Namespace / Pod Discovery (for Logs tab dropdown) ──
@@ -191,6 +203,8 @@ export type ObservabilityNamespacesResponse = {
   generatedAt: string;
   /** namespace → pod list 매핑용 flat 배열 */
   items: NamespacePodItem[];
+  /** Namespaces whose pod logs this connection may read (`aks.podLogNamespaces`); null = every namespace */
+  logNamespaces?: string[] | null;
 };
 
 export type ObservabilityStatusResponse = {

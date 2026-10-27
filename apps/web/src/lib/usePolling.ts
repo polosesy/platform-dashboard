@@ -38,6 +38,7 @@ export function startPolling(tick: () => Promise<boolean | void> | boolean | voi
  * polling cannot change (Hubble exec off for the deployment, no role, bad cluster: `isPermanentApiError`). A new
  * `load` (cluster, token, filter or language changed) starts over.
  */
-export function usePolling(load: () => Promise<boolean | void>, ms: number): void {
-  useEffect(() => startPolling(load, ms), [load, ms]);
+export function usePolling(load: () => Promise<boolean | void>, ms: number, live = true): void {
+  // live = false: load once (and again whenever `load` changes — a new filter or a "new sample" nonce), no interval
+  useEffect(() => (live ? startPolling(load, ms) : (void load(), undefined)), [load, ms, live]);
 }

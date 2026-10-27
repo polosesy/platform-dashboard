@@ -12,7 +12,8 @@ import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
-import { getWorkloadLogs } from "../services/lokiLogs.js";
+import { getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
+import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
@@ -20,7 +21,9 @@ import type {
   ObservabilityStatusResponse,
   ObservabilityLogsResponse,
   ObservabilityNamespacesResponse,
+  PodLogAttempt,
   PodLogEntry,
+  PodLogSource,
 } from "@aud/types";
 import {
   HttpError,
@@ -28,6 +31,7 @@ import {
   queryArmResourceId,
   queryInt,
   queryString,
+  safeMessage,
   sendError,
 } from "../infra/requestParams.js";
 
@@ -190,7 +194,10 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
         }
       }
 
-      const data: ObservabilityNamespacesResponse = { clusterId, generatedAt: new Date().toISOString(), items };
+      // Which namespaces the Logs tab can read from inside the cluster (the rest fall back to Container Insights)
+      const names = [...new Set(items.map((i) => i.namespace))];
+      const logNamespaces = names.every((ns) => podLogNamespaceAllowed(env, clusterId, ns)) ? null : names.filter((ns) => podLogNamespaceAllowed(env, clusterId, ns));
+      const data: ObservabilityNamespacesResponse = { clusterId, generatedAt: new Date().toISOString(), items, logNamespaces };
       res.json(data);
     } catch (e: unknown) {
       sendError(res, e, "namespaces_failed", "observability");
@@ -209,8 +216,11 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     }
   });
 
-  // ── Logs — K8s API 직접 조회 (primary) + Container Insights (fallback) ──
-  // Pod logs can carry secrets and personal data — operators and admins only
+  // ── Logs — Loki (the cluster's own) → kubelet → Container Insights, each attempt reported ──
+  // Pod logs can carry secrets and personal data — operators and admins only, and only the namespaces the connection
+  // allows (`aks.podLogNamespaces`) are read from inside the cluster (Loki, kubelet); Container Insights stays the
+  // customer-governed fallback. Never a silent empty list: `attempts` says which source answered and why the others
+  // did not (the stg connection allowed one namespace, had no pods/log Role and no ContainerLogV2 — the tab was blank).
   router.get("/api/observability/logs", requireRole(env, "operator"), async (req: Request, res: Response) => {
     let clusterId: string;
     let namespace: string;
@@ -224,34 +234,66 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     const container = queryString(req, "container");
     const limit = queryInt(req, "limit", 200, 10, 500);
     const sinceMinutes = queryInt(req, "sinceMinutes", 30, 1, 1440);
-
-    const respond = (logs: PodLogEntry[]) => {
-      const data: ObservabilityLogsResponse = {
-        clusterId,
-        generatedAt: new Date().toISOString(),
-        logs,
-        podName,
-        namespace,
-        hasMore: logs.length >= limit,
-      };
-      res.json(data);
-    };
+    const allowed = podLogNamespaceAllowed(env, clusterId, namespace);
+    const attempts: PodLogAttempt[] = [];
+    let picked: { source: PodLogSource; logs: PodLogEntry[]; redactions: number } | null = null;
 
     try {
-      // Primary: Kubernetes API (kubelet). tailLines만 사용 — sinceSeconds는 startup 로그를 누락시킬 수 있음.
-      // sinceMinutes는 Container Insights fallback에서만 사용.
-      const rawLog = await readPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, { container, tailLines: limit });
-      respond(parseKubeletLogs(rawLog, podName, container ?? ""));
-    } catch (k8sErr) {
-      console.warn("[observability] K8s API logs failed, falling back to Container Insights:", k8sErr instanceof Error ? k8sErr.message : k8sErr);
-      try {
-        const { logs } = await collectPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes);
-        respond(logs);
-      } catch (ciErr) {
-        console.error("[observability] logs error (both K8s API and CI failed):", ciErr instanceof Error ? ciErr.message : ciErr);
-        sendError(res, k8sErr, "logs_failed");
+      // 1. Loki — every namespace the collector ships, with a time window
+      if (!allowed) attempts.push({ source: "loki", state: "denied" });
+      else {
+        const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, { namespace, pod: podName, container, minutes: sinceMinutes, limit });
+        if (r.state === "ok") {
+          attempts.push({ source: "loki", state: r.lines.length ? "ok" : "empty" });
+          if (r.lines.length) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
+        } else attempts.push({ source: "loki", state: r.state, ...(r.message ? { message: r.message } : {}) });
       }
+      // 2. kubelet — needs a pods/log Role in that namespace (k8sReadSurface: never cluster-wide)
+      if (!picked) {
+        if (!allowed) attempts.push({ source: "kubelet", state: "denied" });
+        else {
+          try {
+            const raw = await readPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, { container, tailLines: limit });
+            const logs = parseKubeletLogs(raw, podName, container ?? "");
+            attempts.push({ source: "kubelet", state: logs.length ? "ok" : "empty" });
+            if (logs.length) picked = { source: "kubelet", logs, redactions: 0 };
+          } catch (e: unknown) {
+            const status = (e as { status?: number }).status;
+            attempts.push({ source: "kubelet", state: status === 403 ? "forbidden" : "failed", message: safeMessage(e) });
+          }
+        }
+      }
+      // 3. Container Insights — ContainerLogV2 / ContainerLog, when the cluster's DCR collects them
+      if (!picked) {
+        try {
+          const { logs, containerInsightsAvailable } = await collectPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes);
+          if (!containerInsightsAvailable) attempts.push({ source: "containerInsights", state: "notConfigured" });
+          else {
+            let redactions = 0;
+            const masked = logs.map((l) => { const r = redactLogLine(l.logMessage); redactions += r.n; return { ...l, logMessage: r.line }; });
+            attempts.push({ source: "containerInsights", state: masked.length ? "ok" : "empty" });
+            if (masked.length) picked = { source: "containerInsights", logs: masked, redactions };
+          }
+        } catch (e: unknown) {
+          attempts.push({ source: "containerInsights", state: "failed", message: safeMessage(e) });
+        }
+      }
+    } catch (e: unknown) {
+      return sendError(res, e, "logs_failed");
     }
+
+    const data: ObservabilityLogsResponse = {
+      clusterId,
+      generatedAt: new Date().toISOString(),
+      logs: picked?.logs ?? [],
+      podName,
+      namespace,
+      hasMore: (picked?.logs.length ?? 0) >= limit,
+      source: picked?.source ?? null,
+      attempts,
+      redactions: picked?.redactions ?? 0,
+    };
+    res.json(data);
   });
 }
 

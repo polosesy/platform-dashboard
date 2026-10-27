@@ -89,6 +89,12 @@ export type ArchSubnet = {
 };
 export type ArchVnet = { node: ArchitectureNode; region: string; subnets: ArchSubnet[] };
 export type ArchCleanupItem = { id: string; name: string; detail?: string };
+/**
+ * An NSG with no association in the graph that sits in an AKS cluster's node resource group: AKS made it for the
+ * node NICs and owns it (never cleanup). `reason` = why nothing is attached now: the cluster is stopped · every
+ * node pool is at 0 · nodes exist (their NICs live inside the scale sets, which the graph does not list).
+ */
+export type ArchManagedNsg = ArchCleanupItem & { cluster: string; clusterId: string; reason: "stopped" | "noNodes" | "nodesRunning" };
 export type ArchRegion = {
   key: string;
   vnets: ArchVnet[];
@@ -104,6 +110,8 @@ export type ArchRegion = {
   unresolvedPublicIps: ArchCleanupItem[];
   /** NSGs associated with nothing */
   unusedNsgs: ArchCleanupItem[];
+  /** Unassociated NSGs an AKS cluster owns (its node resource group) — shown apart, not cleanup */
+  managedNsgs: ArchManagedNsg[];
 };
 /** state: peering (the worse side's peeringState), hybrid (worst connection status), ingress "unknown" (config unread) */
 export type ArchEdge = { id: string; kind: ArchEdgeKind; source: string; target: string; state?: string };
@@ -142,7 +150,7 @@ export type ArchModel = {
   sites: Map<string, ArchSite>;
   totals: {
     regions: number; vnets: number; subnets: number; tiles: number; vms: number; publicIpResources: number;
-    privateEndpoints: number; unusedPublicIps: number; unresolvedPublicIps: number; unusedNsgs: number; otherNics: number;
+    privateEndpoints: number; unusedPublicIps: number; unresolvedPublicIps: number; unusedNsgs: number; managedNsgs: number; otherNics: number;
   };
 };
 
@@ -319,8 +327,9 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   }
 
   // NSGs: subnet badge, VM badge via NIC, subnet badge via a VM-less NIC, else "unused"
-  const cleanup = new Map<string, { unusedPublicIps: ArchCleanupItem[]; unresolvedPublicIps: ArchCleanupItem[]; unusedNsgs: ArchCleanupItem[] }>();
-  const bucket = (k: string) => cleanup.get(k) ?? cleanup.set(k, { unusedPublicIps: [], unresolvedPublicIps: [], unusedNsgs: [] }).get(k)!;
+  const cleanup = new Map<string, { unusedPublicIps: ArchCleanupItem[]; unresolvedPublicIps: ArchCleanupItem[]; unusedNsgs: ArchCleanupItem[]; managedNsgs: ArchManagedNsg[] }>();
+  const bucket = (k: string) => cleanup.get(k) ?? cleanup.set(k, { unusedPublicIps: [], unresolvedPublicIps: [], unusedNsgs: [], managedNsgs: [] }).get(k)!;
+  const aksNodeRgs = aksByNodeResourceGroup(byId);
   const pushUnique = (arr: string[], v: string) => { if (!arr.includes(v)) arr.push(v); };
   for (const [id, n] of byId) {
     if (n.kind !== "nsg") continue;
@@ -333,8 +342,11 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       const viaNic = nicSubnet.get(e.target);
       if (viaNic) { pushUnique(subnets.get(viaNic)!.nsgs, n.name); into ??= viaNic; }
     }
-    if (into) account(id, "absorbed", into);
-    else { bucket(regionKey(n.location)).unusedNsgs.push({ id, name: n.name }); account(id, "counted"); }
+    if (into) { account(id, "absorbed", into); continue; }
+    const managed = aksManagedNsg(id, aksNodeRgs);
+    if (managed) bucket(regionKey(n.location)).managedNsgs.push({ id, name: n.name, ...managed });
+    else bucket(regionKey(n.location)).unusedNsgs.push({ id, name: n.name });
+    account(id, "counted");
   }
 
   const edges: ArchEdge[] = [];
@@ -501,6 +513,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     reg.unusedPublicIps.sort(byItem);
     reg.unresolvedPublicIps.sort(byItem);
     reg.unusedNsgs.sort(byItem);
+    reg.managedNsgs.sort(byItem);
   }
   for (const r of resources.values()) { r.privateIps.sort(); r.publicIps.sort(); r.nsgs.sort(); r.nodePools.sort(); r.instances.sort(); }
   // "Region unknown" last
@@ -536,7 +549,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   edges.sort((a, b) => a.id.localeCompare(b.id));
 
   const flow = computeFlowRanks(resources, edges);
-  const all = <K extends "unusedPublicIps" | "unresolvedPublicIps" | "unusedNsgs">(key: K) =>
+  const all = <K extends "unusedPublicIps" | "unresolvedPublicIps" | "unusedNsgs" | "managedNsgs">(key: K) =>
     regionList.reduce((n, r) => n + r[key].length, 0) + (globalCleanup?.[key].length ?? 0);
   return {
     nodes: byId,
@@ -561,9 +574,37 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       unusedPublicIps: all("unusedPublicIps"),
       unresolvedPublicIps: all("unresolvedPublicIps"),
       unusedNsgs: all("unusedNsgs"),
+      managedNsgs: all("managedNsgs"),
       otherNics: [...subnets.values()].reduce((n, s) => n + s.otherNics, 0),
     },
   };
+}
+
+/** AKS clusters by node resource group (lower case) — AKS creates and owns that group (Learn: do not modify it) */
+export function aksByNodeResourceGroup(byId: Map<string, ArchitectureNode>): Map<string, ArchitectureNode> {
+  const m = new Map<string, ArchitectureNode>();
+  for (const n of byId.values()) {
+    const rg = n.kind === "aks" ? n.metadata?.nodeResourceGroup : undefined;
+    if (typeof rg === "string" && rg) m.set(lower(rg), n);
+  }
+  return m;
+}
+
+/**
+ * An unassociated NSG in an AKS node resource group → its cluster and why no NIC uses it now. Ownership comes only
+ * from the resource group (never from the `aks-agentpool-…-nsg` name, which anyone can give an NSG). Reason ladder:
+ * cluster power state Stopped → stopped · every agent pool count 0 → noNodes · otherwise nodesRunning (the node NICs
+ * are scale-set NICs, absent from Resource Graph's network interface list).
+ */
+export function aksManagedNsg(nsgId: string, aksNodeRgs: Map<string, ArchitectureNode>): Omit<ArchManagedNsg, "id" | "name"> | null {
+  const rg = /\/resourcegroups\/([^/]+)\//i.exec(nsgId)?.[1];
+  const aks = rg ? aksNodeRgs.get(lower(rg)) : undefined;
+  if (!aks) return null;
+  const power = String(aks.metadata?.powerState ?? "");
+  const pools = (aks.metadata?.agentPoolProfiles as Array<{ count?: number }> | undefined) ?? [];
+  const nodes = pools.reduce((n, p) => n + (typeof p.count === "number" ? p.count : 0), 0);
+  const reason = lower(power) === "stopped" ? "stopped" : pools.length > 0 && nodes === 0 ? "noNodes" : "nodesRunning";
+  return { cluster: aks.name, clusterId: aks.id, reason };
 }
 
 // ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-10-27
-covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -15,7 +15,9 @@ covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloa
 | 워크로드 히트맵 | AMW: cAdvisor·kube-state-metrics·Micrometer(`jvm_*`·`hikaricp_*`·`http_server_requests_*`)·로그 ERROR 카운터 | 클러스터 연결 신원 — 작업 영역 Monitoring Data Reader | 상태(작업 영역 없음·권한 없음·실패) |
 | Warning 이벤트 | Kubernetes API core/v1 `events` (list, `type=Warning`) | `aud-dashboard-reader`에 `events` 추가(이 문서와 함께 생성 — [템플릿](../integrations/azure/templates/aks/aud-dashboard-reader.yaml)) | 403 `aks_rbac_forbidden` |
 | 로그 스트림 | 클러스터 안 Loki `query_range` (연결 파일 `aks.observability.loki`) | Pod 로그와 같은 문: 운영자 + `aks.podLogNamespaces` | `notConfigured` / `unreachable`(정책) / `failed` |
-| Hubble 드롭 | Loki `{job="hubble-flows"}` (hubble-flow-exporter) | 보기 권한 | 위와 같음 |
+| 로그 탭 (Pod 하나) | ① Loki `{namespace, pod[, container]}` → ② kubelet → ③ Container Insights — 응답 `attempts`에 출처마다 결과 | ①② 운영자 + `aks.podLogNamespaces`, ② `pods/log` Role(네임스페이스별), ③ Log Analytics Reader | 칩: 읽음·이 기간 줄 없음·설정 안 됨·허용 안 됨·권한 없음·연결 안 됨·실패 |
+| Hubble 드롭 | Loki `{job="hubble-flows"}` (hubble-flow-exporter — **DROPPED만** 보냄, 연결선 없음) | 보기 권한 | 위와 같음 |
+| Hubble 흐름·서비스 맵 (exec 꺼짐) | 클러스터의 Hubble UI 백엔드 `service-map-stream`(연결 파일 `aks.observability.hubbleUi`) — Relay '최근 10,000건' 표본, 응답(reply)은 Relay에서 제외 | 보기 권한, 네트워크만(파드 exec·Secret 없음) | `notConfigured`·`unreachable`·`unsupported`(0.13 미만)·`failed` |
 | 관측 스택 | AMW (Alloy·Loki·Tempo·Pyroscope·수집 대상·Cilium) | 작업 영역 Monitoring Data Reader | 상태 |
 
 **왜 Loki를 직접 읽나**: Managed Grafana `/api/ds/query`는 Viewer 역할이 인스턴스의 모든 데이터 원본(stg·prd 공용 인스턴스)에 미쳐 범위가 더 넓고, 네임스페이스 경계는 어차피 대시보드가 지켜야 합니다. 클러스터 안 Loki는 대시보드가 이미 kubelet으로 읽을 수 있는 Pod 로그와 같은 범위에 과거 기록만 더합니다. 질의(LogQL)는 서버가 검증된 이름으로만 만들고 브라우저 문자열은 받지 않습니다. 줄은 4 KB·500줄·응답 2 MB로 자르고, 토큰·키·비밀번호·SAS·PEM을 가립니다(`logRedaction.ts` — kubelet Pod 로그에도 적용).
@@ -31,7 +33,15 @@ covers: [apps/api/src/services/observabilitySources.ts, apps/web/src/lib/workloa
 
 > 고객에게 알릴 점: Loki가 `auth_enabled: false`로 내부 LB·Private Link 뒤에 있어 VNet 안에서는 인증 없이 모든 로그를 읽을 수 있습니다.
 
-## 2. 워크로드 히트맵 (AKS 모니터링 › 워크로드 › 히트맵)
+**로그 탭이 비던 이유**(2026-10-27 stg 실측): 연결은 `integration` 하나만 허용하는데 드롭다운은 모든 네임스페이스를 이름 순으로 보여 첫 선택이 거부됐고, 클러스터에는 `pods/log` Role이 없었으며(읽기 ClusterRole 하나뿐), 마지막 출처 Container Insights는 DCR이 Perf·Syslog뿐이라 0줄 — 이 셋이 모두 200 '로그 없음'으로 숨었습니다. 이제 Loki를 먼저 읽고(같은 문), 허용된 네임스페이스를 드롭다운 맨 앞에 두며, 출처마다 결과를 칩으로 보입니다.
+
+**Hubble UI를 읽는 이유**: hubble-flow-exporter는 차단만 Loki에 보내 정상 연결선이 없고, ACNS 흐름 로그(`ContainerNetworkLog`)는 꺼져 있으며, Relay는 mTLS라 AKS가 관리하는 kube-system Secret(클라이언트 인증서)이 있어야 합니다. Hubble UI 백엔드는 그 인증서로 이미 Relay에 붙어 있으므로, 대시보드는 Secret·exec 없이 HTTP로 짧게(최대 8초·10,000건, 30초 캐시) 표본만 읽습니다. 공개 API가 아니어서(hubble-ui 0.13의 customprotocol: JSON 봉투 + protobuf 본문) 형식이 다르면 `unsupported`로 멈추고 추측하지 않습니다. stg 실측: 7,651건(중복 제거 후)·약 44초 구간·서로 다른 연결 281개·POLICY_DENIED 24건. 고객에게 알릴 점: Hubble UI는 인증 없이 클러스터의 모든 흐름을 보여 주므로 접근은 네트워크 정책으로 좁혀야 합니다(차트 `networkPolicy.hubbleUi: true`가 대시보드 쪽 송신 규칙을 추가).
+
+**네트워크 (Hubble) › 서비스 맵**(2026-10-27 재작성): 라이브 다이어그램과 같은 문법 — 네임스페이스 상자 안 워크로드 카드(상태 띠 + ● ▲ ■ ○), 왼쪽 '인터넷 → 클러스터', 가운데 네임스페이스를 요청 단계 순서로, 오른쪽 '클러스터 밖 · 구성 요소'(인터넷 나감·API 서버·노드). 거의 모든 워크로드가 DNS·API 서버·노드와 통신하므로 그 선은 카드를 고를 때만 그리고 카드에는 칩만 둡니다. 화면은 저절로 다시 그려지지 않습니다: 열 때 표본 한 번, '새 표본', '실시간 (30초)'(기본 꺼짐). 표본은 15분 동안 누적되어 이번 표본에 없는 연결은 점선으로 흐려질 뿐 사라지지 않고, 배치는 카드·선이 생기거나 없어질 때만 바뀝니다. 같은 기회에 Cilium 예약 식별자 6(remote-node)·7(kube-apiserver)이 바뀌어 있던 것을 고쳤습니다(다른 노드 트래픽이 API 서버로 보였음).
+
+## 2. 워크로드 히트맵 (AKS 모니터링 › 클러스터 · 워크로드)
+
+**화면 구성**(2026-10-27 개편 — Datadog Kubernetes 개요 방식): 탭 5개 = 클러스터 · 워크로드(기본) · 노드 · 로그 · 네트워크(Hubble) · 수집 상태. 첫 탭 맨 위 **클러스터 한눈에 보기** 띠(`clusterGlance` — 히트맵이 잰 값만): 워크로드(위험·주의·정상 쌓은 막대, 누르면 문제만) · Ready 파드 n/m · 레플리카 부족 · 재시작(기간) · OOMKilled 파드 — 칸을 누르면 아래 히트맵이 그 신호로 칠해집니다. 아무도 재지 않은 값은 '—'·'미측정'(0 아님). 예전 '개요' 탭(Container Insights 요약)은 DCR에 Container Insights가 없으면 0만 보여 없앴고, 목록 보기는 첫 탭의 [히트맵 | 목록]으로 남았습니다.
 
 고객 Grafana '컨테이너 맵'을 한 장으로, **문제 먼저**: 요약 한 줄(판정 알약 '● 주의 필요 없음'/'■ 위험 n · 주의 m' + 울린 신호만 칩 — 누르면 그 신호로 칠함, 나머지는 '정상 신호 n개'·'미측정 신호 n개' 글자(목록은 툴팁) + 범례) → **주의 필요** 목록(있을 때만 — 위험 먼저, `ns / 워크로드`와 이유 '메모리 96% · 재시작 3') → 네임스페이스 카드 **모자이크**(가장 나쁜 카드 먼저; 바깥 격자 = 타일 칸 132px·4px 행, 카드는 자기 타일 수만큼 √(2.2n)열 안팎(빈칸 가장 적은 열)·높이만큼 행을 차지, `grid-auto-flow: dense`로 작은 카드가 큰 카드 옆 빈자리를 채움 — 타일 1개 네임스페이스는 타일 1칸 폭, 열 수는 너비에 따라 `mosaicColumns`·`cardShape`). 타일 = **라이브 다이어그램 카드 문법**(흰 바탕 + 왼쪽 상태 띠 + 기호: ● 정상 초록 · ▲ 주의 · ■ 위험 · ○ 실행 대상 없음 · ◎ 측정됨·판정 기준 없음 · ? 미측정 점선 · – 계측 없음 빗금), 주의·위험 값은 색 알약, 이름은 네임스페이스 접두와 카드 공통 접두(`sharedPrefix`, 머리글에 '· 접두…')를 뺌, 종류는 툴팁. 기호가 항상 상태를 함께 보임. 모든 워크로드를 그림(Grafana 통계 패널은 48개 중 26개만 그렸음), '문제만' 토글은 기본 꺼짐. 신호 선택은 묶은 선택 상자 하나(쿠버네티스·Java/Spring·로그). 타일을 누르면 오른쪽 상세(값·파드·Warning 이벤트·로그 스트림 — ERROR 먼저, 예외 클래스 상위 10, trace ID → Tempo 링크), 방향키로 타일 이동·Esc로 닫기. 보기 모델은 `apps/web/src/lib/workloadHeatView.ts`(순수, `workloadHeatView.test.ts`).
 
@@ -82,10 +92,11 @@ Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 �
 "aks": { "observability": {
   "grafana": { "endpoint": "https://<grafana>.<region>.grafana.azure.com", "datasources": { "prometheus": "<uid>", "loki": "<uid>", "tempo": "<uid>" } },
   "loki": { "url": "http://<loki-svc>.<namespace>:3100" },
+  "hubbleUi": { "url": "http://hubble-ui.kube-system:80" },
   "logErrors": { "metric": "<collector log-error counter>", "podLabel": "exported_pod" } } }
 ```
 
-`loki.url`은 클러스터 안 주소(`<svc>.<ns>[.svc]`)나 사설 IP만, `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다.
+`loki.url`·`hubbleUi.url`은 클러스터 안 주소(`<svc>.<ns>[.svc]`)나 사설 IP만, `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다.
 
 ## 5. 다음
 

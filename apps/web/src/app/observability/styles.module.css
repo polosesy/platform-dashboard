@@ -797,3 +797,40 @@
   background: var(--panel-sunken); color: var(--muted);
 }
 .vpaNote[data-tone="warn"] { background: var(--warning-soft); color: var(--warning-strong); font-weight: 600; }
+
+/* Logs tab: which source answered, and why the others did not */
+.logSourceRow { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.logSourceChip {
+  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm, 6px);
+  border: 1px solid rgba(var(--ink-rgb), 0.14); color: rgba(var(--ink-rgb), 0.62); background: rgba(var(--ink-rgb), 0.03);
+}
+.logSourceChip[data-state="ok"] { border-color: rgba(var(--success-rgb), 0.45); color: var(--success); background: rgba(var(--success-rgb), 0.08); }
+.logSourceChip[data-state="unreachable"], .logSourceChip[data-state="failed"], .logSourceChip[data-state="forbidden"] {
+  border-color: rgba(var(--warning-rgb), 0.45); color: rgba(var(--warning-strong-rgb), 1);
+}
+.logEmpty { padding: 32px; text-align: center; color: rgba(var(--ink-rgb), 0.5); }
+.logCount { font-size: 11px; color: rgba(var(--ink-rgb), 0.45); margin-left: auto; }
+
+/* Cluster at a glance — the band above the heatmap (Datadog's Kubernetes overview): big measured numbers, the status
+   colour as a top strip (same --status the tiles use), a stacked health bar for workloads; each tile opens its view */
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.glanceTile {
+  position: relative; display: grid; gap: 4px; align-content: start; text-align: left; min-width: 0;
+  padding: 12px 14px 10px; border-radius: var(--radius-md, 10px); cursor: pointer; font: inherit; color: inherit;
+  background: var(--panel); border: 1px solid rgba(var(--ink-rgb), 0.1); box-shadow: var(--shadow-sm, none);
+  overflow: hidden; transition: border-color 0.15s, transform 0.15s;
+}
+.glanceTile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--status); }
+.glanceTile:hover { border-color: rgba(var(--status-rgb), 0.5); transform: translateY(-1px); }
+.glanceTile[aria-pressed="true"] { border-color: var(--status); box-shadow: 0 0 0 2px rgba(var(--status-rgb), 0.18); }
+.glanceTile[data-span="2"] { grid-column: span 2; }
+.glanceLabel { font-size: 12px; color: rgba(var(--ink-rgb), 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.glanceValue { font-size: 26px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--status); }
+.glanceTile[data-level="ok"] .glanceValue, .glanceTile[data-level="notMeasured"] .glanceValue { color: inherit; }
+.glanceValue small { font-size: 13px; font-weight: 500; color: rgba(var(--ink-rgb), 0.55); }
+.glanceSub { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: rgba(var(--ink-rgb), 0.55); }
+.glanceSub [data-level] { color: var(--status); font-variant-numeric: tabular-nums; }
+.glanceBar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(var(--ink-rgb), 0.06); }
+.glanceBar > span { background: var(--status); }
+.glanceBar > span + span { box-shadow: inset 1px 0 0 var(--panel); }
+@media (max-width: 720px) { .glanceTile[data-span="2"] { grid-column: auto; } }

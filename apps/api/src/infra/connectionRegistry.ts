@@ -61,6 +61,9 @@ const ConnectionSchema = z.object({
    *                      only (AKS 모니터링 › 관측 스택); nothing is read from Grafana
    *   observability.loki     the cluster's own Loki, read in-cluster (workload logs, Hubble drops from
    *                      hubble-flow-exporter) — cluster-internal URL only, behind the pod-log gate
+   *   observability.hubbleUi  the cluster's Hubble UI (kube-system/hubble-ui), read in-cluster: its backend already
+   *                      holds the relay's mTLS client certificate, so a short live sample of flows (service map,
+   *                      flows, network, security) needs no exec and no Secret — cluster-internal URL only
    *   observability.logErrors  the collector's log-ERROR counter in the workspace (site-specific name) and the
    *                      label that names the app pod (heatmap 'log ERROR')
    */
@@ -83,6 +86,10 @@ const ConnectionSchema = z.object({
         url: z.string().regex(/^https?:\/\/([a-z0-9-]+\.[a-z0-9-]+(\.svc(\.cluster\.local)?)?|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d{1,5})?\/?$/,
           "an in-cluster http(s)://<service>.<namespace>[.svc]:<port> or private address"),
         tenant: z.string().regex(/^[\w.-]{1,64}$/).optional(),
+      }).strict().optional(),
+      hubbleUi: z.object({
+        url: z.string().regex(/^https?:\/\/([a-z0-9-]+\.[a-z0-9-]+(\.svc(\.cluster\.local)?)?|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d{1,5})?\/?$/,
+          "an in-cluster http(s)://<service>.<namespace>[.svc]:<port> or private address"),
       }).strict().optional(),
       logErrors: z.object({
         metric: z.string().regex(/^[a-zA-Z_:][a-zA-Z0-9_:]{0,199}$/, "a Prometheus metric name"),

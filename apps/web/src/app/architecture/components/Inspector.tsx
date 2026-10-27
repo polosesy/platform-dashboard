@@ -76,6 +76,8 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
       [t("arch.unresolvedPip", { n: "" }).trim(), model.regions.flatMap((r) => r.unresolvedPublicIps.map((x) => ({ ...x, region: r.key })))],
       [t("arch.unusedNsg", { n: "" }).trim(), model.regions.flatMap((r) => r.unusedNsgs.map((x) => ({ ...x, region: r.key })))],
     ];
+    // NSGs an AKS cluster owns (its node resource group): not cleanup — why nothing uses them now
+    const managed = model.regions.flatMap((r) => r.managedNsgs.map((x) => ({ ...x, region: r.key })));
     return (
       <aside className={s.inspector}>
         <h2 className={s.iTitle}>{t("arch.i.cleanup")}</h2>
@@ -93,6 +95,21 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
             </ul>
           </section>
         ))}
+        {managed.length ? (
+          <section className={s.iSection}>
+            <h3>{t("arch.managedNsg.title")} · {managed.length}</h3>
+            <p className={s.iHint}>{t("arch.managedNsg.hint")}</p>
+            <ul className={s.iList}>
+              {managed.map((x) => (
+                <li key={x.id}>
+                  <span className={s.mono}>{x.name}</span>
+                  <span className={s.iDim}>{regionName(x.region, t)} · {t("arch.managedNsg.owner", { cluster: x.cluster })}</span>
+                  <span className={s.iDim}>{t(`arch.managedNsg.reason.${x.reason}`)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </aside>
     );
   }

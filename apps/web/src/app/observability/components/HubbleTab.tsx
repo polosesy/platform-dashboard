@@ -9,7 +9,7 @@ import { FlowsTab } from "../../hubble/components/FlowsTab";
 import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
-import { Button, ErrorNotice, LoadingState, Notice, Segmented } from "@/components/ui";
+import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle } from "@/components/ui";
 import { EnableFlowLogsPanel, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
 
@@ -21,24 +21,34 @@ const SUB_TABS: SubTab[] = ["service-map", "flows", "network", "security"];
 
 /**
  * Service Map / Flows / Network / Security for one cluster, from the source the API picks (/api/hubble/sources):
- * exec on the agents (status badges + the flow views) · ACNS flow logs (the same flow views) · Hubble metrics
+ * exec on the agents (status badges + the flow views) · ACNS flow logs or the cluster's Hubble UI (a live relay
+ * sample — the same flow views) · Hubble metrics
  * (counts only: workload grid, network, security — no edges, no flow list) · none (why, and how to enable).
  */
 export function HubbleTab({ clusterId }: Props) {
   const { t } = useI18n();
   const [subTab, setSubTab] = useState<SubTab>("service-map");
+  // One refresh rule for all four views: a sample when a view opens, "새 표본" on demand, "실시간" = every 30 s.
+  // Off by default — every poll used to redraw the map and the tables (a Hubble UI sample takes seconds).
+  const [live, setLive] = useState(false);
+  const [nonce, setNonce] = useState(0);
   const sources = useHubbleSource(clusterId);
   const src = sources.data?.clusterId === clusterId ? sources.data : null;
 
   const tabs = (
     <div className={styles.subTabs}>
       <Segmented label={t("hub.views")} value={subTab} onChange={setSubTab} items={SUB_TABS.map((id) => ({ id, label: t(`hub.view.${id}`) }))} />
+      <span className={styles.refreshCtl}>
+        <Toggle checked={live} onChange={setLive} title={t("hb.nm.liveHint")}>{t("hb.nm.live")}</Toggle>
+        <Button size="sm" onClick={() => setNonce((n) => n + 1)}>{t("hb.nm.sample")}</Button>
+      </span>
     </div>
   );
+  const view = { clusterId, live, nonce };
 
   if (sources.error) return <ErrorNotice error={sources.error} />;
   if (!src) return <LoadingState label={t("hb.src.checking")} />;
-  if (src.selected === "exec") return <ExecHubble clusterId={clusterId} subTab={subTab} tabs={tabs} badge={<SourceBadge sources={src} />} />;
+  if (src.selected === "exec") return <ExecHubble view={view} subTab={subTab} tabs={tabs} badge={<SourceBadge sources={src} />} />;
 
   return (
     <div>
@@ -49,20 +59,20 @@ export function HubbleTab({ clusterId }: Props) {
       {src.selected === "none" ? (
         <>
           <Notice tone="warning" title={t("hb.src.noneTitle")}>
-            {t(`hb.src.execOff.${src.exec.reason ?? "deployment"}`)} {t(`hb.src.logs.${src.flowLogs.state}`)} {t(`hb.m.state.${src.metrics.state}`)}
+            {t(`hb.src.execOff.${src.exec.reason ?? "deployment"}`)} {t(`hb.src.logs.${src.flowLogs.state}`)} {t(`hb.src.ui.${src.hubbleUi.state}`)}{src.hubbleUi.message ? ` (${src.hubbleUi.message})` : ""} {t(`hb.m.state.${src.metrics.state}`)}
           </Notice>
           <EnableFlowLogsPanel />
         </>
       ) : (
         <>
-          <Notice tone="info">{t(src.selected === "flowLogs" ? "hb.src.flowLogsHint" : "hb.src.metricsHint")}</Notice>
+          <Notice tone="info">{t(src.selected === "flowLogs" ? "hb.src.flowLogsHint" : src.selected === "hubbleUi" ? "hb.src.hubbleUiHint" : "hb.src.metricsHint")}</Notice>
           {tabs}
-          {src.selected === "flowLogs" ? (
+          {src.selected === "flowLogs" || src.selected === "hubbleUi" ? (
             <>
-              {subTab === "service-map" && <ServiceMapTab clusterId={clusterId} />}
-              {subTab === "flows" && <FlowsTab clusterId={clusterId} />}
-              {subTab === "network" && <NetworkTab clusterId={clusterId} />}
-              {subTab === "security" && <SecurityTab clusterId={clusterId} />}
+              {subTab === "service-map" && <ServiceMapTab {...view} />}
+              {subTab === "flows" && <FlowsTab {...view} />}
+              {subTab === "network" && <NetworkTab {...view} />}
+              {subTab === "security" && <SecurityTab {...view} />}
             </>
           ) : subTab === "flows" ? (
             <>
@@ -79,7 +89,8 @@ export function HubbleTab({ clusterId }: Props) {
 }
 
 /** Exec on the cilium agents: relay status + the flow views (unchanged) */
-function ExecHubble({ clusterId, subTab, tabs, badge }: { clusterId: string; subTab: SubTab; tabs: ReactNode; badge: ReactNode }) {
+function ExecHubble({ view, subTab, tabs, badge }: { view: { clusterId: string; live: boolean; nonce: number }; subTab: SubTab; tabs: ReactNode; badge: ReactNode }) {
+  const { clusterId } = view;
   const { t, locale } = useI18n();
   const status = useApiQuery(clusterId ? `hubble-status:${clusterId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<HubbleStatusResponse>(apiUrl("/api/hubble/status", { clusterId, lang: locale }), token),
@@ -131,10 +142,10 @@ function ExecHubble({ clusterId, subTab, tabs, badge }: { clusterId: string; sub
 
       {tabs}
 
-      {subTab === "service-map" && <ServiceMapTab clusterId={clusterId} />}
-      {subTab === "flows" && <FlowsTab clusterId={clusterId} />}
-      {subTab === "network" && <NetworkTab clusterId={clusterId} />}
-      {subTab === "security" && <SecurityTab clusterId={clusterId} />}
+      {subTab === "service-map" && <ServiceMapTab {...view} />}
+      {subTab === "flows" && <FlowsTab {...view} />}
+      {subTab === "network" && <NetworkTab {...view} />}
+      {subTab === "security" && <SecurityTab {...view} />}
     </div>
   );
 }

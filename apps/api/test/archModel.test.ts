@@ -426,3 +426,27 @@ test("Flexible scale set: instance VMs are absorbed into the scale-set tile; the
   assert.ok(!model.edges.some((e) => e.kind === "ingress" && e.target === LB_PUB), "an LB with no inbound rule is not an Internet entry (LB-04)");
   assert.equal(model.accounting.get(pipId("pip-k"))?.into, LB_PUB, "its public IP is still shown on it");
 });
+
+test("an unassociated NSG in an AKS node resource group is AKS-managed (with why), not cleanup", () => {
+  const g = fixture();
+  const nodeNsg = rid("mc_rg2", "microsoft.network/networksecuritygroups", "aks-agentpool-1-nsg");
+  const lookalike = nsgId("aks-agentpool-2-nsg"); // the name alone proves nothing
+  const aks = g.nodes.find((x) => x.id === AKS)!;
+  aks.metadata = { ...aks.metadata, nodeResourceGroup: "MC_rg2", powerState: "Stopped", agentPoolProfiles: [{ count: 0 }] };
+  g.nodes.push(
+    { id: nodeNsg, kind: "nsg", name: "aks-agentpool-1-nsg", location: "koreacentral", azureId: nodeNsg, resourceGroup: "mc_rg2" },
+    { id: lookalike, kind: "nsg", name: "aks-agentpool-2-nsg", location: "koreacentral", azureId: lookalike, resourceGroup: "rg1" },
+  );
+  const mm = buildArchModel(g);
+  const kc = mm.regions.find((x) => x.key === "koreacentral")!;
+  assert.deepEqual(kc.managedNsgs.map((x) => [x.name, x.cluster, x.reason]), [["aks-agentpool-1-nsg", "aks1", "stopped"]]);
+  assert.ok(kc.unusedNsgs.some((x) => x.id === lookalike) && !kc.unusedNsgs.some((x) => x.id === nodeNsg));
+  assert.equal(mm.totals.managedNsgs, 1);
+  assert.ok(mm.accounting.has(nodeNsg), "still in one accounting bucket");
+  const rgOf = m.aksByNodeResourceGroup(mm.nodes);
+  aks.metadata = { ...aks.metadata, powerState: "Running", agentPoolProfiles: [{ count: 0 }, { count: 0 }] };
+  assert.equal(m.aksManagedNsg(nodeNsg, rgOf)?.reason, "noNodes");
+  aks.metadata = { ...aks.metadata, agentPoolProfiles: [{ count: 3 }] };
+  assert.equal(m.aksManagedNsg(nodeNsg, rgOf)?.reason, "nodesRunning");
+  assert.equal(m.aksManagedNsg(lookalike, rgOf), null);
+});

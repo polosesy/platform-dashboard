@@ -9,7 +9,6 @@ import type {
 } from "@aud/types";
 import styles from "./styles.module.css";
 import { DataSourceBadges } from "./components/DataSourceBadges";
-import { OverviewTab } from "./components/OverviewTab";
 import { WorkloadsTab } from "./components/WorkloadsTab";
 import { InfraTab } from "./components/InfraTab";
 import { LogsTab } from "./components/LogsTab";
@@ -22,9 +21,11 @@ import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 
-type Tab = "overview" | "workloads" | "infra" | "logs" | "hubble" | "stack";
+// Five places, heatmap first (Datadog's Kubernetes overview): the cluster at a glance + every workload as a tile, then
+// nodes, logs, the network (Hubble) and whether the collection pipeline itself is healthy
+type Tab = "overview" | "infra" | "logs" | "hubble" | "stack";
 
-const TABS: Tab[] = ["overview", "workloads", "infra", "logs", "hubble", "stack"];
+const TABS: Tab[] = ["overview", "infra", "logs", "hubble", "stack"];
 
 export default function ObservabilityPage() {
   const { t, locale } = useI18n();
@@ -70,7 +71,8 @@ export default function ObservabilityPage() {
       return;
     }
     setSelectedWorkload(`${ns}/${name}`);
-    setTab("workloads");
+    setTab("overview");
+    setWlView("list");
   }
 
   const dsStatus =
@@ -127,22 +129,18 @@ export default function ObservabilityPage() {
       )}
 
       {/* Tabs */}
-      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble" || tab === "stack" || tab === "workloads") && (
+      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 
-          {tab === "overview" && overview && (
-            <OverviewTab data={overview} onWorkloadSelect={handleWorkloadSelect} />
-          )}
-
-          {tab === "workloads" && (
+          {tab === "overview" && (
             <Segmented label={t("ob.hm.view")} value={wlView} onChange={setWlView}
               items={[{ id: "heatmap", label: t("ob.hm.view.heatmap") }, { id: "list", label: t("ob.hm.view.list") }]} />
           )}
 
-          {tab === "workloads" && wlView === "heatmap" && <WorkloadHeatmap clusterId={clusterId} />}
+          {tab === "overview" && wlView === "heatmap" && <WorkloadHeatmap clusterId={clusterId} />}
 
-          {tab === "workloads" && wlView === "list" && workloadsResp && (
+          {tab === "overview" && wlView === "list" && workloadsResp && (
             <WorkloadsTab
               workloads={workloadsResp.workloads}
               onWorkloadSelect={handleWorkloadSelect}

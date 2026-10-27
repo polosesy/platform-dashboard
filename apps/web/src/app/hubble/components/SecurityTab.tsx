@@ -11,9 +11,10 @@ import { CoverageNote } from "./CoverageNote";
 import { EnforceReadiness } from "./EnforceReadiness";
 import { rgba } from "@/lib/palette";
 
-type Props = { clusterId: string };
+/** live = refresh on its own (visible tab, interval); nonce = one new sample on demand (HubbleTab owns both) */
+type Props = { clusterId: string; live?: boolean; nonce?: number };
 
-export function SecurityTab({ clusterId }: Props) {
+export function SecurityTab({ clusterId, live = false, nonce = 0 }: Props) {
   const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
@@ -38,9 +39,9 @@ export function SecurityTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, getApiToken, locale]);
+  }, [clusterId, getApiToken, locale, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  usePolling(fetch_, 30_000);
+  usePolling(fetch_, 30_000, live);
 
   if (loading && !data) {
     return (

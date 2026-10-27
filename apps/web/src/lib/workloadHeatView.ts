@@ -192,3 +192,48 @@ export function cardShape(n: number, avail: number): { cols: number; rows: numbe
   const h = MOSAIC.border * 2 + MOSAIC.head + MOSAIC.pad * 2 + rows * MOSAIC.tileH + (rows - 1) * MOSAIC.tileGap;
   return { cols: best.cols, rows, span: Math.ceil((h + MOSAIC.gap) / MOSAIC.unit) };
 }
+
+// ── Cluster at a glance (the band above the heatmap — Datadog's Kubernetes overview pattern) ──
+
+export type ClusterGlance = {
+  /** Workloads with something to run, by worst level (idle DaemonSets / scaled-to-zero apart) */
+  workloads: { total: number; danger: number; warn: number; ok: number; other: number; idle: number };
+  /** Pods with a measured Ready state (null = no pod has one) */
+  pods: { ready: number; measured: number } | null;
+  /** Workloads with fewer ready replicas than desired (both measured) */
+  short: number;
+  /** Container restarts in the window over every pod (null = no pod measured) and how many workloads had any */
+  restarts: { total: number; workloads: number } | null;
+  /** Pods whose last termination was OOMKilled, and their workloads */
+  oom: { pods: number; workloads: number };
+};
+
+/**
+ * Pure: the band's numbers, only from what the heatmap measured — a value nobody measured stays null (shown as '—',
+ * never 0). "other" = measured without a baseline / no traffic / not instrumented; idle = nothing to run.
+ */
+export function clusterGlance(ws: HeatWorkload[]): ClusterGlance {
+  const g: ClusterGlance = { workloads: { total: 0, danger: 0, warn: 0, ok: 0, other: 0, idle: 0 }, pods: null, short: 0, restarts: null, oom: { pods: 0, workloads: 0 } };
+  let ready = 0, measured = 0, restarts = 0, restartsMeasured = false, restartWorkloads = 0;
+  for (const w of ws) {
+    if (w.worst === "stopped") { g.workloads.idle++; continue; }
+    g.workloads.total++;
+    if (w.worst === "danger") g.workloads.danger++;
+    else if (w.worst === "warn") g.workloads.warn++;
+    else if (w.worst === "ok") g.workloads.ok++;
+    else g.workloads.other++;
+    const { ready: r, desired: d } = w.replicas;
+    if (r !== null && d !== null && r < d) g.short++;
+    let wRestarts = 0, wOom = 0;
+    for (const p of w.pods) {
+      if (p.ready !== null) { measured++; if (p.ready) ready++; }
+      if (p.restarts !== null) { restartsMeasured = true; restarts += p.restarts; wRestarts += p.restarts; }
+      if (p.oom) wOom++;
+    }
+    if (wRestarts > 0) restartWorkloads++;
+    if (wOom > 0) { g.oom.pods += wOom; g.oom.workloads++; }
+  }
+  g.pods = measured ? { ready, measured } : null;
+  g.restarts = restartsMeasured ? { total: restarts, workloads: restartWorkloads } : null;
+  return g;
+}

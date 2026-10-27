@@ -1,20 +1,20 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useI18n } from "@/lib/i18n";
-import type { PodLogEntry, ObservabilityLogsResponse, ObservabilityNamespacesResponse, NamespacePodItem } from "@aud/types";
+import { dateLocale, useI18n } from "@/lib/i18n";
+import type { PodLogEntry, PodLogAttempt, PodLogSource, ObservabilityLogsResponse, ObservabilityNamespacesResponse, NamespacePodItem } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
-import { rgba } from "@/lib/palette";
 import { startPolling } from "@/lib/usePolling";
+import { Notice } from "@/components/ui";
 
 type Props = {
   clusterId: string;
 };
 
 export function LogsTab({ clusterId }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [namespace, setNamespace] = useState("");
@@ -27,6 +27,11 @@ export function LogsTab({ clusterId }: Props) {
 
   const [nsPodItems, setNsPodItems] = useState<NamespacePodItem[]>([]);
   const [logs, setLogs] = useState<PodLogEntry[]>([]);
+  // Which source answered (Loki · kubelet · Container Insights) and why the others did not
+  const [source, setSource] = useState<PodLogSource | null>(null);
+  const [attempts, setAttempts] = useState<PodLogAttempt[]>([]);
+  // Namespaces this connection may read logs of inside the cluster (null = all)
+  const [logNamespaces, setLogNamespaces] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +47,7 @@ export function LogsTab({ clusterId }: Props) {
         token,
       );
       setNsPodItems(data.items);
+      setLogNamespaces(data.logNamespaces ?? null);
     } catch (e) {
       console.error("[LogsTab] namespace fetch error:", e);
     }
@@ -59,8 +65,11 @@ export function LogsTab({ clusterId }: Props) {
     for (const item of nsPodItems) {
       if (item.namespace) nsSet.add(item.namespace);
     }
-    return Array.from(nsSet).sort();
-  }, [nsPodItems]);
+    // Readable namespaces first, so the first pick shows logs instead of a refusal
+    const can = (ns: string) => !logNamespaces || logNamespaces.includes(ns);
+    return Array.from(nsSet).sort((a, b) => Number(can(b)) - Number(can(a)) || a.localeCompare(b));
+  }, [nsPodItems, logNamespaces]);
+  const canRead = useCallback((ns: string) => !logNamespaces || logNamespaces.includes(ns), [logNamespaces]);
 
   // Build pod list for selected namespace (빈 podName 항목 제외)
   const podOptions = useMemo(() => {
@@ -126,6 +135,8 @@ export function LogsTab({ clusterId }: Props) {
         token,
       );
       setLogs(data.logs);
+      setSource(data.source ?? null);
+      setAttempts(data.attempts ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -164,7 +175,7 @@ export function LogsTab({ clusterId }: Props) {
   function formatTime(ts: string) {
     const d = new Date(ts);
     if (!ts || Number.isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString(dateLocale(locale), { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   if (nsPodItems.length === 0 && !loading) {
@@ -180,9 +191,9 @@ export function LogsTab({ clusterId }: Props) {
     <div>
       {/* Toolbar */}
       <div className={styles.logsToolbar}>
-        <select value={namespace} onChange={(e) => setNamespace(e.target.value)}>
+        <select value={namespace} onChange={(e) => setNamespace(e.target.value)} aria-label={t("hb.namespace")}>
           {namespaces.map((ns) => (
-            <option key={ns} value={ns}>{ns}</option>
+            <option key={ns} value={ns}>{canRead(ns) ? ns : t("ob.logs.nsDenied", { ns })}</option>
           ))}
         </select>
 
@@ -231,17 +242,35 @@ export function LogsTab({ clusterId }: Props) {
           {t("ob.logs.autoScroll")} {autoScroll ? "ON" : "OFF"}
         </button>
 
-        <span style={{ fontSize: 11, color: rgba("ink", 0.4), marginLeft: "auto" }}>
+        <span className={styles.logCount}>
           {t("ob.logs.lines", { n: filteredLogs.length })} {loading && `· ${t("common.loading")}`}
         </span>
       </div>
 
       {error && <div className={styles.errorMsg}>{t("ob.error")}: {error}</div>}
 
+      {/* Where the lines came from — and why the other sources gave none */}
+      {attempts.length > 0 && (
+        <p className={styles.logSourceRow}>
+          {attempts.map((a) => (
+            <span key={a.source} className={styles.logSourceChip} data-state={a.state} title={a.message ?? t(`ob.logs.state.${a.state}`)}>
+              {t(`ob.logs.src.${a.source}`)} · {t(`ob.logs.state.${a.state}`)}
+            </span>
+          ))}
+        </p>
+      )}
+      {!source && attempts.length > 0 && !loading && (
+        <Notice tone={canRead(namespace) ? "warning" : "info"} title={t(canRead(namespace) ? "ob.logs.noneTitle" : "ob.logs.deniedTitle")}>
+          {canRead(namespace)
+            ? t("ob.logs.noneHint")
+            : t("ob.logs.deniedHint", { list: (logNamespaces ?? []).join(", ") || "—" })}
+        </Notice>
+      )}
+
       {/* Log viewer */}
       <div className={styles.logContainer} ref={containerRef}>
         {filteredLogs.length === 0 && !loading && (
-          <div style={{ padding: 32, textAlign: "center", color: "#6a6a6a" }}>
+          <div className={styles.logEmpty}>
             {podOptions.length === 0
               ? t("ob.logs.noRunningPods")
               : namespace && podName

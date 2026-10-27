@@ -134,7 +134,7 @@ export type HubbleNodeCoverage = {
  * node's buffer lasts.
  */
 export type HubbleCoverage = {
-  source: "agents" | "relay" | "api-proxy" | "flow-logs";
+  source: "agents" | "relay" | "api-proxy" | "flow-logs" | "hubble-ui";
   nodesObserved: number;
   nodesTotal: number;
   nodes: HubbleNodeCoverage[];
@@ -342,8 +342,12 @@ export type HubbleStatusResponse = {
 
 // ── Sources without Hubble exec (services/hubbleSources.ts) ──
 
-/** Where the Hubble views read from: exec on the agents · ACNS flow logs (Log Analytics) · Hubble metrics (Managed Prometheus) */
-export type HubbleDataSource = "exec" | "flowLogs" | "metrics" | "none";
+/**
+ * Where the Hubble views read from: exec on the agents · ACNS flow logs (Log Analytics) · the cluster's Hubble UI
+ * (a live sample of the relay through its backend — services/hubbleUiSource.ts) · Hubble metrics (Managed Prometheus)
+ */
+export type HubbleDataSource = "exec" | "flowLogs" | "hubbleUi" | "metrics" | "none";
+export type HubbleUiState = "ok" | "notConfigured" | "unreachable" | "unsupported" | "failed";
 
 export type HubbleMetricsState = "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
 export type HubbleLogsState = "ok" | "notEnabled" | "forbidden" | "failed";
@@ -355,6 +359,8 @@ export type HubbleSourcesResponse = {
   exec: { allowed: boolean; reason?: "deployment" | "connection" };
   /** ContainerNetworkLogs rows for this cluster in the last hour (resource-centric query) */
   flowLogs: { state: HubbleLogsState; rows1h: number | null; newest: string | null };
+  /** The cluster's Hubble UI backend (connections file `aks.observability.hubbleUi`) */
+  hubbleUi: { state: HubbleUiState; message?: string };
   metrics: { state: HubbleMetricsState; message?: string };
 };
 

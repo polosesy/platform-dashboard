@@ -8,7 +8,7 @@
 // connection is state "unreachable" with the rule to add — never sample lines.
 
 import type { Env } from "../env.js";
-import type { HubbleFlow, LogLine, LokiDropsResponse, LokiState, WorkloadLogsResponse } from "@aud/types";
+import type { HubbleFlow, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { clusterConnection } from "../infra/azureClientFactory.js";
 import { HttpError, safeMessage } from "../infra/requestParams.js";
@@ -131,6 +131,50 @@ export async function getWorkloadLogs(
     return result;
   } catch (e) {
     return { ...base, ...lokiStateOf(e) };
+  }
+}
+
+// ── One pod's lines (AKS 모니터링 › 로그) ──
+
+const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }>(50, 10_000);
+
+/**
+ * A pod's lines from Loki (the same gate as kubelet logs — the route checks it): `{namespace, pod[, container]}`
+ * built from validated names, newest `limit` lines in the window, returned oldest first like a tail. The container
+ * label is the collector's (Alloy `loki.source.kubernetes` sets namespace · pod · container).
+ */
+export async function getPodLogsFromLoki(
+  env: Env, bearerToken: string | undefined, clusterId: string,
+  opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number },
+): Promise<{ state: LokiState | "notConfigured"; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
+  const cfg = lokiConfig(env, clusterId);
+  if (!cfg) return { state: "notConfigured", lines: [], redactions: 0, truncated: false };
+  for (const v of [opts.namespace, opts.pod, ...(opts.container ? [opts.container] : [])]) {
+    if (!NAME.test(v)) throw new HttpError(400, "invalid_name", "namespace / pod / container is not a Kubernetes name");
+  }
+  const selector = `{namespace="${opts.namespace}", pod="${opts.pod}"${opts.container ? `, container="${opts.container}"` : ""}}`;
+  const limit = Math.min(Math.max(opts.limit, 1), MAX_LINES);
+  const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${limit}`;
+  const hit = podLogCache.get(key);
+  if (hit) return hit;
+  try {
+    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes), limit: String(limit), direction: "backward" });
+    let redactions = 0;
+    const lines: PodLogEntry[] = [];
+    for (const st of res.body.data?.result ?? []) {
+      for (const v of st.values ?? []) {
+        const p = parseLogLine(st.stream ?? {}, v[0], v[1] ?? "", v[2]);
+        redactions += p.redactions;
+        const stream = st.stream?.stream;
+        lines.push({ timestamp: p.line.time, podName: opts.pod, containerName: st.stream?.container ?? "", logMessage: p.line.text, stream: stream === "stdout" || stream === "stderr" ? stream : "unknown" });
+      }
+    }
+    lines.sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+    const out = { state: "ok" as const, lines: lines.slice(-limit), redactions, truncated: res.truncated };
+    podLogCache.set(key, out);
+    return out;
+  } catch (e) {
+    return { ...lokiStateOf(e), lines: [], redactions: 0, truncated: false };
   }
 }
 

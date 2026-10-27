@@ -409,7 +409,7 @@
 .detailConnProto {
   font-size: 10px;
   color: rgba(var(--ink-rgb), 0.4);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 .detailConnFlows {
@@ -421,7 +421,7 @@
 .detailConnL7 {
   font-size: 9px;
   color: rgba(var(--accent-rgb), 0.5);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 /* ── Map Legend ── */
@@ -681,7 +681,7 @@
   white-space: nowrap;
 }
 .detailEpIp {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   color: rgba(var(--ink-rgb), 0.6);
 }
 .detailEpNode {
@@ -974,6 +974,10 @@
 /* View switcher under the Hubble status line */
 .subTabs {
   margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
 }
 
 /* ── Hubble metrics view (no exec, no flow logs): workload grid ── */
@@ -1013,3 +1017,87 @@
 }
 .enablePanel summary { cursor: pointer; font-weight: 600; }
 .enablePanel pre { white-space: pre; overflow-x: auto; padding: 8px; background: var(--surface-2, var(--surface)); border-radius: var(--radius-sm); }
+
+/* ── Network map (lib/k8sNetMap.ts) — the live diagram's card grammar for Kubernetes ── */
+.nm { display: grid; gap: 10px; min-width: 0; --status: rgba(var(--ink-rgb), 0.25); --status-rgb: var(--ink-rgb); }
+.nm [data-status="ok"] { --status: var(--ok); --status-rgb: var(--ok-rgb); }
+.nm [data-status="warn"] { --status: var(--warning); --status-rgb: var(--warning-rgb); }
+.nm [data-status="danger"] { --status: var(--danger); --status-rgb: var(--danger-rgb); }
+.nm [data-status="stale"] { --status: rgba(var(--ink-rgb), 0.3); --status-rgb: var(--ink-rgb); }
+.nmBar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.nmMeta { margin-left: auto; display: inline-flex; gap: 10px; align-items: center; }
+.nmSummary { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12.5px; color: rgba(var(--ink-rgb), 0.7); }
+.nmSummary > [data-status] { color: var(--status); font-weight: 600; }
+.nmAt { color: rgba(var(--ink-rgb), 0.5); }
+.nmLegend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 0 auto; padding: 0; list-style: none; font-size: 12px; color: rgba(var(--ink-rgb), 0.6); }
+.nmLegend li { display: inline-flex; align-items: center; gap: 4px; }
+.nmLegend li[data-status] span { color: var(--status); font-weight: 700; }
+.nmLine { display: inline-block; width: 18px; height: 0; border-top: 2px solid rgba(var(--ink-rgb), 0.38); }
+.nmLine[data-tone="drop"] { border-top: 2px dashed var(--danger); }
+.nmLine[data-tone="l7err"] { border-top-color: var(--warning); }
+.nmLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.nmLayout[data-open] { grid-template-columns: minmax(0, 1fr) 340px; }
+.nmCanvas { height: calc(100vh - 300px); min-height: 460px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-md); background: rgba(var(--ink-rgb), 0.015); overflow: hidden; }
+@media (max-width: 1100px) { .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr); } }
+
+/* Namespace box = the live diagram's subnet box; lanes = its ingress / outside lanes */
+.nmBox { width: 100%; height: 100%; border: 1px solid rgba(var(--subnet-rgb), 0.35); border-radius: 10px; background: rgba(var(--subnet-rgb), 0.04); }
+.nmBox[data-kind="laneIn"], .nmBox[data-kind="laneOut"] { border-style: dashed; border-color: rgba(var(--ink-rgb), 0.22); background: rgba(var(--ink-rgb), 0.025); }
+.nmBox[data-system] { border-color: rgba(var(--ink-rgb), 0.18); background: rgba(var(--ink-rgb), 0.02); }
+.nmBoxHead { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: 12.5px; font-weight: 600; color: rgba(var(--ink-rgb), 0.78); }
+.nmBoxTag { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(var(--subnet-rgb), 0.14); color: rgba(var(--subnet-rgb), 1); }
+.nmBoxTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nmBoxCounts { margin-left: auto; display: inline-flex; gap: 8px; }
+.nmBoxCounts [data-status] { color: var(--status); font-variant-numeric: tabular-nums; }
+
+/* Card = the live diagram / heatmap tile: white, status strip on the left, glyph + name, kind, two cells */
+.nmCard {
+  position: relative; width: 100%; height: 100%; box-sizing: border-box; padding: 7px 10px 6px 14px; border-radius: 8px;
+  background: var(--surface); border: 1px solid rgba(var(--ink-rgb), 0.12); box-shadow: var(--shadow-sm);
+  display: grid; grid-template-rows: auto auto 1fr; gap: 2px; cursor: pointer; transition: opacity 0.15s, box-shadow 0.15s;
+}
+.nmCard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: 8px 0 0 8px; background: var(--status); }
+.nmCard[data-status="danger"], .nmCard[data-status="warn"] { border-color: rgba(var(--status-rgb), 0.45); }
+.nmCard[data-status="stale"] { border-style: dashed; background: rgba(var(--ink-rgb), 0.02); }
+.nmCard[data-status="stale"] .nmCardName, .nmCard[data-status="stale"] .nmCells { opacity: 0.6; }
+.nmCard[data-dim] { opacity: 0.25; }
+.nmCard[data-selected] { box-shadow: 0 0 0 2px rgba(var(--status-rgb), 0.55), var(--shadow-sm); }
+.nmCard[data-kind="internetIn"], .nmCard[data-kind="internetOut"] { background: rgba(var(--violet-rgb), 0.04); }
+.nmCardTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.nmGlyph { color: var(--status); font-weight: 700; font-size: 11px; line-height: 1; }
+.nmCardName { font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nmCardKind { font-size: 11px; color: rgba(var(--ink-rgb), 0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nmCells { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: end; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.nmCells small { display: block; font-size: 10px; font-weight: 500; color: rgba(var(--ink-rgb), 0.5); }
+.nmCells [data-hot] { color: var(--status); }
+
+/* Detail panel */
+.nmPanel { border: 1px solid rgba(var(--ink-rgb), 0.12); border-radius: var(--radius-md); background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; align-content: start; max-height: calc(100vh - 300px); overflow: auto; }
+.nmPanelHead { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; }
+.nmPanelHead strong { display: block; font-size: 14px; word-break: break-all; }
+.nmPanelHead small { color: rgba(var(--ink-rgb), 0.55); }
+.nmWhy { margin: 0; font-size: 12.5px; color: rgba(var(--ink-rgb), 0.72); }
+.nmKv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12.5px; }
+.nmKv dt { color: rgba(var(--ink-rgb), 0.55); }
+.nmKv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.nmPanel h4 { margin: 4px 0 6px; font-size: 12px; color: rgba(var(--ink-rgb), 0.6); }
+.nmLinks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.nmLinkRow {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; text-align: left;
+  padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(var(--ink-rgb), 0.08); background: transparent; font: inherit; font-size: 12px; cursor: pointer;
+}
+.nmLinkRow:hover { background: rgba(var(--ink-rgb), 0.04); }
+.nmLinkRow[data-tone="drop"] { border-color: rgba(var(--danger-rgb), 0.35); }
+.nmLinkRow[data-tone="drop"] b { color: var(--danger); }
+.nmLinkRow[data-stale] { opacity: 0.55; }
+.nmLinkDir { color: rgba(var(--ink-rgb), 0.5); }
+.nmLinkPeer { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nmLinkPort { font-family: var(--font-mono); color: rgba(var(--ink-rgb), 0.6); }
+.nmLinkFlows { grid-column: 2 / 4; color: rgba(var(--ink-rgb), 0.6); font-variant-numeric: tabular-nums; }
+.nmLinkL7 { grid-column: 2 / 4; font-size: 11px; color: rgba(var(--ink-rgb), 0.5); }
+
+.refreshCtl { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+
+.nmCardKind { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.nmCardKind > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.nmHub { flex: none; font-size: 9.5px; font-weight: 600; padding: 0 4px; border-radius: 3px; background: rgba(var(--ink-rgb), 0.06); color: rgba(var(--ink-rgb), 0.6); }

@@ -33,8 +33,12 @@ const CILIUM_RESERVED: Record<number, HubbleServiceType> = {
   3: "unmanaged",  // unmanaged endpoints
   4: "health",     // cilium-health endpoints
   5: "init",       // init identity
-  6: "kube-apiserver",
-  7: "remote-node",
+  // Cilium pkg/identity/numericidentity.go: 6 remote-node, 7 kube-apiserver (they were swapped here — remote-node
+  // traffic showed as the API server), 8 ingress, 9 / 10 world-ipv4 / world-ipv6 (dual-stack worlds)
+  6: "remote-node",
+  7: "kube-apiserver",
+  9: "world",
+  10: "world",
 };
 
 function resolveServiceType(identity: number, labels: Record<string, string>): HubbleServiceType {
