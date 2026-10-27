@@ -1,7 +1,7 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env.js";
 import { mockReservationUtilization, tryGetReservationUtilization } from "../services/reservations.js";
-import { queryString, querySubscriptionId, sendError } from "../infra/requestParams.js";
+import { queryString, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 
 export function registerReservationRoutes(router: Router, env: Env) {
   router.get("/api/reservations/utilization", async (req: Request, res: Response) => {
@@ -15,11 +15,9 @@ export function registerReservationRoutes(router: Router, env: Env) {
       return sendError(res, e, "reservations_failed");
     }
 
-    try {
-      const r = await tryGetReservationUtilization(env, req.auth?.bearerToken, grain, { subscriptionId });
-      res.json(r ?? mockReservationUtilization(grain, "mock data"));
-    } catch (e: unknown) {
-      res.json(mockReservationUtilization(grain, e instanceof Error ? e.message : "reservations error"));
-    }
+    // Sample numbers only for anonymous callers (source:"mock"); a signed-in read that fails is an error — it used
+    // to answer the sample utilisation (63 %) with the Azure error as a footnote, as if it were the caller's
+    await respondWithFallback(res, () => tryGetReservationUtilization(env, req.auth?.bearerToken, grain, { subscriptionId }),
+      mockReservationUtilization(grain), "reservations");
   });
 }

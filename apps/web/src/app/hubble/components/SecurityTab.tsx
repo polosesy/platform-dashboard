@@ -9,6 +9,7 @@ import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
 import { EnforceReadiness } from "./EnforceReadiness";
+import { rgba } from "@/lib/palette";
 
 type Props = { clusterId: string };
 
@@ -64,19 +65,19 @@ export function SecurityTab({ clusterId }: Props) {
       {/* Policy Verdict Summary */}
       <div className={styles.verdictSummary}>
         <div className={styles.verdictBox}>
-          <div className={styles.verdictBoxValue} style={{ color: "rgba(16,137,62,0.85)" }}>
+          <div className={styles.verdictBoxValue} style={{ color: rgba("success", 0.85) }}>
             {data.policyVerdicts.allowed.toLocaleString()}
           </div>
           <div className={styles.verdictBoxLabel}>{t("hb.allowed")}</div>
         </div>
         <div className={styles.verdictBox}>
-          <div className={styles.verdictBoxValue} style={{ color: "rgba(196,43,28,0.85)" }}>
+          <div className={styles.verdictBoxValue} style={{ color: rgba("danger", 0.85) }}>
             {data.policyVerdicts.denied.toLocaleString()}
           </div>
           <div className={styles.verdictBoxLabel}>{t("hb.denied")}</div>
         </div>
         <div className={styles.verdictBox}>
-          <div className={styles.verdictBoxValue} style={{ color: "rgba(209,132,0,0.85)" }}>
+          <div className={styles.verdictBoxValue} style={{ color: rgba("warning", 0.85) }}>
             {data.policyVerdicts.audit.toLocaleString()}
           </div>
           <div className={styles.verdictBoxLabel}>{t("hb.verdict.AUDIT")}</div>
@@ -88,7 +89,7 @@ export function SecurityTab({ clusterId }: Props) {
         {total > 0 && (
           <div className={styles.verdictBox}>
             <div className={styles.verdictBoxValue} style={{
-              color: data.policyVerdicts.denied > total * 0.05 ? "rgba(196,43,28,0.85)" : "rgba(16,137,62,0.85)",
+              color: data.policyVerdicts.denied > total * 0.05 ? rgba("danger", 0.85) : rgba("success", 0.85),
             }}>
               {((data.policyVerdicts.denied / total) * 100).toFixed(1)}%
             </div>
@@ -119,8 +120,8 @@ export function SecurityTab({ clusterId }: Props) {
                   <td style={{ fontWeight: 600 }}>{d.destination}</td>
                   <td className={styles.flowMono}>{d.port}</td>
                   <td><span className={styles.protocolBadge}>{d.protocol}</span></td>
-                  <td style={{ fontWeight: 700, color: "rgba(196,43,28,0.85)" }}>{d.count}</td>
-                  <td style={{ fontSize: 11, color: "rgba(20,21,23,0.5)" }}>{d.direction}</td>
+                  <td style={{ fontWeight: 700, color: rgba("danger", 0.85) }}>{d.count}</td>
+                  <td style={{ fontSize: 11, color: rgba("ink", 0.5) }}>{d.direction}</td>
                 </tr>
               ))}
             </tbody>
@@ -157,8 +158,8 @@ export function SecurityTab({ clusterId }: Props) {
                   <td>{f.sourceLabel}</td>
                   <td className={styles.flowMono}>{f.destIdentity}</td>
                   <td>{f.destLabel}</td>
-                  <td style={{ color: "rgba(16,137,62,0.85)", fontWeight: 600 }}>{f.allowed}</td>
-                  <td style={{ color: f.denied > 0 ? "rgba(196,43,28,0.85)" : undefined, fontWeight: 600 }}>
+                  <td style={{ color: rgba("success", 0.85), fontWeight: 600 }}>{f.allowed}</td>
+                  <td style={{ color: f.denied > 0 ? rgba("danger", 0.85) : undefined, fontWeight: 600 }}>
                     {f.denied}
                   </td>
                 </tr>

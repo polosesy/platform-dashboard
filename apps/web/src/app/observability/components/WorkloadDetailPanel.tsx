@@ -12,6 +12,7 @@ import type {
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
 
 function MetricRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -60,7 +61,7 @@ function JvmSection({ jvm }: { jvm: JvmMetrics }) {
 function formatAge(isoString: string): string {
   if (!isoString) return "—";
   const ms = Date.now() - new Date(isoString).getTime();
-  if (ms < 0) return "just now";
+  if (ms < 0) return "0m"; // clock skew — never a future age
   const mins = Math.floor(ms / 60_000);
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
@@ -149,7 +150,7 @@ function PodDetailRow({ pod }: { pod: WorkloadPodDetail }) {
                 {c.restartCount > 0 && (
                   <div className={styles.podDetailMiniRow}>
                     <span>{t("ob.restarts")}</span>
-                    <span style={{ color: "rgba(196,43,28,0.85)" }}>{c.restartCount}</span>
+                    <span style={{ color: rgba("danger", 0.85) }}>{c.restartCount}</span>
                   </div>
                 )}
               </div>
@@ -264,24 +265,24 @@ export function WorkloadDetailPanel({
           <MetricRow label={t("hb.total")} value={pods.total} />
           <MetricRow
             label={t("ob.running")}
-            value={<span style={{ color: "rgba(16,137,62,0.85)" }}>{pods.running}</span>}
+            value={<span style={{ color: rgba("success", 0.85) }}>{pods.running}</span>}
           />
           {pods.pending > 0 && (
             <MetricRow
               label={t("ob.pending")}
-              value={<span style={{ color: "rgba(209,132,0,0.85)" }}>{pods.pending}</span>}
+              value={<span style={{ color: rgba("warning", 0.85) }}>{pods.pending}</span>}
             />
           )}
           {pods.failed > 0 && (
             <MetricRow
               label={t("ob.failed")}
-              value={<span style={{ color: "rgba(196,43,28,0.85)" }}>{pods.failed}</span>}
+              value={<span style={{ color: rgba("danger", 0.85) }}>{pods.failed}</span>}
             />
           )}
           {pods.restarts > 0 && (
             <MetricRow
               label={t("ob.restartCount")}
-              value={<span style={{ color: "rgba(196,43,28,0.75)" }}>{pods.restarts}</span>}
+              value={<span style={{ color: rgba("danger", 0.75) }}>{pods.restarts}</span>}
             />
           )}
         </div>
@@ -328,7 +329,7 @@ export function WorkloadDetailPanel({
           <div className={styles.detailSection}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
               <span className={styles.spinner} style={{ width: 14, height: 14 }} />
-              <span style={{ fontSize: 12, color: "rgba(20,21,23,0.4)" }}>{t("ob.podDetailLoading")}</span>
+              <span style={{ fontSize: 12, color: rgba("ink", 0.4) }}>{t("ob.podDetailLoading")}</span>
             </div>
           </div>
         )}
@@ -354,7 +355,7 @@ export function WorkloadDetailPanel({
         {detail && detail.services.length === 0 && detail.pods.length > 0 && (
           <div className={styles.detailSection}>
             <p className={styles.detailSectionTitle}>{t("ob.services")}</p>
-            <div style={{ fontSize: 12, color: "rgba(20,21,23,0.4)", padding: "6px 0" }}>
+            <div style={{ fontSize: 12, color: rgba("ink", 0.4), padding: "6px 0" }}>
               {t("ob.noServices")}
             </div>
           </div>
@@ -371,7 +372,7 @@ export function WorkloadDetailPanel({
               <MetricRow
                 label={t("ob.errorRate")}
                 value={
-                  <span style={{ color: errorPct >= 5 ? "rgba(196,43,28,0.85)" : errorPct >= 1 ? "rgba(160,100,0,0.85)" : "rgba(16,137,62,0.85)" }}>
+                  <span style={{ color: errorPct >= 5 ? rgba("danger", 0.85) : errorPct >= 1 ? rgba("warning", 0.85) : rgba("success", 0.85) }}>
                     {errorPct}%
                   </span>
                 }

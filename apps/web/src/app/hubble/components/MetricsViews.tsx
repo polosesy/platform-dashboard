@@ -10,7 +10,7 @@ import type { HubbleMetricsState, HubbleMetricsSummary, HubbleSourcesResponse, L
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, Button, LoadingState, Notice, Segmented, Select, Stat } from "@/components/ui";
+import { Badge, Button, ErrorNotice, LoadingState, Notice, Segmented, Select, Stat } from "@/components/ui";
 import styles from "../styles.module.css";
 
 const WINDOWS = [5, 15, 60, 360] as const;
@@ -57,7 +57,7 @@ export function MetricsView({ clusterId, view }: { clusterId: string; view: View
         <Segmented label={t("hb.m.window")} value={win} onChange={setWin} items={WINDOWS.map((w) => ({ id: w, label: t("hb.m.minutes", { n: w }) }))} />
         <Button size="sm" onClick={q.reload}>{t("hb.m.refresh")}</Button>
       </div>
-      {q.error && <Notice tone="danger">{q.error}</Notice>}
+      <ErrorNotice error={q.error} />
       {!d && !q.error && <LoadingState />}
       {d && d.state !== "ok" && <MetricsState state={d.state} message={d.message} />}
       {d && d.state === "ok" && (

@@ -8,6 +8,7 @@ import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
+import { rgba } from "@/lib/palette";
 
 type Props = { clusterId: string };
 
@@ -66,13 +67,13 @@ export function NetworkTab({ clusterId }: Props) {
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardLabel}>{t("hb.verdict.FORWARDED")}</div>
-          <div className={styles.summaryCardValue} style={{ color: "rgba(16,137,62,0.85)" }}>
+          <div className={styles.summaryCardValue} style={{ color: rgba("success", 0.85) }}>
             {data.forwardedFlows.toLocaleString()}
           </div>
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardLabel}>{t("hb.verdict.DROPPED")}</div>
-          <div className={styles.summaryCardValue} style={{ color: data.droppedFlows > 0 ? "rgba(196,43,28,0.85)" : undefined }}>
+          <div className={styles.summaryCardValue} style={{ color: data.droppedFlows > 0 ? rgba("danger", 0.85) : undefined }}>
             {data.droppedFlows.toLocaleString()}
           </div>
           <div className={styles.summaryCardSub}>{dropPct}%</div>
@@ -120,8 +121,8 @@ export function NetworkTab({ clusterId }: Props) {
             </div>
             {ns.dropped > 0 && (
               <div className={styles.nsTrafficRow}>
-                <span style={{ color: "rgba(196,43,28,0.75)" }}>{t("hb.verdict.DROPPED")}</span>
-                <span style={{ fontWeight: 600, color: "rgba(196,43,28,0.85)" }}>{ns.dropped}</span>
+                <span style={{ color: rgba("danger", 0.75) }}>{t("hb.verdict.DROPPED")}</span>
+                <span style={{ fontWeight: 600, color: rgba("danger", 0.85) }}>{ns.dropped}</span>
               </div>
             )}
           </div>
@@ -146,8 +147,8 @@ export function NetworkTab({ clusterId }: Props) {
                 <tr key={i}>
                   <td>{d.source}</td>
                   <td>{d.destination}</td>
-                  <td style={{ fontWeight: 600, color: "rgba(196,43,28,0.85)" }}>{d.count}</td>
-                  <td style={{ fontSize: 11, color: "rgba(20,21,23,0.55)" }}>{d.dropReason || "—"}</td>
+                  <td style={{ fontWeight: 600, color: rgba("danger", 0.85) }}>{d.count}</td>
+                  <td style={{ fontSize: 11, color: rgba("ink", 0.55) }}>{d.dropReason || "—"}</td>
                 </tr>
               ))}
             </tbody>

@@ -23,5 +23,7 @@ export type ReservationUtilizationResponse = {
   usedHours: number;
   reservedHours: number;
   subscriptions: SubscriptionReservationUtilization[];
+  /** "mock" = sample numbers (anonymous only — a signed-in failure is an error response) */
+  source?: "mock";
   note?: string;
 };

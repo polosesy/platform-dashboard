@@ -9,7 +9,7 @@ import { FlowsTab } from "../../hubble/components/FlowsTab";
 import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
-import { Button, LoadingState, Notice, Segmented } from "@/components/ui";
+import { Button, ErrorNotice, LoadingState, Notice, Segmented } from "@/components/ui";
 import { EnableFlowLogsPanel, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
 
@@ -36,7 +36,7 @@ export function HubbleTab({ clusterId }: Props) {
     </div>
   );
 
-  if (sources.error) return <Notice tone="danger">{sources.error}</Notice>;
+  if (sources.error) return <ErrorNotice error={sources.error} />;
   if (!src) return <LoadingState label={t("hb.src.checking")} />;
   if (src.selected === "exec") return <ExecHubble clusterId={clusterId} subTab={subTab} tabs={tabs} badge={<SourceBadge sources={src} />} />;
 

@@ -6,7 +6,7 @@ import { mockArchitectureGraph } from "../mockData.js";
 import { tryGetArchitectureGraphFromAzure } from "../services/azure.js";
 import { mockNetworkSummary, tryGetNetworkSummaryFromLogAnalytics } from "../services/network.js";
 import { mapSubnetPairsToGraphEdgeMetrics } from "../services/flowOverlay.js";
-import { isSigninRequired, queryInt, querySubscriptionId, safeMessage, sendError } from "../infra/requestParams.js";
+import { queryInt, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 import { requireRole } from "../infra/platformAccess.js";
 import { ArrangementBody, readArrangement, writeArrangement } from "../services/arrangementStore.js";
 
@@ -44,12 +44,12 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
   router.get("/api/architecture/graph", async (req: Request, res: Response) => {
     try {
       const subscriptionId = querySubscriptionId(req, env);
-      try {
+      // The sample diagram only when there is nothing live (anonymous / feature off); a signed-in read that fails
+      // (403, 429 …) is an error — it used to draw the sample subscription as if it were the caller's
+      await respondWithFallback(res, async () => {
         const graph = await tryGetArchitectureGraphFromAzure(env, req.auth?.bearerToken, { subscriptionId });
-        res.json(graph ? { ...graph, source: "azure" } : { ...mockArchitectureGraph, source: "mock" });
-      } catch (e: unknown) {
-        res.json({ ...mockArchitectureGraph, source: "mock", note: isSigninRequired(e) ? "signin_required" : safeMessage(e) });
-      }
+        return graph ? { ...graph, source: "azure" as const } : null;
+      }, { ...mockArchitectureGraph }, "architecture");
     } catch (e: unknown) {
       sendError(res, e, "architecture_graph_failed");
     }

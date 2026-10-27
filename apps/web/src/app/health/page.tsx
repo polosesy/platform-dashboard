@@ -18,8 +18,8 @@ import { apiBaseUrl, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
-import { dateLocale, useI18n } from "@/lib/i18n";
-import { PageHeader, Tabs } from "@/components/ui";
+import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
+import { PageHeader, SampleDataNotice, Tabs, useNoteText } from "@/components/ui";
 import { InstanceHealthPanel } from "./InstanceHealthPanel";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { rgba } from "@/lib/palette";
@@ -52,21 +52,19 @@ const EVENT_TYPE_COLORS: Record<ServiceHealthEventType, string> = {
 
 // ── Helpers ──
 
-function fmtRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+/** "3시간 전" / "3h ago" in the app's language (was English-only text on the Korean page) */
+function fmtRelative(iso: string, locale: Locale): string {
+  const diff = new Date(iso).getTime() - Date.now();
   const abs = Math.abs(diff);
-  const mins = Math.floor(abs / 60_000);
-  const hrs = Math.floor(abs / 3_600_000);
-  const days = Math.floor(abs / 86_400_000);
-  const future = diff < 0;
-  if (days > 0) return future ? `in ${days}d` : `${days}d ago`;
-  if (hrs > 0) return future ? `in ${hrs}h` : `${hrs}h ago`;
-  if (mins > 0) return future ? `in ${mins}m` : `${mins}m ago`;
-  return future ? "soon" : "just now";
+  const rtf = new Intl.RelativeTimeFormat(dateLocale(locale), { numeric: "auto", style: "short" });
+  if (abs >= 86_400_000) return rtf.format(Math.trunc(diff / 86_400_000), "day");
+  if (abs >= 3_600_000) return rtf.format(Math.trunc(diff / 3_600_000), "hour");
+  return rtf.format(Math.trunc(diff / 60_000), "minute");
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
+/** In the app's language (was the browser's locale) */
+function fmtDate(iso: string, locale: Locale): string {
+  return new Date(iso).toLocaleString(dateLocale(locale), {
     month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
@@ -122,7 +120,7 @@ const SERVICE_DOT_COLOR: Record<string, string> = {
 };
 
 function RegionCard({ region }: { region: RegionHealthStatus }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const isAffected = region.hasActiveIssues;
   const services = useRegionServices(region);
@@ -179,7 +177,7 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
                       {t(`health.eventType.${evt.eventType}`)}
                     </span>
                     <span className={styles.regionEventTime}>
-                      {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime) : ""}
+                      {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime, locale) : ""}
                     </span>
                   </div>
                   <div className={styles.regionEventTitle}>{evt.title}</div>
@@ -213,7 +211,8 @@ function GlobalStatusPanel({
   regionalData: RegionalStatusResponse | null;
   regionalLoading: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const noteText = useNoteText();
 
   if (loading) return <div className={styles.empty}>{t("health.loading")}</div>;
   if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
@@ -236,6 +235,8 @@ function GlobalStatusPanel({
           </div>
         ) : hasRegions ? (
           <>
+            {/* Sample first: the red "n regions affected" line below must not be read as a real outage */}
+            {regionalData.source === "mock" ? <SampleDataNotice note={regionalData.note ?? "mock data"} /> : null}
             {regionalData.totalAffected > 0 && (
               <div className={styles.regionAffectedBanner}>
                 {t("health.regionsAffected", { n: regionalData.totalAffected })}
@@ -246,14 +247,14 @@ function GlobalStatusPanel({
                 <RegionCard key={region.name} region={region} />
               ))}
             </div>
-            {regionalData.note && (
-              <div className={styles.regionalNote}>{regionalData.note}</div>
-            )}
+            {regionalData.source !== "mock" && regionalData.note ? (
+              <div className={styles.regionalNote}>{noteText(regionalData.note)}</div>
+            ) : null}
           </>
         ) : (
           <div className={styles.empty}>
             {regionalData?.note
-              ? <><strong>{t("health.error")}:</strong> {regionalData.note}</>
+              ? <><strong>{t("health.error")}:</strong> {noteText(regionalData.note)}</>
               : t("health.permissionsNote")}
           </div>
         )}
@@ -286,7 +287,7 @@ function GlobalStatusPanel({
                   <span className={`${styles.incidentStatus} ${INCIDENT_STATUS_STYLE[inc.status]}`}>
                     {t(`health.incident.${inc.status}`)}
                   </span>
-                  <span className={styles.incidentDate}>{inc.pubDate ? fmtDate(inc.pubDate) : ""}</span>
+                  <span className={styles.incidentDate}>{inc.pubDate ? fmtDate(inc.pubDate, locale) : ""}</span>
                 </div>
                 <div className={styles.incidentTitle}>{inc.title}</div>
                 {inc.description && (
@@ -362,7 +363,7 @@ function EventCard({
   translation?: EventTranslation;
   showTranslation?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const toggle = () => setExpanded((v) => !v);
 
@@ -395,7 +396,7 @@ function EventCard({
         </div>
         <div className={styles.eventCardBtnRight}>
           <span className={styles.eventTime}>
-            {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime) : ""}
+            {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime, locale) : ""}
           </span>
           <span className={styles.eventChevron}>{expanded ? "▲" : "▼"}</span>
         </div>
@@ -442,21 +443,21 @@ function EventCard({
                 <div className={styles.timestampItem}>
                   <div className={styles.timestampDot} data-kind="start" />
                   <span className={styles.timestampLabel}>{t("health.impactStart")}</span>
-                  <span className={styles.timestampValue}>{fmtDate(evt.impactStartTime)}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.impactStartTime, locale)}</span>
                 </div>
               )}
               {evt.impactMitigationTime && (
                 <div className={styles.timestampItem}>
                   <div className={styles.timestampDot} data-kind="end" />
                   <span className={styles.timestampLabel}>{t("health.impactEnd")}</span>
-                  <span className={styles.timestampValue}>{fmtDate(evt.impactMitigationTime)}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.impactMitigationTime, locale)}</span>
                 </div>
               )}
               {evt.lastUpdateTime && (
                 <div className={styles.timestampItem}>
                   <div className={styles.timestampDot} data-kind="update" />
                   <span className={styles.timestampLabel}>{t("health.lastUpdate")}</span>
-                  <span className={styles.timestampValue}>{fmtDate(evt.lastUpdateTime)}</span>
+                  <span className={styles.timestampValue}>{fmtDate(evt.lastUpdateTime, locale)}</span>
                 </div>
               )}
             </div>
@@ -574,6 +575,8 @@ function ServiceStatusPanel({
 
   return (
     <div className={styles.grid}>
+      {/* Sample events (anonymous) are marked before anything else — they read like real outages */}
+      {data?.source === "mock" ? <SampleDataNotice note={data.note ?? "mock data"} /> : null}
       {/* Event type summary strip */}
       <div className={styles.eventSummaryStrip}>
         {eventTypeCounts.map(({ type, key }) => (

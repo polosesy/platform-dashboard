@@ -13,7 +13,7 @@ import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } fro
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Button, EmptyState, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
 import {
   GLYPH, SIGNAL_GROUPS, attentionRows, cardShape, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
   legendLevels, levelIn, mosaicColumns, problemSignals, shortName, signalSummary, tileText, type HeatView,
@@ -113,7 +113,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  if (q.error) return <Notice tone="danger">{q.error}</Notice>;
+  if (q.error) return <ErrorNotice error={q.error} />;
   if (!d || !signals) return <LoadingState />;
   if (d.metricsState !== "ok") {
     return <Notice tone="warning" title={t(`hb.m.state.${d.metricsState}`)}>{t(`hb.m.stateHint.${d.metricsState}`)}{d.message ? ` (${d.message})` : ""}</Notice>;

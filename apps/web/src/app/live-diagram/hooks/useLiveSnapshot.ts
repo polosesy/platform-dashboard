@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import type { LiveDiagramSnapshot } from "@aud/types";
-import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer, isPermanentApiError } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
+import { useI18n } from "@/lib/i18n";
+import { startPolling } from "@/lib/usePolling";
 
 export type UpdateMode = "polling" | "sse";
 
@@ -23,6 +25,8 @@ export function useLiveSnapshot(
   intervalSec = 30,
 ) {
   const getApiToken = useApiToken();
+  const { t } = useI18n();
+  const sseLost = t("ld.sseLost");
   const key = `${diagramId}:${mode}`;
   const [state, setState] = useState<SnapshotState>({ key: "", ...EMPTY });
 
@@ -62,7 +66,7 @@ export function useLiveSnapshot(
           /* ignore parse errors */
         }
       };
-      es.onerror = () => update({ connected: false, error: "SSE connection lost, reconnecting..." });
+      es.onerror = () => update({ connected: false, error: sseLost });
 
       return () => {
         cancelled = true;
@@ -70,21 +74,21 @@ export function useLiveSnapshot(
       };
     }
 
-    // Polling mode
-    const load = () =>
+    // Polling mode — visible tab only, no overlapping builds; a permanent answer (diagram gone, no role) stops it
+    const stop = startPolling(() =>
       fetchSnapshot().then(
-        (snapshot) => update({ snapshot, error: null, connected: true }),
-        (e: unknown) => update({ error: e instanceof Error ? e.message : "Unknown error", connected: false }),
-      );
-
-    void load();
-    const timer = window.setInterval(load, intervalSec * 1000);
+        (snapshot) => { update({ snapshot, error: null, connected: true }); },
+        (e: unknown) => {
+          update({ error: e instanceof Error ? e.message : String(e), connected: false });
+          return isPermanentApiError(e) ? false : undefined;
+        },
+      ), intervalSec * 1000);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
-  }, [key, diagramId, mode, intervalSec, fetchSnapshot]);
+  }, [key, diagramId, mode, intervalSec, fetchSnapshot, sseLost]);
 
   const current = state.key === key ? state : { key, ...EMPTY };
   return { snapshot: current.snapshot, error: current.error, connected: current.connected, refresh };

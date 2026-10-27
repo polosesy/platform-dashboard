@@ -79,6 +79,8 @@ export type ServiceHealthEventsResponse = {
     securityAdvisory: number;
   };
   events: ServiceHealthEvent[];
+  /** "mock" = sample events (anonymous only) */
+  source?: "mock";
   note?: string;
   tenantId?: string;
 };
@@ -99,6 +101,8 @@ export type RegionalStatusResponse = {
   generatedAt: string;
   regions: RegionHealthStatus[];
   totalAffected: number;
+  /** "mock" = sample regions (anonymous only) */
+  source?: "mock";
   note?: string;
 };
 

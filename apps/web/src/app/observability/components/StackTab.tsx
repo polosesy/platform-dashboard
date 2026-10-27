@@ -9,7 +9,7 @@ import type { ObservabilityStackResponse, StackCheck, StackComponent, StackState
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, Button, EmptyState, LoadingState, Notice, Stat, type BadgeTone } from "@/components/ui";
+import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Stat, type BadgeTone } from "@/components/ui";
 import styles from "../styles.module.css";
 
 const TONE: Record<StackState, BadgeTone> = { ok: "success", degraded: "medium", stale: "medium", down: "high", unknown: "neutral", notDetected: "neutral" };
@@ -26,7 +26,7 @@ export function StackTab({ clusterId }: { clusterId: string }) {
   );
   const d = q.data?.clusterId === clusterId ? q.data : null;
 
-  if (q.error) return <Notice tone="danger">{q.error}</Notice>;
+  if (q.error) return <ErrorNotice error={q.error} />;
   if (!d) return <LoadingState />;
   if (d.metricsState !== "ok") {
     return (

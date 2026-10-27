@@ -41,21 +41,22 @@ import { usePolling } from "@/lib/usePolling";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { CoverageNote } from "./CoverageNote";
+import { rgba } from "@/lib/palette";
 
 type Props = { clusterId: string };
 
 // ── Service Type 아이콘/라벨 ──
 
 const SERVICE_TYPE_META: Record<HubbleServiceType, { icon: string; label: string; color: string }> = {
-  workload:       { icon: "⬡", label: "hb.type.workload",       color: "rgba(0,120,212,0.15)" },
-  world:          { icon: "🌐", label: "hb.type.world",       color: "rgba(107,76,154,0.15)" },
-  host:           { icon: "🖥", label: "hb.type.host",           color: "rgba(20,21,23,0.08)" },
-  health:         { icon: "♡", label: "hb.type.health",         color: "rgba(20,21,23,0.06)" },
-  dns:            { icon: "◈", label: "hb.type.dns",            color: "rgba(0,150,136,0.15)" },
-  init:           { icon: "◎", label: "hb.type.init",           color: "rgba(20,21,23,0.06)" },
-  unmanaged:      { icon: "◇", label: "hb.type.unmanaged",      color: "rgba(209,132,0,0.12)" },
-  "kube-apiserver": { icon: "⎈", label: "hb.type.apiserver",  color: "rgba(50,100,200,0.12)" },
-  "remote-node":  { icon: "⊞", label: "hb.type.remoteNode",   color: "rgba(20,21,23,0.08)" },
+  workload:       { icon: "⬡", label: "hb.type.workload",       color: rgba("accent", 0.15) },
+  world:          { icon: "🌐", label: "hb.type.world",       color: rgba("violet", 0.15) },
+  host:           { icon: "🖥", label: "hb.type.host",           color: rgba("ink", 0.08) },
+  health:         { icon: "♡", label: "hb.type.health",         color: rgba("ink", 0.06) },
+  dns:            { icon: "◈", label: "hb.type.dns",            color: rgba("integration", 0.15) },
+  init:           { icon: "◎", label: "hb.type.init",           color: rgba("ink", 0.06) },
+  unmanaged:      { icon: "◇", label: "hb.type.unmanaged",      color: rgba("warning", 0.12) },
+  "kube-apiserver": { icon: "⎈", label: "hb.type.apiserver",  color: rgba("accent", 0.12) },
+  "remote-node":  { icon: "⊞", label: "hb.type.remoteNode",   color: rgba("ink", 0.08) },
 };
 
 // ── Custom Service Node ──
@@ -343,9 +344,9 @@ function computeForceLayout(
     .map((e) => {
       const isDropped = e.verdict === "DROPPED";
       const hasErrors = e.metrics.httpErrorRate > 0.05;
-      const strokeColor = isDropped ? "rgba(196,43,28,0.6)"
-        : hasErrors ? "rgba(209,132,0,0.6)"
-        : "rgba(0,120,212,0.35)";
+      const strokeColor = isDropped ? rgba("danger", 0.6)
+        : hasErrors ? rgba("warning", 0.6)
+        : rgba("accent", 0.35);
 
       const label = [
         e.protocol !== "UNKNOWN" ? e.protocol : "",
@@ -365,8 +366,8 @@ function computeForceLayout(
           strokeDasharray: isDropped ? "5 3" : undefined,
         },
         label: label || undefined,
-        labelStyle: { fontSize: 9, fill: "rgba(20,21,23,0.5)" },
-        labelBgStyle: { fill: "rgba(248,249,250,0.9)" },
+        labelStyle: { fontSize: 9, fill: rgba("ink", 0.5) },
+        labelBgStyle: { fill: rgba("canvas", 0.9) },
         labelBgPadding: [4, 2] as [number, number],
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -879,18 +880,18 @@ export function ServiceMapTab({ clusterId }: Props) {
                   maxZoom={3}
                   proOptions={{ hideAttribution: true }}
                 >
-                  <Background gap={20} size={1} color="rgba(20,21,23,0.04)" />
+                  <Background gap={20} size={1} color={rgba("ink", 0.04)} />
                   <Controls showInteractive={false} />
                   <MiniMap
                     nodeColor={(n) => {
                       const d = n.data as ServiceNodeData;
-                      if (d.healthStatus === "crit") return "rgba(196,43,28,0.6)";
-                      if (d.healthStatus === "warn") return "rgba(209,132,0,0.6)";
-                      if (d.serviceType === "world") return "rgba(107,76,154,0.5)";
-                      if (d.serviceType === "dns") return "rgba(0,150,136,0.5)";
-                      return "rgba(16,137,62,0.4)";
+                      if (d.healthStatus === "crit") return rgba("danger", 0.6);
+                      if (d.healthStatus === "warn") return rgba("warning", 0.6);
+                      if (d.serviceType === "world") return rgba("violet", 0.5);
+                      if (d.serviceType === "dns") return rgba("integration", 0.5);
+                      return rgba("success", 0.4);
                     }}
-                    maskColor="rgba(248,249,250,0.8)"
+                    maskColor={rgba("canvas", 0.8)}
                     style={{ borderRadius: 6 }}
                   />
                 </ReactFlow>
@@ -1014,7 +1015,7 @@ export function ServiceMapTab({ clusterId }: Props) {
                         : styles.verdictForwarded
                       }`}>{f.verdict.toLowerCase()}</span>
                     </td>
-                    <td style={{ fontSize: 10, color: "rgba(20,21,23,0.5)" }}>
+                    <td style={{ fontSize: 10, color: rgba("ink", 0.5) }}>
                       {f.trafficDirection.toLowerCase()}
                     </td>
                   </tr>

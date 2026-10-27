@@ -230,3 +230,19 @@ test("a connection that may read a cluster but not fetch its credentials gets a 
   const other = new Error("ARM 500: InternalServerError");
   assert.equal(kubeconfigError(other, id, env), other, "other failures pass through unchanged");
 });
+
+test("static: no route answers a failed live read with sample data (catch → res.json(mock…)) — signed-in users get the error", () => {
+  const dir = new URL("../src/routes/", import.meta.url);
+  const offenders: string[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".ts")) continue;
+    const src = readFileSync(new URL(f, dir), "utf8");
+    // A catch block that builds a response from a mock*/sample value — unless an isSigninRequired() guard comes first
+    for (const m of src.matchAll(/catch\s*\([^)]*\)\s*\{([^{}]|\{[^{}]*\})*?res\.json\(\s*(\{\s*\.\.\.\s*)?mock\w*/g)) {
+      if (!/isSigninRequired\(/.test(m[0])) offenders.push(`${f}: ${m[0].split("\n").pop()!.trim().slice(0, 80)}`);
+    }
+    // `live ?? mock…` answered directly hides a missing live result behind the sample without source/note
+    for (const m of src.matchAll(/res\.json\(\s*\w+\s*\?\?\s*mock\w*\(/g)) offenders.push(`${f}: ${m[0]}`);
+  }
+  assert.deepEqual(offenders, [], "use respondWithFallback / respondLiveOrSignin (sample only for signin_required)");
+});

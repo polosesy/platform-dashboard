@@ -199,11 +199,24 @@ export function Notice({ tone = "info", title, children }: { tone?: "info" | "wa
   );
 }
 
-/** Error banner with the localized "failed to load" prefix. */
-export function ErrorNotice({ error }: { error: string | null | undefined }) {
+/**
+ * Signed out on a page that has no sample data (cluster pages — the sample cluster cannot be read): a sign-in hint
+ * in the info tone, not a red failure
+ */
+export function SignInNotice() {
+  const { t } = useI18n();
+  return <Notice tone="info" title={t("auth.state.signin")}>{t("auth.signinNoSample")}</Notice>;
+}
+
+/**
+ * Error banner with the localized "failed to load" prefix (or `title`). The sign-in sentence (lib/api fetchJson turns
+ * 401 signin_required into it) becomes SignInNotice — being signed out is not a failure.
+ */
+export function ErrorNotice({ error, title }: { error: string | null | undefined; title?: string }) {
   const { t } = useI18n();
   if (!error) return null;
-  return <Notice tone="danger" title={t("common.loadFailed")}>{error}</Notice>;
+  if (error === t("auth.state.signin")) return <SignInNotice />;
+  return <Notice tone="danger" title={title ?? t("common.loadFailed")}>{error}</Notice>;
 }
 
 /** Shown whenever a response is sample (mock) data, so it is never mistaken for live data. */

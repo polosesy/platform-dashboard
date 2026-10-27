@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // Pure web module (no React) — the web package is CommonJS-typed, so read the namespace
@@ -37,4 +37,20 @@ test("rgba / hex helpers", () => {
   assert.equal(p.hex("accent"), "#0078d4");
   assert.equal(p.hex("ok"), "#107c10");
   assert.equal(p.hex("privateLink"), "#8b5cf6");
+});
+
+test("TSX has no numeric rgb()/rgba() colours — tokens via lib/palette rgba(key, a) (Hubble / AKS 모니터링 used other reds and greens)", () => {
+  const root = new URL("../../web/src/", import.meta.url);
+  const hits: string[] = [];
+  const walk = (dir: URL) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
+      else if (e.name.endsWith(".tsx")) {
+        const src = readFileSync(new URL(e.name, dir), "utf8");
+        for (const m of src.matchAll(/rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}/g)) hits.push(`${e.name}: ${m[0]}`);
+      }
+    }
+  };
+  walk(root);
+  assert.deepEqual(hits, []);
 });

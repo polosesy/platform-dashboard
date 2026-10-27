@@ -133,7 +133,8 @@ export default function KubernetesPage() {
       />
 
       {clustersNote ? <Notice tone="info">{noteText(clustersNote)}</Notice> : null}
-      {overview?.note ? <Notice tone="info">{noteText(overview.note)}</Notice> : null}
+      {/* The list and the overview both carry "signin_required" for a signed-out visitor — say it once */}
+      {overview?.note && noteText(overview.note) !== noteText(clustersNote) ? <Notice tone="info">{noteText(overview.note)}</Notice> : null}
       <ErrorNotice error={error} />
       {loading ? <LoadingState /> : null}
 

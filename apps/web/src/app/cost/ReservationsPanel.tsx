@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { AzureSubscriptionOption, ReservationUtilizationResponse } from "@aud/types";
-import { EmptyState, ErrorNotice, Panel, Segmented, Stat } from "@/components/ui";
+import { EmptyState, ErrorNotice, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -38,7 +38,7 @@ export function ReservationsPanel({ subscriptionId, subscriptions }: { subscript
             <Stat label={t("cost.ri.utilization")} value={`${data.utilizedPercentage.toFixed(1)}%`} />
             <Stat label={t("cost.ri.hours")} value={`${Math.round(data.usedHours).toLocaleString()} / ${Math.round(data.reservedHours).toLocaleString()}`} />
           </div>
-          {data.note ? <div className={styles.riNote}>{data.note}</div> : null}
+          {data.source === "mock" ? <SampleDataNotice note={data.note ?? "mock data"} /> : null}
           {data.subscriptions.length ? (
             <ul className={styles.riList}>
               {[...data.subscriptions].sort((a, b) => b.reservedHours - a.reservedHours).slice(0, 6).map((s) => (

@@ -4,6 +4,7 @@ import type { ObservabilityOverview } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { WorkloadRow } from "./WorkloadsTab";
+import { rgba } from "@/lib/palette";
 
 export function OverviewTab({
   data,
@@ -34,8 +35,8 @@ export function OverviewTab({
               className={styles.summaryCardValue}
               style={{
                 color:
-                  c.label === "Failed" && c.value > 0 ? "rgba(196,43,28,0.85)"
-                  : c.label === "Pending" && c.value > 0 ? "rgba(209,132,0,0.85)"
+                  c.label === "Failed" && c.value > 0 ? rgba("danger", 0.85)
+                  : c.label === "Pending" && c.value > 0 ? rgba("warning", 0.85)
                   : undefined,
               }}
             >

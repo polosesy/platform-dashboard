@@ -145,6 +145,8 @@ const CORE: Translations = {
   "auth.signedIn": { ko: "로그인됨", en: "Signed in" },
   "auth.signinForReal": { ko: "로그인하지 않아 예시 데이터를 보여 줍니다. 로그인하면 연결된 Azure의 실제 데이터를 봅니다.", en: "Not signed in, so this is sample data. Sign in to see real data from the connected Azure." },
   "auth.state.signin": { ko: "로그인이 필요합니다.", en: "Sign in first." },
+  "ld.sseLost": { ko: "실시간 연결이 끊겨 다시 연결하는 중입니다…", en: "Live connection lost — reconnecting…" },
+  "auth.signinNoSample": { ko: "이 화면은 연결된 클러스터의 실제 데이터만 보여 줍니다(예시 데이터 없음). 오른쪽 위 '로그인'을 누르세요.", en: "This page shows real data from the connected cluster only (no sample data). Use Sign in at the top right." },
   "auth.state.norole": { ko: "플랫폼 역할이 없습니다 — 관리자에게 역할(조회자·운영자·관리자) 할당을 요청하세요.", en: "No platform role — ask an admin to assign one (Viewer, Operator, Admin)." },
   "auth.state.connection": { ko: "Azure 연결에 문제가 있습니다 — 관리자가 '설정 › Azure 연결'에서 점검해야 합니다.", en: "The Azure connection needs attention — an admin can check it under Settings › Azure connections." },
   "auth.state.aksCredential": { ko: "이 클러스터의 Azure 연결에 AKS 자격 증명 조회 권한이 없습니다 (listClusterUserCredential). 클러스터에서 그 연결의 서비스 주체에 'Azure Kubernetes Service Cluster User Role'을 할당해야 합니다 — 관리자가 '설정 › Azure 연결 › 점검'에서 'AKS 자격 증명' 항목으로 확인할 수 있습니다.", en: "The Azure connection of this cluster may not fetch AKS credentials (listClusterUserCredential). Assign 'Azure Kubernetes Service Cluster User Role' on the cluster to that connection's service principal — an admin can verify it under Settings › Azure connections › Check (AKS credential)." },

@@ -4,9 +4,10 @@ import type { NodeResourceSummary } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { formatBytes } from "@/lib/format";
+import { rgba } from "@/lib/palette";
 
 function GaugeBar({ pct }: { pct: number | null }) {
-  if (pct === null) return <span style={{ fontSize: 11, color: "rgba(20,21,23,0.35)" }}>N/A</span>;
+  if (pct === null) return <span style={{ fontSize: 11, color: rgba("ink", 0.35) }}>N/A</span>;
   const clamped = Math.min(100, Math.round(pct));
   const cls = clamped >= 85 ? styles.gaugeCrit : clamped >= 70 ? styles.gaugeWarn : styles.gaugeOk;
   return (
@@ -39,8 +40,8 @@ function PressureIndicators({ conditions }: { conditions: NodeResourceSummary["c
           key={c.type}
           style={{
             fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
-            background: "rgba(196,43,28,0.08)", color: "rgba(196,43,28,0.80)",
-            border: "1px solid rgba(196,43,28,0.15)",
+            background: rgba("danger", 0.08), color: rgba("danger", 0.80),
+            border: `1px solid ${rgba("danger", 0.15)}`,
           }}
         >
           {c.type}
@@ -66,10 +67,10 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: "rgba(20,21,23,0.6)" }}>
+      <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: rgba("ink", 0.6) }}>
         <span>{t("ob.allNodes")} <strong style={{ color: "var(--fg)" }}>{nodes.length}</strong></span>
-        <span style={{ color: "rgba(16,137,62,0.85)" }}>Ready: <strong>{ready}</strong></span>
-        {notReady > 0 && <span style={{ color: "rgba(196,43,28,0.85)" }}>NotReady: <strong>{notReady}</strong></span>}
+        <span style={{ color: rgba("success", 0.85) }}>Ready: <strong>{ready}</strong></span>
+        {notReady > 0 && <span style={{ color: rgba("danger", 0.85) }}>NotReady: <strong>{notReady}</strong></span>}
       </div>
 
       <div className={styles.nodeGrid}>
@@ -98,13 +99,13 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <GaugeBar pct={node.diskUsagePct} />
                   {node.diskCapacityGB !== null && (
-                    <span style={{ fontSize: 11, color: "rgba(20,21,23,0.45)" }}>{node.diskCapacityGB}GB</span>
+                    <span style={{ fontSize: 11, color: rgba("ink", 0.45) }}>{node.diskCapacityGB}GB</span>
                   )}
                 </div>
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 11, color: "rgba(20,21,23,0.45)" }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 11, color: rgba("ink", 0.45) }}>
               <span>{t("ob.podsN", { n: node.podCount })}</span>
               {node.cpuCapacityMillicores != null && <span>CPU {node.cpuCapacityMillicores}m</span>}
               {node.memoryCapacityMiB != null && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}

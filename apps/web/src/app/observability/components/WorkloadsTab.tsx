@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import type { WorkloadHealth, ResourceUsage } from "@aud/types";
 import styles from "../styles.module.css";
 import { WorkloadDetailPanel } from "./WorkloadDetailPanel";
+import { rgba } from "@/lib/palette";
 
 // ── Gauge component ──
 function ResourceGauge({ usage, unit }: { usage: ResourceUsage | null; unit: "cpu" | "mem" }) {
@@ -70,7 +71,7 @@ export function WorkloadRow({
   return (
     <tr className={rowCls} onClick={onClick}>
       <td style={{ fontWeight: 600 }}>{wl.name}</td>
-      <td style={{ color: "rgba(20,21,23,0.5)", fontSize: 12 }}>{wl.namespace}</td>
+      <td style={{ color: rgba("ink", 0.5), fontSize: 12 }}>{wl.namespace}</td>
       <td><PodBar pods={wl.pods} /></td>
       <td><ResourceGauge usage={wl.cpu} unit="cpu" /></td>
       <td><ResourceGauge usage={wl.memory} unit="mem" /></td>
@@ -150,7 +151,7 @@ export function WorkloadsTab({
               <option key={ns} value={ns}>{ns === "all" ? t("hb.allNamespaces") : ns}</option>
             ))}
           </select>
-          <span style={{ fontSize: 12, color: "rgba(20,21,23,0.45)", marginLeft: "auto" }}>
+          <span style={{ fontSize: 12, color: rgba("ink", 0.45), marginLeft: "auto" }}>
             {t("ob.workloadsOf", { n: filtered.length, m: workloads.length })}
           </span>
         </div>

@@ -22,7 +22,7 @@ import { WorkloadIdentityPanel } from "./insights/WorkloadIdentityPanel";
 import type { HeatSel } from "./insights/RiskHeatmap";
 import type { InsightsNav } from "./insights/model";
 import insightStyles from "./insights/insights.module.css";
-import { Button, LoadingState, PageHeader, Segmented, Select, Tabs, Toggle } from "@/components/ui";
+import { Button, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, Toggle } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { PANELS, POLICY_GROUPS, groupOfPanel, type Panel } from "./tabs";
@@ -137,8 +137,8 @@ function Policies() {
         }
       />
 
-      {clustersError && <div className={styles.error}>{t("polc.page.clustersFailed")}: {clustersError}</div>}
-      {query.error && <div className={styles.error}>{t("polc.page.policiesFailed")}: {query.error}</div>}
+      <ErrorNotice error={clustersError} title={`${t("polc.page.clustersFailed")}:`} />
+      <ErrorNotice error={query.error} title={`${t("polc.page.policiesFailed")}:`} />
       {data && data.capabilities.unavailable.length > 0 && (
         <div className={styles.notice}>
           {t("polc.page.unavailable")}: {data.capabilities.unavailable.join(", ")} — {t("polc.page.incomplete")}
@@ -206,7 +206,7 @@ function Policies() {
 
           {INSIGHT_TABS.has(tab) && !insights && (
             insightsQuery.error
-              ? <div className={styles.error}>{t("polc.page.insightsFailed")}: {insightsQuery.error}</div>
+              ? <ErrorNotice error={insightsQuery.error} title={`${t("polc.page.insightsFailed")}:`} />
               : <div className={styles.loading}>{t("polc.page.insightsLoading")}</div>
           )}
           {tab === "overview" && insights && (
@@ -248,7 +248,7 @@ function Policies() {
                 <WorkloadIdentityPanel data={wi} showSystem={showSystem} onScan={() => setWiScan(true)} scanning={wiQuery.loading} />
               </div>
             ) : wiQuery.error
-              ? <div className={styles.error}>{t("wi.failed")}: {wiQuery.error}</div>
+              ? <ErrorNotice error={wiQuery.error} title={`${t("wi.failed")}:`} />
               : <div className={styles.loading}>{t("wi.loading")}</div>
           )}
           {tab === "rbac" && <RbacPanel roles={data.rbac.roles} bindings={data.rbac.bindings} showSystem={showSystem} />}

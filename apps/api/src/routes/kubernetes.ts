@@ -6,7 +6,7 @@ import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
 import { collectWorkloadIdentity } from "../services/workloadIdentityCollector.js";
 import { queryLang } from "../infra/lang.js";
-import { HttpError, assertArmResourceId, isSigninRequired, queryArmResourceId, querySubscriptionId, respondWithFallback, safeMessage, sendError } from "../infra/requestParams.js";
+import { assertArmResourceId, isSigninRequired, queryArmResourceId, querySubscriptionId, respondWithFallback, sendError, upstreamError } from "../infra/requestParams.js";
 
 /** Minimal cluster info derived from an ARM ID, used when the cluster is not in the listing. */
 function clusterInfoFromId(azureResourceId: string): KubernetesClusterInfo {
@@ -56,13 +56,10 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
         clustersData.clusters.find((c) => c.id === azureResourceId.toLowerCase()) ?? clusterInfoFromId(azureResourceId);
       res.json(await getClusterOverview(env, req.auth?.bearerToken, azureResourceId, clusterInfo));
     } catch (e: unknown) {
-      // Sign in → the sample overview; a real refusal (expired sign-in, Entra-only cluster …) stays an error
-      if (e instanceof HttpError && !isSigninRequired(e)) return sendError(res, e, "cluster_overview_failed", "kubernetes");
-      console.error("[kubernetes] overview error:", safeMessage(e));
-      res.json({
-        ...mockClusterOverview(mockClusters.clusters[0]!),
-        note: isSigninRequired(e) ? "signin_required" : safeMessage(e),
-      });
+      // Sign in → the sample overview; any other failure stays an error (an unexpected one used to answer the
+      // sample cluster's overview to a signed-in user)
+      if (!isSigninRequired(e)) return sendError(res, upstreamError(e), "cluster_overview_failed", "kubernetes");
+      res.json({ ...mockClusterOverview(mockClusters.clusters[0]!), source: "mock", note: "signin_required" });
     }
   });
 

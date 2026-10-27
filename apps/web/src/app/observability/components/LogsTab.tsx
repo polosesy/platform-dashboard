@@ -6,6 +6,8 @@ import type { PodLogEntry, ObservabilityLogsResponse, ObservabilityNamespacesRes
 import { apiBaseUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
+import { rgba } from "@/lib/palette";
+import { startPolling } from "@/lib/usePolling";
 
 type Props = {
   clusterId: string;
@@ -29,8 +31,6 @@ export function LogsTab({ clusterId }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch namespace/pod list from dedicated endpoint
   const fetchNamespaces = useCallback(async () => {
@@ -52,11 +52,7 @@ export function LogsTab({ clusterId }: Props) {
   // Poll namespaces every 30s
   useEffect(() => {
     if (!clusterId) return;
-    fetchNamespaces();
-    nsPollRef.current = setInterval(fetchNamespaces, 30_000);
-    return () => {
-      if (nsPollRef.current) clearInterval(nsPollRef.current);
-    };
+    return startPolling(fetchNamespaces, 30_000); // visible tab only, no overlap
   }, [fetchNamespaces, clusterId]);
 
   // Build namespace list (모든 네임스페이스, Pod 유무 관계없이)
@@ -153,11 +149,7 @@ export function LogsTab({ clusterId }: Props) {
   // Initial fetch + polling
   useEffect(() => {
     if (!namespace || !podName) return;
-    fetchLogs();
-    pollRef.current = setInterval(fetchLogs, 15_000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return startPolling(fetchLogs, 15_000); // visible tab only, no overlap
   }, [fetchLogs, namespace, podName]);
 
   // Auto-scroll to bottom
@@ -252,7 +244,7 @@ export function LogsTab({ clusterId }: Props) {
           {t("ob.logs.autoScroll")} {autoScroll ? "ON" : "OFF"}
         </button>
 
-        <span style={{ fontSize: 11, color: "rgba(20,21,23,0.4)", marginLeft: "auto" }}>
+        <span style={{ fontSize: 11, color: rgba("ink", 0.4), marginLeft: "auto" }}>
           {t("ob.logs.lines", { n: filteredLogs.length })} {loading && `· ${t("common.loading")}`}
         </span>
       </div>
