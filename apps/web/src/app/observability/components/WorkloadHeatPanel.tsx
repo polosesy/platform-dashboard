@@ -14,6 +14,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button, LoadingState, Notice } from "@/components/ui";
 import { GLYPH, HEAT_METRICS, formatBytes, formatCell, formatCores } from "@/lib/workloadHeatView";
 import { WorkloadLogStream } from "./WorkloadLogStream";
+import { WorkloadVpaSection } from "./WorkloadVpaSection";
 import styles from "../styles.module.css";
 
 const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (applied by the cluster owner through GitOps)
@@ -104,6 +105,8 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
               {noBaseline && <p className={styles.stackMuted}>{t("ob.hm.absHint")}</p>}
             </>
           )}
+
+          <WorkloadVpaSection clusterId={clusterId} namespace={w.namespace} workload={w.workload} kind={w.kind} />
 
           <h4 className={styles.stackTitle}>{t("ob.hm.events")}</h4>
           {events.error ? <Notice tone="warning">{events.error}</Notice> : !events.data ? <LoadingState /> : events.data.events.length === 0 ? (

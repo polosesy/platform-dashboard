@@ -11,6 +11,7 @@ import { getObservabilityStack } from "../services/observabilityStack.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
+import { getWorkloadVpa } from "../services/workloadVpa.js";
 import { getWorkloadLogs } from "../services/lokiLogs.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
@@ -70,6 +71,17 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       }));
     } catch (e: unknown) {
       sendError(res, e, "events_failed", "observability");
+    }
+  });
+
+  // VPA recommendation beside the workload's request / limit (Kubernetes API — the AMW has no VPA series)
+  router.get("/api/observability/vpa", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [namespace, workload] = requireQuery(req, ["namespace", "workload"]);
+      res.json(await getWorkloadVpa(env, req.auth?.bearerToken, clusterId, { namespace: namespace!, workload: workload!, kind: queryString(req, "kind") }));
+    } catch (e: unknown) {
+      sendError(res, e, "vpa_failed", "observability");
     }
   });
 

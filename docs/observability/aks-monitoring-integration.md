@@ -51,6 +51,8 @@ Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 �
 
 **실측(2026-10-26, stg)**: Windows 노드가 없는 클러스터의 Windows 전용 DaemonSet 10개와 `retina-agent`(노드 조건 `kubernetes.azure.com/ebpf-dataplane NotIn cilium` — Cilium 노드를 피함)는 목표 0 — 예전엔 '0/0 0/0'·'? 미측정'으로 보였음, 이제 기본 숨김('대상 노드가 없는 DaemonSet n개 숨김 · 보이기'). AKS 관리 `cilium`·`acns-security-agent`는 컨테이너에 requests·limits가 아예 없음(`kubectl get ds -o jsonpath` 확인) — 비율이 없으니 사용량(예: 366Mi·49m)만.
 
+**VPA 권장**(패널, `WorkloadVpaSection` + `services/workloadVpa.ts`): 작업 영역에는 VPA 시계열이 없어(AKS kube-state-metrics가 내보내지 않음) Kubernetes API로 VPA 객체와 워크로드 템플릿을 같은 시점에 읽음(기존 list 권한, 60초 캐시). 컨테이너마다 메모리·CPU의 request·limit·VPA 권장·VPA 범위, 표시는 VPA 자체 의미만 — 권장 > limit·request < 하한(주의), request > 상한(참고: VPA는 CPU를 25m 아래로 권장하지 않아 흔함). 모드 Off = 권장만. 실측(stg): VPA 26개 모두 Off, 컨테이너 28개 중 권장 > limit 1·메모리 request < 하한 7.
+
 **로그 스트림**(패널, `WorkloadLogStream` + 순수 `apps/web/src/lib/logView.ts`): 같은 메시지(수·ID만 다른 것 포함 — `logSignature`)는 한 줄 '×n'(처음~마지막 시각·파드 수), 줄 = 로거가 되풀이한 앞 시각을 뺀 메시지(logback `… LEVEL … - 메시지`는 메시지만), 2줄 말줄임, 누르면 첫 줄 전체·앱 코드 스택(`▸ 클래스.메서드 (파일:줄)`, 패키지는 툴팁, 라이브러리 프레임은 'n개 더 보기')·Caused by·원문 복사·trace. 예외 클래스 칩 = 거르기. 스크롤은 패널 하나(목록 자체 스크롤 없음). 가리기는 MDC `[TOKEN-ID:…]`·세션 ID도(`logRedaction.ts`). 메트릭 묶음 존재는 묶음마다 따로 셉니다(`a or b`는 이름을 무시하고 라벨이 같은 시계열을 지움 — Hubble 메트릭 쪽에도 있던 버그).
 
 ### 데이터 소스 칩 (페이지 머리)

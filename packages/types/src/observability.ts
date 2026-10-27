@@ -444,3 +444,42 @@ export type LokiDropsResponse = {
   /** AMW hubble_drop_total rose but Loki holds no flow lines → the exporter pipeline is broken */
   pipelineBroken: boolean | null;
 };
+
+// ── VPA recommendations for a workload (services/workloadVpa.ts) — Kubernetes API, recommendation vs current ──
+
+/** cpu = cores · memory = bytes · null = not set */
+export type ResourcePair = { cpu: number | null; memory: number | null };
+
+export type VpaContainer = {
+  name: string;
+  /** The workload's pod template now */
+  request: ResourcePair;
+  limit: ResourcePair;
+  /** VPA status.recommendation (null = no recommendation for this container yet) */
+  target: ResourcePair | null;
+  lower: ResourcePair | null;
+  upper: ResourcePair | null;
+  uncapped: ResourcePair | null;
+  /**
+   * VPA's own semantics only: targetOverLimit = the recommendation is above the limit · belowLower = the request is
+   * below VPA's lower bound (under-provisioned) · aboveUpper = the request is above the upper bound (over-provisioned)
+   */
+  notes: Array<{ resource: "cpu" | "memory"; kind: "targetOverLimit" | "belowLower" | "aboveUpper" }>;
+};
+
+export type WorkloadVpa = {
+  name: string;
+  /** spec.updatePolicy.updateMode — Off = recommend only, Initial / Recreate / Auto / InPlaceOrRecreate apply it */
+  mode: string | null;
+  containers: VpaContainer[];
+  /** status.conditions RecommendationProvided */
+  recommending: boolean | null;
+};
+
+export type WorkloadVpaResponse = {
+  clusterId: string;
+  generatedAt: string;
+  /** ok · none = no VPA targets this workload · noCrd = the VPA CRD is not installed */
+  state: "ok" | "none" | "noCrd";
+  vpas: WorkloadVpa[];
+};

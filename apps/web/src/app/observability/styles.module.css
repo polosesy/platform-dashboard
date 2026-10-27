@@ -779,3 +779,21 @@
 .lgNote { margin: 0; font-size: 12px; color: var(--muted); }
 .lgActions { display: flex; align-items: center; gap: 8px; }
 .lgFoot { margin: 0; font-size: 11.5px; color: var(--muted); }
+
+/* VPA recommendation (WorkloadVpaSection) — request · limit · target · bound per resource, notes under the table */
+.vpaBox { display: grid; gap: 6px; min-width: 0; }
+.vpaHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 12px; }
+.vpaMode { padding: 0 8px; font-weight: 700; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); }
+.vpaMode[data-off] { background: var(--panel-sunken); color: var(--muted); }
+.vpaTable { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.vpaTable caption { text-align: left; font-weight: 600; padding: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vpaTable th, .vpaTable td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.vpaTable thead th { font-size: 11px; color: var(--muted); font-weight: 600; }
+.vpaTable tbody th { text-align: left; color: var(--muted); font-weight: 600; }
+.vpaTarget { font-weight: 700; }
+.vpaNotes { text-align: left !important; border-bottom: 0 !important; }
+.vpaNote {
+  display: inline-block; margin: 2px 6px 0 0; padding: 1px 8px; font-size: 11.5px; border-radius: var(--radius-pill);
+  background: var(--panel-sunken); color: var(--muted);
+}
+.vpaNote[data-tone="warn"] { background: var(--warning-soft); color: var(--warning-strong); font-weight: 600; }
