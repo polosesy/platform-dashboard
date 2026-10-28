@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-23
+last-verified: 2026-10-28
 ---
 # 수집하는 데이터
 
@@ -19,6 +19,7 @@ last-verified: 2026-10-23
 | AKS API | 클러스터 객체 목록, Pod 로그(운영자), Hubble 흐름 | 메모리 캐시(로그는 요청 시에만) |
 | 공개 취약점 출처 (보안 › 긴급 취약점) | CVE.org 기록(CVE Services), CISA KEV 목록, NVD 점수(보조), nodejs.org·php.net 보안 공지와 릴리스 목록, OSV.dev 패키지 대조 결과 | 메모리 캐시(피드 6시간, CVE.org·OSV·NVD 24시간) |
 
+- **AKS 보안 점검 › 네트워크 노출**(관측 트래픽의 목적지 이름 붙이기): Resource Graph로 Private Endpoint와 그 NIC의 사설 IP, PaaS의 공용 액세스·네트워크 규칙·키 인증 설정을 읽고, 규칙이 하위 리소스에 있는 유형(PostgreSQL·MySQL·SQL·Redis·Mongo vCore 방화벽 규칙, Event Hubs·Service Bus 네트워크 규칙 세트, Azure Managed Redis 데이터베이스)은 ARM GET으로 읽습니다(공용 액세스가 꺼진 리소스는 읽지 않음, 최대 40개). 응답에는 **규칙 개수와 허용 VNet의 `vnet/서브넷` 이름만** — 허용 IP 값은 보내지 않습니다. 이름이 없는 공용 IP는 Microsoft **서비스 태그**(ARM Service Tag Discovery API, 클러스터 리전)로만 이름을 붙입니다 — Microsoft 공개 데이터라 리전별로 24시간 공유 캐시
 - **Azure 데이터는 저장소에 쓰지 않습니다.** API를 재시작하면 캐시는 사라집니다. 라이브 다이어그램 스펙은 메모리에 사용자별로 보관됩니다.
 - **예외 — 팀 배치**: `AUD_ARRANGEMENT_DIR`을 설정하면 인프라 구성도의 게시된 배치가 구독마다 `<subscriptionId>.json` 하나로 저장됩니다(순서·칸·연결선 — 리소스 ID·이름을 담고 메트릭은 없음, 작성자는 표시 이름만). 설정하지 않으면 메모리.
 - **캐시 공유 범위**: 플랫폼 자격 증명으로 읽은 데이터는 **같은 연결 집합을 쓰는 사용자끼리** 공유됩니다(`c:home,custa` — 같은 자격 증명으로 읽은 같은 데이터이므로). `delegated`(OBO) 연결이 섞이면 사용자별로 분리합니다(`u:{tid}:{oid}`).

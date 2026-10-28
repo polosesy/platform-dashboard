@@ -15,16 +15,19 @@ import styles from "./insights.module.css";
 const ECLS: Record<NetEdgeClass, [string, string, string | undefined]> = {
   eastwest: ["ins.net.cls.eastwest", "var(--muted)", undefined],
   cloud: ["ins.net.cls.cloud", "var(--accent)", undefined],
+  private: ["ins.net.cls.private", "var(--n-node)", "4 2"],
   internet: ["ins.net.cls.internet", "var(--crit)", "6 3"],
   control: ["ins.net.cls.control", "var(--edge-cfg)", "2 3"],
   platform: ["ins.net.cls.platform", "var(--faint)", "1 3"],
 };
-const CLS_RANK: Record<NetEdgeClass, number> = { internet: 5, cloud: 4, control: 3, eastwest: 2, platform: 1 };
+const CLS_RANK: Record<NetEdgeClass, number> = { internet: 6, cloud: 5, private: 4, control: 3, eastwest: 2, platform: 1 };
 const NS_ORDER = ["cloud-domain", "observability", "azure-alb-system", "kube-system"];
 const nsRank = (ns: string) => { const i = NS_ORDER.indexOf(ns); return i < 0 ? 50 : i; };
 const thick = (c: number, max: number) => 1.2 + (3.4 * Math.log1p(c)) / Math.log1p(Math.max(max, 1));
 const VIEWS = ["nest", "flow"] as const;
 type View = (typeof VIEWS)[number];
+const LINE_MODES = ["bundle", "each"] as const;
+type LineMode = (typeof LINE_MODES)[number];
 
 type Props = {
   data: PolicyInsightsResponse;
@@ -55,7 +58,7 @@ function LeafIcon({ kind }: { kind: NetNode["kind"] }) {
 }
 
 const leafColor = (n: NetNode) =>
-  n.kind === "paas" ? "var(--n-azure)" : n.kind === "internet" || n.kind === "unknown" ? "var(--crit)" : n.kind === "apiserver" ? "var(--n-permission)"
+  n.kind === "paas" || n.kind === "azureService" ? "var(--n-azure)" : n.kind === "private" ? "var(--n-node)" : n.kind === "internet" || n.kind === "unknown" ? "var(--crit)" : n.kind === "apiserver" ? "var(--n-permission)"
     : n.kind === "node" ? "var(--n-node)" : n.kind === "probe" || n.kind === "platform" ? "var(--faint)" : "var(--n-workload)";
 const textW = (s: string, px: number) => [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? px : px * 0.58), 0);
 
@@ -64,7 +67,8 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
   const { COMBO_LABEL, flowNote, hubbleLabel } = useInsightLabels();
   const net = data.network;
   const [view, setView] = useLocalPreference<View>("aud-net-view", "nest", VIEWS);
-  const [on, setOn] = useState<Record<NetEdgeClass, boolean>>({ eastwest: true, cloud: true, internet: true, control: false, platform: false });
+  const [lineMode, setLineMode] = useLocalPreference<LineMode>("aud-net-lines", "bundle", LINE_MODES);
+  const [on, setOn] = useState<Record<NetEdgeClass, boolean>>({ eastwest: true, cloud: true, private: true, internet: true, control: false, platform: false });
   const [showManaged, setShowManaged] = useState(false);
   const [overlay, setOverlay] = useState(true);
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -103,7 +107,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     const W = 980, rowH = 46;
     const deg = (id: string) => edges.filter((e) => e.from === id || e.to === id).reduce((s, e) => s + e.count, 0);
     const left = nodes.filter((n) => n.kind === "probe" || n.kind === "node");
-    const rightOrder = ["paas", "internet", "unknown", "apiserver", "platform"];
+    const rightOrder = ["paas", "azureService", "private", "internet", "unknown", "apiserver", "platform"];
     const right = nodes.filter((n) => n.kind !== "workload" && n.kind !== "probe" && n.kind !== "node").sort((a, b) => rightOrder.indexOf(a.kind) - rightOrder.indexOf(b.kind) || deg(b.id) - deg(a.id));
     const mid = nodes.filter((n) => n.kind === "workload");
     const nss = [...new Set(mid.map((n) => n.namespace ?? ""))].sort((a, b) => nsRank(a) - nsRank(b) || a.localeCompare(b));
@@ -187,7 +191,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
                   <title>{t("ins.heat.combosCol")}: {n.combos.map((c) => COMBO_LABEL[c]).join(", ")}</title>
                 </g>
               )}
-              {n.publicAccess === "Enabled" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={6} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.publicOn")}</title></g>}
+              {n.exposure === "open" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={6} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
             </g>
           );
         })}
@@ -216,11 +220,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     const rg: NestNode = narrow
       ? { id: "rg", kind: "box", dir: "col", labelW: textW(c.resourceGroup, 12.5), children: [cluster, { id: "paascol", kind: "group", maxW: 420, children: paasGroups }] }
       : { id: "rg", kind: "box", maxW: 1600, labelW: textW(c.resourceGroup, 12.5), children: [cluster, { id: "paascol", kind: "group", dir: "col", children: paasGroups }] };
-    const platform: NestNode = { id: "platform", kind: "box", maxW: 300, labelW: 100, children: ["probe:lb", "platform:wireserver", "platform:imds"].map(leaf).filter((x): x is NestNode => !!x) };
+    const platform: NestNode = { id: "platform", kind: "box", maxW: 300, labelW: 100, children: [...["probe:lb", "platform:wireserver", "platform:imds"].map(leaf).filter((x): x is NestNode => !!x), ...net.nodes.filter((n) => n.kind === "azureService").map((n) => ({ id: n.id, kind: "leaf" as const }))] };
+    const privateBox: NestNode = { id: "privnet", kind: "box", maxW: 300, labelW: 140, children: ["ext:private"].map(leaf).filter((x): x is NestNode => !!x) };
     const azureLabel = `Azure ▸ ${t("ins.net.subscription")} ${c.subscription ?? t("ins.net.nameNotCollected")}`;
     const azure: NestNode = { id: "azure", kind: "box", dir: "col", labelW: textW(azureLabel, 12.5), children: [rg, ...((platform as { children: NestNode[] }).children.length ? [platform] : [])] };
     const unknown: NestNode = { id: "unknown", kind: "box", maxW: 300, labelW: 120, children: ["ext:world", "ext:unknown"].map(leaf).filter((x): x is NestNode => !!x) };
-    const tree: NestNode = { id: "root", kind: "group", dir: "col", gap: 28, children: [...((unknown as { children: NestNode[] }).children.length ? [{ id: "internet", kind: "box" as const, maxW: 600, labelW: 120, children: [unknown] }] : []), azure] };
+    const tree: NestNode = { id: "root", kind: "group", dir: "col", gap: 28, children: [...((unknown as { children: NestNode[] }).children.length ? [{ id: "internet", kind: "box" as const, maxW: 600, labelW: 120, children: [unknown] }] : []), ...((privateBox as { children: NestNode[] }).children.length ? [privateBox] : []), azure] };
     const meta: Record<string, { label: string; type: string; dashed?: boolean; chip?: string }> = {
       azure: { label: azureLabel, type: t("ins.net.box.azure") },
       rg: { label: c.resourceGroup || t("ins.net.rgNotCollected"), type: t("ins.net.box.rg") },
@@ -229,6 +234,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       platform: { label: t("ins.net.box.platform"), type: t("ins.net.box.msManaged") },
       internet: { label: t("ins.net.box.internet"), type: t("ins.net.box.internetType") },
       unknown: { label: t("ins.net.box.unknown"), type: t("ins.net.box.unknownType"), dashed: true },
+      privnet: { label: t("ins.net.box.private"), type: t("ins.net.box.privateType"), dashed: true },
     };
     for (const ns of nsNames) meta[`ns:${ns}`] = { label: ns, type: t("ins.net.box.ns") };
     for (const g of paasGroups) meta[g.id] = { label: g.id.slice(5), type: "Azure PaaS" };
@@ -241,7 +247,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     const rects = layoutNest(tree, collapsed);
     const vis = (id: string) => (rects.has(id) || parents.has(id) ? visibleAncestor(id, parents, collapsed) : null);
     const nsOf = (id: string) => { for (let p = parents.get(id); p; p = parents.get(p)) if (p.startsWith("ns:")) return p; return null; };
-    type Roll = { from: string; to: string; count: number; ports: string[]; cls: NetEdgeClass; dropped: number; raw: NetEdge[] };
+    type Roll = { from: string; to: string; count: number; ports: string[]; cls: NetEdgeClass; dropped: number; raw: NetEdge[]; bundled: boolean };
+    const lift = (id: string, at: string) => {
+      if (lineMode !== "bundle" || nodeById.get(id)?.kind !== "workload") return at;
+      const ns = nsOf(id);
+      return ns && rects.has(ns) && !collapsed.has(ns) && at === id ? ns : at;
+    };
     const roll = new Map<string, Roll>();
     const inner: Record<string, number> = {};
     for (const e of edges) {
@@ -251,8 +262,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       if (a === b) { inner[a] = (inner[a] ?? 0) + 1; continue; }
       const nsA = nsOf(e.from);
       if (nsA && nsA === nsOf(e.to) && !collapsed.has(nsA) && !touchesSel && !e.dropped) { inner[nsA] = (inner[nsA] ?? 0) + 1; continue; }
-      const k = `${a}>${b}`;
-      const r = roll.get(k) ?? { from: a, to: b, count: 0, ports: [], cls: e.cls, dropped: 0, raw: [] };
+      // The selected workload and DROPPED flows (a security signal) keep their own lines
+      const keep = touchesSel || e.dropped > 0;
+      const a2 = keep ? a : lift(e.from, a), b2 = keep ? b : lift(e.to, b);
+      if (a2 === b2) { inner[a2] = (inner[a2] ?? 0) + 1; continue; }
+      const k = `${a2}>${b2}`;
+      const r = roll.get(k) ?? { from: a2, to: b2, count: 0, ports: [], cls: e.cls, dropped: 0, raw: [], bundled: a2 !== a || b2 !== b };
       r.count += e.count; r.dropped += e.dropped; r.raw.push(e);
       r.ports = [...new Set([...r.ports, ...e.ports])];
       if (CLS_RANK[e.cls] > CLS_RANK[r.cls]) r.cls = e.cls;
@@ -281,7 +296,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       if (!r.collapsed) for (const c2 of n.children) drawBoxes(c2, depth + (n.kind === "box" ? 1 : 0));
     };
     drawBoxes(tree, 0);
-    const leafLabel = (v: NetNode) => (v.id === "ext:world" ? (net.unmatchedExternal.filter((u) => u.from.some((f) => !rowById.get(f)?.managed && !f.startsWith("ext:"))).map((u) => u.ip).join(", ") || t("ins.net.unknownIps", { n: net.unmatchedExternal.length })) : v.label);
+    const leafLabel = (v: NetNode) => (v.id === "ext:private" ? net.privateExternal.map((u) => u.ip).join(", ") || v.label : v.id === "ext:world" ? (net.unmatchedExternal.filter((u) => u.from.some((f) => !rowById.get(f)?.managed && !f.startsWith("ext:"))).map((u) => u.ip).join(", ") || t("ins.net.unknownIps", { n: net.unmatchedExternal.length })) : v.label);
     const drawFront = (n: NestNode) => {
       const r = rects.get(n.id);
       if (!r) return;
@@ -292,7 +307,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
         const lit = !!sel && (isSel || [...roll.values()].some((x) => rollOn(x) && (x.from === v.id || x.to === v.id)));
         const name = leafLabel(v);
         const short = name.length > 19 ? name.slice(0, 18) + "…" : name;
-        const typ = v.kind === "paas" ? v.azureType ?? "" : v.kind === "internet" ? t("ins.net.noAzureMatch") : v.sub;
+        const typ = v.kind === "paas" ? v.azureType ?? "" : v.kind === "azureService" ? v.serviceTag ?? "" : v.kind === "internet" ? t("ins.net.noAzureMatch") : v.kind === "private" ? t("ins.net.privateShort") : v.sub;
         const pillW = Math.min(r.w - 4, textW(short, 11.5) + 14);
         const dropped = net.edges.some((e) => e.from === v.id && e.dropped);
         fronts.push(
@@ -301,7 +316,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
             <circle cx={cx} cy={cy} r={19} fill={leafColor(v)} fillOpacity={v.kind === "internet" || v.kind === "unknown" ? 0.75 : 1} stroke={v.kind === "internet" || v.kind === "unknown" ? "var(--faint)" : undefined} strokeDasharray={v.kind === "internet" || v.kind === "unknown" ? "3 3" : undefined} />
             <g transform={`translate(${cx},${cy})`}><LeafIcon kind={v.kind} /></g>
             {overlay && !!v.combos?.length && <g transform={`translate(${cx + 15},${cy - 15})`}><circle r={8} fill="var(--crit)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9.5, fontWeight: 800, fill: "#fff" }}>{v.combos.length}</text><title>{t("ins.heat.combosCol")}: {v.combos.map((x) => COMBO_LABEL[x]).join(", ")}</title></g>}
-            {v.publicAccess === "Enabled" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={7} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.publicOn")}</title></g>}
+            {v.exposure === "open" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={7} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
             {v.sharedIpWith && <g transform={`translate(${cx + 15},${cy + 13})`}><circle r={7} fill="var(--surface)" stroke="var(--faint)" strokeDasharray="2 2" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "var(--muted)" }}>?</text><title>{t("ins.net.sharedIp")}</title></g>}
             {overlay && dropped && <circle cx={cx - 15} cy={cy + 14} r={4} fill="var(--crit)"><title>{t("ins.net.dropped")}</title></circle>}
             <rect className={styles.selpill} x={cx - pillW / 2} y={cy + 26} width={pillW} height={17} rx={8.5} fill="transparent" />
@@ -367,13 +382,15 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
           const [, color, dash] = ECLS[r.cls];
           const D = Math.hypot(p0.x - p1.x, p0.y - p1.y) || 1;
           const cx = p1.x + ((p0.x - p1.x) / D) * 30, cy = p1.y + ((p0.y - p1.y) / D) * 30;
-          const txt = `${r.raw.length > 1 ? `×${r.raw.length} ${t("ins.net.links")} · ` : ""}${r.ports.slice(0, 3).join(",")}${r.ports.length > 3 ? "…" : ""} · ${r.count}`;
+          const wl = new Set(r.raw.flatMap((e) => [e.from, e.to]).filter((id) => nodeById.get(id)?.kind === "workload")).size;
+          const txt = `${r.bundled ? `${t("ins.net.bundleN", { n: wl })} · ` : r.raw.length > 1 ? `×${r.raw.length} ${t("ins.net.links")} · ` : ""}${r.ports.slice(0, 3).join(",")}${r.ports.length > 3 ? "…" : ""} · ${r.count}`;
           const tw = txt.length * 5.6 + 12;
+          const chip = rollOn(r) || (!sel && (r.dropped > 0 || r.cls === "internet"));
           return (
             <g key={`${r.from}>${r.to}`} className={styles.edge} data-on={rollOn(r) || undefined}>
               <path className={styles.ehitNet} d={d}><title>{r.raw.map(edgeTitle).join("\n")}</title></path>
-              <path d={d} fill="none" stroke={r.dropped ? "var(--crit)" : color} strokeWidth={thick(r.count, maxC).toFixed(1)} strokeDasharray={dash} opacity={0.85} markerEnd={`url(#nn-${r.cls})`} pointerEvents="none" />
-              <g className={styles.nchip} transform={`translate(${cx.toFixed(1)},${cy.toFixed(1)})`}><rect x={-tw / 2} y={-9} width={tw} height={17} rx={6} /><text textAnchor="middle" y={3.5}>{txt}</text></g>
+              <path d={d} fill="none" stroke={r.dropped ? "var(--crit)" : color} strokeWidth={(thick(r.count, maxC) * (r.bundled ? 1.25 : 1)).toFixed(1)} strokeDasharray={dash} opacity={r.bundled ? 0.7 : 0.85} markerEnd={`url(#nn-${r.cls})`} pointerEvents="none" />
+              {chip && <g className={styles.nchip} transform={`translate(${cx.toFixed(1)},${cy.toFixed(1)})`}><rect x={-tw / 2} y={-9} width={tw} height={17} rx={6} /><text textAnchor="middle" y={3.5}>{txt}</text></g>}
             </g>
           );
         })}
@@ -382,24 +399,61 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
     );
   };
 
+  const paasRows = (n: NetNode): InspectorRow[] => {
+    const nw = n.network;
+    const rules = !nw ? t("ins.net.f.rulesUnread")
+      : nw.noIpFirewall ? t("ins.net.f.noIpFirewall")
+        : [nw.defaultAction === "Allow" ? t("ins.net.f.defaultAllow") : nw.defaultAction === "Deny" ? t("ins.net.f.defaultDeny") : "?", nw.ipRules !== null ? t("ins.net.f.ipRules", { n: nw.ipRules }) : null, nw.vnetRules?.length ? t("ins.net.f.vnetRules", { list: nw.vnetRules.join(", ") }) : null].filter(Boolean).join(" · ");
+    const via = (n.matchedBy ?? []).map((v) => t(`ins.net.via.${v}`)).join(" · ");
+    return [
+      { k: t("ins.net.f.host"), v: n.host || "?", ev: n.host ? "cfg" as const : "unk" as const, mono: true, src: t("ins.net.f.armProp") },
+      { k: t("ins.net.f.path"), v: n.path ? `${t(`ins.net.path.${n.path}`)} — ${(n.observedIps ?? []).join(", ")}` : t("ins.net.f.notObserved"), ev: n.path ? "obs" as const : "unk" as const, mono: true, src: t("ins.net.f.pathSrc") },
+      { k: t("ins.net.f.match"), v: via || "?", ev: (n.matchedBy ?? []).includes("peIp") ? "cfg" as const : "obs" as const },
+      { k: "Private Endpoint", v: n.peIps?.length ? n.peIps.join(", ") : t("ins.heat.noneShort"), ev: "cfg" as const, mono: true, src: t("ins.net.f.peSrc") },
+      ...(n.sharedIpWith ? [{ k: t("ins.net.f.certainty"), v: t("ins.net.f.sharedV", { with: n.sharedIpWith.join(", ") }), ev: "unk" as const }] : []),
+      { k: t("ins.net.f.publicAccess"), v: n.publicAccess ?? t("ins.unknown"), ev: n.publicAccess ? "cfg" as const : "unk" as const },
+      { k: t("ins.net.f.rules"), v: rules, ev: nw ? "cfg" as const : "unk" as const, src: nw?.source },
+      { k: t("ins.net.f.exposure"), v: t(`ins.net.exposure.${n.exposure ?? "unknown"}`), ev: n.exposure && n.exposure !== "unknown" ? "cfg" as const : "unk" as const },
+      { k: t("ins.net.f.keyAuth"), v: t(`ins.net.keyAuth.${n.keyAuth ?? "unknown"}`), ev: n.keyAuth ? "cfg" as const : "unk" as const },
+    ];
+  };
+
   // ── Side panel: overview or the selected node ──
   const sideModel = (): InspectorModel => {
     if (!sel || !nodeById.has(sel)) {
-      const cloud = net.edges.filter((e) => e.cls === "cloud");
-      const pub = net.nodes.filter((n) => n.kind === "paas" && n.publicAccess === "Enabled" && cloud.some((e) => e.to === n.id));
+      const left = (e: NetEdge) => e.count > e.dropped;
+      const paasIds = new Set(net.edges.filter((e) => e.cls === "cloud" && left(e)).map((e) => e.to));
+      const paas = net.nodes.filter((n) => n.kind === "paas" && paasIds.has(n.id));
+      const byPath = (k: NonNullable<NetNode["path"]>) => paas.filter((n) => n.path === k);
+      const exposed = (k: NonNullable<NetNode["exposure"]>) => paas.filter((n) => n.exposure === k);
+      const svc = net.nodes.filter((n) => n.kind === "azureService" && net.edges.some((e) => e.to === n.id && left(e)));
       const probes = net.edges.filter((e) => e.from === "probe:lb").reduce((s, e) => s + e.count, 0);
       const remote = net.edges.filter((e) => e.from === "ext:remote-node" && rowById.get(e.to)?.cells.exposure);
       const isMgd = (id: string) => rowById.get(id)?.managed;
-      const usr = net.unmatchedExternal.filter((u) => u.from.some((f) => !isMgd(f) && !f.startsWith("ext:")));
-      const mgd = net.unmatchedExternal.filter((u) => !usr.includes(u));
+      const sent = net.unmatchedExternal.filter((u) => u.count > u.dropped);
+      const usr = sent.filter((u) => u.from.some((f) => !isMgd(f) && !f.startsWith("ext:")));
+      const mgd = sent.filter((u) => !usr.includes(u));
+      const privSent = net.privateExternal.filter((u) => u.count > u.dropped);
       const drops = net.edges.filter((e) => e.dropped);
       const imds = net.edges.filter((e) => e.to === "platform:imds" && nodeById.get(e.from)?.kind === "workload");
+      const names = (ns: NetNode[]) => <span className={styles.mono}>{ns.map((n) => n.label).join(", ")}</span>;
+      const ipList = (us: typeof sent, own: (f: string) => boolean) => (
+        <ul className={styles.ovList}>
+          {us.slice(0, 8).map((u) => (
+            <li key={u.ip}><span className={styles.mono}>{u.ip}:{u.ports.join(",")}</span>{u.names?.length ? <span className={styles.muted}> {u.names.join(", ")}</span> : null} ← {u.from.filter(own).map(label).join(", ")}</li>
+          ))}
+          {us.length > 8 && <li className={styles.muted}>{t("ins.net.ov.more", { n: us.length - 8 })}</li>}
+        </ul>
+      );
       return {
         id: "net-overview", kicker: t("ins.net.ov.kicker"), title: t("ins.net.ov.title"), sub: `${hubbleLabel(net.coverage)} · ${note}`,
         callouts: [
-          { content: <>{t("ins.net.ov.paas1")}<b>{t("ins.net.ov.paasConn", { n: cloud.length })}</b>{t("ins.net.ov.paas2")}<b>{t("ins.net.ov.paasTargets", { n: pub.length })}</b>{t("ins.net.ov.paas3")}{pub.length ? <> — {t("ins.net.ov.paasPublic")}: <span className={styles.mono}>{pub.map((n) => n.label).join(", ")}</span></> : ""}</> },
-          { content: <>{t("ins.net.ov.unmatched")}: {usr.length ? usr.map((u) => <b key={u.ip}>{u.from.filter((f) => !isMgd(f)).map(label).join(", ")} → {u.ip}:{u.ports.join(",")} </b>) : t("ins.heat.noneShort")}{mgd.length ? <span className={styles.muted}> · {t("ins.net.ov.managedIps", { n: mgd.length })}</span> : null}{!net.azureMatched && <span className={styles.muted}> {t("ins.net.ov.matchSkipped")}</span>}</> },
-          ...(drops.length ? [{ content: <>{t("ins.net.ov.drops", { n: drops.length })}: {drops.map((e) => `${label(e.from)} → ${label(e.to)} ${e.ports.join(",")}`).join(" · ")} — {t("ins.net.ov.dropsAlways")}</> }] : []),
+          { tone: byPath("public").length || byPath("mixed").length ? "warn" as const : undefined, content: <>{t("ins.net.ov.path", { n: paas.length, priv: byPath("private").length, pub: byPath("public").length, mixed: byPath("mixed").length })}{byPath("public").length + byPath("mixed").length ? <> — {t("ins.net.ov.pathPublic")}: {names([...byPath("public"), ...byPath("mixed")])}</> : null} <span className={styles.muted}>{t("ins.net.ov.pathBasis")}</span></> },
+          { tone: exposed("open").length ? "warn" as const : undefined, content: <>{t("ins.net.ov.exposure", { open: exposed("open").length, restricted: exposed("restricted").length, closed: exposed("closed").length, unknown: exposed("unknown").length })}{exposed("open").length ? <> — <b>{t("ins.net.ov.exposureOpen")}</b>: {names(exposed("open"))}{exposed("open").some((n) => n.keyAuth === "on") ? <> · {t("ins.net.ov.keyOn")}</> : null}</> : null} <span className={styles.muted}>{t("ins.net.ov.exposureBasis")}</span></> },
+          ...(svc.length ? [{ tone: "info" as const, content: <>{t("ins.net.ov.services")}: {svc.map((n) => `${n.label} ×${(n.observedIps ?? []).length}`).join(" · ")} <span className={styles.muted}>{t("ins.net.ov.servicesBasis")}</span></> }] : []),
+          { content: <>{t("ins.net.ov.unmatched")}: {usr.length ? ipList(usr, (f) => !isMgd(f)) : t("ins.heat.noneShort")}{mgd.length ? <span className={styles.muted}> · {t("ins.net.ov.managedIps", { n: mgd.length })}: {mgd.map((u) => u.ip).join(", ")}</span> : null}{!net.azureMatched && <span className={styles.muted}> {t("ins.net.ov.matchSkipped")}</span>}{net.serviceTagsMatched === false && <span className={styles.muted}> {t("ins.net.ov.tagsSkipped")}</span>}</> },
+          ...(privSent.length ? [{ tone: "info" as const, content: <>{t("ins.net.ov.private")}: {ipList(privSent, () => true)} <span className={styles.muted}>{t("ins.net.ov.privateBasis")}</span></> }] : []),
+          ...(drops.length ? [{ content: <>{t("ins.net.ov.drops", { n: drops.length })} — {t("ins.net.ov.dropsNotEgress")}<ul className={styles.ovList}>{drops.slice(0, 8).map((e) => <li key={`${e.from}>${e.to}`}>{label(e.from)} → {label(e.to)} <span className={styles.mono}>{e.ports.join(",")}</span> ×{e.dropped}</li>)}{drops.length > 8 && <li className={styles.muted}>{t("ins.net.ov.more", { n: drops.length - 8 })}</li>}</ul></> }] : []),
           { tone: "info" as const, content: <>{t("ins.net.ov.probes", { n: probes })}{remote.length ? <>{t("ins.net.ov.remote1")}{remote.map((e) => `${label(e.to)} ×${e.count}`).join(", ")}{t("ins.net.ov.remote2")}<b>{t("ins.net.ov.remote3")}</b>{t("ins.net.ov.remote4")}</> : null}</> },
           { tone: imds.length ? "warn" as const : "ok" as const, content: imds.length ? <>{t("ins.net.ov.imds")}: {imds.map((e) => label(e.from)).join(", ")} — {t("ins.net.ov.imdsCheck")}</> : <>{t("ins.net.ov.imdsNone")}</> },
         ],
@@ -415,7 +469,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       ev: "obs",
     });
     const issues = data.issues.filter((i) => i.nodes.some((x) => x.refs.includes(sel)));
-    const kinds: Record<NetNode["kind"], string> = { workload: t("ins.type.workload"), paas: "Azure PaaS", internet: t("ins.net.kind.internet"), apiserver: t("ins.net.kind.apiserver"), node: t("ins.type.node"), probe: t("ins.net.box.platform"), platform: t("ins.net.box.platform"), unknown: t("ins.net.kind.unknown") };
+    const kinds: Record<NetNode["kind"], string> = { workload: t("ins.type.workload"), paas: "Azure PaaS", azureService: t("ins.net.kind.azureService"), private: t("ins.net.kind.private"), internet: t("ins.net.kind.internet"), apiserver: t("ins.net.kind.apiserver"), node: t("ins.type.node"), probe: t("ins.net.box.platform"), platform: t("ins.net.box.platform"), unknown: t("ins.net.kind.unknown") };
     return {
       id: `nd-${sel}`, kicker: kinds[n.kind], title: n.id === "ext:world" ? t("ins.net.unknownIp") : n.label, sub: n.sub,
       chips: row?.combos.length ? <>{row.combos.map((c) => <ComboButton key={c.type} combo={c} data={data} nav={nav} />)}</> : undefined,
@@ -425,14 +479,13 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
             { k: t("ins.net.f.location"), v: `${row.namespace} · ${row.kind} ×${row.pods} · ${row.owner}` },
             { k: t("ins.net.f.factors"), node: <><FactorStrip row={row} data={data} /><span className={styles.muted}>{data.factors.filter((f) => row.cells[f.key]).map((f) => f.label).join(" · ") || "-"}</span></>, ev: "cfg" as const },
           ] : []),
-          ...(n.kind === "paas" ? [
-            { k: t("ins.net.f.host"), v: n.host ?? "?", ev: "cfg" as const, mono: true, src: t("ins.net.f.armProp") },
-            { k: t("ins.net.f.publicAccess"), v: n.publicAccess ?? t("ins.unknown"), ev: n.publicAccess ? "cfg" as const : "unk" as const },
-            { k: t("ins.net.f.match"), v: t("ins.net.f.matchV", { ips: n.ips?.join(", ") ?? "" }), ev: "obs" as const },
-            ...(n.sharedIpWith ? [{ k: t("ins.net.f.certainty"), v: t("ins.net.f.sharedV", { with: n.sharedIpWith.join(", ") }), ev: "unk" as const }] : []),
-            { k: t("ins.net.f.peFw"), v: t("ins.notCollected"), ev: "unk" as const },
+          ...(n.kind === "paas" ? paasRows(n) : []),
+          ...(n.kind === "azureService" ? [
+            { k: t("ins.net.f.tag"), v: n.serviceTag ?? "?", ev: "cfg" as const, src: t("ins.net.f.tagSrc"), mono: true },
+            { k: t("ins.net.f.prefix"), v: n.prefix ?? "?", ev: "cfg" as const, mono: true },
+            { k: t("ins.net.f.observedIps"), v: (n.observedIps ?? []).join(", "), ev: "obs" as const, mono: true },
           ] : []),
-          ...(n.id === "ext:world" ? net.unmatchedExternal.map((u) => ({ k: u.ip, v: `:${u.ports.join(",")} ← ${u.from.map(label).join(", ")} · ${u.count}`, ev: "obs" as const, mono: true })) : []),
+          ...(n.id === "ext:world" || n.id === "ext:private" ? (n.id === "ext:world" ? net.unmatchedExternal : net.privateExternal).map((u) => ({ k: u.ip, v: `:${u.ports.join(",")} ← ${u.from.map(label).join(", ")} · ${u.count}${u.dropped ? ` · DROPPED ${u.dropped}${u.dropped === u.count ? ` (${t("ins.net.f.notLeft")})` : ""}` : ""}${u.names?.length ? ` · ${u.names.join(", ")}` : ""}`, ev: "obs" as const, mono: true })) : []),
           ...(n.kind === "unknown" ? [{ k: t("ins.net.f.ident"), v: t("ins.net.f.identV"), ev: "unk" as const }] : []),
           { k: t("ins.net.f.flowBasis"), v: note },
         ] },
@@ -459,6 +512,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
             <button aria-pressed={view === "nest"} onClick={() => setView("nest")}>{t("ins.net.viewNest")}</button>
             <button aria-pressed={view === "flow"} onClick={() => setView("flow")}>{t("ins.net.viewFlow")}</button>
           </div>
+          {view === "nest" && (
+            <div className={styles.toggle} role="group" aria-label={t("ins.net.linesAria")} title={t("ins.net.linesHint")}>
+              <button aria-pressed={lineMode === "bundle"} onClick={() => setLineMode("bundle")}>{t("ins.net.linesBundle")}</button>
+              <button aria-pressed={lineMode === "each"} onClick={() => setLineMode("each")}>{t("ins.net.linesEach")}</button>
+            </div>
+          )}
           {(Object.keys(ECLS) as NetEdgeClass[]).map((k) => (
             <button key={k} className={styles.fchip} aria-pressed={on[k]} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>
               <span className={styles.ecls} style={{ borderTopColor: ECLS[k][1], borderTopStyle: ECLS[k][2] ? "dashed" : "solid" }} />{t(ECLS[k][0])}
@@ -476,7 +535,7 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
         <div className={styles.legend}>
           <span>{t("ins.net.legendStrip", { n: data.factors.length })}</span>
           <span>{t("ins.net.legendBadge")}</span>
-          <span><svg width="12" height="12"><circle cx="6" cy="6" r="5.5" fill="var(--warnc)" /></svg> {t("ins.net.legendPublic")}</span>
+          <span><svg width="12" height="12"><circle cx="6" cy="6" r="5.5" fill="var(--warnc)" /></svg> {t("ins.net.legendOpen")}</span>
           <span>{t("ins.net.legendClick")}</span>
         </div>
       </div>

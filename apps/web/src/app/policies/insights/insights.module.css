@@ -67,7 +67,7 @@
 .evc[data-ev="cfg"] { color: var(--muted); border-color: var(--line-strong); }
 .evc[data-ev="unk"] { color: var(--muted); border-style: dashed; border-color: var(--faint); }
 
-.callout { border-left: 3px solid var(--crit); background: var(--surface); padding: 7px 10px; border-radius: 0 8px 8px 0; font-size: 12.5px; }
+.callout { border-left: 3px solid var(--crit); background: var(--surface); padding: 7px 10px; border-radius: 0 8px 8px 0; font-size: 12.5px; min-width: 0; overflow-wrap: anywhere; }
 .callout[data-tone="info"] { border-left-color: var(--accent); }
 .callout[data-tone="ok"] { border-left-color: var(--ok); }
 .callout[data-tone="warn"] { border-left-color: var(--warnc); }
@@ -84,7 +84,8 @@
 .position { font-size: 12.5px; padding: 8px 12px; border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); }
 
 /* ── Inspector ── */
-.dcard { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; text-align: left; }
+.dcard { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; text-align: left; min-width: 0; }
+.dcard > * { min-width: 0; }
 .dcH { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
 .dcK { font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 0.03em; }
 .dcard h4 { margin: 2px 0 0; font-size: 14.5px; line-height: 1.4; outline: none; }
@@ -124,7 +125,7 @@
 .heatLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
 @media (min-width: 1280px) { .heatLayout[data-open="true"] { grid-template-columns: minmax(0, 1fr) 400px; } }
 .heatWrap { overflow: auto; position: relative; max-height: 70vh; border: 1px solid var(--line); border-radius: 10px; }
-.heatDrawer { position: sticky; top: 8px; max-height: 70vh; overflow: auto; }
+.heatDrawer { position: sticky; top: var(--sticky-top); max-height: min(70vh, calc(100vh - var(--sticky-top) - 16px)); overflow: auto; }
 .heat thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; }
 .heat thead tr:nth-child(2) th { top: 22px; }
 .heat thead th.wl { z-index: 3; }
@@ -261,7 +262,12 @@
 @media (max-width: 1080px) { .netLayout { grid-template-columns: minmax(0, 1fr); } }
 .netsvg { width: 100%; min-width: 760px; height: auto; display: block; }
 .netsvg text { font-family: inherit; fill: var(--ink); }
-.netSide { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; background: var(--surface-2); }
+/* The detail panel follows the page while the map scrolls (no scrolling back up to read it); long content scrolls inside */
+.netSide { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; background: var(--surface-2); min-width: 0; position: sticky; top: var(--sticky-top); max-height: calc(100vh - var(--sticky-top) - 16px); overflow-y: auto; overscroll-behavior: contain; }
+.netSide > * { min-width: 0; }
+@media (max-width: 1080px) { .netSide { position: static; max-height: none; overflow: visible; } }
+.ovList { margin: 4px 0 0; padding-left: 16px; display: grid; gap: 2px; }
+.ovList li { overflow-wrap: anywhere; }
 .ecls { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 5px; }
 .obsChip { display: inline-flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: var(--surface-2); }
 .edge .pl, .edge .nchip { opacity: 0; transition: opacity 0.12s; pointer-events: none; }
@@ -393,7 +399,7 @@
 .wiGauge[data-tone="warn"] .wiGaugeBar > span { background: var(--warnc); }
 .wiGauge[data-tone="crit"] .wiGaugeBar > span { background: var(--crit); }
 .wiGauge[data-tone="crit"] { color: var(--crit); font-weight: 700; }
-.wiDrawer { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; }
+.wiDrawer { position: sticky; top: var(--sticky-top); max-height: calc(100vh - var(--sticky-top) - 16px); overflow: auto; }
 .wiTable { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .wiTable th, .wiTable td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .wiMuted { color: var(--muted); }

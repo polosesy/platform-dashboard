@@ -8,6 +8,7 @@ import { collectClusterPolicies, collectPolicyInventory } from "./k8sPolicyColle
 import { getHubbleFlows } from "./hubbleClient.js";
 import { getClusterContext, listAzureEndpoints, type ClusterContext } from "./azureEndpoints.js";
 import { buildPolicyInsights } from "./policyInsights.js";
+import { getServiceTagIndex, type ServiceTagIndex } from "./azureServiceTags.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights collector
@@ -79,9 +80,21 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
     };
   }
 
+  // Names for public IPs that match no resource: the official service tags of the cluster's region (only when there is traffic to name)
+  let serviceTags: ServiceTagIndex | null | undefined;
+  const sub = /\/subscriptions\/([^/]+)\//i.exec(clusterId)?.[1];
+  if (flows && sub && ctx.containment.cluster.location) {
+    try {
+      serviceTags = await getServiceTagIndex(env, bearerToken, sub, ctx.containment.cluster.location);
+    } catch (e) {
+      serviceTags = null;
+      gaps.push(`${tr("Azure 서비스 태그", "Azure service tags")}: ${msg(e)}`);
+    }
+  }
+
   const result = withLang(lang, () => buildPolicyInsights({
     clusterId, inventory, policy, flows, flowsError,
-    azure: { ...azure, apiServerIps: ctx.apiServerIps },
+    azure: { ...azure, apiServerIps: ctx.apiServerIps, serviceTags },
     containment: ctx.containment, gaps,
   }));
   debug(`[policy-insights] ${clusterId}: ${result.rows.length} rows, ${result.issues.length} issues, ${result.network.edges.length} edges, gaps ${gaps.length}`);

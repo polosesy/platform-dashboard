@@ -70,8 +70,35 @@ export type RbacMatrixRow = {
 
 // ── Network (Hubble flows at workload granularity) ──
 
-export type NetNodeKind = "workload" | "paas" | "apiserver" | "internet" | "node" | "probe" | "platform" | "unknown";
-export type NetEdgeClass = "eastwest" | "cloud" | "internet" | "control" | "platform";
+/**
+ * `azureService` = a Microsoft service's public endpoint named by an official service tag (Entra ID, ARM, Azure
+ * Monitor …) — not a resource of this tenant. `private` = a private address outside the cluster that matched no
+ * Azure resource (another VNet, peering, VPN / on-premises) — not the Internet.
+ */
+export type NetNodeKind = "workload" | "paas" | "apiserver" | "internet" | "azureService" | "private" | "node" | "probe" | "platform" | "unknown";
+export type NetEdgeClass = "eastwest" | "cloud" | "private" | "internet" | "control" | "platform";
+
+/** Which address the cluster actually reached: a private IP (Private Endpoint, VNet) or the public endpoint — observed */
+export type PaasPath = "private" | "public" | "mixed";
+
+/**
+ * Who can reach the resource from the Internet — configuration, independent of the cluster's own path:
+ * closed (public access off) · restricted (public on, default deny + allow-lists) · open (public on, no IP filter)
+ * · unknown (the network rules could not be read)
+ */
+export type PaasExposure = "closed" | "restricted" | "open" | "unknown";
+
+export type PaasNetworkRules = {
+  /** Allow = every address that reaches the endpoint; Deny = only the lists below */
+  defaultAction: "Allow" | "Deny" | null;
+  ipRules: number | null;
+  /** Allowed VNet subnets as `vnet/subnet` (max 10) — check for subnets of another environment */
+  vnetRules: string[] | null;
+  /** The type has no IP firewall at all (Azure Managed Redis): public access on = open to every address */
+  noIpFirewall?: boolean;
+  /** Where the facts came from (resource property or child resource) */
+  source: string;
+};
 
 export type NetNode = {
   id: string;
@@ -88,6 +115,20 @@ export type NetNode = {
   ips?: string[];
   /** Other resources answering on the same front-end IP — identification uncertain */
   sharedIpWith?: string[];
+  /** Private IPs of this resource's Private Endpoints (ARM network interfaces) */
+  peIps?: string[];
+  /** Destination IPs the cluster used for this node (observed) */
+  observedIps?: string[];
+  path?: PaasPath;
+  /** How the destination was identified: Private Endpoint NIC IP · DNS name seen by Cilium · DNS lookup of the host · service tag */
+  matchedBy?: Array<"peIp" | "dnsName" | "dnsLookup" | "serviceTag">;
+  exposure?: PaasExposure;
+  network?: PaasNetworkRules | null;
+  /** Key / shared-key / local authentication: on = a leaked key works from wherever the network allows */
+  keyAuth?: "on" | "off" | null;
+  /** azureService only: the service tag (e.g. AzureActiveDirectory) and the most specific matching prefix */
+  serviceTag?: string;
+  prefix?: string;
 };
 
 export type NetEdge = {
@@ -101,7 +142,8 @@ export type NetEdge = {
   note?: string;
 };
 
-export type ExternalIpDetail = { ip: string; ports: number[]; count: number; from: string[] };
+/** `count` = all connection attempts, `dropped` = of those, denied by policy (did not leave) */
+export type ExternalIpDetail = { ip: string; ports: number[]; count: number; dropped: number; from: string[]; names?: string[] };
 
 export type NetworkInsight = {
   available: boolean;
@@ -110,10 +152,14 @@ export type NetworkInsight = {
   coverage: HubbleCoverage | null;
   nodes: NetNode[];
   edges: NetEdge[];
-  /** World destinations that matched no Azure resource */
+  /** Public world destinations that matched no Azure resource and no service tag */
   unmatchedExternal: ExternalIpDetail[];
+  /** Private addresses outside the cluster that matched no Azure resource (VNet · peering · VPN) */
+  privateExternal: ExternalIpDetail[];
   /** Azure resources could be listed and matched by IP */
   azureMatched: boolean;
+  /** Service tags could be read (null = not attempted) */
+  serviceTagsMatched: boolean | null;
 };
 
 export type ClusterContainment = {

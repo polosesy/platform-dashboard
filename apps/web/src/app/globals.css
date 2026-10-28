@@ -1,5 +1,7 @@
 /* Intentional light theme baseline (no dark-mode defaults). */
 :root {
+  /* Page-level sticky panels sit under the sticky top bar */
+  --sticky-top: 72px;
   /* Colour channels — the single source. Any other opacity: rgba() over the matching *-rgb token.
      Mirrored for JS-drawn graphics (canvas, SVG attributes, three.js) in src/lib/palette.ts. */
   --ink-rgb: 20, 21, 23;
@@ -71,7 +73,9 @@
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden makes <body> a scroll container that never scrolls, which silently disables every
+     position: sticky inside it (top bar, side panels) */
+  overflow-x: clip;
 }
 
 body {

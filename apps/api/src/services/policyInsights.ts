@@ -16,6 +16,8 @@ import type {
   NetEdgeClass,
   NetNode,
   NetworkInsight,
+  PaasExposure,
+  PaasNetworkRules,
   PolicyFinding,
   PolicyInsightsResponse,
   RbacMatrixRow,
@@ -30,6 +32,7 @@ import type {
 } from "@aud/types";
 import { L } from "../infra/lang.js";
 import { selectorMatches, type InvRbacRule, type InvWorkload, type PolicyInventory } from "./policyAnalyzer.js";
+import { isPrivateV4, lookupServiceTag, type ServiceTagIndex } from "./azureServiceTags.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights (pure)
@@ -49,8 +52,15 @@ export type AzureEndpoint = {
   armType?: string;
   resourceGroup: string;
   host: string;
+  /** Every public host name of the resource (Storage: blob · queue · table · file · dfs) */
+  hosts?: string[];
   publicAccess: string | null;
+  /** All IPs: Private Endpoint NIC IPs + DNS answers of the host names */
   ips: string[];
+  /** Private Endpoint NIC IPs (ARM configuration) */
+  peIps?: string[];
+  network?: PaasNetworkRules | null;
+  keyAuth?: "on" | "off" | null;
 };
 
 export type InsightsInput = {
@@ -60,7 +70,7 @@ export type InsightsInput = {
   /** null when Hubble is disabled or unreachable */
   flows: HubbleFlowSet | null;
   flowsError?: string;
-  azure: { available: boolean; endpoints: AzureEndpoint[]; apiServerIps: string[] };
+  azure: { available: boolean; endpoints: AzureEndpoint[]; apiServerIps: string[]; serviceTags?: ServiceTagIndex | null };
   containment: ClusterContainment;
   gaps: string[];
   now?: Date;
@@ -210,7 +220,8 @@ function exposureOf(inv: PolicyInventory, w: InvWorkload): { text: string[]; pub
 const IMDS = "169.254.169.254";
 const WIRESERVER = "168.63.129.16";
 
-type Resolver = (ep: HubbleEndpoint, ip: string | undefined, dir: "src" | "dst", peer?: string) => string | null;
+type MatchedBy = NonNullable<NetNode["matchedBy"]>[number];
+type Resolver = (ep: HubbleEndpoint, ip: string | undefined, dir: "src" | "dst", peer?: string, names?: string[]) => { id: string; via?: MatchedBy; tag?: { tag: string; prefix: string } } | null;
 
 /**
  * Several Azure resources can answer on one front-end IP (storage stamps). Prefer the
@@ -225,81 +236,164 @@ export function pickAzureEndpoint(cands: AzureEndpoint[], clusterRg: string, pee
   return [...cands].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0];
 }
 
+/**
+ * Pure: who can reach a PaaS endpoint from the Internet — configuration only, independent of the path the cluster
+ * uses. Public access off = closed; on + no IP filter (or a type without one) = open; on + default deny = restricted.
+ */
+export function paasExposure(publicAccess: string | null, network: PaasNetworkRules | null | undefined): PaasExposure {
+  if (publicAccess === "Disabled") return "closed";
+  if (publicAccess !== "Enabled" || !network) return "unknown";
+  if (network.noIpFirewall || network.defaultAction === "Allow") return "open";
+  return network.defaultAction === "Deny" ? "restricted" : "unknown";
+}
+
+/** Pure: the path the cluster used, from the destination IPs it reached */
+export function paasPath(ips: string[]): NetNode["path"] {
+  const priv = ips.filter(isPrivateV4).length;
+  return priv === ips.length ? "private" : priv === 0 ? "public" : "mixed";
+}
+
+/** Microsoft service tags → display name. Anything else keeps the tag name. */
+const SERVICE_NAMES: Record<string, [string, string]> = {
+  AzureActiveDirectory: ["Microsoft Entra ID (로그인·토큰)", "Microsoft Entra ID (sign-in · tokens)"],
+  AzureResourceManager: ["Azure Resource Manager", "Azure Resource Manager"],
+  AzureMonitor: ["Azure Monitor", "Azure Monitor"],
+  AzureFrontDoor: ["Azure Front Door", "Azure Front Door"],
+  Storage: ["Azure Storage (공용 엔드포인트)", "Azure Storage (public endpoint)"],
+  AzureContainerRegistry: ["Azure Container Registry (공용)", "Azure Container Registry (public)"],
+  MicrosoftContainerRegistry: ["Microsoft Container Registry (mcr)", "Microsoft Container Registry (mcr)"],
+  AzureKeyVault: ["Azure Key Vault (공용)", "Azure Key Vault (public)"],
+  EventHub: ["Event Hubs (공용)", "Event Hubs (public)"],
+  ServiceBus: ["Service Bus (공용)", "Service Bus (public)"],
+  Sql: ["Azure SQL (공용)", "Azure SQL (public)"],
+  AzureCloud: ["Azure 공용 대역 (서비스 미공개)", "Azure public range (service not published)"],
+};
+export const serviceTagLabel = (service: string): string => {
+  const n = SERVICE_NAMES[service];
+  return n ? L(n[0], n[1]) : service;
+};
+
+const normHost = (h: string) => h.toLowerCase().replace(/\.$/, "");
+
 function makeResolver(workloads: InvWorkload[], input: InsightsInput): { resolve: Resolver } {
   const azureByIp = new Map<string, AzureEndpoint[]>();
-  for (const a of input.azure.endpoints) for (const ip of a.ips) azureByIp.set(ip, [...(azureByIp.get(ip) ?? []), a]);
+  const azureByPeIp = new Map<string, AzureEndpoint[]>();
+  const azureByHost = new Map<string, AzureEndpoint[]>();
+  const add = (m: Map<string, AzureEndpoint[]>, k: string, a: AzureEndpoint) => m.set(k, [...(m.get(k) ?? []), a]);
+  for (const a of input.azure.endpoints) {
+    for (const ip of a.ips) add(azureByIp, ip, a);
+    for (const ip of a.peIps ?? []) add(azureByPeIp, ip, a);
+    for (const h of a.hosts ?? [a.host]) if (h) add(azureByHost, normHost(h), a);
+  }
   const apiIps = new Set(input.azure.apiServerIps);
   const byNs = new Map<string, InvWorkload[]>();
   for (const w of workloads) byNs.set(w.namespace, [...(byNs.get(w.namespace) ?? []), w]);
   const memo = new Map<string, string>();
-  const resolve: Resolver = (ep, ip, dir, peer) => {
+  const rg = input.containment.resourceGroup;
+  const resolve: Resolver = (ep, ip, dir, peer, names) => {
     if (ep.namespace) {
       const key = `${ep.namespace}|${ep.podName}|${ep.workloadName}|${ep.identity}`;
       const hit = memo.get(key);
-      if (hit) return hit;
+      if (hit) return { id: hit };
       const labels = Object.fromEntries(Object.entries(ep.labels).map(([k, v]) => [k.replace(/^k8s:/, ""), v]));
       // Most specific template selector that matches the pod's labels
       const cands = (byNs.get(ep.namespace) ?? []).filter((w) => Object.keys(w.podLabels).length && selectorMatches({ matchLabels: w.podLabels }, labels, ep.namespace));
       cands.sort((a, b) => Object.keys(b.podLabels).length - Object.keys(a.podLabels).length);
       const id = cands[0] ? wid(cands[0]) : `${ep.namespace}/${ep.workloadName || ep.podName}`;
       memo.set(key, id);
-      return id;
+      return { id };
     }
     const name = ep.workloadName;
-    if (name === "host") return "ext:host";
-    if (name === "remote-node") return "ext:remote-node";
-    if (name === "kube-apiserver" || (ip && apiIps.has(ip))) return "apiserver";
-    if (ip === WIRESERVER) return dir === "src" ? "probe:lb" : "platform:wireserver";
-    if (ip === IMDS) return "platform:imds";
+    if (name === "host") return { id: "ext:host" };
+    if (name === "remote-node") return { id: "ext:remote-node" };
+    if (name === "kube-apiserver" || (ip && apiIps.has(ip))) return { id: "apiserver" };
+    if (ip === WIRESERVER) return { id: dir === "src" ? "probe:lb" : "platform:wireserver" };
+    if (ip === IMDS) return { id: "platform:imds" };
     if (name === "world") {
-      const az = ip ? pickAzureEndpoint(azureByIp.get(ip) ?? [], input.containment.resourceGroup, peer) : undefined;
-      return az ? `azure:${az.type}/${az.name}` : "ext:world";
+      if (!ip) return { id: "ext:world" };
+      const az = (via: MatchedBy, list: AzureEndpoint[] | undefined) => {
+        const a = pickAzureEndpoint(list ?? [], rg, peer);
+        return a ? { id: `azure:${a.type}/${a.name}`, via } : null;
+      };
+      // ① a Private Endpoint NIC IP (configuration) ② the DNS name Cilium saw for this IP ③ our DNS lookup of the host
+      const named = (names ?? []).flatMap((n) => azureByHost.get(normHost(n)) ?? []);
+      const hit = az("peIp", azureByPeIp.get(ip)) ?? az("dnsName", named.length ? named : undefined) ?? az("dnsLookup", azureByIp.get(ip));
+      if (hit) return hit;
+      // ④ a private address outside the cluster: another VNet, a peering, VPN / on-premises — never the Internet
+      if (isPrivateV4(ip)) return { id: "ext:private" };
+      // ⑤ an official Microsoft service tag
+      const tag = input.azure.serviceTags ? lookupServiceTag(input.azure.serviceTags, ip) : null;
+      if (tag) return { id: `svc:${tag.service}`, via: "serviceTag", tag: { tag: tag.tag, prefix: tag.prefix } };
+      return { id: "ext:world" };
     }
-    return "ext:unknown";
+    return { id: "ext:unknown" };
   };
   return { resolve };
 }
 
+type IpAgg = { ports: Set<number>; count: number; dropped: number; from: Set<string>; names: Set<string> };
+const ipDetails = (m: Map<string, IpAgg>): ExternalIpDetail[] => [...m.entries()]
+  .map(([ip, v]) => ({ ip, ports: [...v.ports].sort((a, b) => a - b), count: v.count, dropped: v.dropped, from: [...v.from], ...(v.names.size ? { names: [...v.names].slice(0, 3) } : {}) }))
+  .sort((a, b) => b.count - a.count);
+
 export function buildNetwork(input: InsightsInput, workloads: InvWorkload[], rowById: Map<string, WorkloadRiskRow>): NetworkInsight {
-  const empty = (reason: string): NetworkInsight => ({ available: false, reason, coverage: input.flows?.coverage ?? null, nodes: [], edges: [], unmatchedExternal: [], azureMatched: input.azure.available });
+  const tagsRead = input.azure.serviceTags === undefined ? null : !!input.azure.serviceTags;
+  const empty = (reason: string): NetworkInsight => ({ available: false, reason, coverage: input.flows?.coverage ?? null, nodes: [], edges: [], unmatchedExternal: [], privateExternal: [], azureMatched: input.azure.available, serviceTagsMatched: tagsRead });
   if (!input.flows) return empty(input.flowsError ?? L("Hubble 관측 데이터 없음", "No Hubble flow data"));
   if (input.flows.flows.length === 0) return empty(L("관측 구간 동안 수집된 flow가 없습니다", "No flows were collected in the observed window"));
   const { resolve } = makeResolver(workloads, input);
   const edges = new Map<string, NetEdge & { portSet: Set<string> }>();
-  const ext = new Map<string, { ports: Set<number>; count: number; from: Set<string> }>();
+  const ext = new Map<string, IpAgg>();
+  const priv = new Map<string, IpAgg>();
+  const seen = new Map<string, { ips: Set<string>; via: Set<MatchedBy>; tags: Set<string>; prefixes: Set<string> }>();
   const kindOf = (id: string): NetNode["kind"] =>
-    id.startsWith("azure:") ? "paas" : id === "apiserver" ? "apiserver" : id === "ext:world" ? "internet"
-      : id === "ext:host" || id === "ext:remote-node" ? "node" : id === "probe:lb" ? "probe" : id.startsWith("platform:") ? "platform"
+    id.startsWith("azure:") ? "paas" : id.startsWith("svc:") ? "azureService" : id === "apiserver" ? "apiserver" : id === "ext:world" ? "internet"
+      : id === "ext:private" ? "private" : id === "ext:host" || id === "ext:remote-node" ? "node" : id === "probe:lb" ? "probe" : id.startsWith("platform:") ? "platform"
         : id === "ext:unknown" ? "unknown" : "workload";
   const port = (f: HubbleFlow) => (f.l4Protocol === "ICMP" ? "ICMP" : f.l4Protocol === "UDP" ? `udp/${f.destinationPort}` : String(f.destinationPort));
+  const tally = (m: Map<string, IpAgg>, f: HubbleFlow, from: string) => {
+    const x = m.get(f.destinationIp!) ?? { ports: new Set<number>(), count: 0, dropped: 0, from: new Set<string>(), names: new Set<string>() };
+    x.ports.add(f.destinationPort); x.count++; x.from.add(from);
+    if (f.verdict === "DROPPED") x.dropped++;
+    for (const n of f.destinationNames ?? []) x.names.add(normHost(n));
+    m.set(f.destinationIp!, x);
+  };
   for (const f of input.flows.flows) {
     if (f.isReply) continue;
-    const from = resolve(f.source, f.sourceIp, "src");
-    const to = resolve(f.destination, f.destinationIp, "dst", from ?? undefined);
+    const from = resolve(f.source, f.sourceIp, "src")?.id;
+    const dst = resolve(f.destination, f.destinationIp, "dst", from, f.destinationNames);
+    const to = dst?.id;
     if (!from || !to || from === to) continue;
     const kf = kindOf(from), kt = kindOf(to);
     if (kf !== "workload" && kt !== "workload") continue; // node ↔ platform noise
     const tunnel = from === "kube-system/konnectivity-agent" && kt === "node";
     const cls: NetEdgeClass = tunnel ? "control"
       : kf === "probe" || kt === "platform" || kf === "node" || kt === "node" || kt === "unknown" || kf === "unknown" ? "platform"
-        : kt === "paas" ? "cloud" : kt === "apiserver" ? "control" : kt === "internet" ? "internet" : "eastwest";
+        : kt === "paas" || kt === "azureService" ? "cloud" : kt === "private" ? "private" : kt === "apiserver" ? "control" : kt === "internet" ? "internet" : "eastwest";
     const k = `${from}>${to}`;
     const e = edges.get(k) ?? { from, to, ports: [], portSet: new Set<string>(), count: 0, dropped: 0, cls, ...(tunnel ? { note: L("컨트롤 플레인 터널(exec/logs 경로)", "Control-plane tunnel (exec/logs path)") } : {}) };
     e.portSet.add(port(f));
     e.count++;
     if (f.verdict === "DROPPED") e.dropped++;
     edges.set(k, e);
-    if (to === "ext:world" && f.destinationIp) {
-      const x = ext.get(f.destinationIp) ?? { ports: new Set<number>(), count: 0, from: new Set<string>() };
-      x.ports.add(f.destinationPort); x.count++; x.from.add(from);
-      ext.set(f.destinationIp, x);
+    if (f.destinationIp && (kt === "paas" || kt === "azureService")) {
+      const s = seen.get(to) ?? { ips: new Set<string>(), via: new Set<MatchedBy>(), tags: new Set<string>(), prefixes: new Set<string>() };
+      s.ips.add(f.destinationIp);
+      if (dst.via) s.via.add(dst.via);
+      if (dst.tag) { s.tags.add(dst.tag.tag); s.prefixes.add(dst.tag.prefix); }
+      seen.set(to, s);
     }
+    if (to === "ext:world" && f.destinationIp) tally(ext, f, from);
+    if (to === "ext:private" && f.destinationIp) tally(priv, f, from);
   }
   const portNum = (p: string) => (p === "ICMP" ? -1 : Number(p.replace(/\D/g, "")));
   const outEdges: NetEdge[] = [...edges.values()].map(({ portSet, ...e }) => ({ ...e, ports: [...portSet].sort((a, b) => portNum(a) - portNum(b)) }))
     .sort((a, b) => b.count - a.count);
   const ids = new Set(outEdges.flatMap((e) => [e.from, e.to]));
   const azureById = new Map(input.azure.endpoints.map((a) => [`azure:${a.type}/${a.name}`, a]));
+  const ON_OFF = (v: string | null | undefined, on: string, off: string) => (v === "Enabled" ? on : v === "Disabled" ? off : "?");
+  const pathWord = (p: NetNode["path"]) => (p === "private" ? L("사설 IP(PE)", "private IP (PE)") : p === "public" ? L("공용 주소", "public address") : L("사설·공용 혼합", "private and public"));
+  const exposureWord = (x: PaasExposure) => ({ closed: L("외부 접근 닫힘", "no public access"), restricted: L("허용 목록만", "allow-list only"), open: L("모든 주소 허용", "open to any address"), unknown: L("외부 접근 미확인", "public access unverified") })[x];
   const nodes: NetNode[] = [...ids].map((id) => {
     const kind = kindOf(id);
     if (kind === "workload") {
@@ -310,14 +404,33 @@ export function buildNetwork(input: InsightsInput, workloads: InvWorkload[], row
     if (kind === "paas") {
       const a = azureById.get(id)!;
       const shared = input.azure.endpoints.filter((o) => o !== a && o.ips.some((ip) => a.ips.includes(ip))).map((o) => o.name);
+      const s = seen.get(id);
+      const observedIps = [...(s?.ips ?? [])].sort();
+      const path = observedIps.length ? paasPath(observedIps) : undefined;
+      const exposure = paasExposure(a.publicAccess, a.network);
+      // A shared front-end IP names the resource only when the match came from a Private Endpoint or Cilium's DNS name
+      const certain = !!s && [...s.via].some((v) => v === "peIp" || v === "dnsName");
       return {
-        id, kind, label: a.name, sub: L(`${a.typeLabel} · 공용 액세스 ${a.publicAccess === "Enabled" ? "켜짐" : a.publicAccess === "Disabled" ? "꺼짐" : "?"}`, `${a.typeLabel} · public access ${a.publicAccess === "Enabled" ? "on" : a.publicAccess === "Disabled" ? "off" : "?"}`),
-        azureType: a.typeLabel, publicAccess: a.publicAccess, host: a.host, ips: a.ips, ...(shared.length ? { sharedIpWith: shared } : {}),
+        id, kind, label: a.name,
+        sub: path ? `${a.typeLabel} · ${pathWord(path)} · ${exposureWord(exposure)}` : `${a.typeLabel} · ${L("공용 액세스", "public access")} ${ON_OFF(a.publicAccess, L("켜짐", "on"), L("꺼짐", "off"))}`,
+        azureType: a.typeLabel, publicAccess: a.publicAccess, host: a.host, ips: a.ips, ...(shared.length && !certain ? { sharedIpWith: shared } : {}),
+        peIps: a.peIps ?? [], observedIps, ...(path ? { path } : {}), matchedBy: [...(s?.via ?? [])].sort(), exposure, network: a.network ?? null, keyAuth: a.keyAuth ?? null,
+      };
+    }
+    if (kind === "azureService") {
+      const service = id.slice("svc:".length);
+      const s = seen.get(id);
+      const tags = [...(s?.tags ?? [])].sort();
+      return {
+        id, kind, label: serviceTagLabel(service),
+        sub: service === "AzureCloud" ? L("서비스 태그 AzureCloud — 어느 서비스인지는 공개 안 됨", "Service tag AzureCloud — the service is not published") : L(`서비스 태그 ${tags.join(", ")} — Microsoft 공용 엔드포인트`, `Service tag ${tags.join(", ")} — Microsoft public endpoint`),
+        serviceTag: tags.join(", "), prefix: [...(s?.prefixes ?? [])].sort().join(", "), observedIps: [...(s?.ips ?? [])].sort(), matchedBy: ["serviceTag"],
       };
     }
     const fixed: Record<string, [string, string]> = {
       apiserver: ["AKS API server", "kube-apiserver :443"],
-      "ext:world": [L("인터넷 · 미식별", "Internet · unidentified"), L("Azure 리소스로 매칭 안 됨", "Not matched to an Azure resource")],
+      "ext:world": [L("인터넷 · 미식별", "Internet · unidentified"), L("Azure 리소스·서비스 태그와 일치 안 함", "Matched no Azure resource or service tag")],
+      "ext:private": [L("사설 주소 · 클러스터 밖", "Private address · outside the cluster"), L("다른 VNet·피어링·VPN/온프레미스 — 인터넷 아님", "Another VNet · peering · VPN / on-premises — not the Internet")],
       "ext:host": [L("노드 (host)", "Node (host)"), L("노드 프로세스 · hostNetwork 파드", "Node processes · hostNetwork pods")],
       "ext:remote-node": [L("다른 노드 (remote-node)", "Other node (remote-node)"), L("다른 노드 · SNAT된 LB 트래픽 포함", "Other nodes · includes SNAT-ed LB traffic")],
       "probe:lb": [L("Azure LB 헬스 프로브", "Azure LB health probe"), WIRESERVER],
@@ -328,11 +441,15 @@ export function buildNetwork(input: InsightsInput, workloads: InvWorkload[], row
     const [label, sub] = fixed[id] ?? [id, ""];
     return { id, kind, label, sub };
   });
-  const unmatchedExternal: ExternalIpDetail[] = [...ext.entries()]
-    .map(([ip, v]) => ({ ip, ports: [...v.ports].sort((a, b) => a - b), count: v.count, from: [...v.from] }))
-    .sort((a, b) => b.count - a.count);
-  return { available: true, coverage: input.flows.coverage, nodes, edges: outEdges, unmatchedExternal, azureMatched: input.azure.available };
+  return {
+    available: true, coverage: input.flows.coverage, nodes, edges: outEdges,
+    unmatchedExternal: ipDetails(ext), privateExternal: ipDetails(priv),
+    azureMatched: input.azure.available, serviceTagsMatched: tagsRead,
+  };
 }
+
+/** Pure: an edge that actually left (some attempt was not dropped by policy) */
+export const leftCluster = (e: NetEdge): boolean => e.count > e.dropped;
 
 // ── KBOM ──
 
@@ -493,8 +610,14 @@ function findingsFor(policy: KubernetesPolicyResponse, pred: (f: PolicyFinding) 
 }
 
 function egressPolicyCode(c: RowCtx, net: NetworkInsight): string {
-  const out = net.edges.filter((e) => e.from === c.row.id);
-  const fqdn = out.filter((e) => e.cls === "cloud").map((e) => ({ host: net.nodes.find((n) => n.id === e.to)?.host, ports: e.ports }));
+  const out = net.edges.filter((e) => e.from === c.row.id && leftCluster(e));
+  const nodeOf = (id: string) => net.nodes.find((n) => n.id === id);
+  const fqdn = out.filter((e) => e.cls === "cloud" && nodeOf(e.to)?.kind === "paas").map((e) => ({ host: nodeOf(e.to)?.host || undefined, ports: e.ports }));
+  const byIp = out.filter((e) => (e.cls === "cloud" && nodeOf(e.to)?.kind === "azureService") || e.cls === "private").map((e) => {
+    const n = nodeOf(e.to);
+    const ips = n?.kind === "private" ? net.privateExternal.filter((x) => x.from.includes(c.row.id) && x.count > x.dropped).map((x) => x.ip) : (n?.observedIps ?? []);
+    return { label: n?.label ?? e.to, ips: ips.slice(0, 8), ports: e.ports };
+  });
   const inCluster = out.filter((e) => e.cls === "eastwest");
   const appLabel = Object.entries(c.w.podLabels)[0];
   const lines = [
@@ -512,6 +635,11 @@ function egressPolicyCode(c: RowCtx, net: NetworkInsight): string {
     ...fqdn.flatMap((f) => [
       L(`  - toFQDNs: [{ matchName: ${f.host ?? "<호스트>"} }]`, `  - toFQDNs: [{ matchName: ${f.host ?? "<host>"} }]`),
       `    toPorts: [{ ports: [${f.ports.map((p) => `{ port: "${p.replace(/\D/g, "")}", protocol: TCP }`).join(", ")}] }]`,
+    ]),
+    ...byIp.flatMap((x) => [
+      L(`  # ${x.label} — 관측 IP (주소가 바뀌면 다시 막힘: 이름을 알면 toFQDNs로)`, `  # ${x.label} — observed IPs (a changed address is blocked again: use toFQDNs when the name is known)`),
+      `  - toCIDR: [${x.ips.map((ip) => `${ip}/32`).join(", ")}]`,
+      `    toPorts: [{ ports: [${x.ports.map((p) => `{ port: "${p.replace(/\D/g, "")}", protocol: TCP }`).join(", ")}] }]`,
     ]),
     ...inCluster.filter((e) => !e.to.startsWith("kube-system/coredns")).map((e) => `  - toEndpoints: [{ matchLabels: { k8s:io.kubernetes.pod.namespace: ${e.to.split("/")[0]} } }]   # → ${e.to.split("/")[1]} ${e.ports.join(",")}`),
     L("# 관측 구간에 없던 목적지는 차단됩니다 — 관측 모드(audit)로 먼저 운영하세요", "# Destinations not seen in the observed window are blocked — run in audit mode first"),
@@ -559,6 +687,30 @@ function workloadFacts(c: RowCtx): FactRow[] {
     ...(c.exposure.services.length ? [{ k: "Service", v: c.exposure.services.join(", "), ev: "cfg" as EvidenceKind, src: L("Service selector 일치", "Service selector match") }] : []),
     { k: L("Ingress 정책", "Ingress policies"), v: c.sel.ingress.join(", ") || "0", ev: "cfg", src: L("NetworkPolicy·CiliumNetworkPolicy 선택 결과", "Selected by NetworkPolicy · CiliumNetworkPolicy") },
     { k: L("Egress 정책", "Egress policies"), v: c.sel.egress.join(", ") || "0", ev: "cfg", src: L("NetworkPolicy·CiliumNetworkPolicy 선택 결과", "Selected by NetworkPolicy · CiliumNetworkPolicy") },
+  ];
+}
+
+const pathTag = (n: NetNode | undefined): string =>
+  n?.kind !== "paas" || !n.path ? "" : n.path === "private" ? L(" · 사설 IP(PE)", " · private IP (PE)") : n.path === "public" ? L(" · 공용 주소", " · public address") : L(" · 사설·공용 혼합", " · private and public");
+const pubIps = (ns: Array<NetNode | undefined>) => ns.map((n) => `${n!.label} ${(n!.observedIps ?? []).filter((ip) => !isPrivateV4(ip)).join(",")}`).join(" · ");
+
+/** Pure: the facts of a PaaS destination — path (observed), how it was identified, who else can reach it (configuration) */
+export function paasFacts(n: NetNode): FactRow[] {
+  const VIA = { peIp: ["Private Endpoint NIC IP", "Private Endpoint NIC IP"], dnsName: ["Cilium이 본 DNS 이름", "DNS name seen by Cilium"], dnsLookup: ["호스트 DNS 조회 IP", "host DNS lookup IP"], serviceTag: ["서비스 태그", "service tag"] } as const;
+  const via = (n.matchedBy ?? []).map((v) => L(VIA[v][0], VIA[v][1])).join(" · ");
+  const nw = n.network;
+  const rules = !nw ? L("규칙을 읽지 못함", "rules not read")
+    : nw.noIpFirewall ? L("IP 방화벽 기능 없음 — 공용 액세스가 켜져 있으면 모든 주소", "no IP firewall feature — with public access on, any address")
+      : `${nw.defaultAction === "Allow" ? L("기본 허용(모든 주소)", "default allow (any address)") : nw.defaultAction === "Deny" ? L("기본 거부", "default deny") : "?"}${nw.ipRules !== null ? L(` · IP 규칙 ${nw.ipRules}`, ` · ${nw.ipRules} IP rules`) : ""}${nw.vnetRules?.length ? L(` · VNet 규칙 ${nw.vnetRules.join(", ")}`, ` · VNet rules ${nw.vnetRules.join(", ")}`) : ""}`;
+  return [
+    { k: L("호스트", "Host"), v: n.host || "?", ev: n.host ? "cfg" : "unk", src: L("ARM 리소스 속성", "ARM resource property"), mono: true },
+    { k: L("경로 (관측)", "Path (observed)"), v: n.path ? `${pathTag(n).slice(3)} — ${(n.observedIps ?? []).join(", ")}` : L("관측 없음", "not observed"), ev: n.path ? "obs" : "unk", src: L("Hubble 목적지 IP — 사설(RFC 1918)이면 Private Endpoint·VNet, 아니면 공용 엔드포인트", "Hubble destination IP — private (RFC 1918) = Private Endpoint / VNet, else the public endpoint"), mono: true },
+    { k: L("식별 근거", "Identified by"), v: via || "?", ev: (n.matchedBy ?? []).includes("peIp") ? "cfg" : "obs" },
+    { k: "Private Endpoint", v: n.peIps?.length ? n.peIps.join(", ") : L("없음", "None"), ev: "cfg", src: L("ARM 네트워크 인터페이스(privateEndpoint)", "ARM network interfaces (privateEndpoint)"), mono: true },
+    ...(n.sharedIpWith ? [{ k: L("식별 확실성", "Identification"), v: L(`같은 프런트엔드 IP를 ${n.sharedIpWith.join(", ")}와 공유 — 리소스 특정 불확실`, `Shares the frontend IP with ${n.sharedIpWith.join(", ")} — the resource is uncertain`), ev: "unk" as EvidenceKind }] : []),
+    { k: L("공용 네트워크 액세스", "Public network access"), v: n.publicAccess ?? L("미확인", "Unknown"), ev: n.publicAccess ? "cfg" : "unk", src: "ARM publicNetworkAccess" },
+    { k: L("공용 엔드포인트 규칙", "Public endpoint rules"), v: rules, ev: nw ? "cfg" : "unk", src: nw?.source ?? L("미확인", "Unknown") },
+    { k: L("키 인증", "Key authentication"), v: n.keyAuth === "on" ? L("켜짐 — 키가 새면 네트워크가 허용하는 곳 어디서든 접속", "On — a leaked key works from anywhere the network allows") : n.keyAuth === "off" ? L("꺼짐 (Entra ID만)", "Off (Entra ID only)") : L("미확인", "Unknown"), ev: n.keyAuth ? "cfg" : "unk" },
   ];
 }
 
@@ -621,8 +773,9 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
   for (const c of user.filter((x) => x.row.combos.some((k) => k.type === "exfil"))) {
     const r = c.row;
     const id = `exfil:${r.id}`;
-    const out = net.edges.filter((e) => e.from === r.id && (e.cls === "cloud" || e.cls === "internet")).slice(0, 3);
-    const pubPaas = out.map((e) => nodeById.get(e.to)).filter((n) => n?.kind === "paas" && n.publicAccess === "Enabled");
+    const out = net.edges.filter((e) => e.from === r.id && (e.cls === "cloud" || e.cls === "internet" || e.cls === "private") && leftCluster(e)).slice(0, 3);
+    // Suggest a Private Endpoint only when the cluster actually reached the public endpoint (observed IP), not because public access is on
+    const pubPaas = out.map((e) => nodeById.get(e.to)).filter((n) => n?.kind === "paas" && (n.path === "public" || n.path === "mixed"));
     const findingIds = [...nsFindings(r.namespace, ["NET-003", "PSA-001", "PSA-002"])];
     const fqdnId = `${id}:fqdn`, peId = `${id}:pe`, scId = `${id}:sc`, psaId = `${id}:psa`;
     const nodes: AttackNode[] = [
@@ -637,15 +790,13 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
       ], refs: [r.id], cmd: saCmd(c) }] : []),
       ...out.map((e, i): AttackNode => {
         const n = nodeById.get(e.to)!;
-        return n.kind === "paas"
-          ? { id: `dst${i}`, col: 3, row: i, type: "azure", label: n.label, sub: L(`${n.azureType} :${e.ports.join(",")} · ${flowsLabel(e.count)} · 공용 액세스 ${n.publicAccess === "Enabled" ? "켜짐" : n.publicAccess === "Disabled" ? "꺼짐" : "?"}`, `${n.azureType} :${e.ports.join(",")} · ${flowsLabel(e.count)} · public access ${n.publicAccess === "Enabled" ? "on" : n.publicAccess === "Disabled" ? "off" : "?"}`), facts: [
-            { k: L("호스트", "Host"), v: n.host ?? "?", ev: "cfg", src: L("ARM 리소스 속성", "ARM resource property"), mono: true },
-            { k: L("공용 네트워크 액세스", "Public network access"), v: n.publicAccess ?? L("미확인", "Unknown"), ev: n.publicAccess ? "cfg" : "unk", src: "ARM publicNetworkAccess" },
-            { k: L("매칭", "Match"), v: L(`Hubble 목적지 IP ${n.ips?.join(", ")} = 호스트 DNS 조회 IP`, `Hubble destination IP ${n.ips?.join(", ")} = host DNS lookup IP`), ev: "obs" },
-            ...(n.sharedIpWith ? [{ k: L("식별 확실성", "Identification"), v: L(`같은 프런트엔드 IP를 ${n.sharedIpWith.join(", ")}와 공유 — 리소스 특정 불확실`, `Shares the frontend IP with ${n.sharedIpWith.join(", ")} — the resource is uncertain`), ev: "unk" as EvidenceKind }] : []),
-            { k: L("Private Endpoint·방화벽", "Private Endpoint · firewall"), v: L("미수집", "Not collected"), ev: "unk" },
-          ], refs: [n.id] }
-          : { id: `dst${i}`, col: 3, row: i, type: "network", label: L("미식별 외부", "Unidentified external"), sub: `:${e.ports.join(",")} · ${flowsLabel(e.count)}`, unk: true, facts: net.unmatchedExternal.filter((u) => u.from.includes(r.id)).map((u) => ({ k: u.ip, v: `:${u.ports.join(",")} · ${u.count}`, ev: "obs" as EvidenceKind, mono: true })), refs: [n.id] };
+        if (n.kind === "paas") return { id: `dst${i}`, col: 3, row: i, type: "azure", label: n.label, sub: `:${e.ports.join(",")} · ${flowsLabel(e.count)} · ${n.sub}`, facts: paasFacts(n), refs: [n.id] };
+        if (n.kind === "azureService") return { id: `dst${i}`, col: 3, row: i, type: "azure", label: n.label, sub: `:${e.ports.join(",")} · ${flowsLabel(e.count)} · ${n.serviceTag ?? ""}`, facts: [
+          { k: L("식별", "Identified by"), v: L(`Microsoft 서비스 태그 ${n.serviceTag} (${n.prefix})`, `Microsoft service tag ${n.serviceTag} (${n.prefix})`), ev: "cfg", src: "Service Tag Discovery API" },
+          { k: L("관측 IP", "Observed IPs"), v: (n.observedIps ?? []).join(", "), ev: "obs", mono: true },
+        ], refs: [n.id] };
+        const list = n.kind === "private" ? net.privateExternal : net.unmatchedExternal;
+        return { id: `dst${i}`, col: 3, row: i, type: "network", label: n.kind === "private" ? L("사설 주소 (클러스터 밖)", "Private address (outside the cluster)") : L("미식별 외부", "Unidentified external"), sub: `:${e.ports.join(",")} · ${flowsLabel(e.count)}`, unk: true, facts: list.filter((u) => u.from.includes(r.id)).map((u) => ({ k: u.ip, v: `:${u.ports.join(",")} · ${u.count}${u.dropped ? ` (DROPPED ${u.dropped})` : ""}`, ev: "obs" as EvidenceKind, mono: true })), refs: [n.id] };
       }),
       { id: "any", col: 4, row: 1, type: "impact", label: L("임의의 클러스터 외부", "Anywhere outside the cluster"), sub: L(`egress 정책 0 · outboundType=${c0.outboundType ?? "?"}`, `0 egress policies · outboundType=${c0.outboundType ?? "?"}`), unk: true, facts: [
         { k: L("Egress 정책", "Egress policies"), v: "0", ev: "cfg", src: L("NetworkPolicy·CiliumNetworkPolicy 선택 결과", "Selected by NetworkPolicy · CiliumNetworkPolicy") },
@@ -657,19 +808,19 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
       { from: "entry", to: "app", ev: "cfg", label: c.exposure.text.length ? L("노출", "Exposure") : (c.exposure.services[0]?.split(" ")[0] ?? L("Service 없음", "No Service")) },
       { from: "app", to: "secret", ev: "cfg", label: L("볼륨/환경변수", "Volume / env var") },
       ...(r.cells.automount ? [{ from: "app", to: "token", ev: "cfg" as EvidenceKind, label: "automount=true" }] : []),
-      ...out.map((e, i): AttackEdge => ({ from: "app", to: `dst${i}`, ev: "obs", label: L(`${flowsLabel(e.count)}${nodeById.get(e.to)?.kind === "paas" ? " · 공인 IP" : ""}`, `${flowsLabel(e.count)}${nodeById.get(e.to)?.kind === "paas" ? " · public IP" : ""}`), ...(i === 0 && pubPaas.length ? { cut: peId } : {}) })),
+      ...out.map((e, i): AttackEdge => ({ from: "app", to: `dst${i}`, ev: "obs", label: `${flowsLabel(e.count)}${pathTag(nodeById.get(e.to))}`, ...(i === 0 && pubPaas.length ? { cut: peId } : {}) })),
       { from: "app", to: "any", ev: "cfg", label: L("송신 제한 없음 ?", "No egress limit ?"), cut: fqdnId },
     ];
     const actions: RemediationAction[] = [
       { id: fqdnId, title: L("ACNS FQDN 송신 정책 (관측된 목적지만 허용)", "ACNS FQDN egress policy (allow observed destinations only)"), desc: L(`관측 목적지 ${net.edges.filter((e) => e.from === r.id).length}곳 기준 초안. 관측 범위가 ${hubbleNote}라 드문 흐름은 빠져 있을 수 있음 → 관측 모드 운영 후 적용.`, `Draft based on ${net.edges.filter((e) => e.from === r.id).length} observed destinations. The observed window is ${hubbleNote}, so rare flows may be missing → run in audit mode before enforcing.`), risk: "warn", riskLabel: L("주의", "Caution"), closes: nsFindings(r.namespace, ["NET-003"]), cuts: ["app>any"], effect: "closed", code: egressPolicyCode(c, net) },
-      ...(pubPaas.length ? [{ id: peId, title: L(`Private Endpoint로 전환 후 ${pubPaas.map((n) => n!.label).join("·")} 공용 액세스 끄기`, `Move to Private Endpoints, then turn off public access on ${pubPaas.map((n) => n!.label).join("·")}`), desc: L("클러스터 → Azure PaaS 트래픽이 아웃바운드 SNAT으로 공인 IP를 거쳐 나갑니다. 다른 클라이언트가 공용 경로를 쓰는지 먼저 확인(방화벽 규칙 미수집).", "Cluster → Azure PaaS traffic leaves through outbound SNAT over a public IP. Check whether other clients use the public path first (firewall rules not collected)."), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: ["app>dst0"], effect: "reduced" as const,
+      ...(pubPaas.length ? [{ id: peId, title: L(`Private Endpoint로 전환 후 ${pubPaas.map((n) => n!.label).join("·")} 공용 액세스 끄기`, `Move to Private Endpoints, then turn off public access on ${pubPaas.map((n) => n!.label).join("·")}`), desc: L(`관측한 목적지 IP가 공용 주소입니다(${pubIps(pubPaas)}) — 아웃바운드 SNAT으로 공용 엔드포인트에 갑니다. 다른 클라이언트가 공용 경로를 쓰는지 먼저 확인하세요.`, `The observed destination IPs are public (${pubIps(pubPaas)}) — traffic reaches the public endpoint through outbound SNAT. Check whether other clients use the public path first.`), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: ["app>dst0"], effect: "reduced" as const,
         code: pubPaas.map((n) => L(`# ${n!.label} (${n!.azureType})\naz network private-endpoint create -g ${containment.resourceGroup} -n pe-${n!.label} --vnet-name <aks-vnet> --subnet <pe-subnet> \\\n  --private-connection-resource-id <${n!.label} 리소스 ID> --group-id <하위 리소스> --connection-name ${n!.label}`, `# ${n!.label} (${n!.azureType})\naz network private-endpoint create -g ${containment.resourceGroup} -n pe-${n!.label} --vnet-name <aks-vnet> --subnet <pe-subnet> \\\n  --private-connection-resource-id <${n!.label} resource ID> --group-id <sub-resource> --connection-name ${n!.label}`)).join("\n") + L("\n# 파드에서 FQDN이 사설 IP로 풀리는지 확인한 뒤 공용 액세스를 끄세요", "\n# Check that the FQDN resolves to a private IP from a pod, then turn off public access") }] : []),
       ...(r.cells.root || r.cells.privEsc ? [{ id: scId, title: L("securityContext 강화 (allowPrivilegeEscalation:false · runAsNonRoot)", "Harden securityContext (allowPrivilegeEscalation:false · runAsNonRoot)"), desc: L("이미지의 USER·setuid 사용 여부는 수집하지 않았습니다 → 스테이징에서 검증 후 적용.", "Whether the image uses USER or setuid was not collected → verify in staging first."), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: [], effect: "reduced" as const, code: securityContextCode(c) }] : []),
       ...(r.cells.psa ? [{ id: psaId, title: L(`${r.namespace}에 PSA 라벨 (enforce=baseline · warn/audit=restricted)`, `PSA labels on ${r.namespace} (enforce=baseline · warn/audit=restricted)`), desc: L("enforce는 새로 생성되는 파드에만 적용됩니다. 먼저 warn/audit로 위반을 확인하세요.", "enforce applies only to newly created pods. Check violations with warn/audit first."), risk: "ok" as const, riskLabel: L("안전", "Safe"), closes: nsFindings(r.namespace, ["PSA-001", "PSA-002"]), cuts: [], effect: "closed" as const, code: psaCode(r.namespace, c0.k8sVersion) }] : []),
     ];
     issues.push({
       id, sev: "crit", kind: "exfil",
-      title: L(`${r.name}(파드 ${r.pods})${r.cells.root || r.cells.privEsc ? `이 ${[r.cells.root && "root 실행 가능", r.cells.privEsc && "권한 상승 허용"].filter(Boolean).join("·")} 상태로` : "이"} Secret${r.cells.automount ? "과 SA 토큰" : ""}을 마운트한 채, 송신 제한 없이 ${out.map((e) => nodeById.get(e.to)!).map((n) => (n.kind === "paas" ? `${n.azureType}(${n.label})` : "미식별 외부")).join("·")}와 통신 중`, `${r.name} (${r.pods} pods)${r.cells.root || r.cells.privEsc ? `, ${[r.cells.root && "may run as root", r.cells.privEsc && "privilege escalation allowed"].filter(Boolean).join(" and ")},` : ""} mounts Secrets${r.cells.automount ? " and an SA token" : ""} and talks to ${out.map((e) => nodeById.get(e.to)!).map((n) => (n.kind === "paas" ? `${n.azureType}(${n.label})` : "unidentified external")).join("·")} with no egress limit`),
+      title: L(`${r.name}(파드 ${r.pods})${r.cells.root || r.cells.privEsc ? `이 ${[r.cells.root && "root 실행 가능", r.cells.privEsc && "권한 상승 허용"].filter(Boolean).join("·")} 상태로` : "이"} Secret${r.cells.automount ? "과 SA 토큰" : ""}을 마운트한 채, 송신 제한 없이 ${out.map((e) => nodeById.get(e.to)!).map((n) => (n.kind === "paas" ? `${n.azureType}(${n.label})` : n.kind === "azureService" ? n.label : n.kind === "private" ? "사설 주소" : "미식별 외부")).join("·")}와 통신 중`, `${r.name} (${r.pods} pods)${r.cells.root || r.cells.privEsc ? `, ${[r.cells.root && "may run as root", r.cells.privEsc && "privilege escalation allowed"].filter(Boolean).join(" and ")},` : ""} mounts Secrets${r.cells.automount ? " and an SA token" : ""} and talks to ${out.map((e) => nodeById.get(e.to)!).map((n) => (n.kind === "paas" ? `${n.azureType}(${n.label})` : n.kind === "azureService" ? n.label : n.kind === "private" ? "a private address" : "unidentified external")).join("·")} with no egress limit`),
       owner: `${r.owner} · ${r.namespace}`, ownerGroup: "mine", findingIds,
       extraEvidence: [...(out.some((e) => nodeById.get(e.to)?.kind === "paas") ? [["obs", L(`Azure 리소스 매칭 ${out.filter((e) => nodeById.get(e.to)?.kind === "paas").length}`, `Azure resources matched ${out.filter((e) => nodeById.get(e.to)?.kind === "paas").length}`)] as [EvidenceKind, string]] : []), ...(!c.exposure.text.length ? [["unk", L("진입: 외부 노출 없음", "Entry: no external exposure")] as [EvidenceKind, string]] : [])],
       nodes, edges, actions,
@@ -826,7 +977,8 @@ export function buildPolicyInsights(input: InsightsInput): PolicyInsightsRespons
   const network = buildNetwork(input, workloads, rowById);
   // Observed traffic leaving the cluster (API server excluded — normal for controllers)
   for (const c of ctxs) {
-    const out = network.edges.filter((e) => e.from === c.row.id && (e.cls === "cloud" || e.cls === "internet"));
+    // DROPPED-only edges never left: an attempt blocked by policy is not egress
+    const out = network.edges.filter((e) => e.from === c.row.id && (e.cls === "cloud" || e.cls === "internet" || e.cls === "private") && leftCluster(e));
     if (out.length) {
       c.row.cells.extEgress = out.map((e) => `${network.nodes.find((n) => n.id === e.to)?.label ?? e.to} ${e.ports.join(",")} ×${e.count}`).join(" · ");
       c.row.weights.extEgress = "warn";

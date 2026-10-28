@@ -223,3 +223,71 @@ test("lang: English responses carry no Korean text; Korean stays the default", a
   assert.ok(HANGUL.test(JSON.stringify(analyzePolicies(inventory(), CLUSTER).findings)));
   assert.throws(() => withLang("en", (async () => 1) as unknown as () => number), /synchronous/);
 });
+
+// ── PaaS path vs exposure, service tags, private ranges, dropped attempts (2026-10-28 stg verification, synthetic) ──
+// The summary said "public access on → traffic leaves over public IPs" from the setting alone; the cluster really
+// reached every PaaS on a Private Endpoint IP. Mongo vCore showed as "unmatched", Microsoft service IPs as unknown,
+// a private on-premises IP as Internet egress, and a policy-dropped attempt as egress.
+test("network: path from the observed IP, PE NIC match, service tags, private ranges, dropped attempts are not egress", async () => {
+  const { buildServiceTagIndex } = await import("../src/services/azureServiceTags.js");
+  const tags = buildServiceTagIndex([
+    { name: "AzureCloud.koreacentral", properties: { region: "koreacentral", addressPrefixes: ["198.51.100.0/24", "203.0.113.0/24"] } },
+    { name: "AzureActiveDirectory", properties: { addressPrefixes: ["198.51.100.128/25"] } },
+  ]);
+  const eps: AzureEndpoint[] = [
+    { name: "psql-app", type: "flexibleservers", armType: "microsoft.dbforpostgresql/flexibleservers", typeLabel: "PostgreSQL", resourceGroup: "rg-aks", host: "psql-app.postgres.database.azure.com", publicAccess: "Enabled", ips: ["10.0.3.5"], peIps: ["10.0.3.5"], network: { defaultAction: "Deny", ipRules: 2, vnetRules: null, source: "firewallRules" }, keyAuth: null },
+    // PE only, no host (vCore connection string not readable) — still identified by its PE NIC IP
+    { name: "mongo-app", type: "mongoclusters", armType: "microsoft.documentdb/mongoclusters", typeLabel: "Cosmos DB for MongoDB (vCore)", resourceGroup: "rg-aks", host: "", publicAccess: "Disabled", ips: ["10.0.3.6"], peIps: ["10.0.3.6"], network: null, keyAuth: null },
+    { name: "redis-app", type: "redisenterprise", armType: "microsoft.cache/redisenterprise", typeLabel: "Azure Managed Redis", resourceGroup: "rg-aks", host: "redis-app.koreacentral.redis.azure.net", publicAccess: "Enabled", ips: ["10.0.3.4"], peIps: ["10.0.3.4"], network: { defaultAction: "Allow", ipRules: null, vnetRules: null, noIpFirewall: true, source: "Azure Managed Redis" }, keyAuth: "on" },
+  ];
+  const web = ep("app", "web-abc", { "k8s:app": "web" });
+  const agent = ep("obs", "agent-x", { "k8s:app": "agent" });
+  const flows = [
+    flow(web, world, 5432, { destinationIp: "10.0.3.5" }),
+    flow(web, world, 10260, { destinationIp: "10.0.3.6" }),
+    flow(web, world, 10000, { destinationIp: "10.0.3.4" }),
+    flow(web, world, 22, { destinationIp: "192.168.6.10" }),
+    flow(web, world, 443, { destinationIp: "198.51.100.130" }),
+    flow(agent, world, 443, { destinationIp: "198.51.100.7" }),
+    // anonymous usage report blocked by policy: an attempt, not egress
+    flow(agent, world, 443, { destinationIp: "192.0.2.50", verdict: "DROPPED", destinationNames: ["stats.example.org"] }),
+    flow(agent, world, 443, { destinationIp: "192.0.2.50", verdict: "DROPPED" }),
+  ];
+  const r = buildPolicyInsights(input(flows, { azure: { available: true, endpoints: eps, apiServerIps: [], serviceTags: tags } }));
+  const n = r.network;
+  const node = (id: string) => n.nodes.find((x) => x.id === id)!;
+  const psql = node("azure:flexibleservers/psql-app");
+  assert.equal(psql.path, "private");
+  assert.deepEqual(psql.matchedBy, ["peIp"]);
+  assert.equal(psql.exposure, "restricted");
+  assert.equal(node("azure:mongoclusters/mongo-app").path, "private", "Mongo vCore found by its PE NIC IP");
+  assert.equal(node("azure:mongoclusters/mongo-app").exposure, "closed");
+  const redis = node("azure:redisenterprise/redis-app");
+  assert.equal(redis.exposure, "open", "no IP firewall + public access on = any address, even though the cluster uses the PE");
+  assert.equal(redis.path, "private");
+  assert.equal(node("svc:AzureActiveDirectory").kind, "azureService", "a named service beats AzureCloud");
+  assert.equal(node("svc:AzureCloud").kind, "azureService");
+  assert.equal(n.edges.find((e) => e.to === "ext:private")?.cls, "private");
+  assert.deepEqual(n.privateExternal.map((u) => u.ip), ["192.168.6.10"]);
+  assert.deepEqual(n.unmatchedExternal.map((u) => [u.ip, u.count, u.dropped, u.names]), [["192.0.2.50", 2, 2, ["stats.example.org"]]]);
+  assert.equal(n.serviceTagsMatched, true);
+  // agent's unmatched destination was only dropped; the AzureCloud one did leave
+  assert.doesNotMatch(r.rows.find((x) => x.id === "obs/agent")!.cells.extEgress ?? "", /192\.0\.2\.50|미식별/);
+  // every PaaS path is private → no "move to a Private Endpoint" action, no "public" on the path
+  const exfil = r.issues.find((i) => i.id === "exfil:app/web");
+  assert.ok(exfil, "web still has an exfil path (secret + no egress policy + egress)");
+  assert.ok(!exfil.actions.some((a) => a.id.endsWith(":pe")));
+  assert.ok(!exfil.edges.some((e) => /공인 IP|공용 주소/.test(e.label ?? "")));
+  assert.ok(exfil.edges.some((e) => /사설 IP\(PE\)/.test(e.label ?? "")));
+});
+
+test("network: a PaaS reached on its public address keeps the Private Endpoint suggestion with the observed IP", () => {
+  const r = buildPolicyInsights(input(FLOWS));
+  const psql = r.network.nodes.find((x) => x.id === "azure:flexibleservers/psql-app")!;
+  assert.equal(psql.path, "public");
+  assert.deepEqual(psql.matchedBy, ["dnsLookup"]);
+  assert.equal(psql.exposure, "unknown", "rules not read → unverified, not open");
+  const pe = r.issues.find((i) => i.id === "exfil:app/web")!.actions.find((a) => a.id.endsWith(":pe"))!;
+  assert.match(pe.desc, /20\.194\.59\.86/);
+  assert.equal(r.network.serviceTagsMatched, null, "not attempted");
+});
