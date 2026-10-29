@@ -154,6 +154,18 @@ test("events: Warning only, the workload's objects, newest first, message only f
   assert.ok(eventBelongs({ name: "api-0", kind: "Pod" }, "api"));
 });
 
+test("events: count is cumulative from the first occurrence; time is the last (the TTL runs from it)", () => {
+  // stg 2026-10-29: a readiness probe failing for days kept one event alive — ×1311 since 10-23, not in the last hour
+  const base = { type: "Warning", reason: "Unhealthy", involvedObject: { kind: "Pod", name: "pyroscope-0", namespace: "monitor" }, metadata: { namespace: "monitor" } };
+  const [e] = mapEvents([{ ...base, count: 1311, firstTimestamp: new Date("2026-10-23T17:15:23Z"), lastTimestamp: new Date("2026-10-29T01:01:33Z") }] as never, { messages: false });
+  assert.deepEqual([e!.time, e!.firstTime, e!.count], ["2026-10-29T01:01:33.000Z", "2026-10-23T17:15:23.000Z", 1311]);
+  const [noFirst] = mapEvents([{ ...base, count: 3, lastTimestamp: new Date("2026-10-29T01:01:33Z") }] as never, { messages: false });
+  assert.equal(noFirst!.firstTime, undefined, "no first time → the panel keeps the plain ×count");
+  // events.k8s.io-style: lastTimestamp empty, eventTime = first, series.lastObservedTime = last
+  const [series] = mapEvents([{ ...base, eventTime: new Date("2026-10-28T21:38:00Z"), series: { count: 1098, lastObservedTime: new Date("2026-10-29T01:01:33Z") } }] as never, { messages: false });
+  assert.deepEqual([series!.time, series!.firstTime, series!.count], ["2026-10-29T01:01:33.000Z", "2026-10-28T21:38:00.000Z", 1098], "the last time is not the series' first");
+});
+
 test("redaction: tokens, keys, PEM, SAS — clean lines untouched", () => {
   assert.equal(redactLogLine("Authorization: Bearer abcdefghijklmnop").line, "Authorization: [REDACTED]");
   assert.equal(redactLogLine('{"password":"hunter22"}').line, '{"password":"[REDACTED]"}');

@@ -115,7 +115,13 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
             <ul className={styles.hmEvents}>
               {events.data.events.map((e, i) => (
                 <li key={`${e.time}|${e.name}|${e.reason}|${i}`}>
-                  <span className={styles.stackMuted}>{when(e.time)}</span> <strong>{e.reason}</strong> {e.kind}/{e.name}{e.count > 1 ? ` ×${e.count}` : ""}
+                  <span className={styles.stackMuted}>{when(e.time)}</span> <strong>{e.reason}</strong> {e.kind}/{e.name}
+                  {/* count accumulates since the first occurrence — not occurrences in the last hour */}
+                  {e.count > 1 ? (
+                    <span title={e.firstTime ? t("ob.lg.repeat", { n: e.count, first: when(e.firstTime), last: when(e.time) }) : undefined}>
+                      {" "}{e.firstTime && e.firstTime !== e.time ? t("ob.hm.eventsCumulative", { n: e.count, first: when(e.firstTime) }) : `×${e.count}`}
+                    </span>
+                  ) : null}
                   {e.message ? <div className={styles.hmMsg}>{e.message}</div> : null}
                 </li>
               ))}

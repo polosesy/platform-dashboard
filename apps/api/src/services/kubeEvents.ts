@@ -25,13 +25,21 @@ export function eventBelongs(e: { name: string; kind: string }, workload: string
 type CoreEvent = k8s.CoreV1Event;
 
 /** Pure: API events → newest first, Warning only, workload filter, message only when allowed */
+/** client-node gives Dates (or strings from raw JSON); empty → undefined */
+const iso = (v: unknown): string | undefined => (v instanceof Date ? v.toISOString() : v ? String(v) : undefined);
+
 export function mapEvents(items: CoreEvent[], opts: { workload?: string; messages: boolean; limit?: number }): KubeEvent[] {
   return items
     .filter((e) => (e.type ?? "") === "Warning")
     .map((e): KubeEvent => {
-      const time = (e.lastTimestamp ?? e.eventTime ?? e.firstTimestamp ?? e.metadata?.creationTimestamp) as unknown;
+      // `count` accumulates from the first occurrence; the TTL runs from the last — a probe failing every 10 s keeps
+      // one event alive for days (stg 2026-10-29: Unhealthy ×1311 since 10-23, not 1311 in the last hour).
+      // events.k8s.io-style events leave lastTimestamp empty: the last time is series.lastObservedTime, eventTime the first.
+      const last = iso(e.lastTimestamp ?? e.series?.lastObservedTime ?? e.eventTime ?? e.firstTimestamp ?? e.metadata?.creationTimestamp);
+      const first = iso(e.firstTimestamp ?? e.eventTime);
       return {
-        time: time instanceof Date ? time.toISOString() : String(time ?? ""),
+        time: last ?? "",
+        ...(first ? { firstTime: first } : {}),
         type: "Warning",
         reason: e.reason ?? "",
         kind: e.involvedObject?.kind ?? "",

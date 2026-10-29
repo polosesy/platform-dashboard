@@ -398,7 +398,10 @@ export type WorkloadHeatmapResponse = {
 // ── Kube events (services/kubeEvents.ts) ──
 
 export type KubeEvent = {
+  /** Last occurrence — the ~1 h TTL counts from here, so a recurring event never expires */
   time: string;
+  /** First occurrence: `count` accumulates from here (can be days earlier than `time`) */
+  firstTime?: string;
   type: "Warning" | "Normal";
   reason: string;
   kind: string;
