@@ -17,6 +17,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { HubbleTab } from "./components/HubbleTab";
 import { StackTab } from "./components/StackTab";
+import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
@@ -149,6 +150,7 @@ export default function ObservabilityPage() {
             />
           )}
 
+          {tab === "infra" && <NodeMaintenancePanel clusterId={clusterId} />}
           {tab === "infra" && nodesResp && (
             <InfraTab nodes={nodesResp.nodes} />
           )}

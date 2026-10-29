@@ -8,7 +8,7 @@ import { RANGES } from "../services/networkQueries.js";
 import { anonymousSpAllowed, signinRequired } from "../infra/azureClientFactory.js";
 import { HttpError, queryInt, queryString, querySubscriptionId, respondLiveOrSignin, sendError } from "../infra/requestParams.js";
 
-const SECTIONS: NetSection[] = ["overview", "talkers", "blocked", "internet"];
+const SECTIONS: NetSection[] = ["map", "overview", "talkers", "blocked", "internet"];
 const DIMS: NetTalkerDim[] = ["subnet", "vm", "ip", "port"];
 const DIRS: NetDir[] = ["in", "out"];
 const VNET_KEY = /^[A-Za-z0-9._()-]{1,90}\/[A-Za-z0-9._-]{2,64}$/;

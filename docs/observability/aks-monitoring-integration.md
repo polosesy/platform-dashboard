@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-10-27
-covers: [apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+last-verified: 2026-10-29
+covers: [apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -85,6 +85,34 @@ Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 �
 | vpa-* | VPA 권장(CRD) | AKS 보안 점검 자동 크기 — 워크로드 상세는 다음 | 다음 |
 | aks-secrets-store-* · csi-azuredisk/azurefile · azure-wi-webhook | Warning 이벤트(FailedMount·회전 오류) | 히트맵 패널의 이벤트 | 구현(이벤트) |
 | konnectivity-agent · metrics-server · eraser · azure-cns · ip-masq · cloud-node-manager | KSM 준비 상태·재시작 | 히트맵(kube-system 네임스페이스) | 구현 |
+
+## 3a. 수집 상태의 '정상'은 파드 Ready까지 본 것
+
+- 구성 요소(Alloy·Loki·Tempo·수집 대상 job)마다 자기 파드의 Kubernetes Ready(`kube_pod_status_ready`)를 봅니다 — Ready 아닌 파드가 있으면 '저하', 카드에 'Ready n/m · 근거'와 파드별 'Ready 아님 · 언제부터(`max_over_time(timestamp(… == 1))[7d:1m]`)'.
+- **Pyroscope**는 빌드 정보가 없어, Alloy의 `pyroscope.write` 메트릭 `endpoint` 라벨(= 서비스 주소)로 **그 서비스의 엔드포인트**(Kubernetes API, 읽기 역할의 `endpoints` list)를 읽어 파드를 찾습니다. API가 안 되면 그 네임스페이스에서 서비스와 이름이 같은 워크로드(근거를 카드에 적음). 파드를 못 찾으면 **'보낸 양 > 0'만으로 정상이라고 하지 않습니다**(상태 '판정 안 함'). 보내다 버린 프로파일(`pyroscope_write_dropped_profiles_total`) > 0이면 저하.
+- 왜: 2026-10-28 21:38–10-29 01:14Z stg pyroscope-0가 Ready가 아니었는데(노드·디스크·메모리 정상, 재시작 0), Alloy는 계속 초당 3.2개를 보냈고 화면은 '정상'이었습니다. 노드 업그레이드(10-23)와는 5일 떨어진 별개의 사건 — 원인은 pyroscope 로그에 있고, 이 화면은 추측하지 않습니다.
+
+### 질의 하나가 늦어도 화면 전체가 실패하지 않음
+
+- 2026-10-29 stg: 29개 질의 중 28개는 1초 안에 답했는데, `prometheus_remote_storage_highest_timestamp_in_seconds`(원격 쓰기 지연) 하나를 Azure Monitor 작업 영역이 13–30초 붙잡거나 504로 답했고(연속 5번, 그다음엔 90ms) — 예전엔 질의 하나의 실패가 탭 전체의 '메트릭 조회 실패 (This operation was aborted)'였습니다.
+- 지금: 질의마다 12초 제한 + 시간 초과·504·429·네트워크 오류는 1번 재시도(400·401·403·PromQL 오류는 재시도 안 함). 그래도 답이 없는 질의는 `gaps`로 알리고 **그 질의에 기댄 값만 '조회 실패'** — 예: `count(up == 0)`이 실패하면 '응답 없음 0'이 아니라 '조회 실패'(빈 결과의 0으로 바꾸지 않음). 나머지 값은 그대로 보여 줍니다.
+- 클러스터 범위 질의(`group by (cluster) (up)`)는 10분 캐시, 일부 실패한 결과는 15초만 캐시(곧 다시 읽음).
+- 새로 고침 전체가 실패하면(작업 영역 오류·한도) **마지막으로 끝까지 읽은 결과(15분 이내)** 를 '읽은 시각'과 '이번 실패 이유'를 붙여 보여 줍니다. 권한 거부(403)는 옛 값 뒤에 숨기지 않습니다.
+
+## 3b. 노드 유지 보수 (AKS 모니터링 › 노드, 라이브 다이어그램 AKS 카드·패널)
+
+`GET /api/observability/node-maintenance?clusterId=&days=1|7|14|30` → `services/nodeMaintenance.ts`
+
+| 출처 | 읽는 것 | 왜 |
+|---|---|---|
+| Activity Log (클러스터 RG·노드 RG) | `agentPools/upgradeNodeImageVersion`, `managedClusters`·`agentPools` write, 노드 확장 집합 reimage·manualupgrade·delete, Resource Health | **실제 작업 시각**과 시작 주체(호출자 `Microsoft.ContainerService` = AKS 자동). `resourcechanges`는 감지 시각이라 쓰지 않음(10-23 17:00Z 업그레이드가 10-24 20:57Z로 기록) |
+| 클러스터 ARM | `autoUpgradeProfile`(클러스터·노드 OS 채널), 노드 풀(이미지·최대 추가 노드·드레인), `maintenanceConfigurations` | 작업이 **유지 보수 창 안**이었는지, 다음 창은 언제인지 |
+| kube-state-metrics | `kube_node_spec_unschedulable`(cordon)·Ready·`kube_node_created`(재등록 — reimage는 이름 유지)·`kube_node_info`(커널·kubelet)·`kube_pod_start_time` | 노드가 실제로 겪은 일과 다시 시작된 파드 수 |
+
+- 사건 = 변경 작업과 노드 변화를 30분 간격으로 묶은 것. 읽기·자격 증명 조회·runCommand·역할/정책 할당은 넣지 않음(stg Activity Log의 대부분이 이 대시보드의 자격 증명 조회). kubelet 버전이 바뀌면 'Kubernetes 업그레이드'. 클러스터 작업이 없으면 시작 주체 '기록 없음'(추측 없음).
+- 사건 밖의 노드 NotReady는 '유지 보수 밖'으로 따로.
+- stg 실측: 10-09 17:00Z Kubernetes 1.36.2→1.36.4(클러스터 자동 창, 둘째 토요일), 10-23 17:00–17:49Z 노드 이미지 202609.15→202610.08(노드 OS 창, 넷째 토요일 02:00 KST) — 임시 노드 4, 재등록 5, 커널 6.8.0-1067→1070, 다음 창 11-28 02:00 KST.
+- 30일은 Activity Log가 길어(3,282건/17쪽) 기간을 조각내 동시에 읽고, 쪽 제한에 걸리면 '일부만 읽음'.
 
 ## 4. 연결 파일
 

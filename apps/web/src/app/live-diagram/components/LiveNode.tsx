@@ -12,6 +12,7 @@ import { cardStatus } from "@/lib/liveStatus";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { HiddenHandles } from "./HiddenHandles";
 import { Spark } from "./Spark";
+import { AksMaintenanceChip, REAL_ARM } from "./detail/AksMaintenance";
 import { FullNameTag } from "./NameParts";
 import type { NamePart } from "@/lib/liveNames";
 import type { UsageChip } from "@/lib/plUsage";
@@ -234,6 +235,10 @@ export const LiveNode = memo(function LiveNode({ id: nodeId, data }: NodeProps<L
   if (lc) {
     const label = [t(lc.stateKey), lc.causeKey ? t(lc.causeKey) : null].filter(Boolean).join(" · ");
     chips.push({ key: "lc", el: <span className={styles.cardChip} data-tone={lc.tone === "warn" ? "public" : lc.tone === "muted" ? "muted" : "lc"} title={`${label} — ${t("ld.lc.chipHint")}`}>{label}</span> });
+  }
+  // An AKS cluster in or just after node maintenance (upgrade / node replacement, 24 h) — the usual "why did pods restart"
+  if (resourceKind === "aks" && azureResourceId && REAL_ARM.test(azureResourceId)) {
+    chips.push({ key: "nm", el: <AksMaintenanceChip clusterId={azureResourceId} /> });
   }
   // A rule that fired and mitigated between polls: the card is green again, but it was not quiet
   if (data.alertRecent && !hasAlert) {

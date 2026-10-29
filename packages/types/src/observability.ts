@@ -282,7 +282,9 @@ export type StackComponentKind = "alloy" | "loki" | "tempo" | "pyroscope" | "kub
 export type StackCheckId =
   | "remoteWriteFailed" | "remoteWriteLag" | "remoteWritePending" | "componentsUnhealthy" | "configLoad"
   | "logsSent" | "logsDropped" | "spansAccepted" | "spansRefused" | "spansExportFailed" | "profilesSent"
-  | "lokiIngest" | "tempoSpans" | "tempoDiscarded" | "targetsDown" | "ksmAge" | "ciliumUnreachable";
+  | "lokiIngest" | "tempoSpans" | "tempoDiscarded" | "targetsDown" | "ksmAge" | "ciliumUnreachable"
+  /** Ready pods / pods (kube-state-metrics kube_pod_status_ready) · profiles the sender dropped */
+  | "podsReady" | "profilesDropped";
 
 export type StackCheck = {
   id: StackCheckId;
@@ -292,6 +294,8 @@ export type StackCheck = {
   unit: "ratio" | "seconds" | "perSecond" | "bytesPerSecond" | "count";
   /** The exact query behind the value (opened in Grafana Explore when configured) */
   promql: string;
+  /** The query did not answer this time (timeout / throttled / error) — value null means "not read", not "no series" */
+  queryFailed?: true;
 };
 
 export type StackComponent = {
@@ -302,6 +306,21 @@ export type StackComponent = {
   state: StackState;
   pods: { pod: string; version: string | null }[];
   checks: StackCheck[];
+  /**
+   * The component's own pods by Kubernetes readiness (kube-state-metrics). How the pods were found: build info /
+   * scrape target (they report themselves) · endpoints (the Service the sender writes to, Kubernetes API) ·
+   * sameName (the one workload in that namespace named like that Service — when the API is not reachable).
+   * Absent = pods not identified: the state then never comes from what a sender sent alone.
+   */
+  readiness?: {
+    basis: "self" | "endpoints" | "sameName";
+    ready: number;
+    total: number;
+    /** Not-ready pods; since = the last time the pod was Ready ended (null = not Ready in the 7 days read) */
+    notReady: { pod: string; since: string | null }[];
+  };
+  /** Pyroscope: the Service the Alloy sender writes to (host:port from its `endpoint` label) */
+  target?: string;
 };
 
 export type ObservabilityStackResponse = {
@@ -313,12 +332,17 @@ export type ObservabilityStackResponse = {
   message?: string;
   cluster: string | null;
   components: StackComponent[];
-  /** Scrape targets per job (`up`) and the ones down now */
-  targets: { job: string; total: number; down: number }[];
+  /** Scrape targets per job (`up`) and the ones down now — down null: the down query did not answer */
+  targets: { job: string; total: number; down: number | null }[];
   downTargets: { job: string; namespace: string | null; pod: string | null }[];
   /** From the connections file `aks.observability.grafana` — links only, nothing read from Grafana */
   grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
+  /** Queries that did not answer this time (each has its own time limit and one retry) — the rest is shown as read */
+  gaps?: StackQueryGap[];
+  /** This refresh failed as a whole: the last complete answer (≤ 15 min old) is shown, with why the refresh failed */
+  stale?: { failedAt: string; state: ObservabilityStackResponse["metricsState"]; message?: string };
 };
+export type StackQueryGap = { query: string; reason: "timeout" | "throttled" | "failed" };
 
 // ── Data sources (services/observabilitySources.ts) — what the dashboard reads vs only links to ──
 
@@ -499,4 +523,84 @@ export type WorkloadVpaResponse = {
   /** ok · none = no VPA targets this workload · noCrd = the VPA CRD is not installed */
   state: "ok" | "none" | "noCrd";
   vpas: WorkloadVpa[];
+};
+
+// ── Node maintenance (services/nodeMaintenance.ts) — /api/observability/node-maintenance ──
+
+/** ok · empty (read, nothing in range) · forbidden · failed · notConfigured (no Azure Monitor workspace for metrics) */
+export type NodeMaintSourceState = "ok" | "empty" | "forbidden" | "failed" | "notConfigured";
+
+/** One AKS planned-maintenance window (`maintenanceConfigurations`), in its own UTC offset */
+export type NodeMaintWindow = {
+  /** aksManagedNodeOSUpgradeSchedule · aksManagedAutoUpgradeSchedule · default · … */
+  name: string;
+  schedule: { kind: "weekly" | "absoluteMonthly" | "relativeMonthly" | "daily" | "other"; interval: number; dayOfWeek?: string; dayOfMonth?: number; weekIndex?: string };
+  startTime: string | null;
+  durationHours: number | null;
+  utcOffset: string | null;
+  /** Next start (ISO) computed from the schedule; null = not computable */
+  next: string | null;
+};
+
+export type NodeMaintNode = {
+  node: string;
+  /** From the AKS node name `aks-<pool>-<n>-vmss…` (display only) */
+  pool: string | null;
+  /** A node that appeared and left inside the episode (the upgrade's surge node) */
+  surge?: { created: string; removed: string | null };
+  /** First start → last end of the spans inside the episode; times = how many spans */
+  cordoned?: { start: string; end: string | null; times: number };
+  notReady?: { start: string; end: string | null; times: number };
+  /** The Node object registered again (kube_node_created changed) — a reimage keeps the name */
+  reRegistered?: string;
+  kernel?: { from: string; to: string };
+  /** kubelet version changed (kube_node_info) — a Kubernetes upgrade reached this node */
+  kubelet?: { from: string; to: string };
+};
+
+export type NodeMaintEpisode = {
+  id: string;
+  /** nodeImageUpgrade = agentPools/upgradeNodeImageVersion · kubernetesUpgrade = node kubelet versions changed · clusterUpdate = managedClusters/agentPools write ·
+   *  nodeChange = only node facts from metrics (no Azure operation read for it) */
+  kind: "nodeImageUpgrade" | "kubernetesUpgrade" | "clusterUpdate" | "nodeChange";
+  start: string;
+  /** null = still running */
+  end: string | null;
+  status: "succeeded" | "failed" | "inProgress" | "unknown";
+  /** aks = AKS itself (caller Microsoft.ContainerService — auto-upgrade) · user · app (a service principal) · unknown */
+  initiator: "aks" | "user" | "app" | "unknown";
+  /** The planned-maintenance window the start falls in (name); null = outside every window; absent = no windows read */
+  inWindow?: string | null;
+  pools: string[];
+  /** Azure operations, condensed (Activity Log): first time, short name, status, target, count */
+  operations: { time: string; op: string; status: string; target: string; count: number }[];
+  /** Sub-operations that failed (e.g. a VMSS instance write — the upgrade can still succeed) */
+  failedOps: number;
+  /** Resource Health events on the node scale sets in the episode */
+  resourceHealth: number;
+  nodes: NodeMaintNode[];
+  /** Pods that started inside the episode and still existed 30 min after it (kube_pod_start_time); null = not measured */
+  podsRestarted: number | null;
+  basis: ("activityLog" | "metrics")[];
+};
+
+export type NodeMaintenanceResponse = {
+  clusterId: string;
+  generatedAt: string;
+  days: number;
+  /** Node facts' resolution (the range step), minutes */
+  stepMinutes: number;
+  sources: { config: NodeMaintSourceState; activityLog: NodeMaintSourceState; metrics: NodeMaintSourceState };
+  /** Some Activity Log chunk hit its page cap — older operations of that chunk may be missing */
+  activityLogPartial?: boolean;
+  config: {
+    upgradeChannel: string | null;
+    nodeOSUpgradeChannel: string | null;
+    pools: { name: string; mode: string | null; count: number | null; nodeImageVersion: string | null; maxSurge: string | null; maxUnavailable: string | null; drainTimeoutMinutes: number | null; undrainableNodeBehavior: string | null }[];
+    windows: NodeMaintWindow[];
+  } | null;
+  /** Newest first */
+  episodes: NodeMaintEpisode[];
+  /** Node NotReady spans outside every episode — not maintenance this page can name */
+  unplanned: { node: string; start: string; end: string | null }[];
 };

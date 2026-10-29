@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { aggregateStack, grafanaExploreUrl, rollup, stackQueries, type StackRaw } from "../src/services/observabilityStack.js";
+import { aggregateStack, gapReason, grafanaExploreUrl, isTransient, notReadySinceQuery, pyroscopeTarget, rollup, stackQueries, withFallback, type StackRaw } from "../src/services/observabilityStack.js";
+import type { ObservabilityStackResponse } from "@aud/types";
 import { pickScope, scopeMatchers } from "../src/services/promScope.js";
 import { parseConnections } from "../src/infra/connectionRegistry.js";
 import { loadEnv } from "../src/env.js";
@@ -70,11 +71,102 @@ test("states are facts: failed writes degrade, nothing written = down, stale KSM
   assert.equal(unhealthy.components[0]!.state, "degraded");
 });
 
-test("Pyroscope is seen only through what Alloy sends it; absent stack pieces are simply not listed", () => {
-  const s = aggregateStack(fixture({ profilesSent: [r({ pod: "alloy-traces-5f8d7c6b9-hjklm" }, 40000)] }), C);
-  const p = s.components.find((c) => c.kind === "pyroscope")!;
-  assert.deepEqual([p.state, p.pods.length, p.checks[0]!.id], ["ok", 0, "profilesSent"]);
-  assert.equal(aggregateStack(empty(), C).components.length, 0);
+// stg 2026-10-29: one query (remote-write highest timestamp) held 13–30 s then 504 — the whole tab failed
+test("a query that did not answer: only its values read 'query failed', never 0 / none; the rest stands", () => {
+  const raw = fixture({ rwLag: [], upDown: [] });
+  const s = aggregateStack(raw, C, { failed: new Set(["rwLag", "upDown"]) });
+  const alloy = s.components[0]!;
+  const lag = alloy.checks.find((c) => c.id === "remoteWriteLag")!;
+  assert.deepEqual([lag.value, lag.state, lag.queryFailed], [null, "unknown", true]);
+  assert.equal(alloy.checks.find((c) => c.id === "remoteWriteFailed")!.queryFailed, undefined, "other values stay read");
+  assert.equal(alloy.state, "ok", "an unread value does not hide the measured ones");
+  // No series from `count(up == 0)` = nothing down — but not when the query failed
+  assert.deepEqual(s.targets.find((t) => t.job === "prometheus.scrape.apps"), { job: "prometheus.scrape.apps", total: 52, down: null });
+  const ksm = s.components.find((c) => c.kind === "kubeStateMetrics")!;
+  assert.deepEqual(ksm.checks.map((c) => [c.id, c.state, c.queryFailed ?? false]), [["targetsDown", "unknown", true], ["ksmAge", "ok", false]]);
+  // A failed readiness query shows as unread, not as "no readiness known"
+  const nr = aggregateStack(fixture(), C, { failed: new Set(["podReady"]) });
+  assert.deepEqual(nr.components[0]!.checks.filter((c) => c.id === "podsReady").map((c) => c.queryFailed), [true]);
+  // A writer value missing because its query failed is listed (unread), not silently dropped
+  const ls = aggregateStack(fixture({ logsSent: [] }), C, { failed: new Set(["logsSent"]) });
+  assert.equal(ls.components[0]!.checks.find((c) => c.id === "logsSent")?.queryFailed, true);
+});
+
+test("query errors: timeouts / 504 / 429 / network retried once; 4xx and PromQL errors are not", () => {
+  const abort = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+  assert.equal(gapReason(abort), "timeout");
+  assert.equal(gapReason(new Error("Prometheus 504: error: Failed to fetch response in time")), "timeout");
+  assert.equal(gapReason(new Error("Prometheus 429: TooManyRequests: slow down")), "throttled");
+  assert.equal(gapReason(new Error("Prometheus 400: bad_data: parse error")), "failed");
+  assert.ok(isTransient(abort));
+  assert.ok(isTransient(new Error("Prometheus 504: error: x")));
+  assert.ok(isTransient(new Error("Prometheus 429: TooManyRequests: x")));
+  assert.ok(isTransient(new Error("Prometheus 502: error: bad gateway")));
+  assert.ok(isTransient(new TypeError("fetch failed")));
+  assert.ok(!isTransient(new Error("Prometheus 400: bad_data: parse error")));
+  assert.ok(!isTransient(new Error("Prometheus 403: Forbidden: no access")));
+  assert.ok(!isTransient(new Error("Prometheus query failed: bad_data")));
+});
+
+test("a refresh that fails as a whole shows the last complete answer, marked with when and why", () => {
+  const base = { clusterId: "c", windowMinutes: 10, cluster: "aks-a", components: [], targets: [], downTargets: [], grafana: null };
+  const good: ObservabilityStackResponse = { ...base, generatedAt: "2026-10-29T05:00:00Z", metricsState: "ok" };
+  const failed: ObservabilityStackResponse = { ...base, generatedAt: "2026-10-29T05:03:00Z", metricsState: "failed", message: "This operation was aborted" };
+  assert.deepEqual(withFallback(failed, good).stale, { failedAt: "2026-10-29T05:03:00Z", state: "failed", message: "This operation was aborted" });
+  assert.equal(withFallback(failed, good).generatedAt, "2026-10-29T05:00:00Z", "the values keep their own time");
+  assert.equal(withFallback(failed, undefined), failed, "nothing to fall back to = the failure");
+  const forbidden: ObservabilityStackResponse = { ...failed, metricsState: "forbidden" };
+  assert.equal(withFallback(forbidden, good), forbidden, "a permission answer is not hidden behind old values");
+});
+
+// stg 2026-10-28 21:38–01:14Z: pyroscope-0 not Ready while Alloy kept sending (0 dropped) — the page said "정상"
+const SENDING = {
+  profilesSent: [r({ pod: "alloy-traces-5f8d7c6b9-hjklm" }, 40000)],
+  profilesTarget: [r({ pod: "alloy-traces-5f8d7c6b9-hjklm", endpoint: "http://pyroscope.monitor.svc.cluster.local:4040" }, 1)],
+  profilesDropped: [r({ pod: "alloy-traces-5f8d7c6b9-hjklm" }, 0)],
+};
+const PYRO_OWNER = r({ namespace: "monitor", pod: "pyroscope-0", owner_kind: "StatefulSet", owner_name: "pyroscope" }, 1);
+
+test("Pyroscope: 'sent > 0' alone is never healthy — its pods' readiness decides", () => {
+  // Sent only (no target, no pods): not a verdict
+  const sentOnly = aggregateStack(fixture({ profilesSent: SENDING.profilesSent }), C).components.find((c) => c.kind === "pyroscope")!;
+  assert.equal(sentOnly.state, "unknown");
+  assert.equal(sentOnly.readiness, undefined);
+  // The incident: the Service's endpoint pod not Ready (Kubernetes API)
+  const ep = aggregateStack(fixture(SENDING), C, { endpointPods: { ready: [], notReady: ["pyroscope-0"] } }).components.find((c) => c.kind === "pyroscope")!;
+  assert.equal(ep.state, "degraded");
+  assert.deepEqual([ep.name, ep.namespace, ep.target], ["pyroscope", "monitor", "pyroscope.monitor:4040"]);
+  assert.deepEqual(ep.readiness, { basis: "endpoints", ready: 0, total: 1, notReady: [{ pod: "pyroscope-0", since: null }] });
+  assert.deepEqual(ep.checks.map((c) => [c.id, c.value, c.state]), [["podsReady", 1, "degraded"], ["profilesSent", 40000, "ok"], ["profilesDropped", 0, "ok"]]);
+  // A Service with no pods at all = down
+  assert.equal(aggregateStack(fixture(SENDING), C, { endpointPods: { ready: [], notReady: [] } }).components.find((c) => c.kind === "pyroscope")!.state, "down");
+  // No Kubernetes API: the workload named like the Service, from kube-state-metrics — basis stated
+  const ksm = fixture({ ...SENDING, podOwners: [...fixture().podOwners, PYRO_OWNER], podReady: [r({ namespace: "monitor", pod: "pyroscope-0" }, 0)] });
+  const byName = aggregateStack(ksm, C).components.find((c) => c.kind === "pyroscope")!;
+  assert.deepEqual([byName.state, byName.readiness?.basis, byName.readiness?.ready, byName.pods.map((p) => p.pod)], ["degraded", "sameName", 0, ["pyroscope-0"]]);
+  const healthy = aggregateStack({ ...ksm, podReady: [r({ namespace: "monitor", pod: "pyroscope-0" }, 1)] }, C).components.find((c) => c.kind === "pyroscope")!;
+  assert.equal(healthy.state, "ok");
+  // Drops are a fact even without pods
+  const drops = aggregateStack(fixture({ ...SENDING, profilesTarget: [], profilesDropped: [r({ pod: "alloy-traces-5f8d7c6b9-hjklm" }, 0.13)] }), C).components.find((c) => c.kind === "pyroscope")!;
+  assert.equal(drops.state, "degraded");
+  assert.equal(aggregateStack(empty(), C).components.length, 0, "absent stack pieces are simply not listed");
+});
+
+test("every component's own pods by Kubernetes readiness; the writer's target parsed from its endpoint label", () => {
+  const s = aggregateStack(fixture({ podReady: [r({ namespace: "monitor", pod: "loki-0" }, 0), r({ namespace: "monitor", pod: "alloy-7c4b9d6f8b-bcdfg" }, 1)] }), C);
+  const loki = s.components.find((c) => c.kind === "loki")!;
+  assert.equal(loki.state, "degraded", "loki receiving bytes but not Ready");
+  assert.deepEqual(loki.readiness, { basis: "self", ready: 0, total: 1, notReady: [{ pod: "loki-0", since: null }] });
+  const alloy = s.components.find((c) => c.name === "alloy")!;
+  assert.deepEqual([alloy.readiness?.ready, alloy.readiness?.total, alloy.state], [1, 1, "ok"]);
+  assert.equal(s.components.find((c) => c.kind === "tempo")!.readiness, undefined, "no series → no readiness, not 'Ready'");
+  const t = (endpoint: string) => pyroscopeTarget([r({ endpoint }, 1)]);
+  assert.deepEqual(t("http://pyroscope.monitor:4040"), { service: "pyroscope", namespace: "monitor", display: "pyroscope.monitor:4040" });
+  assert.equal(t("http://pyroscope.monitor.svc:4040")?.service, "pyroscope");
+  assert.equal(t("https://profiles.example.com"), null, "outside the cluster → no Service to look up");
+  assert.equal(t("http://pyroscope"), null, "no namespace → no guess");
+  const q = notReadySinceQuery(C, "monitor", 'p"0');
+  assert.ok(q.includes('pod="p\\"0"') && q.includes("[7d:1m]"), q);
 });
 
 test("rollup: worst state, unknown never hides a measured value", () => {

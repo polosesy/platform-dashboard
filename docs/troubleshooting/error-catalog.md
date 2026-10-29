@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-22
+last-verified: 2026-10-29
 covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts]
 ---
 # 에러 카탈로그
@@ -261,9 +261,13 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **원인**: ① VNet 흐름 로그가 없거나 Traffic Analytics가 꺼짐 ② NSG 흐름 로그만 있음(옛 테이블 `AzureNetworkAnalytics_CL`로 감 — 이 화면은 집계하지 않음) ③ TA 처리 간격(10/60분)만큼 아직 도착 전
 - **해결**: '수집 범위' 탭에서 VNet별 상태 확인 → VNet 흐름 로그 + TA(간격 10분) 켜기. NSG 흐름 로그는 2027-09-30 종료 — [vnet-flow-logs.md](../observability/vnet-flow-logs.md)
 
-### NET-003: 흐름 로그는 켜져 있는데 기록 없음 + 작업 영역 `≠`
-- **원인**: 흐름 로그가 보내는 작업 영역 ≠ `AZURE_LOG_ANALYTICS_WORKSPACE_ID`
-- **해결**: 같은 작업 영역으로 맞추거나 환경 변수를 그 작업 영역으로 변경(여러 작업 영역 동시 조회는 후속)
+### NET-003: '읽을 흐름 로그 작업 영역이 없습니다' (`state: disabled`) 또는 '읽지 않는 작업 영역' 경고
+- **원인**: 흐름 로그가 Traffic Analytics를 보내는 작업 영역을 이 구독의 연결이 읽지 않음 — 연결 파일 `logAnalyticsWorkspaces`에 없음(흐름 로그 설정이 안 보이는 연결은 이 목록만 봄). 예전에는 `AZURE_LOG_ANALYTICS_WORKSPACE_ID` 하나만 읽어 연결 파일의 작업 영역을 무시했음
+- **해결**: 그 작업 영역의 ID(GUID)를 연결 파일 `logAnalyticsWorkspaces`에 넣고 연결 신원에 Log Analytics Reader. 여러 작업 영역이면 모두 — 한 번의 교차 작업 영역 조회로 함께 읽음
+
+### NET-004: 수집 범위가 '설정 못 읽음' (흐름 로그가 있는데 '없음'으로 보였던 문제)
+- **원인**: 흐름 로그 리소스는 `NetworkWatcherRG`에 있음 → 리소스 그룹 몇 개만 Reader인 연결에는 Resource Graph가 빈 결과(오류 아님). 예전 화면은 이것을 '없음'(0/n VNet)으로 보였음
+- **해결**: 화면은 이제 '설정 못 읽음' + 작업 영역 기록으로 켜짐을 판정. 처리 간격·보존 기간까지 보려면 `NetworkWatcherRG`에 Reader(또는 `Microsoft.Network/networkWatchers/flowLogs/read`)
 
 ---
 

@@ -834,3 +834,22 @@
 .glanceBar > span { background: var(--status); }
 .glanceBar > span + span { box-shadow: inset 1px 0 0 var(--panel); }
 @media (max-width: 720px) { .glanceTile[data-span="2"] { grid-column: auto; } }
+
+/* ── Node maintenance (노드 탭) ── */
+.nm { display: grid; gap: 10px; min-width: 0; }
+.nmSources { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nmConfig { display: grid; gap: 4px; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
+.nmPlain { margin: 0; padding-left: 16px; display: grid; gap: 2px; font-size: 13px; }
+.nmPlain li { overflow-wrap: anywhere; }
+.nmList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.nmEpisode { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: var(--radius-md); background: var(--panel-solid); min-width: 0; }
+.nmEpisode[data-status="failed"] { border-left-color: var(--danger); }
+.nmEpisode[data-status="inProgress"] { border-left-color: var(--accent); }
+.nmHead { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nmWhen { font-size: 13px; font-variant-numeric: tabular-nums; }
+.nmFacts { font-size: 12.5px; overflow-wrap: anywhere; }
+.nmDetails summary { cursor: pointer; font-size: 12.5px; color: var(--accent); }
+.nmDetails table { margin-top: 6px; }
+.mono { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.stackReady { font-size: 12px; overflow-wrap: anywhere; }
+.nmDetails th, .nmDetails td { text-align: left !important; vertical-align: top; }

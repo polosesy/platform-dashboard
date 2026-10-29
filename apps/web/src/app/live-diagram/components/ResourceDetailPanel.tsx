@@ -43,6 +43,7 @@ import { Spark } from "./Spark";
 import { CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
 import { gatewayFrontends, isOutboundOnlyLb, unresolvedBackends } from "@/lib/liveBackends";
 import { AgcFacts, AksCluster, AksNodePool, BackendPools, FrontDoorFacts, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
+import { AksMaintenanceSection, REAL_ARM } from "./detail/AksMaintenance";
 import styles from "../styles.module.css";
 
 type ConnectedEdge = {
@@ -478,6 +479,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         {kind === "frontDoor" ? <FrontDoorFacts node={node} metrics={liveNode?.metrics} /> : null}
         {kind === "frontDoor" || kind === "appGateway" ? <WafSummarySection node={node} onWafSelect={onWafSelect} /> : null}
         {kind === "aks" ? <AksCluster detail={aks.detail} loading={aks.loading} failed={aks.failed} /> : null}
+        {kind === "aks" && armId && REAL_ARM.test(armId) ? <AksMaintenanceSection clusterId={armId} /> : null}
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}
         {kind === "privateEndpoint" && peTarget ? (
           <Section id="pe" title={t("ld.panel.peTarget")}>

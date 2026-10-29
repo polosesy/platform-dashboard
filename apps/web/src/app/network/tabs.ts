@@ -3,7 +3,8 @@
 import type { NetTalkerRow } from "@aud/types";
 import { RISK_PORTS } from "../../lib/riskPorts";
 
-export const NET_TABS = ["overview", "talkers", "blocked", "internet", "coverage"] as const;
+// The map first, like the Pod traffic service map — the tables below drill into the same rows
+export const NET_TABS = ["map", "overview", "talkers", "blocked", "internet", "coverage"] as const;
 export type NetTab = (typeof NET_TABS)[number];
 
 export const TALKER_DIMS = ["subnet", "vm", "ip", "port"] as const;

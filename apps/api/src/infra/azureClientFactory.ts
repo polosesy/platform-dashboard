@@ -49,7 +49,11 @@ export type ArmFetcher = {
 };
 
 export type LogAnalyticsFetcher = {
-  query: (workspaceId: string, kql: string) => Promise<unknown>;
+  /**
+   * `workspaces` = more workspaces the same query reads (cross-workspace: tables are unioned). Read with the token of
+   * `workspaceId`'s connection — callers pass only workspaces that connection reads.
+   */
+  query: (workspaceId: string, kql: string, opts?: { workspaces?: string[] }) => Promise<unknown>;
   /**
    * Resource-centric query: the logs one Azure resource sent to any workspace (or a workspace by its ARM id).
    * A resource with no diagnostic setting answers with 0 rows, not an error.
@@ -58,7 +62,8 @@ export type LogAnalyticsFetcher = {
 };
 
 export type PrometheusFetcher = {
-  query: (endpoint: string, promql: string, time?: string) => Promise<unknown>;
+  /** `timeoutMs` — a caller with its own time budget (default: the shared 30 s request timeout) */
+  query: (endpoint: string, promql: string, time?: string, opts?: { timeoutMs?: number }) => Promise<unknown>;
   queryRange: (endpoint: string, promql: string, start: string, end: string, step: string) => Promise<unknown>;
 };
 
@@ -335,10 +340,10 @@ function buildArmFetcher(token: () => Promise<string>): ArmFetcher {
 
 function buildPrometheusFetcher(token: () => Promise<string>): PrometheusFetcher {
   return {
-    async query(endpoint: string, promql: string, time?: string): Promise<unknown> {
+    async query(endpoint: string, promql: string, time?: string, opts?: { timeoutMs?: number }): Promise<unknown> {
       const params = new URLSearchParams({ query: promql });
       if (time) params.set("time", time);
-      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers: { Authorization: `Bearer ${await token()}` } });
+      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers: { Authorization: `Bearer ${await token()}` } }, opts?.timeoutMs);
     },
     async queryRange(endpoint: string, promql: string, start: string, end: string, step: string): Promise<unknown> {
       const params = new URLSearchParams({ query: promql, start, end, step });
@@ -352,11 +357,12 @@ function buildLogFetcher(
   resourceToken: (armId: string) => Promise<string>,
 ): LogAnalyticsFetcher {
   return {
-    async query(workspaceId: string, kql: string): Promise<unknown> {
+    async query(workspaceId: string, kql: string, opts?: { workspaces?: string[] }): Promise<unknown> {
+      const more = (opts?.workspaces ?? []).filter((w) => w.toLowerCase() !== workspaceId.toLowerCase());
       return fetchJsonWithTimeout("LogAnalytics", `https://api.loganalytics.io/v1/workspaces/${encodeURIComponent(workspaceId)}/query`, {
         method: "POST",
         headers: jsonHeaders(await workspaceToken(workspaceId)),
-        body: JSON.stringify({ query: kql }),
+        body: JSON.stringify(more.length ? { query: kql, workspaces: more } : { query: kql }),
       });
     },
     async queryResource(armId: string, kql: string, timespan: string): Promise<unknown> {

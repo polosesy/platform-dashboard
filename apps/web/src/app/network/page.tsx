@@ -17,12 +17,14 @@ import { OverviewSection } from "./components/OverviewSection";
 import { TalkersSection } from "./components/TalkersSection";
 import { BlockedSection } from "./components/BlockedSection";
 import { InternetSection } from "./components/InternetSection";
+import { TrafficMapSection } from "./components/TrafficMapSection";
 import styles from "./styles.module.css";
 
 /**
- * VNet traffic — a time-ranged audit of VNet flow logs (Traffic Analytics): what moved, what was blocked, what came
- * from or went to the Internet, and whether the logs are even collected. No topology (the live diagram and the
- * infrastructure diagram own that). Signed-in users never see sample numbers: no data reads as a state.
+ * VNet traffic — a time-ranged audit of VNet flow logs (Traffic Analytics), in the Pod traffic page's order: a traffic
+ * map first (subnets and the address classes they talk to — the service map's grammar), then what moved, what was
+ * blocked, what came from or went to the Internet, and whether the logs are even collected. The map is observed
+ * traffic, not configuration (the infrastructure diagram owns that). Signed-in users never see sample numbers.
  */
 export default function NetworkPage() {
   return (
@@ -34,7 +36,7 @@ export default function NetworkPage() {
 
 function NetworkInner() {
   const { t } = useI18n();
-  const [tab, setTab] = useQueryParam<NetTab>("tab", NET_TABS, "overview");
+  const [tab, setTab] = useQueryParam<NetTab>("tab", NET_TABS, "map");
   const { subscriptions, subscriptionId, setSubscriptionId, loaded } = useSubscriptions();
   const [vnet, setVnet] = useState("");
   const [range, setRange] = useState(1440);
@@ -71,7 +73,7 @@ function NetworkInner() {
             {subscriptions.length ? <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={(v) => { setSubscriptionId(v); setVnet(""); }} /> : null}
             <Select label={t("net.vnet")} value={vnet} onChange={setVnet} options={vnetOptions} />
             <Select label={t("net.range")} value={String(range)} onChange={(v) => setRange(Number(v))} options={RANGES.map((r) => ({ value: String(r.min), label: r.label }))} />
-            {section && section !== "overview" ? (
+            {section && section !== "overview" && section !== "map" ? (
               <Select label={t("net.top")} value={String(top)} onChange={(v) => setTop(Number(v))} options={TOPS.map((n) => ({ value: String(n), label: String(n) }))} />
             ) : null}
           </>
@@ -100,6 +102,7 @@ function NetworkInner() {
             flows.loading ? <LoadingState /> : null
           ) : (
             <SectionState flows={data} interval={interval} onCoverage={() => setTab("coverage")}>
+              {data.map ? <TrafficMapSection map={data.map} rangeKey={`${subscriptionId}:${vnet}:${range}`} onTalkers={() => { setDim("ip"); setTab("talkers"); }} /> : null}
               {data.overview ? <OverviewSection overview={data.overview} binMinutes={data.binMinutes ?? 60} lastRow={cov?.workspace.lastRow ?? null} /> : null}
               {data.talkers ? <TalkersSection talkers={data.talkers} dim={dim} onDim={setDim} /> : null}
               {data.blocked ? <BlockedSection rows={data.blocked} /> : null}

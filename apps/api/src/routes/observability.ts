@@ -8,6 +8,7 @@ import {
 } from "../services/observabilityAggregator.js";
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
 import { getObservabilityStack } from "../services/observabilityStack.js";
+import { NODE_MAINT_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
@@ -113,6 +114,18 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getObservabilitySources(env, req.auth?.bearerToken, clusterId));
     } catch (e: unknown) {
       sendError(res, e, "observability_sources_failed", "observability");
+    }
+  });
+
+  // Node maintenance: Azure operations (Activity Log) + planned windows (ARM) + node facts (kube-state-metrics)
+  router.get("/api/observability/node-maintenance", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const d = queryInt(req, "days", 14, 1, 30);
+      const days = (NODE_MAINT_DAYS as readonly number[]).includes(d) ? d : 14;
+      res.json(await getNodeMaintenance(env, req.auth?.bearerToken, clusterId, days));
+    } catch (e: unknown) {
+      sendError(res, e, "node_maintenance_failed", "observability");
     }
   });
 

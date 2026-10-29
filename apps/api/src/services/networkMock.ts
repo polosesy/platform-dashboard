@@ -1,6 +1,6 @@
 // Sample data for the VNet traffic page — anonymous callers only (signed-in users get live data or a state).
 // Public addresses are from the documentation ranges (RFC 5737); labels are invented.
-import type { NetCoverageResponse, NetDir, NetFlowsResponse, NetSection, NetTalkerDim } from "@aud/types";
+import type { NetCoverageResponse, NetDir, NetFlowsResponse, NetMapEdge, NetSection, NetTalkerDim } from "@aud/types";
 import { binMinutes, snapRange } from "./networkQueries.js";
 
 export function mockNetFlows(section: NetSection, dim: NetTalkerDim, dir: NetDir, rangeMin: number): NetFlowsResponse {
@@ -9,6 +9,29 @@ export function mockNetFlows(section: NetSection, dim: NetTalkerDim, dir: NetDir
   const base: NetFlowsResponse = {
     generatedAt: new Date().toISOString(), source: "mock", section, state: "ok", lookbackMinutes: range, binMinutes: bin, gaps: [],
   };
+  if (section === "map") {
+    const last = new Date(Date.now() - 20 * 60_000).toISOString();
+    const e = (src: string, dst: string, bytes: number, port: number, denied = 0, malicious = 0): NetMapEdge => ({
+      src, dst, bytes, allowedFlows: Math.round(bytes / 150_000), deniedFlows: denied, records: Math.max(1, Math.round(bytes / 2_000_000)) + denied, maliciousRecords: malicious, last,
+      ports: [{ port, proto: "TCP", bytes, allowedFlows: Math.round(bytes / 150_000), deniedFlows: denied }], deniedPorts: denied ? [port] : [],
+    });
+    return {
+      ...base,
+      map: {
+        edges: [
+          e("@internet", "rg-app/vnet-hub/snet-web", 1_900_000_000, 443, 312, 2),
+          e("rg-app/vnet-hub/snet-web", "rg-app/vnet-hub/snet-app", 1_350_000_000, 8080),
+          e("rg-app/vnet-hub/snet-app", "rg-app/vnet-hub/snet-data", 2_100_000_000, 5432),
+          e("rg-app/vnet-hub/snet-app", "rg-shared/vnet-shared/snet-dns", 92_000_000, 53),
+          e("rg-app/vnet-hub/snet-app", "@azure", 640_000_000, 443),
+          e("rg-app/vnet-hub/snet-app", "@internet", 120_000_000, 443),
+          e("@onprem", "rg-app/vnet-hub/snet-app", 48_000_000, 8443),
+          e("@internet", "rg-app/vnet-hub/snet-app", 0, 22, 280),
+        ],
+        omitted: 0, unplaced: { bytes: 310_000_000, records: 820 },
+      },
+    };
+  }
   if (section === "overview") {
     const points = Math.min(24, Math.floor(range / bin));
     const now = Date.now();
@@ -87,12 +110,12 @@ export function mockNetCoverage(): NetCoverageResponse {
     generatedAt: new Date().toISOString(),
     source: "mock",
     vnets: [
-      { key: "rg-legacy/vnet-legacy", name: "vnet-legacy", region: "koreacentral", kind: "nsgOnly", trafficAnalytics: false, intervalMin: null, workspaceMatches: null, retentionDays: null, nsgLegacy: 2, disabledLogs: 0 },
-      { key: "rg-app/vnet-spoke", name: "vnet-spoke", region: "koreacentral", kind: "partial", trafficAnalytics: true, intervalMin: 60, workspace: "law-network", workspaceMatches: true, retentionDays: 30, nsgLegacy: 0, disabledLogs: 1 },
-      { key: "rg-app/vnet-hub", name: "vnet-hub", region: "koreacentral", kind: "vnet", trafficAnalytics: true, intervalMin: 10, workspace: "law-network", workspaceMatches: true, retentionDays: 30, nsgLegacy: 1, disabledLogs: 0 },
+      { key: "rg-legacy/vnet-legacy", name: "vnet-legacy", region: "koreacentral", kind: "nsgOnly", config: "read", trafficAnalytics: false, intervalMin: null, workspaceMatches: null, retentionDays: null, nsgLegacy: 2, disabledLogs: 0, observed: { rows7d: 0, lastRow: null } },
+      { key: "rg-app/vnet-spoke", name: "vnet-spoke", region: "koreacentral", kind: "partial", config: "read", trafficAnalytics: true, intervalMin: 60, workspace: "law-network", workspaceMatches: true, retentionDays: 30, nsgLegacy: 0, disabledLogs: 1, observed: { rows7d: 96_000, lastRow: new Date(Date.now() - 52 * 60_000).toISOString() } },
+      { key: "rg-app/vnet-hub", name: "vnet-hub", region: "koreacentral", kind: "vnet", config: "read", trafficAnalytics: true, intervalMin: 10, workspace: "law-network", workspaceMatches: true, retentionDays: 30, nsgLegacy: 1, disabledLogs: 0, observed: { rows7d: 316_000, lastRow: new Date(Date.now() - 14 * 60_000).toISOString() } },
     ],
     unmappedFlowLogs: 0,
-    workspace: { state: "ok", lastRow: new Date(Date.now() - 14 * 60_000).toISOString(), rows7d: 412_000, legacyFlowRows7d: 0 },
+    workspace: { state: "ok", lastRow: new Date(Date.now() - 14 * 60_000).toISOString(), rows7d: 412_000, legacyFlowRows7d: 0, read: [{ name: "law-network", via: "connection", rows7d: 412_000 }], unlisted: [] },
     gaps: [],
   };
 }
