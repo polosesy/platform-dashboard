@@ -20,3 +20,4 @@ export * from "./advisories.js";
 export * from "./featureCatalog.js";
 export * from "./cloud.js";
 export * from "./issues.js";
+export * from "./netpol.js";

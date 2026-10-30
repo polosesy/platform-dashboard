@@ -33,7 +33,7 @@ last-verified: 2026-10-30
 
 ## 보안 — `security/`
 
-- [security-operations-guide.md](security/security-operations-guide.md) — 보안 기능 운영: 이슈 목록(상태·예외·팀) · 위험 조합 읽는 법(4칸·근거 등급·고칠 곳) · 이미지 취약성 · 워크로드 ID WI-17/18 · 배포 출처 · 그래프 탐색 · '확인 불가' 이유표
+- [security-operations-guide.md](security/security-operations-guide.md) — 보안 기능 운영: 이슈 목록(상태·예외·팀) · 위험 조합 읽는 법(4칸·근거 등급·고칠 곳) · 이미지 취약성 · 워크로드 ID WI-17/18 · 배포 출처 · 그래프 탐색 · 네트워크 정책 시뮬레이션 · '확인 불가' 이유표
 
 ## 관측 — `observability/`
 

@@ -342,3 +342,43 @@
   overflow-x: auto;
   white-space: pre;
 }
+
+/* ── 정책 시뮬레이션 (NetpolSimPanel) ── */
+.linkBtn { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+.linkBtn:hover { text-decoration: underline; }
+.npStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); grid-auto-rows: 1fr; gap: 10px; padding: 12px 14px; }
+.npGrid { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.npMain { display: grid; gap: 14px; min-width: 0; }
+.npSide { display: grid; gap: 12px; padding: 12px 14px; min-width: 0; }
+.npActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.npHint { font-size: 12px; padding: 8px 10px; border-radius: var(--radius-sm, 8px); background: rgba(var(--warning-rgb), 0.12); border: 1px solid rgba(var(--warning-rgb), 0.35); }
+.npChip { font: inherit; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(var(--accent-rgb), 0.4); background: rgba(var(--accent-rgb), 0.08); color: inherit; cursor: pointer; }
+.npSubH { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+.npPolicies { display: grid; gap: 6px; max-height: 420px; overflow: auto; }
+.npPolicy { display: grid; gap: 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.npPolicy[data-off] { opacity: 0.55; border-style: dashed; }
+.npPolicyName { display: flex; gap: 6px; align-items: center; min-width: 0; font-size: 12.5px; }
+.npPolicyName span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npLegend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--muted); align-items: center; }
+.npLegend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -2px; }
+.npMatrixWrap { overflow: auto; max-height: 560px; padding: 8px 12px 12px; }
+.npMatrix { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+.npMatrix thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; font-weight: 600; color: var(--muted); max-width: 96px; padding: 4px 2px; vertical-align: bottom; }
+.npMatrix thead th span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 96px; }
+.npMatrix tbody th { text-align: right; font-weight: 600; padding-right: 8px; white-space: nowrap; position: sticky; left: 0; background: var(--surface); }
+.npCorner { left: 0; z-index: 2 !important; text-align: right; }
+.npMatrix td { padding: 0; }
+.npCell { width: 72px; min-height: 34px; font: inherit; font-size: 12px; font-weight: 650; border-radius: 6px; border: 1px solid transparent; cursor: pointer; display: inline-flex; gap: 3px; align-items: center; justify-content: center; color: inherit; }
+.npCell[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.npAllow { background: rgba(var(--success-rgb), 0.16); border-color: rgba(var(--success-rgb), 0.35) !important; }
+.npDeny { background: rgba(var(--danger-rgb), 0.16); border-color: rgba(var(--danger-rgb), 0.4) !important; }
+.npPartial { background: rgba(var(--warning-rgb), 0.18); border-color: rgba(var(--warning-rgb), 0.45) !important; }
+.npUnknown { background: rgba(var(--ink-rgb), 0.05); border: 1px dashed rgba(var(--ink-rgb), 0.3) !important; }
+.npBroken { color: var(--danger); font-size: 11px; }
+.npOpened { color: var(--warning-strong, var(--warning)); font-size: 11px; }
+.npOpenedIso { color: var(--success); }
+.npMismatch { color: var(--warning-strong, var(--warning)); font-size: 12px; }
+.npMismatchText { color: var(--warning-strong, var(--warning)); font-size: 11.5px; margin-top: 2px; }
+.npPill { display: inline-block; font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid transparent; }
+.npWhy { font-size: 12px; min-width: 260px; }
+@media (max-width: 960px) { .npGrid { grid-template-columns: minmax(0, 1fr); } }

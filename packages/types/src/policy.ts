@@ -1,3 +1,4 @@
+import type { NetpolModel } from "./netpol.js";
 // ──────────────────────────────────────────────────────────────
 // Kubernetes cluster policy posture
 // (Pod Security Admission, NetworkPolicy, RBAC, autoscaling / resource governance)
@@ -78,6 +79,8 @@ export type NetworkPolicyInfo = {
   /** Selects every pod in the namespace with no allow rules for that direction. */
   defaultDenyIngress: boolean;
   defaultDenyEgress: boolean;
+  /** Cilium: rules for these directions but `enableDefaultDeny: false` — adds allows, isolates (blocks) nothing */
+  nonEnforcing?: Array<"Ingress" | "Egress">;
 };
 
 export type RbacSubject = { kind: string; name: string; namespace?: string };
@@ -185,4 +188,6 @@ export type KubernetesPolicyResponse = {
   autoscaling: { vpas: VpaInfo[]; hpas: HpaInfo[]; pdbs: PdbInfo[] };
   workloads: WorkloadPolicyCoverage[];
   findings: PolicyFinding[];
+  /** Every network policy as one rule model + workload / namespace labels — the web replays observed flows against it */
+  netpol?: NetpolModel;
 };

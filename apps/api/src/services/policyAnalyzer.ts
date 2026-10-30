@@ -20,6 +20,7 @@ import type {
 } from "@aud/types";
 import { L } from "../infra/lang.js";
 import type { InvGitopsApp } from "./gitopsSource.js";
+import { buildNetpolModel, cnpIsolates } from "./netpolModel.js";
 
 // ──────────────────────────────────────────────────────────────
 // Cluster policy analyzer (pure — no I/O)
@@ -116,6 +117,8 @@ export type InvCiliumSpec = {
   ingressDeny?: unknown[];
   egress?: unknown[];
   egressDeny?: unknown[];
+  /** Cilium: false for a direction = its rules add allows but don't put the selected endpoints in default-deny */
+  enableDefaultDeny?: { ingress?: boolean; egress?: boolean };
 };
 
 export type PolicyInventory = {
@@ -436,8 +439,13 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
   for (const cp of inv.ciliumPolicies) {
     for (const [i, spec] of cp.specs.entries()) {
       if (!spec.endpointSelector) continue; // host (nodeSelector) policies don't select pods
-      const isolatesIngress = spec.ingress !== undefined || spec.ingressDeny !== undefined;
-      const isolatesEgress = spec.egress !== undefined || spec.egressDeny !== undefined;
+      // enableDefaultDeny: false = audit / observe-only — rules present, nothing isolated (blocked)
+      const isolatesIngress = cnpIsolates(spec, "ingress");
+      const isolatesEgress = cnpIsolates(spec, "egress");
+      const nonEnforcing = [
+        ...(spec.ingress !== undefined && !isolatesIngress ? ["Ingress" as const] : []),
+        ...(spec.egress !== undefined && !isolatesEgress ? ["Egress" as const] : []),
+      ];
       const selected = eligiblePods.filter(
         (p) => (cp.namespace === undefined || p.namespace === cp.namespace) && selectorMatches(spec.endpointSelector, p.labels, p.namespace),
       );
@@ -465,6 +473,7 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
         allowsAllEgress: allowsAll(spec.egress, "toEntities"),
         defaultDenyIngress: isolatesIngress && selectorIsEmpty(spec.endpointSelector) && (spec.ingress?.length ?? 0) === 0,
         defaultDenyEgress: isolatesEgress && selectorIsEmpty(spec.endpointSelector) && (spec.egress?.length ?? 0) === 0,
+        ...(nonEnforcing.length ? { nonEnforcing } : {}),
       });
     }
   }
@@ -1016,5 +1025,6 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     autoscaling: { vpas, hpas, pdbs },
     workloads,
     findings: findings.items,
+    netpol: buildNetpolModel(inv, (ns) => isSystemNamespace(ns)),
   };
 }

@@ -141,6 +141,7 @@ export function NetworkPolicyPanel({
                         {p.allowsAllIngress && <Badge tone="medium">{t("polc.net.allowsAllIn")}</Badge>}
                         {p.allowsAllEgress && <Badge tone="low">{t("polc.net.allowsAllOut")}</Badge>}
                         {p.selectedPods === 0 && <Badge tone="info">{t("polc.net.noPods")}</Badge>}
+                        {p.nonEnforcing?.length ? <Badge tone="medium" title={t("polc.net.nonEnforcingHint")}>{t("polc.net.nonEnforcing", { dir: p.nonEnforcing.join(", ") })}</Badge> : null}
                       </div>
                     </td>
                   </tr>

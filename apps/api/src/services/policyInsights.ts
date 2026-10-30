@@ -37,6 +37,7 @@ import { vulnWeight } from "./imageVulns.js";
 import { fixAtText, sourceOf } from "./gitopsSource.js";
 import { selectorMatches, type InvRbacRule, type InvWorkload, type PolicyInventory } from "./policyAnalyzer.js";
 import { isPrivateV4, lookupServiceTag, type ServiceTagIndex } from "./azureServiceTags.js";
+import { cnpIsolates } from "./netpolModel.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights (pure)
@@ -202,8 +203,9 @@ function policySelection(inv: PolicyInventory, w: InvWorkload): { ingress: strin
     if (cp.namespace !== undefined && cp.namespace !== w.namespace) continue;
     for (const s of cp.specs) {
       if (!s.endpointSelector || !selectorMatches(s.endpointSelector, w.podLabels, w.namespace)) continue;
-      if (s.ingress || s.ingressDeny) ingress.push(cp.name);
-      if (s.egress || s.egressDeny) egress.push(cp.name);
+      // An audit policy (enableDefaultDeny: false) limits nothing — "no egress limit" stays true
+      if (cnpIsolates(s, "ingress")) ingress.push(cp.name);
+      if (cnpIsolates(s, "egress")) egress.push(cp.name);
     }
   }
   return { ingress: [...new Set(ingress)], egress: [...new Set(egress)] };

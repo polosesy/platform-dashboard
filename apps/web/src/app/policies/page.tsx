@@ -12,6 +12,7 @@ import { SeverityBadge, categoryLabel, scoreClass } from "./components/shared";
 import { FindingsPanel } from "./components/FindingsPanel";
 import { NamespaceMatrix } from "./components/NamespaceMatrix";
 import { NetworkPolicyPanel } from "./components/NetworkPolicyPanel";
+import { NetpolSimPanel } from "./components/NetpolSimPanel";
 import { RbacPanel } from "./components/RbacPanel";
 import { PsaPanel } from "./components/PsaPanel";
 import { AutoscalingPanel } from "./components/AutoscalingPanel";
@@ -30,7 +31,7 @@ import { useQueryParam } from "@/lib/useQueryParam";
 import { PANELS, POLICY_GROUPS, groupOfPanel, type Panel } from "./tabs";
 
 /** Panels that render policy insights (risk combinations, network, permissions, KBOM). */
-const INSIGHT_TABS = new Set<Panel>(["overview", "network", "permissions", "kbom"]);
+const INSIGHT_TABS = new Set<Panel>(["overview", "network", "netpolSim", "permissions", "kbom"]);
 
 const SEVERITIES: PolicySeverity[] = ["high", "medium", "low"];
 
@@ -251,6 +252,11 @@ function Policies() {
           )}
           {tab === "findings" && <FindingsPanel findings={findings} category={category} onCategoryChange={setCategory} />}
           {tab === "namespaces" && <NamespaceMatrix namespaces={namespaces} />}
+          {tab === "netpolSim" && insights && (
+            data.netpol
+              ? <NetpolSimPanel model={data.netpol} network={insights.network} includeSystem={showSystem} />
+              : <div className={styles.notice}>{t("nps.noModel")}</div>
+          )}
           {tab === "networkPolicy" && (
             <NetworkPolicyPanel
               policies={data.networkPolicies.filter((p) => showSystem || p.source === "cilium-clusterwide" || namespaces.some((n) => n.name === p.namespace))}

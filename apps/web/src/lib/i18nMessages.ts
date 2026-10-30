@@ -1138,6 +1138,7 @@ const CORE: Translations = {
   "pol.panel.explore": { ko: "그래프 탐색", en: "Graph explorer" },
   "pol.panel.network": { ko: "워크로드 네트워크 맵", en: "Workload network map" },
   "pol.panel.networkPolicy": { ko: "네트워크 정책", en: "Network policies" },
+  "pol.panel.netpolSim": { ko: "정책 시뮬레이션", en: "Policy simulation" },
   "pol.panel.permissions": { ko: "권한 탐색", en: "Permission explorer" },
   "pol.panel.rbac": { ko: "RBAC", en: "RBAC" },
   "pol.panel.workloadIdentity": { ko: "워크로드 ID", en: "Workload identity" },

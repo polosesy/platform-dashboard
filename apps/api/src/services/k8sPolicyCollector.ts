@@ -156,6 +156,7 @@ function ciliumSpecs(obj: Record<string, unknown>): InvCiliumSpec[] {
     ingressDeny: Array.isArray(s.ingressDeny) ? s.ingressDeny : undefined,
     egress: Array.isArray(s.egress) ? s.egress : undefined,
     egressDeny: Array.isArray(s.egressDeny) ? s.egressDeny : undefined,
+    ...(s.enableDefaultDeny && typeof s.enableDefaultDeny === "object" ? { enableDefaultDeny: s.enableDefaultDeny as { ingress?: boolean; egress?: boolean } } : {}),
   }));
 }
 

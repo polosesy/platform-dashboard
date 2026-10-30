@@ -2,7 +2,7 @@
 status: current
 owner: platform-security
 last-verified: 2026-10-30
-covers: [apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
+covers: [apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 보안 기능 운영 가이드 — 이슈 목록 · 위험 조합 · 워크로드 ID
 
@@ -169,7 +169,34 @@ covers: [apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQue
 
 AKS가 관리하는 워크로드(kube-system·추가 기능)는 기본으로 빠집니다 — 'AKS 관리 포함'을 켜면 같이 봅니다.
 
-## 8. '확인 불가'·비어 보일 때
+## 8. 네트워크 정책 시뮬레이션 (AKS 보안 점검 › 네트워크 노출 › 정책 시뮬레이션)
+
+> **5살 비유**: 놀이터 문 지키기 연습이에요. 어제 친구들이 실제로 드나든 길(Hubble이 본 연결)을 그대로 두고, "이 문을 잠그면?" "이 표지판을 떼면?" 하고 바꿔 보면 **누가 못 들어오게 되는지(새로 막힘)**, **누가 새로 들어올 수 있는지(새로 열림)** 바로 보여 줘요. 진짜 문은 건드리지 않아요.
+
+1. **위 숫자**: 관측 연결 수 · 지금 정책으로 허용·차단·판단 불가 · 바꾼 뒤 **새로 막힘**(지금 통과하는 연결 — 장애 위험) · **새로 열림** · **판정 ≠ 관측**(지금 정책 판정과 Hubble의 통과·드롭이 다름 — 정책이 바뀌었거나 모델이 모르는 규칙)
+2. **연결 지도**(행 = 출발 네임스페이스, 열 = 도착 네임스페이스·API 서버·Azure 리소스·Azure 서비스·사설망·인터넷·노드): 칸 색 = 허용(초록)·일부 차단(주황)·차단(빨강)·판단 불가(회색 점선), ▼n = 새로 막힘, ▲n = 새로 열림, ! = 판정 ≠ 관측. 칸을 누르면 아래 표가 그 연결만 — 포트마다 판정(지금 → 바꾼 뒤), **이유**(송신: '허용 규칙 정책명' / '격리됨(정책) · 맞는 허용 규칙 없음' / '격리 안 됨 — 모두 통과' / 'deny 규칙' / 판단 불가 이유), Hubble이 본 것(통과 n건·드롭 n건)
+3. **바꿔 보기**(왼쪽): 네임스페이스를 고르고
+   - 정책 체크 끄기 = 그 정책을 지우면?
+   - 관찰용 정책의 **'강제로 바꾸면?'** — `enableDefaultDeny: false`(허용만 더하고 아무것도 막지 않음)를 강제로 바꿀 때 끊기는 연결. 위 안내의 **'모두 강제로 바꾸면?'**은 관찰용 전부
+   - **+ 기본 거부(수신/송신)** — 그 네임스페이스 모든 파드에 default-deny
+   - **+ DNS 허용** — kube-system의 kube-dns UDP/TCP 53
+   - **+ 관측된 수신/송신만 허용** — 지금 실제로 통과한 연결만 허용하는 초안(파드 = 라벨 + 네임스페이스, 외부 = 본 IP /32, 노드·API 서버 = 엔터티). 기본 거부 + 이것 = '새로 막힘 0'이면 그 초안으로 강제 전환을 시작할 수 있다는 뜻
+4. **격리된 워크로드 표**: 네임스페이스마다 수신·송신 격리 워크로드 수, 지금 → 바꾼 뒤(초록 = 늘어남, 빨강 = 줄어듦 — 뚫림)
+
+| 판정 규칙(Cilium — Kubernetes NetworkPolicy와 CiliumNetworkPolicy를 함께) | |
+|---|---|
+| 격리 | 그 방향을 기본 거부로 두는 정책이 하나라도 파드를 고르면 격리. **`enableDefaultDeny: false`는 격리가 아님**(허용만 더함) |
+| 통과 | 격리 안 됨 = 모두 통과. 격리됨 = 고르는 정책의 허용 규칙 하나라도 상대·포트가 맞으면 통과 |
+| deny | `ingressDeny`/`egressDeny`가 맞으면 다른 허용보다 먼저 차단 |
+| 노드 | 노드(kubelet 프로브)에서 파드로 오는 연결은 항상 허용 |
+| 연결 | 보내는 쪽 송신 + 받는 쪽 수신이 모두 통과해야 통과 |
+| 판단 불가 | 관측 IP가 없는 CIDR 규칙 · 본 DNS 이름과 안 맞는 FQDN · 이름 붙은 포트 · 라벨을 모르는 파드 · 모델 밖 필드(toServices·toGroups·fromRequires·icmps) — '허용'도 '차단'도 아님 |
+
+주의: 관측은 Hubble 버퍼 구간(바쁜 노드는 몇 분)뿐입니다. '새로 막힘 0'은 **본 연결**에 대한 말이고, 밤에만 도는 배치 같은 다른 시간대의 연결까지 안전하다는 뜻은 아닙니다. Cilium `policy-audit-mode`라면 deny 판정이어도 실제로는 드롭되지 않아 '판정 ≠ 관측'으로 보입니다.
+
+**네트워크 정책 탭의 격리 수**도 같은 규칙으로 셉니다 — 관찰용 정책은 표에 **'관찰용 — 차단 안 함 (Egress)'** 배지가 붙고 격리 수에 들어가지 않습니다(2026-10-30 수정 전에는 들어갔음).
+
+## 9. '확인 불가'·비어 보일 때
 
 | 화면 | 원인 | 할 일 |
 |---|---|---|
@@ -183,7 +210,7 @@ AKS가 관리하는 워크로드(kube-system·추가 기능)는 기본으로 빠
 | 배포 출처 없음 | Argo CD 권한 없음 / Argo CD가 관리하지 않는 워크로드 | §6 |
 | 히트맵 '취약 이미지' 열이 없음 | 아무 워크로드에도 치명·높음 결과가 없음(빈 요인 열은 접힘) | '빈 요인 보기' |
 
-## 9. 관련 문서
+## 10. 관련 문서
 
 - [보안 고도화 계획](../architecture/security-roadmap.md) — 설계·단계(P0~P5)·실측
 - [aks.md](../integrations/azure/aks.md) — 클러스터 읽기 권한·WI 점검 표(WI-01~18)
