@@ -69,8 +69,8 @@ export default function SecurityRiskPage() {
   const queue = useMemo(() => buildIssueQueue({
     clusterId: cluster?.id ?? null, insights, wi, advisories: adv,
     alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
-    alertsAt: freshPosture?.generatedAt ?? null, states, now: new Date(),
-  }), [cluster, insights, wi, adv, freshPosture, states]);
+    alertsAt: freshPosture?.generatedAt ?? null, states, owners: statesQ.data?.owners ?? [], now: new Date(),
+  }), [cluster, insights, wi, adv, freshPosture, states, statesQ.data?.owners]);
   const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
   const sources: Record<IssueSource, SourceState> = {
     combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
@@ -126,7 +126,7 @@ export default function SecurityRiskPage() {
       ) : null}
       {!sample && ready && clusters.length > 0 ? (
         <IssueQueue queue={queue} sources={sources} durable={statesQ.data?.durable ?? true} canWrite={statesQ.data?.canWrite ?? false}
-          signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} />
+          signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} teams={[...new Set((statesQ.data?.owners ?? []).map((o) => o.team))]} />
       ) : null}
       {body}
     </div>

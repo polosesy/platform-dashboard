@@ -321,3 +321,43 @@ test("collector: preview cluster facts and scale set rows (pure)", () => {
   assert.equal(r.attached.length, 2, "one entry per identity across pools");
   assert.match(nodePoolIdentitiesQuery(`mc-rg" or 1==1`), /resourceGroup =~ "mc-rg\\" or 1==1"/);
 });
+
+test("WI-18 granted vs used: data roles by definition ID, unused only when the scope logs others, unknown otherwise", async () => {
+  const W = await import("../src/services/workloadIdentity.js");
+  const ids = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
+  // Verdicts
+  assert.deepEqual(W.usageVerdict([{ who: "", n: 0 }], ids, "keyVault"), { state: "unknown", source: "keyVault", days: 30, logsInScope: 0, reason: "noLogs" });
+  assert.deepEqual(W.usageVerdict([{ who: "", n: 52 }], ids, "keyVault"), { state: "unused", source: "keyVault", days: 30, requests: 0, logsInScope: 52 });
+  const used = W.usageVerdict([{ who: "", n: 10 }, { who: ids[0], n: 5, lastSeen: "2026-10-28T00:00:00Z" }, { who: ids[1], n: 2, lastSeen: "2026-10-29T00:00:00Z" }], ids, "storage");
+  assert.deepEqual([used.state, used.requests, used.last, used.logsInScope], ["used", 7, "2026-10-29T00:00:00.000Z", 17]);
+  // Query: ids are validated GUIDs only, one row per caller
+  const q = W.roleUsageQuery("keyVault", [...ids, "not-a-guid', drop"]);
+  assert.match(q, /AZKVAuditLogs/);
+  assert.match(q, /summarize n = count\(\), lastSeen = max\(TimeGenerated\) by who/, "'last' is a KQL keyword — the column must not be named so");
+  assert.doesNotMatch(q, /not-a-guid/);
+  assert.match(W.roleUsageQuery("storage", ids), /StorageBlobLogs, StorageFileLogs, StorageQueueLogs, StorageTableLogs/);
+  // Classification by definition ID: Secrets User (data, read), Contributor (control plane — not here)
+  assert.deepEqual(W.DATA_ROLES["4633458b-17de-408a-b874-0445c86b69e6"], { svc: "keyVault", write: false });
+  assert.equal(W.DATA_ROLES["b24988ac-6180-42a0-ab88-20f7382dd24c"], undefined);
+});
+
+test("WI-18 in the map: usage on the role, a finding only for 'unused' data roles (write = warn), 'notCovered' for control-plane roles", async () => {
+  const W = await import("../src/services/workloadIdentity.js");
+  const i = input();
+  const kv = `/subscriptions/${SUB}/resourceGroups/rg-app/providers/Microsoft.KeyVault/vaults/kv1`;
+  i.roleAssignments!.push({ principalId: PRINC_A, roleDefGuid: "b86a8fe4-44ce-4948-aee5-eccb2c155cd7", roleName: "Key Vault Secrets Officer", roleType: "BuiltInRole", scope: kv, hasCondition: false, actions: [] });
+  const usage = new Map([[W.usageKey(PRINC_A, "b86a8fe4-44ce-4948-aee5-eccb2c155cd7", kv), { state: "unused" as const, source: "keyVault" as const, days: 30, requests: 0, logsInScope: 52 }]]);
+  const r = W.buildWorkloadIdentityMap({ ...i, roleUsage: usage });
+  const idn = r.identities.find((x) => x.roles.some((ra) => ra.roleName === "Key Vault Secrets Officer"))!;
+  assert.equal(idn.roles.find((ra) => ra.roleName === "Key Vault Secrets Officer")!.usage!.state, "unused");
+  assert.equal(idn.roles.find((ra) => ra.roleName === "Owner")!.usage!.reason, "notCovered", "control plane: no log records reads");
+  const f = r.findings.filter((x) => x.rule === "WI-18");
+  assert.equal(f.length, 1);
+  assert.deepEqual([f[0]!.sev, f[0]!.ev], ["warn", "obs"], "a write role");
+  assert.match(f[0]!.detail, /52건/);
+  assert.ok(!JSON.stringify(f).includes(PRINC_A) && !JSON.stringify(f).includes(CLIENT_A), "no full ids in the response");
+  // Not checked at all → no usage field, no WI-18
+  const none = W.buildWorkloadIdentityMap(i);
+  assert.ok(none.identities.every((x) => x.roles.every((ra) => ra.usage === undefined)));
+  assert.equal(none.findings.filter((x) => x.rule === "WI-18").length, 0);
+});

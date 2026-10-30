@@ -23,8 +23,16 @@ export type IssueState = {
   history: IssueStateChange[];
 };
 
+/**
+ * Who owns what (connection file `owners`): the first rule that matches wins — namespace rules before resource-group
+ * rules. Patterns are exact names (case-insensitive) or a prefix ending in `*`. Team names only.
+ */
+export type OwnerRule = { team: string; namespaces?: string[]; resourceGroups?: string[] };
+
 export type IssueStatesResponse = {
   states: Record<string, IssueState>;
+  /** The subscription's connection `owners` (empty = no mapping) */
+  owners?: OwnerRule[];
   /** false = kept in memory only (no state directory) — lost on restart */
   durable: boolean;
   signedIn: boolean;

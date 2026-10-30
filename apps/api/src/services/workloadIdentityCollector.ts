@@ -8,10 +8,10 @@
 // builder (services/workloadIdentity.ts) keeps unknowns unknown.
 
 import * as k8s from "@kubernetes/client-node";
-import type { WorkloadIdentityResponse } from "@aud/types";
+import type { WiRoleUsage, WorkloadIdentityResponse } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
+import { getArmFetcherAuto, getLogAnalyticsFetcherAuto, tableToObjects, type LogAnalyticsResponse } from "../infra/azureClientFactory.js";
 import { kqlString, safeMessage } from "../infra/requestParams.js";
 import { withLang, type Lang } from "../infra/lang.js";
 import { k8sFailureReason, k8sStatusOf, withK8sRetry } from "../infra/k8sRetry.js";
@@ -19,7 +19,7 @@ import { loadKubeConfig } from "./kubernetes.js";
 import { collectPolicyInventory } from "./k8sPolicyCollector.js";
 import { getClusterContext, mapLimit, type ClusterContext } from "./azureEndpoints.js";
 import {
-  SCAN_CAP, WI_ANN, buildWorkloadIdentityMap, isGuid,
+  DATA_ROLES, SCAN_CAP, USAGE_DAYS, WI_ANN, buildWorkloadIdentityMap, isGuid, roleUsageQuery, usageKey, usageVerdict,
   type InvFicList, type InvIdentity, type InvNodePool, type InvRoleAssignment, type InvServiceAccount, type WiInput,
 } from "./workloadIdentity.js";
 
@@ -35,6 +35,61 @@ const responseCache = new CacheManager<WorkloadIdentityResponse>(10, 120_000);
 const saCache = new CacheManager<InvServiceAccount[]>(10, 60_000);
 const ficCache = new CacheManager<InvFicList>(200, 300_000);
 const imdsCache = new CacheManager<NodeImds>(10, 300_000);
+/** (caller, scope, service, ids) → access-log rows, 10 minutes */
+const usageCache = new CacheManager<Array<Record<string, unknown>>>(200, 600_000);
+
+/**
+ * Granted vs used (WI-18): for each data-plane role assignment (DATA_ROLES), the resource's own access log at the
+ * assignment's scope — a resource-centric Log Analytics query (the logs wherever that scope sends them), last 30 days,
+ * one query per (scope, service) for every identity holding a role there. A failed or empty read is "unknown", never
+ * "unused". Management-group scopes are not queryable this way (unknown).
+ */
+export async function collectRoleUsage(
+  env: Env, bearerToken: string | undefined,
+  identities: Array<{ principalId: string; clientId: string }>, assignments: InvRoleAssignment[],
+): Promise<Map<string, WiRoleUsage>> {
+  const out = new Map<string, WiRoleUsage>();
+  const idsOf = new Map(identities.map((i) => [i.principalId.toLowerCase(), [i.principalId, i.clientId].filter(isGuid)]));
+  type Group = { scope: string; svc: "keyVault" | "storage"; ras: InvRoleAssignment[]; ids: Set<string> };
+  const groups = new Map<string, Group>();
+  for (const r of assignments) {
+    const def = DATA_ROLES[r.roleDefGuid.toLowerCase()];
+    if (!def) continue;
+    if (!/^\/subscriptions\/[0-9a-f-]{36}(\/|$)/i.test(r.scope)) {
+      out.set(usageKey(r.principalId, r.roleDefGuid, r.scope), { state: "unknown", source: def.svc, days: USAGE_DAYS, reason: "notCovered" });
+      continue;
+    }
+    const k = `${r.scope.toLowerCase()}|${def.svc}`;
+    const g = groups.get(k) ?? { scope: r.scope, svc: def.svc, ras: [], ids: new Set<string>() };
+    g.ras.push(r);
+    for (const id of idsOf.get(r.principalId.toLowerCase()) ?? [r.principalId]) g.ids.add(id.toLowerCase());
+    groups.set(k, g);
+  }
+  if (!groups.size) return out;
+  const la = await getLogAnalyticsFetcherAuto(env, bearerToken);
+  await mapLimit([...groups.values()], 4, async (g) => {
+    const ids = [...g.ids].sort();
+    const ck = `${cachePrefix(bearerToken)}:ra-usage:${g.scope.toLowerCase()}:${g.svc}:${ids.join(",")}`;
+    let rows = usageCache.get(ck);
+    let reason: WiRoleUsage["reason"] | undefined;
+    if (!rows) {
+      try {
+        const res = await la.queryResource(g.scope, roleUsageQuery(g.svc, ids), `P${USAGE_DAYS}D`) as LogAnalyticsResponse;
+        rows = res.tables?.[0] ? tableToObjects(res.tables[0]) : [];
+        usageCache.set(ck, rows);
+      } catch (e) {
+        const m = safeMessage(e);
+        // Every table of the union missing = this scope sends no such log anywhere we can read
+        reason = /resolve|SEM0100|could not be found|not.*exist/i.test(m) ? "noLogs" : / 40[13]\b/.test(m) ? "noAccess" : "failed";
+      }
+    }
+    for (const r of g.ras) {
+      const mine = idsOf.get(r.principalId.toLowerCase()) ?? [r.principalId];
+      out.set(usageKey(r.principalId, r.roleDefGuid, r.scope), rows ? usageVerdict(rows, mine, g.svc) : { state: "unknown", source: g.svc, days: USAGE_DAYS, reason: reason ?? "failed" });
+    }
+  });
+  return out;
+}
 
 type ArgRows<T> = { data?: T[] };
 
@@ -307,12 +362,19 @@ export async function collectWorkloadIdentity(
     mapLimit(identities, 4, async (i) => { fics.set(i.armId.toLowerCase(), await listFics(env, bearerToken, i.armId)); }),
     roleQ,
   ]);
+  // Granted vs used — after the role assignments are known; a failure only leaves usage "unknown"
+  const roleUsage = roleAssignments
+    ? await collectRoleUsage(env, bearerToken, identities, roleAssignments).catch((e) => {
+      gaps.push(`${tr("권한 사용 기록(Log Analytics)", "Permission usage (Log Analytics)")}: ${safeMessage(e)}`);
+      return null;
+    })
+    : null;
   const ficBad = [...fics.values()].filter((f) => f.status !== "ok");
   if (ficBad.length) gaps.push(tr(`페더레이션 자격 증명 목록 실패 ${ficBad.length}개 (${[...new Set(ficBad.map((f) => f.status))].join(", ")})`, `Federated credential lists failed: ${ficBad.length} (${[...new Set(ficBad.map((f) => f.status))].join(", ")})`));
 
   const out = withLang(lang, () => buildWorkloadIdentityMap({
     clusterId, inventory, serviceAccounts, saStatus, cluster, identities, identityLookup, fics,
-    roleAssignments: roleAssignments ?? null, subNames, scan, gaps,
+    roleAssignments: roleAssignments ?? null, roleUsage, subNames, scan, gaps,
     nodePools: nodeImds?.nodePools ?? null,
     imds: nodeImds
       ? { podAccess: nodeImds.podAccess, restrictionBlockedBy: nodeImds.restrictionBlockedBy, pools: nodeImds.pools, nodeResourceGroup: nodeImds.nodeResourceGroup }

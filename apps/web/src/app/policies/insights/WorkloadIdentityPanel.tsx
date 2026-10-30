@@ -9,8 +9,8 @@
 // the container width — no sideways scrolling.
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { WiFinding, WiOtherWorkload, WiSeverity, WorkloadIdentityResponse } from "@aud/types";
-import { useI18n } from "@/lib/i18n";
+import type { WiFinding, WiOtherWorkload, WiRoleUsage, WiSeverity, WorkloadIdentityResponse } from "@aud/types";
+import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
 import { Button, Notice, Segmented } from "@/components/ui";
 import { Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
 import { chainOf, ficGauge, layoutWi, namespaceCoverage, nodeSeverity, poolOfNodeId, wiGraph, type WiKind } from "./wiLayout";
@@ -97,7 +97,7 @@ function CopyCode({ code }: { code: string }) {
 }
 
 export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { data: WorkloadIdentityResponse; showSystem: boolean; onScan: () => void; scanning: boolean }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [sel, setSel] = useState<string | null>(null);
   const [view, setView] = useState<View>("graph");
   const [boxRef, width] = useWidth<HTMLDivElement>();
@@ -126,7 +126,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
     if (i) return { kind: "identity", title: i.kind === "unresolved" ? t("wi.unresolved") : i.name ?? i.clientIdTail, sub: i.kind === "unresolved" ? `client-id ${i.clientIdTail}` : `${i.resourceGroup} · ${i.location}` };
     for (const idn of data.identities) {
       const ra = idn.roles.find((x) => x.id === id);
-      if (ra) return { kind: "role", title: ra.roleName, sub: `${t(`wi.scope.${ra.scope.level}`)} · ${ra.scope.label}`, extra: ra.privileged ? t("wi.privileged") : undefined };
+      if (ra) return { kind: "role", title: ra.roleName, sub: `${t(`wi.scope.${ra.scope.level}`)} · ${ra.scope.label}`, extra: ra.usage?.state === "unused" ? t("wi.usage.unusedShort", { days: ra.usage.days }) : ra.privileged ? t("wi.privileged") : undefined };
     }
     return null;
   };
@@ -191,6 +191,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
       const ra = idn.roles.find((x) => x.id === id)!;
       rows.push({ k: t("wi.f.role"), v: ra.roleName, ev: "perm" }, { k: t("wi.f.scope"), v: `${t(`wi.scope.${ra.scope.level}`)} · ${ra.scope.label}${ra.scope.resourceType ? ` (${ra.scope.resourceType})` : ""}` },
         { k: t("wi.f.builtIn"), v: ra.builtIn === null ? t("wi.unknown") : ra.builtIn ? t("wi.yes") : t("wi.no") }, { k: t("wi.f.condition"), v: ra.conditional ? t("wi.yes") : t("wi.no") });
+      if (ra.usage) rows.push({ k: t("wi.f.usage"), v: usageText(ra.usage, t, locale), ev: ra.usage.state === "unknown" ? "unk" : "obs", evText: ra.usage.state === "unknown" ? undefined : t("wi.usage.evLog"), src: ra.usage.source ? t(`wi.usage.src.${ra.usage.source}`) : undefined });
       sections.push({ h: t("wi.sec.facts"), rows }, { h: t("wi.sec.note"), body: <p className={styles.wiNote}>{t("wi.roles.propagation")} · {t("wi.roles.pim")}</p> });
     }
     return { id, kicker, title: lb.title, sub: lb.sub, callouts, sections };
@@ -279,7 +280,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                         <td><button type="button" className={styles.linkish} onClick={() => pick(s.id)}>{s.namespace}/{s.name}</button></td>
                         <td>{s.ficIds.length ? s.ficIds.map((f) => data.fics.find((x) => x.id === f)?.name).join(", ") : <span className={styles.wiMuted}>{s.identityId ? t("wi.noFic") : "-"}</span>}</td>
                         <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.kind === "unresolved" ? t("wi.unresolved") : idn.name} {idn.kind === "userAssigned" ? `(${ficGauge(idn.fic.count).text})` : ""}</button> : "-"}</td>
-                        <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}`).join(" · ") || "-"}</td>
+                        <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}${r.usage?.state === "unused" ? ` (${t("wi.usage.unusedShort", { days: r.usage.days })})` : ""}`).join(" · ") || "-"}</td>
                       </tr>
                     );
                   })}
@@ -291,7 +292,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                         <td><button type="button" className={styles.linkish} onClick={() => pick(n.id)}>{label(n.id)?.title}</button></td>
                         <td><span className={styles.wiMuted}>{t("wi.imds.path")}</span></td>
                         <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.name ?? idn.clientIdTail}</button> : "-"}</td>
-                        <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}`).join(" · ") || "-"}</td>
+                        <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}${r.usage?.state === "unused" ? ` (${t("wi.usage.unusedShort", { days: r.usage.days })})` : ""}`).join(" · ") || "-"}</td>
                       </tr>
                     );
                   })}
@@ -354,4 +355,11 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
       <OtherWorkloads data={data} showSystem={showSystem} />
     </section>
   );
+}
+
+/** "사용 1,234회 · 마지막 10/28" / "30일간 사용 없음 (같은 범위 요청 5,210건)" / "확인 불가 — 이유" */
+function usageText(u: WiRoleUsage, t: (k: string, v?: Record<string, string | number>) => string, locale: Locale): string {
+  if (u.state === "used") return t("wi.usage.used", { n: (u.requests ?? 0).toLocaleString(dateLocale(locale)), days: u.days, last: u.last ? new Date(u.last).toLocaleDateString(dateLocale(locale)) : "—" });
+  if (u.state === "unused") return t("wi.usage.unused", { days: u.days, total: (u.logsInScope ?? 0).toLocaleString(dateLocale(locale)) });
+  return t(`wi.usage.unknown.${u.reason ?? "failed"}`, { days: u.days });
 }

@@ -52,6 +52,16 @@ const ConnectionSchema = z.object({
   /** Log Analytics workspaces (customer id GUIDs) read through this connection */
   logAnalyticsWorkspaces: z.array(GUID).default([]),
   /**
+   * Who owns what — the team on 통합 위험 issues (and its filter). The first rule that matches wins; namespace rules
+   * before resource-group rules. Patterns: an exact name (case-insensitive) or a prefix ending in `*`. Team names
+   * only (no people, no ids — nothing is looked up in a directory).
+   */
+  owners: z.array(z.object({
+    team: z.string().trim().min(1).max(60).refine((s) => !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(s), "a team name, not an id"),
+    namespaces: z.array(z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\*?$|^\*$/, "a namespace name or prefix*")).max(100).optional(),
+    resourceGroups: z.array(z.string().regex(/^[-\w.()]{1,90}\*?$|^\*$/, "a resource group name or prefix*")).max(100).optional(),
+  }).strict().refine((o) => (o.namespaces?.length ?? 0) + (o.resourceGroups?.length ?? 0) > 0, "a team needs namespaces or resourceGroups")).max(100).optional(),
+  /**
    * What this connection may do inside AKS clusters (services/aksAccess.ts). Everything off by default:
    *   allowLocalAccount  read clusters WITHOUT Entra integration (their kubeconfig is a cluster-admin certificate)
    *   hubbleExec         Hubble flows by exec into cilium-agent (≈ node access) — customer connections only with this

@@ -25,7 +25,8 @@ export function Pill({ tone, children, title }: { tone: "crit" | "warn" | "ok" |
   );
 }
 
-export type InspectorRow = { k: string; v?: string; node?: ReactNode; ev?: EvidenceKind; src?: string; mono?: boolean; off?: boolean; key?: boolean };
+/** `evText` names what was observed when it isn't Hubble (e.g. an access log) — the chip keeps the grade's colour */
+export type InspectorRow = { k: string; v?: string; node?: ReactNode; ev?: EvidenceKind; evText?: string; src?: string; mono?: boolean; off?: boolean; key?: boolean };
 export type InspectorSection = { h: string; rows?: InspectorRow[]; body?: ReactNode; grid?: boolean };
 
 export type InspectorModel = {
@@ -47,7 +48,7 @@ export function FactRows({ rows, grid }: { rows: InspectorRow[]; grid?: boolean 
           <dt>{r.k}</dt>
           <dd>
             {r.node ?? <span className={r.mono ? styles.mono : undefined}>{r.v}</span>}
-            {r.ev && <EvidenceChip ev={r.ev} />}
+            {r.ev && <EvidenceChip ev={r.ev} text={r.evText} />}
             {r.src && <span className={styles.src}>{r.src}</span>}
           </dd>
         </div>

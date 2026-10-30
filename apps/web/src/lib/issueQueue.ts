@@ -4,7 +4,7 @@
 // exception is open again (expired). Keys are printable ASCII without spaces (the API validates `source:scope:id`).
 
 import type {
-  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, PolicyInsightsResponse, PostureAlert, WorkloadIdentityResponse,
+  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, WorkloadIdentityResponse,
 } from "@aud/types";
 import { groupAlerts } from "./alertGroups";
 
@@ -23,6 +23,11 @@ export type QueueItem = {
   href: string;
   /** When the source last produced it */
   seenAt: string | null;
+  /** Kubernetes namespaces and Azure resource groups it is about — what the team rules match */
+  namespaces: string[];
+  resourceGroups: string[];
+  /** Owning team (connection file `owners`), null = no rule matched */
+  team: string | null;
   stored: IssueState | null;
   /** Effective status (the source wins over a stale claim) */
   status: IssueStatus;
@@ -40,6 +45,8 @@ export type QueueInput = {
   alertsAt?: string | null;
   advisories?: AdvisoriesResponse | null;
   states: Record<string, IssueState>;
+  /** Team rules of the subscription's connection */
+  owners?: OwnerRule[];
   now: Date;
 };
 
@@ -74,8 +81,29 @@ export function effectiveStatus(stored: IssueState | null, seenAt: string | null
   return { status: stored.status, flag: null };
 }
 
+/** "team-*" or an exact name, case-insensitive */
+const matches = (pattern: string, value: string) => {
+  const p = pattern.toLowerCase(), v = value.toLowerCase();
+  return p.endsWith("*") ? v.startsWith(p.slice(0, -1)) : p === v;
+};
+
+/** The first rule naming one of the namespaces, else the first naming one of the resource groups (file order) */
+export function teamOf(namespaces: string[], resourceGroups: string[], rules: OwnerRule[] = []): string | null {
+  for (const r of rules) if ((r.namespaces ?? []).some((p) => namespaces.some((n) => matches(p, n)))) return r.team;
+  for (const r of rules) if ((r.resourceGroups ?? []).some((p) => resourceGroups.some((g) => matches(p, g)))) return r.team;
+  return null;
+}
+
+/** "ns/name" ids, "w:ns/Kind/name" and "sa:ns/name" graph ids → the namespace */
+const nsOf = (id: string): string | null => {
+  const m = /^(?:w:|sa:)?([a-z0-9][-a-z0-9]{0,62})\/[^/]/.exec(id);
+  return m ? m[1]! : null;
+};
+const uniq = (xs: Array<string | null | undefined>) => [...new Set(xs.filter((x): x is string => !!x))];
+
 export function buildIssueQueue(input: QueueInput): IssueQueue {
-  const raw: Array<Omit<QueueItem, "stored" | "status" | "flag">> = [];
+  const raw: Array<Omit<QueueItem, "stored" | "status" | "flag" | "team">> = [];
+  const clusterRg = input.clusterId ? /\/resourcegroups\/([^/]+)\//i.exec(input.clusterId)?.[1] ?? null : null;
   const scope = input.clusterId ? clusterScope(input.clusterId) : null;
   const cluster = input.clusterId ? encodeURIComponent(input.clusterId) : "";
 
@@ -87,6 +115,8 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
         key: `combo:${scope}:${ascii(i.id, 400)}`, source: "combo", sev: i.sev === "crit" ? "critical" : "high",
         title: i.title, target: i.owner, evidence: ev, href: `/policies?tab=overview&cluster=${cluster}&issue=${encodeURIComponent(i.id)}`,
         seenAt: input.insights.generatedAt,
+        namespaces: uniq([...(i.members ?? []).map((m) => m.namespace), ...i.nodes.flatMap((n) => n.refs).map(nsOf), i.id.startsWith("vnet:") ? i.id.slice(5) : null]),
+        resourceGroups: uniq([clusterRg]),
       });
     }
   }
@@ -97,6 +127,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
       raw.push({
         key: `wi:${scope}:${ascii(f.id, 400)}`, source: "wi", sev: f.sev === "crit" ? "critical" : "high",
         title: f.title, target: f.rule, evidence: f.ev, href: `/policies?tab=workloadIdentity&cluster=${cluster}`, seenAt: input.wi.generatedAt,
+        namespaces: uniq(f.refs.map(nsOf)), resourceGroups: uniq([clusterRg]),
       });
     }
   }
@@ -111,6 +142,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
         key: `vuln:${scope}:${ascii(a.key, 400)}`, source: "vuln", sev: critical ? "critical" : "high",
         title: a.title, target: where.slice(0, 2).join(", ") + (where.length > 2 ? ` +${where.length - 2}` : ""), evidence: "cfg",
         href: "/security/advisories", seenAt: input.advisories.generatedAt,
+        namespaces: uniq(a.targets.flatMap((x) => x.workloads).map(nsOf)), resourceGroups: uniq([clusterRg]),
       });
     }
   }
@@ -122,6 +154,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
         key: `alert:${g.severity.toLowerCase()}:${slug(g.title)}`, source: "alert", sev: g.severity === "High" ? "high" : g.severity === "Medium" ? "medium" : "low",
         title: g.items.length > 1 ? `${g.title} ×${g.items.length}` : g.title, target: g.resources.slice(0, 2).join(", ") + (g.resources.length > 2 ? ` +${g.resources.length - 2}` : ""),
         evidence: "obs", href: "/security/threats", seenAt: input.alertsAt ?? g.lastAt,
+        namespaces: uniq(g.items.map((a) => a.k8s?.namespace)), resourceGroups: uniq(g.items.flatMap((a) => a.resources.map((r) => r.resourceGroup))),
       });
     }
   }
@@ -132,7 +165,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
     if (seen.has(r.key)) continue; // the same id twice in a source is one issue
     seen.add(r.key);
     const stored = input.states[r.key] ?? null;
-    items.push({ ...r, stored, ...effectiveStatus(stored, r.seenAt, input.now) });
+    items.push({ ...r, team: teamOf(r.namespaces, r.resourceGroups, input.owners), stored, ...effectiveStatus(stored, r.seenAt, input.now) });
   }
   items.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || SEV_RANK[a.sev] - SEV_RANK[b.sev] || SOURCE_RANK[a.source] - SOURCE_RANK[b.source] || a.title.localeCompare(b.title));
 

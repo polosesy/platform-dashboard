@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-29
+last-verified: 2026-10-30
 covers: [apps/api/src/services/featureCatalog.ts]
 ---
 # Azure 연결 권한 표
@@ -27,6 +27,7 @@ covers: [apps/api/src/services/featureCatalog.ts]
 | 워크로드 ID 매핑 — 노드에 붙은 관리 ID(IMDS 경로) | **Reader** | AKS 노드 리소스 그룹(`MC_…`) | 노드 풀 VMSS의 사용자 할당 ID(Resource Graph), 클러스터 `networkProfile.podLinkLocalAccess`(미리 보기 api-version) — 없으면 IMDS 경로만 '읽지 못함' | `inventory` |
 | 메트릭·알림·리소스 상태 | **Monitoring Reader** (Reader에 포함) | 구독 | Azure Monitor 메트릭·알림 규칙·Resource Health | `metrics` |
 | 로그(Traffic Analytics·Container Insights·Private Link 사용 근거) | **Log Analytics Reader** | 작업 영역 (또는 구독) | KQL 쿼리 | `logs` |
+| 워크로드 ID 매핑 — 받았지만 안 쓰는 권한(WI-18) | **Reader** (리소스 로그 읽기 `Microsoft.Insights/logs/*/read` 포함) | 역할 할당 범위(Key Vault·Storage 계정·RG·구독) | 그 범위의 접근 로그를 **리소스 중심**으로 KQL(작업 영역 접근 모드 '리소스 또는 작업 영역 권한'일 때). 없으면 사용 여부만 '확인 불가' | `logs` |
 | 보안 개요·권고·위협·규정 준수 | **Security Reader** (Reader로도 대부분) | 구독 | Defender for Cloud | `security` |
 | 비용 관리 | **Cost Management Reader** | 구독 | Cost Management 쿼리·예산 | `cost` |
 | AKS 클러스터·모니터링·정책 점검 | **Azure Kubernetes Service Cluster User Role** | 클러스터 | `listClusterUserCredential` — API 서버 주소·CA (Entra 클러스터에서는 비밀 없음) | `aksCredential` |

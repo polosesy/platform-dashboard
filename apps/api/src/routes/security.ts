@@ -8,6 +8,7 @@ import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
 import type { IssueStatesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
+import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { IssueStateBody, issueStateDir, readIssueStates, writeIssueState } from "../services/issueStateStore.js";
 
 export function registerSecurityRoutes(router: Router, env: Env) {
@@ -69,7 +70,8 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       const subscriptionId = querySubscriptionId(req, env);
       const canWrite = roleAtLeast(callerOf(env, req.auth.bearerToken)?.role ?? null, "operator");
       if (!subscriptionId) return res.json({ states: {}, durable: !!stateDir, signedIn: true, canWrite } satisfies IssueStatesResponse);
-      res.json({ states: await readIssueStates(stateDir, subscriptionId), durable: !!stateDir, signedIn: true, canWrite } satisfies IssueStatesResponse);
+      const owners = connectionForSubscription(env, subscriptionId)?.owners ?? [];
+      res.json({ states: await readIssueStates(stateDir, subscriptionId), owners, durable: !!stateDir, signedIn: true, canWrite } satisfies IssueStatesResponse);
     } catch (e: unknown) {
       sendError(res, e, "issue_state_read_failed");
     }

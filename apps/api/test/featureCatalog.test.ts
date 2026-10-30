@@ -60,7 +60,7 @@ test("catalog shape: tiers chain from core, each has features, every permission 
   for (const f of FEATURES) for (const k of [...f.requires, ...f.optional]) assert.ok(keys.has(k), `${f.id}: ${k}`);
   // the AKS security check, end to end: the cluster credential + the reader role, Hubble and Resource Graph optional
   const aks = FEATURES.find((f) => f.id === "aksSecurityCheck")!;
-  assert.deepEqual([aks.requires, aks.optional, aks.preconditions], [["aksCredential", "k8sRead"], ["inventory", "hubbleExec", "security"], ["entraCluster", "clusterReachable"]]);
+  assert.deepEqual([aks.requires, aks.optional, aks.preconditions], [["aksCredential", "k8sRead"], ["inventory", "hubbleExec", "security", "logs"], ["entraCluster", "clusterReachable"]]);
 });
 
 test("every catalog text is translated (ko / en)", () => {

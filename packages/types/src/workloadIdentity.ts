@@ -7,7 +7,7 @@ import type { EvidenceKind, RbacRiskKey } from "./policyInsights.js";
 
 export type WiRuleId =
   | "WI-01" | "WI-02" | "WI-03" | "WI-04" | "WI-05" | "WI-06" | "WI-07" | "WI-08"
-  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16" | "WI-17";
+  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16" | "WI-17" | "WI-18";
 export type WiSeverity = "crit" | "warn" | "low" | "info";
 export type WiScopeLevel = "root" | "managementGroup" | "subscription" | "resourceGroup" | "resource";
 /** Display only — never an ARM id or a subscription GUID */
@@ -76,6 +76,23 @@ export type WiFic = {
   dangling: boolean | null;
 };
 
+/**
+ * Is a data-plane role actually used? From the resource's own access log (Key Vault audit / Storage logs) over the
+ * last `days`, read at the role's scope. unknown = no log to tell (not collected, not readable, or a role whose use no
+ * log records — control-plane reads, AcrPull …) — never "unused".
+ */
+export type WiRoleUsage = {
+  state: "used" | "unused" | "unknown";
+  source: "keyVault" | "storage" | null;
+  days: number;
+  /** This identity's requests in the window */
+  requests?: number;
+  last?: string;
+  /** Requests by anyone at that scope in the window (proof the log is collected) */
+  logsInScope?: number;
+  reason?: "notCovered" | "noLogs" | "noAccess" | "failed";
+};
+
 export type WiRoleAssignment = {
   id: string;
   roleName: string;
@@ -84,6 +101,8 @@ export type WiRoleAssignment = {
   wildcardActions: boolean;
   conditional: boolean;
   scope: WiScope;
+  /** Absent = usage not checked */
+  usage?: WiRoleUsage;
 };
 
 export type WiIdentity = {

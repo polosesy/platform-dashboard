@@ -2,7 +2,7 @@
 status: draft
 owner: platform-security
 last-verified: 2026-10-30
-covers: [apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -30,8 +30,8 @@ covers: [apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.t
 |---|---|---|
 | 공격 경로 **진입점** | 노출(LoadBalancer·Ingress·HTTPRoute)만 — 대부분 '진입 미확인' | 실행 중인 이미지의 취약성과 경로가 이어지지 않음 → **P1 (구현)** |
 | Issues 단일 목록 | 클러스터 위험 조합(AKS 보안 점검) · 통합 위험 · WI-17 · Defender 경고가 화면마다 | 하나의 우선순위·상태(열림·진행·해결·예외) 없음 → **P2 (구현)** |
-| 소유 | Helm 차트·kubectl로 추정 | 팀 단위 소유·필터 없음 → P3 |
-| CIEM | RBAC 행렬 · 워크로드 ID 매핑 · IMDS 경로 | 받은 권한 대비 **실제로 쓴** 권한 없음 → P3 |
+| 소유 | Helm 차트·kubectl로 추정 | 팀 단위 소유·필터 없음 → **P3 (구현)** |
+| CIEM | RBAC 행렬 · 워크로드 ID 매핑 · IMDS 경로 | 받은 권한 대비 **실제로 쓴** 권한 없음 → **P3 (구현 — Key Vault·Storage 데이터 역할)** |
 | Code-to-Cloud | KBOM(이미지·버전) | 이미지 → 저장소·커밋 연결 없음 → P4 |
 | Security Graph 탐색 | 화면마다 그래프(구성도·라이브·공격 경로·네트워크 맵·WI 흐름도) | 화면을 가로지르는 질의 없음 → P5 |
 | Runtime | Defender 경고 · Hubble 관측 | 경고가 경로 위에 안 보임 → P2와 함께 |
@@ -108,10 +108,26 @@ covers: [apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.t
 
 **남은 것**: 이슈에 Defender 경고를 얹어 공격 경로 진입을 `obs`로(런타임), 이슈별 알림·티켓 연동(Teams·Jira), 팀 소유(P3)로 '내 팀' 필터.
 
-### P3 — 소유와 실제 사용 권한
+### P3 — 팀 소유와 '받았지만 안 쓰는 권한' (구현, 2026-10-30)
 
-- 연결 파일에 `owners`(네임스페이스·리소스 그룹 → 팀) → 이슈·히트맵 '내 팀' 필터
-- 권한 사용 여부: Key Vault 감사 로그(WI-17의 `imdsKvQuery` 확장)·Activity Log로 '받았지만 안 쓰는 권한' 표시 — 근거 `obs`, 로그 보존 기간을 같이 표시
+> **5살 비유**: ① 장난감 상자마다 **이름표**(어느 반 것인지)를 붙여서 "우리 반 고장만 보기"가 돼요. ② 열쇠를 받았는데 한 달 동안 한 번도 안 쓴 친구는 **열쇠를 돌려주자**고 알려 줘요. 단, 문에 출입 기록장이 없으면 "안 썼다"가 아니라 "몰라요"라고 말해요.
+
+**A. 팀 소유** — 연결 파일 `owners: [{team, namespaces?, resourceGroups?}]`(zod strict, 팀 이름만·GUID 거부, 정확한 이름 또는 `접두*`, 대소문자 무시). `GET /api/security/issue-states` 응답 `owners`(구독의 연결) → 웹 `teamOf`(순수): **네임스페이스 규칙이 리소스 그룹 규칙보다 먼저**, 같은 종류는 파일 순서. 이슈마다 `namespaces`·`resourceGroups`를 모음(위험 조합 = 구성원·노드 ref `ns/name`, WI = `w:ns/…`·`sa:ns/…` ref, 취약점 = 대상 워크로드, 경고 = K8s 네임스페이스·리소스 RG, 네임스페이스가 없으면 클러스터 RG). 화면: 행에 팀 칩, '팀' 선택 상자(모든 팀 / 팀 / 소유 미지정) — 로그인 사용자의 팀은 디렉터리로 찾지 않고 고른 값을 이 브라우저에만 기억(`aud.issues.team`).
+
+**B. 받았지만 안 쓰는 권한(WI-18)** — 워크로드 ID 매핑의 관리 ID 역할 할당 중 **데이터 역할**(`DATA_ROLES` — Key Vault 9종·Storage 14종, **정의 ID**로 분류, 읽기/쓰기 구분)만:
+
+| 단계 | 내용 |
+|---|---|
+| 읽기 | 역할 범위(리소스·RG·구독)마다 **Log Analytics 리소스 중심 조회** `POST /v1{scope}/query`, 30일 — Key Vault 감사 로그(`AzureDiagnostics` AuditEvent ∪ `AZKVAuditLogs`) / Storage 로그(`StorageBlobLogs`·File·Queue·Table). (범위, 서비스)마다 한 번, 그 범위에 역할이 있는 ID들을 함께(`roleUsageQuery` — GUID만 통과), 4개씩 동시, 10분 캐시 |
+| 판정 `usageVerdict` | 이 ID(client·object ID) 요청 > 0 = **사용**(횟수·마지막) · 0이고 **같은 범위 다른 요청 > 0** = **미사용** · 범위 전체 0건 = **확인 불가(noLogs)** · 403 = 확인 불가(noAccess) · 관리 그룹 범위·제어 평면 역할·AcrPull = 확인 불가(notCovered) |
+| 점검 | 미사용 데이터 역할 → WI-18(쓰기 역할 = 주의, 읽기 = 낮음, 근거 `obs`) + 지우기 명령(자리표시자) — 설명에 '월말 배치·보존 기간이 짧으면 놓칠 수 있음' |
+| 화면 | 역할 카드 보조 줄 '30일 미사용', 역할 상세 '사용 기록'(횟수·마지막 / 미사용 + 같은 범위 요청 수 / 확인 불가 + 이유, 근거 등급), 표 보기 '(30일 미사용)' |
+
+권한: Reader(리소스 로그 읽기 포함) — 기능 카탈로그 `aksSecurityCheck`의 선택 `logs`. 응답에는 전체 client·object ID를 넣지 않음(끝 4자리만).
+
+**완료 조건**: `issueQueue.test.ts` "teams …"(규칙 우선순위·접두사·이슈별 네임스페이스), `workloadIdentity.test.ts` "WI-18 …" 2개(판정·질의·분류, 지도의 usage·점검·전체 ID 비노출) — 충족.
+
+**한계(사실)**: 로그가 그 범위에서 작업 영역으로 가지 않으면 판정하지 않음(확인 불가). 제어 평면 역할의 '사용'은 읽기 호출이 Activity Log에 없어 판정하지 않음. Kubernetes RBAC 사용(감사 로그 `kube-audit`)은 아직 아님.
 
 ### P4 — 이미지 → 코드
 

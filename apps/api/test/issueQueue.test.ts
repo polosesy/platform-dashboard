@@ -6,7 +6,7 @@ import path from "node:path";
 import type { AdvisoriesResponse, IssueState, PolicyInsightsResponse, PostureAlert, WorkloadIdentityResponse } from "@aud/types";
 import { ISSUE_KEY, clearIssueStateMemory, issueStateDir, readIssueStates, validateChange, writeIssueState } from "../src/services/issueStateStore.js";
 import * as iq from "../../web/src/lib/issueQueue.ts";
-const { buildIssueQueue, clusterScope, effectiveStatus } = ((iq as { default?: typeof iq }).default ?? iq) as typeof iq;
+const { buildIssueQueue, clusterScope, effectiveStatus, teamOf } = ((iq as { default?: typeof iq }).default ?? iq) as typeof iq;
 
 const SUB = "00000000-0000-0000-0000-0000000000aa";
 const CLUSTER = `/subscriptions/${SUB}/resourceGroups/RG-AKS/providers/Microsoft.ContainerService/managedClusters/AKS1`;
@@ -75,13 +75,15 @@ test("effective status: the source wins — resolved but read again later = reop
 const insights = {
   clusterId: CLUSTER, generatedAt: "2026-10-30T00:00:00Z",
   issues: [
-    { id: "standing:crit", sev: "crit", kind: "standing", title: "클러스터 장악 수준 권한을 상시 가진 서비스 계정 3개", owner: "Helm argo-cd", edges: [{ from: "w0", to: "p0", ev: "perm" }] },
-    { id: "takeover:obs/agent", sev: "crit", kind: "takeover", title: "agent의 SA 토큰 …", owner: "kubectl · obs", edges: [{ from: "entry", to: "app", ev: "obs" }] },
-    { id: "standing", sev: "warn", kind: "standing", title: "고권한을 상시 가진 서비스 계정 6개", owner: "Helm", edges: [] },
+    { id: "standing:crit", sev: "crit", kind: "standing", title: "클러스터 장악 수준 권한을 상시 가진 서비스 계정 3개", owner: "Helm argo-cd", edges: [{ from: "w0", to: "p0", ev: "perm" }],
+      nodes: [{ id: "w0", refs: ["argo/app-controller"] }], members: [{ rowId: "argo/app-controller", namespace: "argo" }] },
+    { id: "takeover:obs/agent", sev: "crit", kind: "takeover", title: "agent의 SA 토큰 …", owner: "kubectl · obs", edges: [{ from: "entry", to: "app", ev: "obs" }],
+      nodes: [{ id: "app", refs: ["obs/agent"] }, { id: "api", refs: ["apiserver"] }] },
+    { id: "standing", sev: "warn", kind: "standing", title: "고권한을 상시 가진 서비스 계정 6개", owner: "Helm", edges: [], nodes: [] },
   ],
 } as unknown as PolicyInsightsResponse;
 const wi = { clusterId: CLUSTER, generatedAt: "2026-10-30T00:00:00Z", findings: [
-  { id: "WI-17:mi:abc", rule: "WI-17", sev: "warn", ev: "cfg", title: "IMDS 경로", refs: [] },
+  { id: "WI-17:mi:abc", rule: "WI-17", sev: "warn", ev: "cfg", title: "IMDS 경로", refs: ["mi:abc", "w:payments/Deployment/api"] },
   { id: "WI-06:fic:x:aud", rule: "WI-06", sev: "low", ev: "cfg", title: "audience", refs: [] },
 ] } as unknown as WorkloadIdentityResponse;
 const advisories = { clusterId: CLUSTER, generatedAt: "2026-10-30T00:00:00Z", items: [
@@ -118,4 +120,24 @@ test("queue: stored states apply by key; states of issues no longer found count 
   assert.deepEqual([by("takeover:obs/agent").status, by("takeover:obs/agent").flag], ["open", "reopened"], "read again after the claim");
   assert.equal(q.notDetected, 1, "the gone combo — not the WI one (WI not read), not another cluster's");
   assert.equal(q.counts.accepted, 1);
+});
+
+test("teams: namespace rules before resource-group rules, file order, prefix*, case-insensitive; issues carry their namespaces", () => {
+  const rules = [
+    { team: "platform", resourceGroups: ["rg-aks"] },
+    { team: "gitops", namespaces: ["argo*"] },
+    { team: "observability", namespaces: ["obs", "monitor"] },
+  ];
+  assert.equal(teamOf(["argo"], ["rg-aks"], rules), "gitops", "a namespace rule beats an earlier resource-group rule");
+  assert.equal(teamOf(["OBS"], [], rules), "observability");
+  assert.equal(teamOf([], ["RG-AKS"], rules), "platform");
+  assert.equal(teamOf(["payments"], ["rg-other"], rules), null);
+  const q = buildIssueQueue({ clusterId: CLUSTER, insights, wi, states: {}, owners: rules, now: NOW });
+  const by = (id: string) => q.items.find((i) => i.key.endsWith(id))!;
+  assert.deepEqual(by(":standing:crit").namespaces, ["argo"]);
+  assert.equal(by(":standing:crit").team, "gitops");
+  assert.deepEqual(by(":takeover:obs/agent").namespaces, ["obs"], "apiserver is not a namespace");
+  assert.equal(by(":takeover:obs/agent").team, "observability");
+  assert.equal(by(":standing").team, "platform", "no namespace → the cluster's resource group");
+  assert.deepEqual(by("WI-17:mi:abc").namespaces, ["payments"], "w:<ns>/<kind>/<name> graph ids");
 });

@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import type {
-  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiImds, WiK8sBinding, WiMatch, WiNodePool, WiOtherWorkload, WiRoleAssignment,
+  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiImds, WiK8sBinding, WiMatch, WiNodePool, WiOtherWorkload, WiRoleAssignment, WiRoleUsage,
   WiRuleId, WiScope, WiScopeLevel, WiServiceAccount, WiSeverity, WiWorkload, WorkloadIdentityResponse, EvidenceKind,
 } from "@aud/types";
 import type { PolicyInventory } from "./policyAnalyzer.js";
@@ -69,7 +69,84 @@ export const WI_RULE_DOCS: Record<WiRuleId, { url: string; quote: string }> = {
   "WI-15": { url: DOC.considerations, quote: "Creation of federated identity credentials is currently not supported on user-assigned managed identities created in the following regions" },
   "WI-16": { url: DOC.aksOverview, quote: "If you update the service account annotations, you must restart the pod for the changes to take effect." },
   "WI-17": { url: DOC.imds, quote: "The IMDS REST API is available at a well-known, nonroutable IP address (169.254.169.254) that is by default accessible from all pods running in an AKS cluster." },
+  "WI-18": { url: DOC.rbacBest, quote: "By limiting roles and scopes, you limit what resources are at risk if the security principal is ever compromised." },
 };
+
+// ── Granted vs used (WI-18): data-plane roles whose use the resource's own access log records ──
+
+/** Days of access log read for "used / not used" */
+export const USAGE_DAYS = 30;
+/**
+ * Data-plane roles by definition ID (names can change): which access log shows their use, and whether they write.
+ * Control-plane roles (Contributor, Key Vault Reader …) and AcrPull are not here — no log records their reads, so their
+ * use stays "unknown".
+ */
+export const DATA_ROLES: Record<string, { svc: "keyVault" | "storage"; write: boolean }> = {
+  "00482a5a-887f-4fb3-b363-3b7fe8e74483": { svc: "keyVault", write: true },  // Key Vault Administrator
+  "a4417e6f-fecd-4de8-b567-7b0420556985": { svc: "keyVault", write: true },  // Key Vault Certificates Officer
+  "14b46e9e-c2b7-41b4-b07b-48a6ebf60603": { svc: "keyVault", write: true },  // Key Vault Crypto Officer
+  "b86a8fe4-44ce-4948-aee5-eccb2c155cd7": { svc: "keyVault", write: true },  // Key Vault Secrets Officer
+  "db79e9a7-68ee-4b58-9aeb-b90e7c24fcba": { svc: "keyVault", write: false }, // Key Vault Certificate User
+  "e147488a-f6f5-4113-8e2d-b22465e65bf6": { svc: "keyVault", write: false }, // Key Vault Crypto Service Encryption User
+  "08bbd89e-9f13-488c-ac41-acfcb10c90ab": { svc: "keyVault", write: false }, // Key Vault Crypto Service Release User
+  "12338af0-0e69-4776-bea7-57ae8d297424": { svc: "keyVault", write: false }, // Key Vault Crypto User
+  "4633458b-17de-408a-b874-0445c86b69e6": { svc: "keyVault", write: false }, // Key Vault Secrets User
+  "ba92f5b4-2d11-453d-a403-e96b0029c9fe": { svc: "storage", write: true },   // Storage Blob Data Contributor
+  "b7e6dc6d-f1e8-4753-8033-0f276bb0955b": { svc: "storage", write: true },   // Storage Blob Data Owner
+  "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1": { svc: "storage", write: false },  // Storage Blob Data Reader
+  "974c5e8b-45b9-4653-ba55-5f855dd0fb88": { svc: "storage", write: true },   // Storage Queue Data Contributor
+  "8a0f0c08-91a1-4084-bc3d-661d67233fed": { svc: "storage", write: true },   // Storage Queue Data Message Processor
+  "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a": { svc: "storage", write: true },   // Storage Queue Data Message Sender
+  "19e7f393-937e-4f77-808e-94535e297925": { svc: "storage", write: false },  // Storage Queue Data Reader
+  "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3": { svc: "storage", write: true },   // Storage Table Data Contributor
+  "76199698-9eea-4c19-bc75-cec21354c6b6": { svc: "storage", write: false },  // Storage Table Data Reader
+  "69566ab7-960f-475b-8e7c-b3118f30c6bd": { svc: "storage", write: true },   // Storage File Data Privileged Contributor
+  "b8eda974-7b85-4f76-af95-65846b26df6d": { svc: "storage", write: false },  // Storage File Data Privileged Reader
+  "0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb": { svc: "storage", write: true },   // Storage File Data SMB Share Contributor
+  "a7264617-510b-434b-a828-9731dc254ea7": { svc: "storage", write: true },   // Storage File Data SMB Share Elevated Contributor
+  "aba4ae5f-2193-4029-9191-0cb91df5e314": { svc: "storage", write: false },  // Storage File Data SMB Share Reader
+};
+export const usageKey = (principalId: string, roleDefGuid: string, scope: string) => `${principalId}|${roleDefGuid}|${scope}`.toLowerCase();
+
+/** One row per caller id (this identity's client or object id, "" = anyone else) at the queried scope over the window */
+export function roleUsageQuery(svc: "keyVault" | "storage", ids: string[]): string {
+  const list = `dynamic([${[...new Set(ids.map((x) => x.trim().toLowerCase()).filter(isGuid))].map((x) => `"${x}"`).join(",")}])`;
+  const who = `| extend who = iff(appid in (ids), appid, iff(oid in (ids), oid, ""))
+| summarize n = count(), lastSeen = max(TimeGenerated) by who`;
+  if (svc === "keyVault") {
+    return `let ids = ${list};
+union isfuzzy=true
+ (AzureDiagnostics | where ResourceProvider == "MICROSOFT.KEYVAULT" and Category == "AuditEvent"
+   | project TimeGenerated, appid = tolower(tostring(column_ifexists("identity_claim_appid_g", ""))),
+             oid = tolower(tostring(column_ifexists("identity_claim_http_schemas_microsoft_com_identity_claims_objectidentifier_g", "")))),
+ (AZKVAuditLogs | project TimeGenerated, appid = tolower(tostring(Identity.claim.appid)), oid = tolower(tostring(Identity.claim.oid)))
+${who}`;
+  }
+  return `let ids = ${list};
+union isfuzzy=true StorageBlobLogs, StorageFileLogs, StorageQueueLogs, StorageTableLogs
+| extend appid = tolower(tostring(column_ifexists("RequesterAppId", ""))), oid = tolower(tostring(column_ifexists("RequesterObjectId", "")))
+${who}`;
+}
+
+/**
+ * Pure verdict for one identity at one scope: its requests, or none while the log has someone's requests (unused),
+ * or no request by anyone (the log isn't there — unknown, never "unused").
+ */
+export function usageVerdict(rows: Array<{ who?: unknown; n?: unknown; lastSeen?: unknown }>, ids: string[], svc: "keyVault" | "storage", days = USAGE_DAYS): WiRoleUsage {
+  const want = new Set(ids.map((x) => x.toLowerCase()));
+  let total = 0, mine = 0, last: string | undefined;
+  for (const r of rows) {
+    const n = Number(r.n) || 0;
+    total += n;
+    if (want.has(String(r.who ?? "").toLowerCase())) {
+      mine += n;
+      const l = r.lastSeen ? new Date(String(r.lastSeen)).toISOString() : undefined;
+      if (l && (!last || l > last)) last = l;
+    }
+  }
+  if (!total) return { state: "unknown", source: svc, days, logsInScope: 0, reason: "noLogs" };
+  return mine ? { state: "used", source: svc, days, requests: mine, ...(last ? { last } : {}), logsInScope: total } : { state: "unused", source: svc, days, requests: 0, logsInScope: total };
+}
 
 // ── Inputs (collector → builder) ──
 
@@ -103,6 +180,8 @@ export type WiInput = {
   /** Node pool scale sets with their identities; null/absent = not read (status in imds.pools) */
   nodePools?: InvNodePool[] | null;
   imds?: { podAccess: WiImds["podAccess"]; restrictionBlockedBy: string[]; pools: WiImds["pools"]; nodeResourceGroup: string | null };
+  /** Granted vs used per role assignment (usageKey); absent/null = not checked */
+  roleUsage?: Map<string, WiRoleUsage> | null;
   now?: Date;
 };
 
@@ -422,6 +501,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       wildcardActions: r.roleType === "CustomRole" && r.actions.includes("*"),
       conditional: r.hasCondition,
       scope: classifyScope(r.scope, input.subNames),
+      ...(input.roleUsage ? { usage: input.roleUsage.get(usageKey(i.principalId, r.roleDefGuid, r.scope)) ?? { state: "unknown" as const, source: null, days: USAGE_DAYS, reason: "notCovered" as const } } : {}),
     })).sort((a, b) => (a.privileged ? 0 : 1) - (b.privileged ? 0 : 1) || scopeBreadth(b.scope.level) - scopeBreadth(a.scope.level) || (a.roleName < b.roleName ? -1 : 1));
   }
 
@@ -647,6 +727,30 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
               ` The cluster-wide IMDS restriction (preview) can't be enabled while these add-ons are on: ${imdsIn.restrictionBlockedBy.join(", ")}.`)
             : ""),
         kv ? imdsKvQuery(raw.clientId) : undefined);
+    }
+  }
+
+  // ── Granted but not used (WI-18): a data-plane role the resource's access log shows no call for, while it logs others ──
+  if (input.roleUsage) {
+    for (const i of input.identities) {
+      const idn = identityNodes.get(identityIdOf(i));
+      if (!idn) continue;
+      for (const r of byPrincipal.get(i.principalId.toLowerCase()) ?? []) {
+        const u = input.roleUsage.get(usageKey(i.principalId, r.roleDefGuid, r.scope));
+        const def = DATA_ROLES[r.roleDefGuid.toLowerCase()];
+        if (!u || u.state !== "unused" || !def) continue;
+        const sc = classifyScope(r.scope, input.subNames);
+        const role = r.roleName ?? r.roleDefGuid;
+        const log = def.svc === "keyVault" ? L("Key Vault 감사 로그", "Key Vault audit log") : L("Storage 로그", "Storage logs");
+        add("WI-18", def.write ? "warn" : "low", "obs", `${idn.id}:${r.roleDefGuid.toLowerCase()}:${sc.label}`, [idn.id],
+          L(`${idn.name ?? i.name} — ${role}(${sc.label})를 ${u.days}일간 쓰지 않음`, `${idn.name ?? i.name} — ${role} (${sc.label}) not used in ${u.days} days`),
+          L(`같은 범위의 ${log}에 ${u.days}일간 요청 ${u.logsInScope}건이 있는데 이 ID(client …${i.clientId.slice(-4)})의 요청은 0건입니다. 로그는 그 범위로 보낸 것만 셉니다 — 월말 배치처럼 드물게 쓰는 작업, 로그 보존 기간이 ${u.days}일보다 짧은 경우는 놓칠 수 있습니다.`,
+            `The ${log} at the same scope has ${u.logsInScope} requests in ${u.days} days and none from this identity (client …${i.clientId.slice(-4)}). Only logs sent from that scope count — a rare job (month-end batch) or a retention shorter than ${u.days} days can be missed.`),
+          def.write
+            ? L("쓰기 권한입니다 — 쓰는 곳이 없다면 할당을 지우고, 필요하면 읽기 역할로 줄이세요. 지우기 전에 이 ID를 쓰는 워크로드·배치의 주기를 확인하세요.", "A write role — remove the assignment if nothing uses it, or narrow it to a read role. Check the schedule of workloads and jobs that use this identity first.")
+            : L("쓰는 곳이 없다면 할당을 지우세요. 지우기 전에 이 ID를 쓰는 워크로드·배치의 주기를 확인하세요.", "Remove the assignment if nothing uses it. Check the schedule of workloads and jobs that use this identity first."),
+          `az role assignment delete --assignee <principal-id> --role ${r.roleDefGuid.toLowerCase()} --scope <scope>   # ${role} · ${sc.label}`);
+      }
     }
   }
 

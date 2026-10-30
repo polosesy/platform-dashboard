@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import type { IssueState, IssueStatus } from "@aud/types";
 import { Badge, Button, EmptyState, Notice, Panel, SearchInput, Segmented, Select, Stat } from "@/components/ui";
@@ -21,8 +21,13 @@ export type SaveResult = "ok" | "conflict" | string;
  * 통합 위험 › 이슈 목록 — every source's issues in one queue, the team's status beside each. Issues come from the
  * sources (recomputed per load); only the status is stored. Operators change a status; everyone sees it.
  */
-export function IssueQueue({ queue, sources, durable, canWrite, signedIn, onSave }: {
+const TEAM_KEY = "aud.issues.team";
+const NO_TEAM = "__none";
+
+export function IssueQueue({ queue, sources, durable, canWrite, signedIn, onSave, teams }: {
   queue: Queue;
+  /** Team names of the connection's `owners` (file order) */
+  teams: string[];
   sources: Record<IssueSource, SourceState>;
   durable: boolean;
   canWrite: boolean;
@@ -33,13 +38,20 @@ export function IssueQueue({ queue, sources, durable, canWrite, signedIn, onSave
   const [filter, setFilter] = useState<Filter>("active");
   const [source, setSource] = useState<IssueSource | "all">("all");
   const [q, setQ] = useState("");
+  // The reader's team is not known (no directory lookup) — they pick it; remembered in this browser only
+  const [teamPick, setTeam] = useState("all");
+  useEffect(() => { try { const v = localStorage.getItem(TEAM_KEY); if (v) setTeam(v); } catch { /* storage blocked */ } }, []);
+  const pickTeam = (v: string) => { setTeam(v); try { localStorage.setItem(TEAM_KEY, v); } catch { /* storage blocked */ } };
+  // A remembered team that this connection no longer has falls back to all
+  const team = teamPick === NO_TEAM || teams.includes(teamPick) ? teamPick : "all";
   const [open, setOpen] = useState<string | null>(null);
   const base = useId();
   const c = queue.counts;
   const shown = useMemo(() => queue.items.filter((i) =>
     (filter === "all" || (filter === "active" ? i.status === "open" || i.status === "inProgress" : i.status === filter)) &&
     (source === "all" || i.source === source) &&
-    (!q || `${i.title} ${i.target}`.toLowerCase().includes(q.toLowerCase()))), [queue.items, filter, source, q]);
+    (team === "all" || (team === NO_TEAM ? !i.team : i.team === team)) &&
+    (!q || `${i.title} ${i.target}`.toLowerCase().includes(q.toLowerCase()))), [queue.items, filter, source, q, team]);
 
   return (
     <Panel title={t("iq.title")} sub={t("iq.sub")}>
@@ -61,6 +73,10 @@ export function IssueQueue({ queue, sources, durable, canWrite, signedIn, onSave
         <Segmented label={t("iq.filter")} value={filter} onChange={setFilter} items={(["active", "accepted", "resolved", "all"] as Filter[]).map((f) => ({ id: f, label: t(`iq.filter.${f}`) }))} />
         <Select label={t("iq.sourceFilter")} value={source} onChange={(v) => setSource(v as IssueSource | "all")}
           options={[{ value: "all", label: t("iq.allSources") }, ...SOURCES.map((k) => ({ value: k, label: t(`iq.source.${k}`) }))]} />
+        {teams.length ? (
+          <Select label={t("iq.team")} value={team} onChange={pickTeam}
+            options={[{ value: "all", label: t("iq.allTeams") }, ...teams.map((x) => ({ value: x, label: x })), { value: NO_TEAM, label: t("iq.noTeam") }]} />
+        ) : null}
         <SearchInput label={t("iq.search")} value={q} onChange={setQ} placeholder={t("iq.searchHint")} />
       </div>
       {shown.length === 0 ? <EmptyState title={queue.items.length ? t("iq.noMatch") : t("iq.none")} /> : (
@@ -74,7 +90,10 @@ export function IssueQueue({ queue, sources, durable, canWrite, signedIn, onSave
                   <Badge tone={SEV_TONE[i.sev]}>{t(`iq.sev.${i.sev}`)}</Badge>
                   <span className={s.iqMain}>
                     <span className={s.iqTitle} title={i.title}>{i.title}</span>
-                    <span className={s.iqMeta}>{t(`iq.source.${i.source}`)}{i.target ? ` · ${i.target}` : ""}{i.stored?.assignee ? ` · ${t("iq.assignee")}: ${i.stored.assignee}` : ""}</span>
+                    <span className={s.iqMeta}>
+                      {i.team ? <span className={s.iqTeam}>{i.team}</span> : null}
+                      {t(`iq.source.${i.source}`)}{i.target ? ` · ${i.target}` : ""}{i.stored?.assignee ? ` · ${t("iq.assignee")}: ${i.stored.assignee}` : ""}
+                    </span>
                   </span>
                   <span className={s.iqStatus}>
                     <Badge tone={STATUS_TONE[i.status]}>{t(`iq.status.${i.status}`)}</Badge>

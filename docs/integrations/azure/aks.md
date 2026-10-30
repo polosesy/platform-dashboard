@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-29
+last-verified: 2026-10-30
 covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/workloadIdentityCollector.ts]
 ---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)
@@ -244,6 +244,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | WI-14 | 그 네임스페이스에서 다른 주체가 exec·토큰 발급 가능 → 이 Azure ID를 쓸 수 있음 | managed identity best practices — 코드를 실행할 수 있으면 그 ID를 쓴다 |
 | WI-15 | 관리 ID 지역이 FIC 미지원 지역 | considerations |
 | WI-16 | 실행 중인 파드의 주입 상태가 SA 설정과 다름(재시작 필요) | workload-identity-overview — "you must restart the pod" |
+| WI-18 | **받았지만 안 쓰는 권한** — Key Vault·Storage **데이터 역할**(정의 ID로 분류)을 역할 범위의 접근 로그(Key Vault 감사 로그 / Storage Blob·File·Queue·Table 로그, Log Analytics 리소스 중심 조회, 30일)에서 이 ID(client·object ID)의 요청 0건 **그리고** 같은 범위 다른 요청 > 0일 때만. 쓰기 역할(Officer·Contributor·Owner·Administrator) = 주의, 읽기 = 낮음, 근거 `obs`. 로그가 한 건도 없으면·읽을 권한이 없으면·제어 평면 역할(읽기는 Activity Log에 안 남음)·AcrPull은 '확인 불가' — '안 씀'으로 판정하지 않음. 월말 배치·보존 기간이 짧은 경우는 놓칠 수 있다고 설명에 적음 | [RBAC best practices](https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices) — "By limiting roles and scopes, you limit what resources are at risk if the security principal is ever compromised." |
 | WI-17 | 관리 ID가 노드 풀 VMSS에 붙어 있고 파드의 IMDS 접근이 제한되지 않음(또는 확인 불가) → 그 풀의 모든 파드가 워크로드 ID 없이 이 ID를 쓸 수 있음. 심각도: 특권 역할 = 위험, 워크로드 ID로도 쓰이거나 AcrPull 외 역할 = 주의, AcrPull만 = 참고. 노드 리소스 그룹의 ID(AKS가 붙임 — kubelet·추가 기능)는 '떼지 말고 역할 줄이기', 그 밖은 '워크로드 ID로 옮긴 뒤 붙인 출처에서 떼기 → 필요 없는 네임스페이스는 169.254.169.254 송신 차단'. Key Vault 역할이 있으면 감사 로그 확인 KQL(client-id 끝 4자리만) | [imds-restriction](https://learn.microsoft.com/en-us/azure/aks/imds-restriction) — "…by default accessible from all pods running in an AKS cluster." |
 
 **권장**(공식 문서 기준): 워크로드마다 관리 ID를 나누고 업무 역할을 리소스 그룹·리소스 범위로, 같은 관리 ID에 FIC를 만들 때는 순차적으로(동시 생성은 409), 생성 직후 몇 초~몇 분은 `AADSTS70021`이 날 수 있음, 역할 변경은 최대 10분 뒤 반영, 쓰지 않는 FIC(WI-05)는 삭제해 20개 한도를 확보.

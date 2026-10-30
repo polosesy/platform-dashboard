@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-22
+last-verified: 2026-10-30
 covers: [apps/api/src/infra/connectionRegistry.ts, apps/api/src/infra/connectionCredentials.ts]
 ---
 # Azure 연결 설정 — 홈 · 고객 서비스 주체 · Lighthouse
@@ -128,6 +128,7 @@ az deployment sub create --location koreacentral \
 | `tenantName` | 아니요 | 화면에 연결 이름 옆에 보이는 테넌트(디렉터리) 이름. 플랫폼의 읽기 전용 자격 증명으로는 이름을 읽을 수 없어(ARM `/tenants`는 서비스 주체에 이름을 주지 않고, Graph는 `Organization.Read.All`이 필요하며 Lighthouse 위임에는 Graph가 없음) 여기에 적습니다. GUID는 거부. 디렉터리 ID는 끝 4자리만 보이고 전체는 관리자에게만(복사 가능) |
 | `roles` | 아니요 | 이 연결을 쓸 수 있는 플랫폼 역할(기본 전부). 관리자는 항상 포함 |
 | `logAnalyticsWorkspaces` | 아니요 | 이 연결로 쿼리할 작업 영역(customer ID). 목록에 없는 작업 영역은 홈 연결이 읽음 |
+| `owners` | 아니요 | 이 연결의 구독에서 **무엇을 어느 팀이 맡는지** — 보안 › 통합 위험의 이슈 목록에 팀 칩·'팀' 필터. `[{"team": "platform", "namespaces": ["kube-system", "monitor"], "resourceGroups": ["rg-shared-*"]}]` — 정확한 이름(대소문자 무시) 또는 끝 `*` 접두사, **네임스페이스 규칙이 리소스 그룹 규칙보다 먼저**, 같은 종류는 파일 순서로 처음 맞는 팀. 팀 이름만(사람·ID 없음, GUID 거부, 팀 100개·규칙 100개까지). 디렉터리는 조회하지 않음 — '내 팀'은 화면에서 고르고 그 브라우저에만 기억 |
 
 `.env`: `AUD_CONNECTIONS_FILE=config/connections.json`(상대 경로는 저장소 루트 — `.env`가 있는 곳 — 기준) → API 재시작. 시작 로그에 `[auth] … Azure connections: home:platform, custa:lighthouse, custb:servicePrincipal`이 나옵니다. 예전 `AUD_TENANTS_FILE`(`tenants` + `access`)도 그대로 읽힙니다.
 
