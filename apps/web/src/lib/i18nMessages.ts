@@ -1175,6 +1175,10 @@ const CORE: Translations = {
   "sec.alert.instances": { ko: "발생 {n}건", en: "{n} occurrences" },
   "sec.alert.entity": { ko: "침해된 개체", en: "Compromised entity" },
   "sec.alert.portal": { ko: "Defender에서 열기", en: "Open in Defender" },
+  "sec.alert.descHidden": {
+    ko: "Azure Resource Graph가 이 경고의 설명을 가려서 주고(****), Defender 경고 API에서도 읽지 못했습니다. 설명은 아래 'Defender에서 열기'에서 볼 수 있습니다.",
+    en: "Azure Resource Graph returns this alert's description masked (****) and the Defender alerts API did not return it either. Read it via 'Open in Defender' below.",
+  },
   "sec.alert.span": { ko: "처음 {first} · 마지막 {last}", en: "First {first} · last {last}" },
   "sec.scoreNotVisible": { ko: "구독 수준 점수가 보이지 않음 — 구독 Reader 필요", en: "Subscription-level score not visible — needs subscription Reader" },
   "sec.noStandardsVisible": { ko: "보이는 표준 없음 (구독 범위)", en: "No standards visible (subscription scope)" },

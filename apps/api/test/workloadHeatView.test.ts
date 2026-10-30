@@ -124,10 +124,40 @@ test("mosaic: cards sized to their tiles (no empty half cards), never wider than
   const one = v.cardShape(1, 10);
   assert.equal(one.span, Math.ceil((2 + 30 + 16 + 44 + 10) / 4));
   const css = readFileSync(new URL("../../web/src/app/observability/styles.module.css", import.meta.url), "utf8");
-  assert.match(css, /\.hmGroups \{[^}]*grid-auto-rows: 4px;[^}]*column-gap: 10px;[^}]*grid-auto-flow: row dense;/);
+  assert.match(css, /\.hmGroups \{[^}]*grid-auto-rows: 4px;[^}]*column-gap: 10px;/);
+  assert.match(css, /\.hmNs \{[^}]*align-self: stretch; margin-bottom: 10px;/, "a card fills its placed rows; the gap is its margin");
   assert.match(css, /\.hmNsHead \{[^}]*height: 30px;/);
   assert.match(css, /\.hmTile \{[^}]*height: 44px;/);
   assert.match(css, /\.hmGrid \{[^}]*gap: 4px; padding: 8px;/);
+});
+
+test("packMosaic: no overlap, inside the grid, holes beside tall cards filled, one flat bottom edge, deterministic", () => {
+  const cellsOf = (ps: ReturnType<typeof v.packMosaic>) => {
+    const seen = new Set<string>();
+    for (const p of ps) for (let c = p.col; c < p.col + p.cols; c++) for (let r = p.row; r < p.row + p.span; r++) {
+      const k = `${c}:${r}`;
+      assert.ok(!seen.has(k), `overlap at ${k}`);
+      seen.add(k);
+    }
+    return seen;
+  };
+  // The measured stg cluster (2026-10-29): 22 · 35 · 6 · 8 · 2 · 1 · 1 · 1 workloads on 9 tracks
+  const counts = [22, 35, 6, 8, 2, 1, 1, 1];
+  const ps = v.packMosaic(counts, 9);
+  assert.equal(ps.length, counts.length);
+  for (const p of ps) assert.ok(p.col >= 0 && p.cols >= 1 && p.col + p.cols <= 9, JSON.stringify(p));
+  ps.forEach((p, i) => assert.ok(p.cols * Math.floor((p.span * 4 - 10 - 48 + 4) / 48) >= counts[i]!, `card ${i} holds its tiles: ${JSON.stringify(p)}`));
+  const used = cellsOf(ps).size;
+  const bottom = Math.max(...ps.map((p) => p.row + p.span));
+  // Grid auto-flow left a 5-track hole beside argocd and empty columns under small cards; now ≥ 97% of the rectangle is cards
+  assert.ok(used / (9 * bottom) >= 0.97, `filled ${(used / (9 * bottom)).toFixed(3)}`);
+  assert.deepEqual(ps[0], { col: 0, cols: 6, row: 0, span: v.cardShape(22, 9).span }, "the first (problem) namespace stays top-left at its shape");
+  assert.deepEqual(v.packMosaic(counts, 9), ps, "deterministic");
+  // Narrow screens and one namespace
+  assert.deepEqual(v.packMosaic([5], 1), [{ col: 0, cols: 1, row: 0, span: v.cardShape(5, 1).span }]);
+  assert.deepEqual(v.packMosaic([], 6), []);
+  const wide = v.packMosaic([1, 1, 1], 6);
+  assert.equal(wide.reduce((s, p) => s + p.cols, 0), 6, "a single row of small cards spreads over the whole width");
 });
 
 test("log stream: repeated logger timestamp dropped, logback prefix cut to the message, same error grouped ×n, app frames kept", () => {

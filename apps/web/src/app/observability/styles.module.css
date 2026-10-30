@@ -663,13 +663,22 @@
 @media (max-width: 1100px) { .hmLayout[data-open] { grid-template-columns: minmax(0, 1fr); } }
 .hmMain { min-width: 0; }
 .hmPanelWrap { position: sticky; top: var(--sticky-top); max-height: calc(100vh - var(--sticky-top) - 16px); overflow: auto; min-width: 0; overscroll-behavior: contain; }
+/* One panel surface under the mosaic — gaps read as the panel, not the page gradient behind it */
+.hmSurface {
+  /* opaque: the sunken tint over the solid panel (the tint alone is translucent and let the page show through) */
+  border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 10px 0;
+  background: linear-gradient(var(--panel-sunken), var(--panel-sunken)), var(--panel-solid);
+}
+.hmSurface > .hmIdle { margin: 0 0 10px; }
+/* Cards are placed by packMosaic (explicit column / row); a card fills its placed rows — the gap is its bottom margin */
 .hmGroups {
   display: grid; grid-template-columns: repeat(var(--hm-cols, 6), minmax(0, 1fr)); grid-auto-rows: 4px; column-gap: 10px; row-gap: 0;
-  grid-auto-flow: row dense; align-items: start; min-width: 0;
+  min-width: 0;
 }
 .hmEmpty { grid-column: 1 / -1; grid-row: span 30; }
 .hmNs {
-  align-self: start; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
+  align-self: stretch; margin-bottom: 10px; display: flex; flex-direction: column;
+  min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
 }
 .hmNs[data-level="danger"] { border-color: rgba(var(--danger-rgb), 0.45); box-shadow: inset 3px 0 0 var(--danger); }
 .hmNs[data-level="warn"] { border-color: rgba(var(--warning-rgb), 0.5); box-shadow: inset 3px 0 0 var(--warning); }

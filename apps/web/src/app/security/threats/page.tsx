@@ -80,7 +80,8 @@ export default function SecurityThreatsPage() {
                     </button>
                     {isOpen && (
                       <div className={s.alertBody}>
-                        {a0.description ? <p className={s.alertFull}>{a0.description}</p> : null}
+                        {a0.description ? <p className={s.alertFull}>{a0.description}</p>
+                          : a0.descriptionHidden ? <p className={s.dim}>{t("sec.alert.descHidden")}</p> : null}
                         {a0.remediation?.length ? (
                           <>
                             <h4 className={s.alertH}>{t("sec.alert.remediation")}</h4>

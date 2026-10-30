@@ -30,14 +30,19 @@ export function insightLabels(t: TFn) {
     TYPE_LABEL: rec(NODE_TYPES, "ins.type") as Record<string, string>,
     hubbleLabel,
     flowNote,
+    /** "선 8개 모두 RBAC 권한" / "선 6개 — 관측 2 · 권한 3 · 추정 1" — the count is of lines (edges), said so */
     confOf(issue: RiskIssue, cov: HubbleCoverage | null): string {
       const n = tally(issue);
-      const parts = (["obs", "perm", "cfg", "unk"] as const).filter((k) => n[k]).map((k) => `${short[k]} ${n[k]}`);
-      return parts.join(" · ") + (n.obs ? ` · Hubble ${hubbleLabel(cov)}` : "") + (issue.confNote ? ` — ${issue.confNote}` : "");
+      const total = issue.edges.length;
+      const kinds = (["obs", "perm", "cfg", "unk"] as const).filter((k) => n[k]);
+      const head = kinds.length === 1
+        ? t("ins.combos.evAll", { n: total, kind: EVK[kinds[0]!] })
+        : t("ins.combos.evLine", { n: total, parts: kinds.map((k) => `${short[k]} ${n[k]}`).join(" · ") });
+      return head + (n.obs ? ` · Hubble ${hubbleLabel(cov)}` : "") + (issue.confNote ? ` — ${issue.confNote}` : "");
     },
     evidenceOf(issue: RiskIssue): Array<[EvidenceKind | "ev", string]> {
       const n = tally(issue);
-      const auto = (["obs", "perm", "cfg"] as const).filter((k) => n[k]).map((k) => ["ev", `${short[k]} ${n[k]}`] as ["ev", string]);
+      const auto = (["obs", "perm", "cfg"] as const).filter((k) => n[k]).map((k) => ["ev", t("ins.evChip", { kind: short[k], n: n[k] })] as ["ev", string]);
       return [...auto, ...issue.extraEvidence.map(([k, txt]) => [k === "unk" ? "unk" : "ev", txt] as [EvidenceKind | "ev", string])];
     },
   };
@@ -54,6 +59,24 @@ export function tally(issue: RiskIssue): Record<EvidenceKind, number> {
   const t: Record<EvidenceKind, number> = { obs: 0, perm: 0, cfg: 0, unk: 0 };
   for (const e of issue.edges) t[e.ev]++;
   return t;
+}
+
+/**
+ * The issue in four facts, for the line under its title: who (workloads or accounts), what they reach (impact
+ * nodes), where the path can be cut (and how many cuts are safe), and how many links are unverified.
+ */
+export type IssueGlance = { who: number; whoKind: "accounts" | "workloads"; reach: string[]; cuts: number; safe: number; unverified: number; links: number };
+export function issueGlance(issue: RiskIssue): IssueGlance {
+  const refs = new Set(issue.nodes.filter((n) => n.type === "workload").flatMap((n) => n.refs));
+  return {
+    who: issue.members?.length ?? Math.max(1, refs.size),
+    whoKind: issue.members ? "accounts" : "workloads",
+    reach: [...new Set(issue.nodes.filter((n) => n.type === "impact").map((n) => n.label))],
+    cuts: new Set(issue.edges.filter((e) => e.cut).map((e) => e.cut)).size,
+    safe: issue.actions.filter((a) => a.risk === "ok").length,
+    unverified: issue.edges.filter((e) => e.ev === "unk").length,
+    links: issue.edges.length,
+  };
 }
 
 /** Cross-view navigation, implemented by the page. */

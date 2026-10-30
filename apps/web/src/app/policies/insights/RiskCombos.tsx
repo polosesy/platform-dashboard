@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import type { AttackEdge, AttackNode, PolicyFinding, PolicyInsightsResponse, RemediationAction, RiskIssue } from "@aud/types";
 import { useMediaQuery } from "@/lib/useBrowserState";
 import { useI18n } from "@/lib/i18n";
-import { edgeKey, issueNum, type InsightLabels, type InsightsNav, type TFn } from "./model";
+import { edgeKey, issueGlance, issueNum, type InsightLabels, type InsightsNav, type TFn } from "./model";
 import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
 import { AttackGraph, AttackTable, type GraphSel } from "./AttackGraph";
@@ -68,6 +68,47 @@ function ActionRow({ a, checked, onToggle }: { a: RemediationAction; checked: bo
         <span className={styles.muted}>{a.effect === "closed" ? `${t("ins.combos.resolves", { n: a.closes.length })}${a.cuts.length ? ` · ${t("ins.combos.cutsPath")}` : ""}` : a.effect === "exception" ? t("ins.combos.exception") : t("ins.combos.reduces")}</span>
       </div>
     </label>
+  );
+}
+
+/**
+ * Under the path's title: four facts readable in a glance (who · reaches · cuts · evidence), then — for grouped
+ * issues — every member in a folded table (name · grade · permissions · bindings · owner).
+ */
+function IssueGlanceRow({ issue, conf, onOpenRow }: { issue: RiskIssue; conf: string; onOpenRow: (rowId: string) => void }) {
+  const { t } = useI18n();
+  const g = issueGlance(issue);
+  const crit = issue.members?.filter((m) => m.grade === "crit").length ?? 0;
+  return (
+    <>
+      <dl className={styles.glance}>
+        <div><dt>{t("ins.glance.who")}</dt><dd>{t(`ins.glance.${g.whoKind}`, { n: g.who })}{crit && crit < g.who ? <span className={styles.muted}> · {t("ins.glance.critN", { n: crit })}</span> : null}</dd></div>
+        <div><dt>{t("ins.glance.reach")}</dt><dd title={g.reach.join(" · ")}>{g.reach.join(" · ") || "—"}</dd></div>
+        <div><dt>{t("ins.glance.cuts")}</dt><dd>{t("ins.glance.cutsV", { n: g.cuts, safe: g.safe })}</dd></div>
+        <div><dt>{t("ins.glance.evidence")}</dt><dd title={conf}>{conf}{g.unverified ? <span className={styles.glanceUnk}> · {t("ins.glance.unverified", { n: g.unverified })}</span> : null}</dd></div>
+      </dl>
+      {issue.members?.length ? (
+        <details className={styles.members}>
+          <summary>{t("ins.glance.members", { n: issue.members.length })}</summary>
+          <div className={styles.tableWrap}>
+            <table className={styles.tbl} style={{ minWidth: 0 }}>
+              <thead><tr><th>{t("ins.glance.col.name")}</th><th>{t("ins.glance.col.grade")}</th><th>{t("ins.glance.col.perms")}</th><th>{t("ins.glance.col.bindings")}</th><th>{t("ins.glance.col.owner")}</th></tr></thead>
+              <tbody>
+                {issue.members.map((m) => (
+                  <tr key={m.rowId}>
+                    <td><button type="button" className={styles.linkish} onClick={() => onOpenRow(m.rowId)} title={t("ins.combos.openHeat")}>{m.name}</button><div className={styles.muted} style={{ fontSize: 11 }}>{m.namespace}</div></td>
+                    <td><Pill tone={m.grade}>{t(`ins.sev.${m.grade}`)}</Pill></td>
+                    <td>{m.permissions.join(" · ")}</td>
+                    <td className={styles.mono} style={{ fontSize: 11 }}>{m.bindings.join(", ")}</td>
+                    <td className={styles.muted} style={{ fontSize: 12 }}>{m.owner}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ) : null}
+    </>
   );
 }
 
@@ -287,7 +328,6 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
         <div className={styles.panelH}>
           <h3>{t("ins.combos.pathTitle")}</h3>
           <div className={styles.ctrls}>
-            <span className={styles.sub}>{t("ins.combos.pathEvidence")}: {confOf(issue, data.network.coverage)}</span>
             <div className={styles.toggle}>
               <button aria-pressed={view === "graph"} onClick={() => setViewChoice("graph")}>{t("ins.combos.graph")}</button>
               <button aria-pressed={view === "table"} onClick={() => setViewChoice("table")}>{t("ins.combos.table")}</button>
@@ -295,7 +335,8 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
           </div>
         </div>
         <div className={styles.panelB}>
-          <div className={styles.cardTitle} style={{ fontSize: 13.5, marginBottom: 6, WebkitLineClamp: "unset" }}>{num(issue.id)} {issue.title}</div>
+          <div className={styles.issueTitle}>{num(issue.id)} {issue.title}</div>
+          <IssueGlanceRow issue={issue} conf={confOf(issue, data.network.coverage)} onOpenRow={nav.openHeatRow} />
           {view === "graph" ? (
             <div className={styles.graphWrap}>
               <AttackGraph issue={issue} sel={sel} cutDone={cutDone} onPick={pick} onEscape={closeDetail} register={register} />

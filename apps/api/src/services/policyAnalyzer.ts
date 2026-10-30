@@ -121,6 +121,8 @@ export type PolicyInventory = {
   namespaces: Array<{ name: string; labels: Record<string, string> }>;
   pods: Array<{
     namespace: string; name: string; labels: Record<string, string>; phase?: string; hostNetwork?: boolean;
+    /** Node the pod is scheduled on (node pool via nodes[].pool) */
+    nodeName?: string;
     serviceAccountName?: string;
     /** Workload identity webhook traces: AZURE_FEDERATED_TOKEN_FILE present (name only), AZURE_CLIENT_ID / AZURE_TENANT_ID GUIDs */
     wi?: { tokenFile: boolean; clientId?: string; tenantId?: string };

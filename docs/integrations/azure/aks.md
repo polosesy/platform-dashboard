@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-27
-covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts]
+last-verified: 2026-10-29
+covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/workloadIdentityCollector.ts]
 ---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)
 
@@ -214,8 +214,16 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 
 파드 → ServiceAccount → 페더레이션 자격 증명(FIC) → 사용자 할당 관리 ID → Azure 역할 할당을 한 흐름도로 보여 줍니다(`GET /api/kubernetes/policies/workload-identity`, 탭을 열 때만 읽음).
 
+**워크로드 ID가 아닌 길 — 노드에 붙은 관리 ID(IMDS)**: 관리 ID가 노드 풀 VMSS에 붙어 있으면, 그 노드의 파드는 워크로드 ID 설정(SA 주석·use 라벨·FIC) 없이도 IMDS(`169.254.169.254`)에 client-id를 주고 토큰을 받을 수 있습니다. 공식 문서: "The IMDS REST API is available at a well-known, nonroutable IP address (169.254.169.254) that is by default accessible from all pods running in an AKS cluster." ([imds-restriction](https://learn.microsoft.com/en-us/azure/aks/imds-restriction)). 그래서 이런 앱은 워크로드 ID 흐름도에 나타나지 않습니다 — 화면은
+- 흐름도 '토큰 경로' 열에 **노드 풀 (IMDS)** 카드(주황 점선 → 관리 ID). 워크로드와는 잇지 않습니다(구성상 '쓸 수 있음'일 뿐, 어느 워크로드가 쓰는지는 Azure 리소스 로그에만 있고 호출 IP가 노드 주소라 특정 불가).
+- 아래 **워크로드 ID를 쓰지 않는 워크로드** 표: 네임스페이스 칩(미사용 수 · 워크로드 ID n), 워크로드·SA·실행 노드 풀·IMDS로 받을 수 있는 관리 ID·Secret 참조 여부.
+- 머리 칩 **파드 → IMDS**: 허용(`podLinkLocalAccess: IMDS`, 기본값)·제한됨(`None`)·?(못 읽음 — '허용'으로 추측하지 않음).
+
+예(2026-10-29 실측, 한 stg 클러스터): 한 네임스페이스의 워크로드 22개 중 2개만 워크로드 ID(FIC)를 쓰고, 나머지 20개(Spring 앱)는 같은 관리 ID를 **노드 풀 VMSS를 통해 IMDS로** 받아 Key Vault를 읽었습니다(Key Vault 감사 로그: 그 ID의 호출 중 `az-sp-kv`·`azsdk-java-…` 클라이언트 5만여 건 / 하루, CSI 드라이버 `azsdk-go-azsecrets`는 FIC 경로). 그 네임스페이스의 기준 CNP가 `169.254.169.254/32` 송신을 모든 파드에 명시적으로 허용했고, 클러스터에 Container Insights·Azure Policy 추가 기능이 켜져 있어 클러스터 IMDS 제한(미리 보기)은 켤 수 없는 상태였습니다.
+
 - **읽는 것**: ServiceAccount 목록(주석 중 `azure.workload.identity/client-id`·`tenant-id`·`service-account-token-expiration`만 보관), 파드의 웹후크 흔적(환경 변수 `AZURE_FEDERATED_TOKEN_FILE`은 이름만, `AZURE_CLIENT_ID`·`AZURE_TENANT_ID`는 GUID 형식만 — 다른 환경 변수는 이름·값 모두 버림), 클러스터 ARM의 `oidcIssuerProfile`·`securityProfile.workloadIdentity`, Resource Graph로 client-id → 관리 ID와 `authorizationresources` 역할 할당(`AtScopeAboveAndBelow`, PIM 적격 할당 제외), 관리 ID마다 ARM `federatedIdentityCredentials`(api-version 2024-11-30, 5분 캐시 — 리소스당 GET 0.5 rps 제한).
-- **권한**: 클러스터 안은 `aud-dashboard-reader`(serviceaccounts list 추가 — 갱신 전에는 파드 환경 변수로 연결하고 'SA 없음' 판정은 하지 않음), Azure는 **Reader**(`*/read`로 FIC·관리 ID·역할 할당 읽기 — 읽을 권한이 있는 범위의 할당만 보임).
+- **IMDS 경로를 위해 더 읽는 것**: 클러스터 ARM을 미리 보기 api-version(`2025-10-02-preview` — GA 버전은 `networkProfile.podLinkLocalAccess`를 돌려주지 않음)으로 한 번 더(`podLinkLocalAccess`·`nodeResourceGroup`·켜진 추가 기능 — IMDS 제한을 막는 것: Container Insights·Azure Policy·AGIC·가상 노드·HTTP 응용 프로그램 라우팅·응용 프로그램 라우팅·비용 분석, 클러스터 확장(Flux 등)은 안 읽음 — 이 호출이 20초 안에 답하지 않거나 실패하면 'IMDS 접근 ?'만 남고 노드 리소스 그룹은 GA 클러스터 설정에서 가져와 VMSS는 계속 읽음), Resource Graph로 노드 리소스 그룹의 VMSS(풀 = 태그 `aks-managed-poolName`, 사용자 할당 ID의 client·principal), 파드의 `nodeName`(노드 → 풀), 네트워크 정책 중 `169.254.169.254`를 명시적으로 허용하는 것(`/16` 이상 좁은 CIDR만 — `0.0.0.0/0`은 명시적 허용이 아님, `except`로 뺀 것은 제외). 5분 캐시.
+- **권한**: 클러스터 안은 `aud-dashboard-reader`(serviceaccounts list 추가 — 갱신 전에는 파드 환경 변수로 연결하고 'SA 없음' 판정은 하지 않음), Azure는 **Reader**(`*/read`로 FIC·관리 ID·역할 할당 읽기 — 읽을 권한이 있는 범위의 할당만 보임). IMDS 경로는 **노드 리소스 그룹(`MC_…`) Reader**가 있어야 보입니다(없으면 '일부를 읽지 못함'에 표시 — Resource Graph는 못 읽는 리소스 그룹에 빈 결과를 주므로 0개로 읽지 않음).
 - **판정**: 일치는 바이트 단위(문서: issuer·subject·audience는 "case-sensitively match") — 공백·끝 슬래시·대소문자만 다른 값은 일치가 아니라 WI-04. client-id가 관리 ID로 안 찾아지면 앱 등록인지 다른 구독 관리 ID인지 구분하지 않고 '미확인'(Graph 권한 없음).
 - **응답에 없는 것**: 구독 ID·principalId·관리 ID ARM ID·전체 GUID(client/tenant ID는 끝 4자리, 발급자 URL은 마스킹).
 
@@ -236,5 +244,6 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 | WI-14 | 그 네임스페이스에서 다른 주체가 exec·토큰 발급 가능 → 이 Azure ID를 쓸 수 있음 | managed identity best practices — 코드를 실행할 수 있으면 그 ID를 쓴다 |
 | WI-15 | 관리 ID 지역이 FIC 미지원 지역 | considerations |
 | WI-16 | 실행 중인 파드의 주입 상태가 SA 설정과 다름(재시작 필요) | workload-identity-overview — "you must restart the pod" |
+| WI-17 | 관리 ID가 노드 풀 VMSS에 붙어 있고 파드의 IMDS 접근이 제한되지 않음(또는 확인 불가) → 그 풀의 모든 파드가 워크로드 ID 없이 이 ID를 쓸 수 있음. 심각도: 특권 역할 = 위험, 워크로드 ID로도 쓰이거나 AcrPull 외 역할 = 주의, AcrPull만 = 참고. 노드 리소스 그룹의 ID(AKS가 붙임 — kubelet·추가 기능)는 '떼지 말고 역할 줄이기', 그 밖은 '워크로드 ID로 옮긴 뒤 붙인 출처에서 떼기 → 필요 없는 네임스페이스는 169.254.169.254 송신 차단'. Key Vault 역할이 있으면 감사 로그 확인 KQL(client-id 끝 4자리만) | [imds-restriction](https://learn.microsoft.com/en-us/azure/aks/imds-restriction) — "…by default accessible from all pods running in an AKS cluster." |
 
 **권장**(공식 문서 기준): 워크로드마다 관리 ID를 나누고 업무 역할을 리소스 그룹·리소스 범위로, 같은 관리 ID에 FIC를 만들 때는 순차적으로(동시 생성은 409), 생성 직후 몇 초~몇 분은 `AADSTS70021`이 날 수 있음, 역할 변경은 최대 10분 뒤 반영, 쓰지 않는 FIC(WI-05)는 삭제해 20개 한도를 확보.

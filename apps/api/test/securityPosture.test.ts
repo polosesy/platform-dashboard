@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   domainOf,
+  isMaskedText,
   mapAlerts,
+  unmaskAlertRows,
   mapControls,
   mapPlans,
   mapRecommendations,
@@ -84,6 +86,47 @@ test("mapAlerts: newest first, resource names from ResourceIdentifiers", () => {
   assert.deepEqual(alerts.map((a) => a.title), ["New", "Old"]);
   assert.deepEqual(alerts[1]!.resources, [{ name: "vm-01", type: "virtualMachines", resourceGroup: "rg-app", armType: "microsoft.compute/virtualmachines" }]);
   assert.equal(alerts[0]!.id, "2");
+});
+
+test("Resource Graph masked alert fields (****) are never shown — filled from the Defender Alerts API when it returns them", async () => {
+  const STARS = "*".repeat(160);
+  const rows = [
+    { id: `/subscriptions/${SUB}/providers/Microsoft.Security/locations/eastus2/alerts/AbC-1`, dn: "Access to kubelet kubeconfig file detected", sev: "Informational", t: "2026-10-02T00:00:00Z",
+      dsc: STARS, ce: STARS, ent: STARS, rem: ["Determine whether the pod is a scanner."] },
+    { id: `/subscriptions/${SUB}/providers/Microsoft.Security/locations/eastus2/alerts/gone-2`, dn: "Sensitive mount", sev: "Informational", t: "2026-10-01T00:00:00Z", dsc: STARS, ce: STARS },
+  ];
+  // Without the alerts API: no asterisks anywhere, the alert says the description is hidden
+  const masked = mapAlerts(rows);
+  assert.ok(!JSON.stringify(masked).includes("***"));
+  assert.deepEqual(masked.map((a) => [a.description, a.descriptionHidden, a.entity]), [["", true, undefined], ["", true, undefined]]);
+  assert.deepEqual(masked[0]!.remediation, ["Determine whether the pod is a scanner."]);
+
+  const urls: string[] = [];
+  const arm = {
+    fetchJson: async <T>(url: string): Promise<T> => {
+      urls.push(url);
+      if (!url.includes("skiptoken")) return { value: [{ name: "other", properties: { description: "x" } }], nextLink: `https://management.azure.com/subscriptions/${SUB}/providers/Microsoft.Security/alerts?api-version=2022-01-01&$skiptoken=2` } as T;
+      return { value: [{ name: "abc-1", properties: { description: "Access to the kubeconfig file on the host.", compromisedEntity: "aks-node", entities: [{ type: "container", name: "debugger" }],
+        extendedProperties: { "Suspicious Command Line": "cat /var/lib/kubelet/kubeconfig" } } }] } as T;
+    },
+  };
+  const out = mapAlerts(await unmaskAlertRows(arm, [SUB], rows));
+  assert.equal(urls.length, 2, "follows nextLink until found");
+  assert.equal(out[0]!.description, "Access to the kubeconfig file on the host.");
+  assert.equal(out[0]!.descriptionHidden, undefined);
+  assert.deepEqual(out[0]!.k8s, { container: "debugger" });
+  assert.equal(out[1]!.descriptionHidden, true, "an alert the API does not return stays hidden");
+  assert.ok(!JSON.stringify(out).includes("cat /var/lib"), "extended properties (command lines) are not read");
+
+  // The alerts API failing leaves the rows as they were — never an error for the page
+  const failing = { fetchJson: async () => { throw new Error("ARM 403: AuthorizationFailed"); } };
+  assert.deepEqual(await unmaskAlertRows(failing, [SUB], rows), rows);
+  // Nothing masked → no call
+  let called = 0;
+  await unmaskAlertRows({ fetchJson: async <T>() => { called++; return {} as T; } }, [SUB], [{ id: "/a/alerts/x", dsc: "plain" }]);
+  assert.equal(called, 0);
+  assert.equal(isMaskedText("***"), true);
+  assert.equal(isMaskedText("a * b"), false);
 });
 
 test("ownerResourceId resolves the top-level owner of an ip configuration", () => {

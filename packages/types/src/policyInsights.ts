@@ -12,8 +12,42 @@ export type EvidenceKind = "obs" | "perm" | "cfg" | "unk";
 export type RiskWeight = "crit" | "warn" | "low";
 
 export type RiskFactorKey =
-  | "exposure" | "root" | "privEsc" | "host" | "automount" | "highRbac"
+  | "exposure" | "vuln" | "root" | "privEsc" | "host" | "automount" | "highRbac"
   | "secret" | "noIngress" | "noEgress" | "extEgress" | "psa";
+
+// ── Image vulnerabilities (the entry point of an attack path) ──
+
+export type VulnSeverity = "critical" | "high" | "medium" | "low" | "unknown";
+/**
+ * Unresolved vulnerabilities of one running image. `source`: Defender for Containers (registry / running-image
+ * assessment) or the SBOM path (a known open-source image at its exact tag → OSV, CVE.org, CISA KEV). Images that
+ * neither source covers have no entry — "not scanned", never "clean".
+ */
+export type ImageVuln = {
+  image: string;
+  source: "defender" | "sbom";
+  /** How the scan result was tied to this pod's image: digest, tag, or the SBOM module version */
+  basis: "digest" | "tag" | "version";
+  counts: Record<Exclude<VulnSeverity, "unknown">, number>;
+  /** Strongest exploitation signal: CISA KEV > CVE.org SSVC active > proof of concept / Defender exploit published */
+  exploited: "kev" | "active" | "poc" | null;
+  /** Findings with a fixed version */
+  fixable: number;
+  /** Worst first, at most 5 */
+  top: Array<{ id: string; cve: string | null; severity: VulnSeverity; exploited: "kev" | "active" | "poc" | null; pkg: string; version: string; fixed: string | null; url: string | null }>;
+};
+export type VulnCoverage = {
+  /** Distinct images running in the cluster */
+  images: number;
+  /** Images with a result from either source */
+  scanned: number;
+  defender: "ok" | "noData" | "failed";
+  /** Images the SBOM path could map to a known project at an exact version */
+  sbomMapped: number;
+  sbom: "ok" | "disabled" | "failed";
+  /** Lookups still running — the next load fills them */
+  pending: number;
+};
 
 export type RiskFactorDef = {
   key: RiskFactorKey;
@@ -193,12 +227,20 @@ export type KbomItem = {
   managed: boolean;
   category: string;
   flags: Array<{ key: "drift" | "snapshot" | "public"; label: string }>;
+  /** Worst vulnerability result among this repo's running images (absent = not scanned) */
+  vuln?: { counts: ImageVuln["counts"]; exploited: ImageVuln["exploited"]; source: ImageVuln["source"] };
 };
 
 export type Kbom = {
   platform: Array<{ label: string; value: string; note: string }>;
   items: KbomItem[];
-  summary: { images: number; registries: string[]; drift: number; snapshot: number; publicPull: number; digestPinned: number };
+  summary: {
+    images: number; registries: string[]; drift: number; snapshot: number; publicPull: number; digestPinned: number;
+    /** Repos with a critical/high or exploited finding — null when no vulnerability source was read */
+    vulnerable?: number | null;
+    /** Repos with any scan result */
+    scanned?: number;
+  };
 };
 
 // ── Risk combinations (issues) with an evidence-graded attack path ──
@@ -254,6 +296,11 @@ export type RiskIssue = {
   /** Evidence chips that are not edge counts (e.g. "Azure 리소스 매칭 2", "? 진입 미확인") */
   extraEvidence: Array<[EvidenceKind, string]>;
   confNote?: string;
+  /**
+   * Every workload the issue is about, riskiest first (grouped issues — standing privilege). The title stays one line;
+   * the graph may fold the tail into a "+n" node, this list never does.
+   */
+  members?: Array<{ rowId: string; name: string; namespace: string; owner: string; grade: "crit" | "warn"; permissions: string[]; bindings: string[] }>;
   nodes: AttackNode[];
   edges: AttackEdge[];
   actions: RemediationAction[];
@@ -270,6 +317,8 @@ export type PolicyInsightsResponse = {
   network: NetworkInsight;
   containment: ClusterContainment;
   kbom: Kbom;
+  /** Image vulnerabilities by image reference + what was covered; null = not collected (feature off / failed) */
+  vulns?: { byImage: ImageVuln[]; coverage: VulnCoverage } | null;
   /** Sources that could not be read — each degrades its section only */
   gaps: string[];
 };

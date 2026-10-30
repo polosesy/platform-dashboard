@@ -284,6 +284,7 @@ export async function collectPolicyInventory(
       labels: labelsOf(p.metadata),
       phase: p.status?.phase,
       hostNetwork: p.spec?.hostNetwork === true,
+      ...(p.spec?.nodeName ? { nodeName: p.spec.nodeName } : {}),
       ...(p.spec?.serviceAccountName ? { serviceAccountName: p.spec.serviceAccountName } : {}),
       ...wiTraces(p.spec?.containers ?? []),
     })),

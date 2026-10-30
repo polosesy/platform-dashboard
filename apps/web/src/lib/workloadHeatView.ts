@@ -189,8 +189,62 @@ export function cardShape(n: number, avail: number): { cols: number; rows: numbe
     if (waste < best.waste || (waste === best.waste && dist < best.dist)) best = { cols, waste, dist };
   }
   const rows = Math.ceil(count / best.cols);
+  return { cols: best.cols, rows, span: spanOf(rows) };
+}
+
+/** Grid rows (of MOSAIC.unit) a card with `rows` tile rows takes, including the gap below it */
+function spanOf(rows: number): number {
   const h = MOSAIC.border * 2 + MOSAIC.head + MOSAIC.pad * 2 + rows * MOSAIC.tileH + (rows - 1) * MOSAIC.tileGap;
-  return { cols: best.cols, rows, span: Math.ceil((h + MOSAIC.gap) / MOSAIC.unit) };
+  return Math.ceil((h + MOSAIC.gap) / MOSAIC.unit);
+}
+
+/** A card's place on the mosaic grid: columns in tile tracks, rows in MOSAIC.unit (0-based) */
+export type MosaicPlace = { col: number; cols: number; row: number; span: number };
+
+/**
+ * Places the namespace cards (in display order — problems first) so the mosaic is one filled rectangle:
+ * 1. bottom-left: each card at the highest, then leftmost free spot for its preferred width (`cardShape`); a
+ *    narrower or wider shape is taken only when it fits higher up (a hole beside a tall card) — never thinner
+ *    than half the preferred width;
+ * 2. fill: a card grows right into columns free for its whole height (its tiles reflow into them), then down to the
+ *    next card or the mosaic's bottom edge — the space stays inside a card instead of showing the page behind.
+ * Deterministic; `grid-auto-flow: dense` could only move whole cards, never resize one into a hole.
+ */
+export function packMosaic(counts: number[], columns: number): MosaicPlace[] {
+  const C = Math.max(1, columns);
+  const placed: MosaicPlace[] = [];
+  const hits = (p: MosaicPlace, q: MosaicPlace) => p.col < q.col + q.cols && q.col < p.col + p.cols && p.row < q.row + q.span && q.row < p.row + p.span;
+  const free = (p: MosaicPlace, skip?: MosaicPlace) => placed.every((q) => q === skip || !hits(p, q));
+  /** Highest, then leftmost spot for a w × span card — the top is 0 or the bottom of a placed card */
+  const spot = (w: number, span: number): MosaicPlace | null => {
+    const tops = [...new Set([0, ...placed.map((q) => q.row + q.span)])].sort((a, b) => a - b);
+    for (const row of tops) {
+      for (let col = 0; col + w <= C; col++) {
+        const p = { col, cols: w, row, span };
+        if (free(p)) return p;
+      }
+    }
+    return null;
+  };
+  for (const n of counts) {
+    const count = Math.max(1, n);
+    const pref = cardShape(count, C).cols;
+    let best = spot(pref, spanOf(Math.ceil(count / pref)))!;
+    for (let w = Math.max(1, Math.ceil(pref / 2)); w <= Math.min(C, count); w++) {
+      if (w === pref) continue;
+      const p = spot(w, spanOf(Math.ceil(count / w)));
+      if (p && (p.row < best.row || (p.row === best.row && Math.abs(w - pref) < Math.abs(best.cols - pref)))) best = p;
+    }
+    placed.push(best);
+  }
+  const bottom = Math.max(0, ...placed.map((q) => q.row + q.span));
+  for (const p of placed) {
+    while (p.col + p.cols < C && free({ ...p, col: p.col + p.cols, cols: 1 }, p)) p.cols++;
+  }
+  for (const p of placed) {
+    while (p.row + p.span < bottom && free({ ...p, row: p.row + p.span, span: 1 }, p)) p.span++;
+  }
+  return placed;
 }
 
 // ── Cluster at a glance (the band above the heatmap — Datadog's Kubernetes overview pattern) ──

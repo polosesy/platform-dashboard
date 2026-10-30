@@ -54,6 +54,8 @@ export type PostureAlert = {
   intent?: string;
   detectedAt: string;
   description: string;
+  /** Resource Graph masked the description ("****") and the Defender Alerts API did not return it — read it in the portal */
+  descriptionHidden?: boolean;
   resources: PostureResourceRef[];
   /** Defender's remediation steps (plain text) */
   remediation?: string[];

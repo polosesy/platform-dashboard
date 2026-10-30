@@ -346,6 +346,7 @@ export const PLATFORM_T: Translations = {
   "feat.urgentVulnerabilities.without.k8sRead": { ko: "없으면: 클러스터 이미지 목록을 읽지 못함", en: "Without it: the cluster's image list can't be read" },
   "feat.aksSecurityCheck.without.inventory": { ko: "없으면: Azure 리소스 매칭이 비어 있음", en: "Without it: the Azure resource matching is empty" },
   "feat.aksSecurityCheck.without.hubbleExec": { ko: "없으면: 관측된 네트워크 흐름 근거 없음 — 구성 기준만", en: "Without it: no observed network flows — configuration evidence only" },
+  "feat.aksSecurityCheck.without.security": { ko: "없으면: 이미지 취약성은 알려진 오픈소스 이미지의 버전 조회(OSV)만 — Defender 스캔 결과 없이 공격 경로 진입점이 대부분 '미확인'", en: "Without it: image vulnerabilities come only from version lookups of known open-source images (OSV) — no Defender scan results, so most attack-path entries stay 'unknown'" },
   "perm.inventory.why": { ko: "Resource Graph·ARM 읽기 — 리소스 목록과 구성", en: "Resource Graph and ARM reads — inventory and configuration" },
   "perm.metrics.why": { ko: "Azure Monitor 메트릭·알림 규칙·Resource Health", en: "Azure Monitor metrics, alert rules, Resource Health" },
   "perm.logs.why": { ko: "Log Analytics KQL — Traffic Analytics·Container Insights·접근 로그", en: "Log Analytics KQL — Traffic Analytics, Container Insights, access logs" },

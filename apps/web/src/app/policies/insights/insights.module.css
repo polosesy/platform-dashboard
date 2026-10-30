@@ -186,6 +186,16 @@
 .card[data-closed="true"] { opacity: 0.55; }
 .cardTop { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cardNum { font-family: var(--font-geist-mono, monospace); font-size: 12px; color: var(--muted); }
+/* Path header: one-line title → four facts (who · reaches · cuts · evidence) → folded member table */
+.issueTitle { font-size: 14.5px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }
+.glance { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 8px; }
+@media (max-width: 900px) { .glance { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.glance > div { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; background: var(--surface-2); }
+.glance dt { font-size: 11px; font-weight: 600; color: var(--muted); }
+.glance dd { margin: 2px 0 0; font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glanceUnk { color: var(--unk); font-weight: 600; }
+.members { margin: 0 0 10px; font-size: 12.5px; }
+.members > summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 2px 0 6px; }
 .cardTitle { font-size: 14px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .cardMeta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 0; }
 .cardMeta > * { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -318,10 +328,8 @@
 .mdot[data-k="cond"] { border: 1.5px dashed var(--faint); }
 
 /* ── KBOM ── */
-.kbSum { display: flex; gap: 8px; flex-wrap: wrap; }
-.kbStat { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; background: var(--surface-2); font-size: 12px; color: var(--muted); }
-.kbStat b { display: block; font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
-.kbStat[data-warn="true"] b { color: var(--warnc); }
+/* KPI cards: one grid, every card the same width and height (UI kit Stat — label · value · reason) */
+.kbSum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); grid-auto-rows: 1fr; gap: 8px; }
 .kbPlat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 900px) { .kbPlat { grid-template-columns: minmax(0, 1fr); } }
 .kbPlat > div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 12px; }
@@ -370,6 +378,7 @@
 .wiEdge[data-kind="annotatedOnly"] { stroke: var(--faint); stroke-dasharray: 4 4; }
 .wiEdge[data-kind="assigned"] { stroke: var(--edge-perm); stroke-dasharray: 6 3; }
 .wiEdge[data-kind="parent"] { stroke: var(--n-credential); }
+.wiEdge[data-kind="imds"] { stroke: var(--warnc); stroke-dasharray: 2 4; stroke-width: 2; }
 .wiEdge[data-dim] { opacity: 0.15; }
 .wiColHead {
   position: absolute; top: 0; height: 28px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--muted);
@@ -383,6 +392,7 @@
 .wiCard[data-kind="workload"] { border-left-color: var(--n-workload); }
 .wiCard[data-kind="sa"] { border-left-color: var(--n-identity); }
 .wiCard[data-kind="fic"] { border-left-color: var(--n-credential); }
+.wiCard[data-kind="pool"] { border-left-color: var(--warnc); border-style: dashed; border-left-style: solid; }
 .wiCard[data-kind="identity"] { border-left-color: var(--n-azure); }
 .wiCard[data-kind="role"] { border-left-color: var(--n-permission); }
 .wiCard[data-sev="crit"] { box-shadow: 0 0 0 2px var(--crit); }
@@ -409,3 +419,12 @@
 .wiLegend i[data-kind="federated"] { border-top-color: var(--n-identity); }
 .wiLegend i[data-kind="annotatedOnly"] { border-top-style: dashed; border-top-color: var(--faint); }
 .wiLegend i[data-kind="assigned"] { border-top-style: dashed; border-top-color: var(--edge-perm); }
+.wiLegend i[data-kind="imds"] { border-top-style: dotted; border-top-color: var(--warnc); }
+.wiOther { display: grid; gap: 8px; }
+.wiOther > summary { cursor: pointer; list-style-position: outside; }
+.wiOther > summary > h4 { display: inline; }
+.wiNsChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wiNsChip { border: 1px solid var(--line); background: var(--surface); color: inherit; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.wiNsChip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.wiOtherBox { max-height: 420px; overflow-y: auto; min-width: 0; }
+.wiImdsIds { color: var(--warnc); }

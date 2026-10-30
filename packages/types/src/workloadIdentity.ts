@@ -7,7 +7,7 @@ import type { EvidenceKind, RbacRiskKey } from "./policyInsights.js";
 
 export type WiRuleId =
   | "WI-01" | "WI-02" | "WI-03" | "WI-04" | "WI-05" | "WI-06" | "WI-07" | "WI-08"
-  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16";
+  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16" | "WI-17";
 export type WiSeverity = "crit" | "warn" | "low" | "info";
 export type WiScopeLevel = "root" | "managementGroup" | "subscription" | "resourceGroup" | "resource";
 /** Display only — never an ARM id or a subscription GUID */
@@ -109,7 +109,54 @@ export type WiIdentity = {
   };
   roles: WiRoleAssignment[];
   rolesStatus: "ok" | "error" | "notListed";
-  scanned: "annotated" | "subscriptionScan";
+  /** annotated = an SA or pod names it · subscriptionScan = found by the optional scan · nodePool = only attached to a node pool's VMSS */
+  scanned: "annotated" | "subscriptionScan" | "nodePool";
+  /** Node pools (WiNodePool ids) whose scale set carries this identity — reachable through IMDS without workload identity */
+  pools?: string[];
+};
+
+/**
+ * A node pool's scale set and the user-assigned identities attached to it. Any pod on those nodes that can reach IMDS
+ * (169.254.169.254) can get a token for any of them by client ID — configuration ("can"), not observed use.
+ */
+export type WiNodePool = {
+  id: string;
+  name: string;
+  identityIds: string[];
+  nodes: number;
+  /** Non-terminated workloads with pods on this pool (hostNetwork pods reach IMDS even with the restriction on) */
+  workloads: number;
+  /** …of which run without workload identity (no use label, no token injected) */
+  withoutWi: number;
+  namespaces: Array<{ namespace: string; workloads: number; withoutWi: number }>;
+};
+
+/** Can pods reach IMDS? Cluster setting (AKS networkProfile.podLinkLocalAccess, preview API) + explicit allow policies */
+export type WiImds = {
+  /** allowed = podLinkLocalAccess IMDS (the default) · restricted = None · null = not readable */
+  podAccess: "allowed" | "restricted" | null;
+  /** Enabled add-ons that the IMDS restriction (preview) doesn't support — it can't be turned on while they are */
+  restrictionBlockedBy: string[];
+  /** Network policies that explicitly allow egress to 169.254.169.254 */
+  allowPolicies: Array<{ kind: "NetworkPolicy" | "CiliumNetworkPolicy" | "CiliumClusterwideNetworkPolicy"; namespace?: string; name: string; selectsAll: boolean }>;
+  /** Node pool scale sets (Resource Graph, node resource group) */
+  pools: "ok" | "forbidden" | "error" | "notRead";
+};
+
+/** A workload that doesn't use workload identity (shown so a namespace's silence is explained, never guessed) */
+export type WiOtherWorkload = {
+  id: string;
+  namespace: string;
+  name: string;
+  kind: string;
+  pods: number;
+  managed: boolean;
+  serviceAccount: string;
+  /** Node pools its running pods are on (WiNodePool ids) */
+  pools: string[];
+  hostNetwork: boolean;
+  /** Pod template references a Secret (volume, envFrom, secretKeyRef) — names never collected */
+  usesSecrets: boolean;
 };
 
 export type WiFinding = {
@@ -136,6 +183,9 @@ export type WorkloadIdentityResponse = {
   fics: WiFic[];
   identities: WiIdentity[];
   findings: WiFinding[];
+  nodePools: WiNodePool[];
+  imds: WiImds;
+  otherWorkloads: WiOtherWorkload[];
   coverage: {
     serviceAccounts: "ok" | "forbidden" | "error";
     identitiesResolved: number;

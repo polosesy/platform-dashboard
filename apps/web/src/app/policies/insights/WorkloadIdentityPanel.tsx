@@ -1,16 +1,19 @@
 "use client";
 
 // AKS 보안 점검 › ID·권한 › 워크로드 ID — who in the cluster becomes which Azure identity, with what rights:
-// workloads → ServiceAccount → federated credential → managed identity (n/20 credentials) → Azure roles.
-// Findings WI-01…16 (API services/workloadIdentity.ts) each cite the official document. Unknown is grey and dashed,
-// never coloured as risk. The diagram's columns follow the container width — no sideways scrolling.
+// workloads → ServiceAccount → federated credential → managed identity (n/20 credentials) → Azure roles, plus the
+// IMDS path: a node pool whose scale set carries the identity (any pod on it can get the token without workload
+// identity — configuration, never drawn to a workload as use). Workloads without workload identity are listed per
+// namespace so a namespace missing from the map is explained. Findings WI-01…17 (API services/workloadIdentity.ts)
+// each cite the official document. Unknown is grey and dashed, never coloured as risk. The diagram's columns follow
+// the container width — no sideways scrolling.
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { WiFinding, WiSeverity, WorkloadIdentityResponse } from "@aud/types";
+import type { WiFinding, WiOtherWorkload, WiSeverity, WorkloadIdentityResponse } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import { Button, Notice, Segmented } from "@/components/ui";
 import { Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
-import { chainOf, ficGauge, layoutWi, nodeSeverity, wiGraph, type WiKind } from "./wiLayout";
+import { chainOf, ficGauge, layoutWi, namespaceCoverage, nodeSeverity, poolOfNodeId, wiGraph, type WiKind } from "./wiLayout";
 import styles from "./insights.module.css";
 
 type View = "graph" | "table";
@@ -26,6 +29,58 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] 
     return () => ro.disconnect();
   }, []);
   return [ref, w];
+}
+
+/** Workloads without workload identity — per namespace, with what the configuration says they could use instead */
+function OtherWorkloads({ data, showSystem }: { data: WorkloadIdentityResponse; showSystem: boolean }) {
+  const { t } = useI18n();
+  const cov = useMemo(() => namespaceCoverage(data, { showSystem }), [data, showSystem]);
+  // Default: the namespace that uses workload identity for some workloads but not for most (the "why is it missing" case)
+  const [ns, setNs] = useState<string | null>(() => cov.find((c) => c.wi > 0 && c.other > 0)?.namespace ?? null);
+  const rows = data.otherWorkloads.filter((w) => (showSystem || !w.managed) && (!ns || w.namespace === ns));
+  const total = data.otherWorkloads.filter((w) => showSystem || !w.managed).length;
+  const idName = (id: string) => data.identities.find((i) => i.id === id)?.name ?? t("wi.unknown");
+  const imdsIds = (w: WiOtherWorkload): string[] | null => {
+    if (data.imds.podAccess === "restricted" && !w.hostNetwork) return [];
+    return [...new Set(w.pools.flatMap((p) => data.nodePools.find((x) => x.id === p)?.identityIds ?? []))];
+  };
+  if (!total) return null;
+  return (
+    <details className={styles.wiOther} open={!!ns || undefined}>
+      <summary><h4 className={styles.wiH}>{t("wi.other.title")} <span className={styles.wiCount}>{total}</span></h4></summary>
+      <p className={styles.wiNote}>{t("wi.other.note")}</p>
+      <div className={styles.wiNsChips} role="group" aria-label={t("wi.other.ns")}>
+        <button type="button" className={styles.wiNsChip} aria-pressed={ns === null} onClick={() => setNs(null)}>{t("wi.other.all")} <b>{total}</b></button>
+        {cov.filter((c) => c.other > 0).map((c) => (
+          <button key={c.namespace} type="button" className={styles.wiNsChip} aria-pressed={ns === c.namespace} onClick={() => setNs(c.namespace)}
+            title={t("wi.other.chipTip", { wi: c.wi, other: c.other })}>
+            {c.namespace} <b>{c.other}</b>{c.wi > 0 && <span className={styles.wiMuted}> · {t("wi.other.chipWi", { n: c.wi })}</span>}
+          </button>
+        ))}
+      </div>
+      <div className={styles.wiOtherBox}>
+        <table className={styles.wiTable} aria-label={t("wi.other.title")}>
+          <thead><tr><th scope="col">{t("wi.col.0")}</th><th scope="col">{t("wi.col.1")}</th><th scope="col">{t("wi.other.pools")}</th><th scope="col">{t("wi.other.imds")}</th><th scope="col">{t("wi.other.secrets")}</th></tr></thead>
+          <tbody>
+            {rows.map((w) => {
+              const ids = imdsIds(w);
+              return (
+                <tr key={w.id}>
+                  <td>{w.name}<span className={styles.wiMuted}> · {w.namespace} · {w.kind} · {t("wi.pods", { n: w.pods })}</span></td>
+                  <td>{w.serviceAccount}</td>
+                  <td>{w.pools.map((p) => p.slice("pool:".length)).join(", ") || <span className={styles.wiMuted}>{w.pods ? t("wi.unknown") : t("wi.injected.noRunningPods")}</span>}</td>
+                  <td>{ids === null || data.imds.pools !== "ok" ? <span className={styles.wiMuted}>{t("wi.unknown")}</span>
+                    : ids.length ? <span className={styles.wiImdsIds}>{ids.map(idName).join(", ")}</span>
+                      : <span className={styles.wiMuted}>{data.imds.podAccess === "restricted" ? t("wi.imds.restricted") : t("wi.other.none")}</span>}</td>
+                  <td>{w.usesSecrets ? t("wi.yes") : <span className={styles.wiMuted}>{t("wi.no")}</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
 }
 
 function CopyCode({ code }: { code: string }) {
@@ -62,6 +117,9 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
       const keys = [...new Set(s.k8sRbac.flatMap((b) => b.keys))];
       return { kind: "sa", title: `${s.namespace}/${s.name}`, sub: s.clientIdTail ? `client-id ${s.clientIdTail}${s.clientIdSource === "podEnv" ? ` · ${t("wi.fromPodEnv")}` : ""}` : t("wi.noClientId"), extra: keys.length ? `K8s: ${keys.slice(0, 2).join(", ")}${keys.length > 2 ? ` +${keys.length - 2}` : ""}` : s.exists === false ? t("wi.dangling") : undefined };
     }
+    const poolId = poolOfNodeId(id);
+    const pool = poolId ? data.nodePools.find((x) => x.id === poolId) : undefined;
+    if (pool) return { kind: "pool", title: t("wi.pool.title", { name: pool.name }), sub: t("wi.pool.sub", { nodes: pool.nodes, n: pool.withoutWi }), extra: t(`wi.imds.${data.imds.podAccess ?? "unknown"}`) };
     const f = data.fics.find((x) => x.id === id);
     if (f) return { kind: "fic", title: f.name, sub: f.dangling ? t("wi.dangling") : f.subject.replace("system:serviceaccount:", "sa:"), extra: f.issuerMatch !== "exact" ? t(`wi.match.${f.issuerMatch}`) : f.subjectMatch && f.subjectMatch !== "exact" && f.subjectMatch !== "other" ? t(`wi.match.${f.subjectMatch}`) : !f.audienceOk ? t("wi.audience.off") : undefined };
     const i = data.identities.find((x) => x.id === id);
@@ -96,6 +154,17 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
       sections.push({ h: t("wi.k8sRbac"), rows: s.k8sRbac.length ? s.k8sRbac.map((b) => ({ k: `${b.kind} ${b.name}`, v: `${b.role}${b.keys.length ? ` — ${b.keys.join(", ")}` : ""}${b.via === "group" ? ` · ${t("wi.k8sRbac.viaGroup", { group: b.group ?? "" })}` : ""}`, ev: "perm" as const })) : [{ k: "", v: t("wi.k8sRbac.none") }] });
       if (s.canUseIdentity.length) sections.push({ h: t("wi.canUse"), rows: s.canUseIdentity.map((c) => ({ k: c.subject, v: `${c.binding} — ${c.keys.join(", ")}`, ev: "perm" as const })) });
       sections.push({ h: t("wi.sec.check"), body: <CopyCode code={`kubectl auth can-i --list --as=system:serviceaccount:${s.namespace}:${s.name}`} /> });
+    } else if (lb.kind === "pool") {
+      const pool = data.nodePools.find((x) => x.id === poolOfNodeId(id))!;
+      rows.push({ k: t("wi.pool.name"), v: pool.name }, { k: t("wi.pool.nodes"), v: String(pool.nodes) },
+        { k: t("wi.pool.imds"), v: t(`wi.imds.${data.imds.podAccess ?? "unknown"}`), ev: data.imds.podAccess === null ? "unk" : "cfg" },
+        { k: t("wi.pool.workloads"), v: t("wi.pool.workloadsV", { n: pool.workloads, other: pool.withoutWi }) },
+        { k: t("wi.pool.identities"), v: pool.identityIds.map((x) => data.identities.find((i) => i.id === x)?.name ?? "?").join(", ") || "-", ev: "cfg" });
+      sections.push({ h: t("wi.sec.facts"), rows });
+      if (pool.namespaces.length) sections.push({ h: t("wi.pool.byNs"), rows: pool.namespaces.map((n) => ({ k: n.namespace, v: t("wi.pool.workloadsV", { n: n.workloads, other: n.withoutWi }) })) });
+      if (data.imds.allowPolicies.length) sections.push({ h: t("wi.pool.allow"), rows: data.imds.allowPolicies.map((p) => ({ k: `${p.namespace ? `${p.namespace}/` : ""}${p.name}`, v: `${p.kind}${p.selectsAll ? ` · ${t("wi.pool.selectsAll")}` : ""}`, ev: "cfg" as const })) });
+      if (data.imds.restrictionBlockedBy.length) sections.push({ h: t("wi.pool.restriction"), body: <p className={styles.wiNote}>{t("wi.pool.restrictionBlocked", { addons: data.imds.restrictionBlockedBy.join(", ") })}</p> });
+      sections.push({ h: t("wi.sec.note"), body: <p className={styles.wiNote}>{t("wi.pool.note")}</p> });
     } else if (lb.kind === "fic") {
       const f = data.fics.find((x) => x.id === id)!;
       rows.push({ k: "issuer", v: `${f.issuerMasked} — ${t(`wi.match.${f.issuerMatch}`)}`, mono: true, ev: "cfg" },
@@ -113,6 +182,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
         rows.push({ k: t("wi.f.rg"), v: i.resourceGroup ?? "-" }, { k: t("wi.f.subscription"), v: i.subscription ?? t("wi.unknown") }, { k: t("wi.f.location"), v: i.location ?? "-" },
           { k: "client-id", v: i.clientIdTail, mono: true }, { k: t("wi.gauge.label"), v: g.text, ev: i.fic.status === "ok" ? "cfg" : "unk" });
         if (i.fic.otherIssuers) rows.push({ k: t("wi.f.otherIssuers"), v: String(i.fic.otherIssuers) });
+        if (i.pools?.length) rows.push({ k: t("wi.f.pools"), v: i.pools.map((p) => p.slice("pool:".length)).join(", "), ev: "cfg" });
         if (i.fic.status !== "ok") rows.push({ k: t("wi.f.ficStatus"), v: t(`wi.ficStatus.${i.fic.status}`), ev: "unk" });
         sections.push({ h: t("wi.sec.facts"), rows }, { h: t("wi.sec.limit"), body: <p className={styles.wiNote}>{t("wi.limitNote")}</p> });
       }
@@ -144,6 +214,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
         <div className={styles.wiChips}>
           <Pill tone={data.cluster.oidcIssuerEnabled === null ? "unk" : data.cluster.oidcIssuerEnabled ? "ok" : "warn"}>{t("wi.cluster.oidc")} {data.cluster.oidcIssuerEnabled === null ? "?" : data.cluster.oidcIssuerEnabled ? t("wi.cluster.on") : t("wi.cluster.off")}</Pill>
           <Pill tone={data.cluster.workloadIdentityEnabled === null ? "unk" : data.cluster.workloadIdentityEnabled ? "ok" : "warn"}>{t("wi.cluster.wi")} {data.cluster.workloadIdentityEnabled === null ? "?" : data.cluster.workloadIdentityEnabled ? t("wi.cluster.on") : t("wi.cluster.off")}</Pill>
+          <Pill tone={data.imds.podAccess === null ? "unk" : data.imds.podAccess === "restricted" ? "ok" : "warn"}>{t("wi.cluster.imds")} {t(`wi.imds.${data.imds.podAccess ?? "unknown"}`)}</Pill>
           <span className={styles.wiCount}>{t("wi.summary", { sa: data.serviceAccounts.length, id: data.coverage.identitiesResolved, un: data.coverage.identitiesUnresolved })}</span>
           {counts.filter(([, n]) => n > 0).map(([s, n]) => <Pill key={s} tone={SEV_TONE[s]}>{t(`wi.sev.${s}`)} {n}</Pill>)}
         </div>
@@ -212,6 +283,18 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                       </tr>
                     );
                   })}
+                  {graph.nodes.filter((n) => n.kind === "pool").map((n) => {
+                    const idn = data.identities.find((i) => i.id === n.group);
+                    return (
+                      <tr key={n.id}>
+                        <td>-</td>
+                        <td><button type="button" className={styles.linkish} onClick={() => pick(n.id)}>{label(n.id)?.title}</button></td>
+                        <td><span className={styles.wiMuted}>{t("wi.imds.path")}</span></td>
+                        <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.name ?? idn.clientIdTail}</button> : "-"}</td>
+                        <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}`).join(" · ") || "-"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
@@ -263,10 +346,12 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
           <li><i data-kind="uses" />{t("wi.legend.uses")}</li>
           <li><i data-kind="federated" />{t("wi.legend.federated")}</li>
           <li><i data-kind="annotatedOnly" />{t("wi.legend.annotatedOnly")}</li>
+          <li><i data-kind="imds" />{t("wi.legend.imds")}</li>
           <li><i data-kind="assigned" />{t("wi.legend.assigned")}</li>
           <li><Button size="sm" variant="ghost" onClick={() => setSel(null)} disabled={!sel}>{t("wi.clearSel")}</Button></li>
         </ul>
       )}
+      <OtherWorkloads data={data} showSystem={showSystem} />
     </section>
   );
 }

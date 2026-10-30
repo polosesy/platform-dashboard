@@ -7,8 +7,8 @@
 
 import { createHash } from "node:crypto";
 import type {
-  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiK8sBinding, WiMatch, WiRoleAssignment, WiRuleId, WiScope, WiScopeLevel,
-  WiServiceAccount, WiSeverity, WiWorkload, WorkloadIdentityResponse, EvidenceKind,
+  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiImds, WiK8sBinding, WiMatch, WiNodePool, WiOtherWorkload, WiRoleAssignment,
+  WiRuleId, WiScope, WiScopeLevel, WiServiceAccount, WiSeverity, WiWorkload, WorkloadIdentityResponse, EvidenceKind,
 } from "@aud/types";
 import type { PolicyInventory } from "./policyAnalyzer.js";
 import { GRADE, isAksManaged, rbacRiskKeys, roleRules } from "./policyInsights.js";
@@ -37,6 +37,8 @@ export const PRIVILEGED_ROLES: Record<string, "owner" | "contributor" | "uaa" | 
   "f58310d9-a9f6-439a-9e8d-f62e7b41a168": "rbacAdmin",
 };
 export const SCAN_CAP = 50;
+/** AcrPull — the kubelet identity's usual only role (decided by definition ID) */
+export const ACR_PULL_ROLE = "7f951dda-4ed3-4680-a7ca-43fe172d538d";
 
 const DOC = {
   considerations: "https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-considerations",
@@ -46,6 +48,7 @@ const DOC = {
   miBest: "https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/managed-identity-best-practice-recommendations",
   rbacBest: "https://learn.microsoft.com/en-us/azure/role-based-access-control/best-practices",
   k8sRbac: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/",
+  imds: "https://learn.microsoft.com/en-us/azure/aks/imds-restriction",
 };
 /** One documented basis per rule (URL + the sentence it rests on) */
 export const WI_RULE_DOCS: Record<WiRuleId, { url: string; quote: string }> = {
@@ -65,6 +68,7 @@ export const WI_RULE_DOCS: Record<WiRuleId, { url: string; quote: string }> = {
   "WI-14": { url: DOC.miBest, quote: "if a user has access to install or execute code on this resource, then the user has access to all the identities assigned/associated to the Azure resource." },
   "WI-15": { url: DOC.considerations, quote: "Creation of federated identity credentials is currently not supported on user-assigned managed identities created in the following regions" },
   "WI-16": { url: DOC.aksOverview, quote: "If you update the service account annotations, you must restart the pod for the changes to take effect." },
+  "WI-17": { url: DOC.imds, quote: "The IMDS REST API is available at a well-known, nonroutable IP address (169.254.169.254) that is by default accessible from all pods running in an AKS cluster." },
 };
 
 // ── Inputs (collector → builder) ──
@@ -72,9 +76,11 @@ export const WI_RULE_DOCS: Record<WiRuleId, { url: string; quote: string }> = {
 export type InvServiceAccount = { namespace: string; name: string; annotations: Record<string, string>; labels: Record<string, string> };
 export type InvIdentity = {
   armId: string; name: string; resourceGroup: string; subscriptionId: string; location: string;
-  clientId: string; principalId: string; tenantId: string; scanned: "annotated" | "subscriptionScan";
+  clientId: string; principalId: string; tenantId: string; scanned: "annotated" | "subscriptionScan" | "nodePool";
 };
 export type InvFicList = { status: "ok" | "forbidden" | "throttled" | "error"; items: Array<{ name: string; issuer: string; subject: string; audiences: string[] }> };
+/** A node pool's scale set (Resource Graph): the pool name (tag aks-managed-poolName) and its user-assigned identity ARM IDs */
+export type InvNodePool = { pool: string; identityArmIds: string[] };
 export type InvRoleAssignment = {
   principalId: string; roleDefGuid: string; roleName: string | null; roleType: string | null; scope: string; hasCondition: boolean; actions: string[];
 };
@@ -94,6 +100,9 @@ export type WiInput = {
   subNames: Map<string, string>;
   scan: { requested: boolean; scanned: number; total: number | null; cap: number };
   gaps: string[];
+  /** Node pool scale sets with their identities; null/absent = not read (status in imds.pools) */
+  nodePools?: InvNodePool[] | null;
+  imds?: { podAccess: WiImds["podAccess"]; restrictionBlockedBy: string[]; pools: WiImds["pools"]; nodeResourceGroup: string | null };
   now?: Date;
 };
 
@@ -143,6 +152,62 @@ export function classifyScope(scope: string, subNames: Map<string, string>): WiS
 }
 const BREADTH: Record<WiScopeLevel, number> = { root: 4, managementGroup: 3, subscription: 2, resourceGroup: 1, resource: 0 };
 export const scopeBreadth = (l: WiScopeLevel) => BREADTH[l];
+
+/** Does a v4 CIDR (prefix ≥ 16 — explicit link-local, not "the whole internet") contain the IMDS address? */
+export function cidrHasImds(cidr: unknown): boolean {
+  if (typeof cidr !== "string") return false;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(cidr.trim());
+  if (!m) return false;
+  const bits = m[5] === undefined ? 32 : Number(m[5]);
+  if (bits < 16 || bits > 32) return false;
+  const ip = (a: number[]) => a.reduce((x, o) => ((x << 8) | o) >>> 0, 0);
+  const mask = bits === 32 ? 0xffffffff : (~((1 << (32 - bits)) - 1)) >>> 0;
+  return ((ip([1, 2, 3, 4].map((i) => Number(m[i]))) & mask) >>> 0) === ((ip([169, 254, 169, 254]) & mask) >>> 0);
+}
+
+const isEmptySelector = (sel: unknown) => {
+  if (!sel || typeof sel !== "object") return true;
+  const o = sel as { matchLabels?: Record<string, unknown>; matchExpressions?: unknown[] };
+  return !Object.keys(o.matchLabels ?? {}).length && !(o.matchExpressions ?? []).length;
+};
+const rec = (r: unknown): Record<string, unknown> => (r && typeof r === "object" ? r as Record<string, unknown> : {});
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const allowsImds = (cidr: unknown, except: unknown) => cidrHasImds(cidr) && !arr(except).some(cidrHasImds);
+
+/** Network policies whose egress explicitly allows the IMDS address (an "except" that removes it doesn't count) */
+export function imdsAllowPolicies(inv: PolicyInventory): WiImds["allowPolicies"] {
+  const out: WiImds["allowPolicies"] = [];
+  for (const cp of inv.ciliumPolicies) {
+    const hit = cp.specs.find((spec) => spec.endpointSelector && arr(spec.egress).some((r) =>
+      arr(rec(r).toCIDR).some(cidrHasImds) || arr(rec(r).toCIDRSet).some((c) => allowsImds(rec(c).cidr, rec(c).except))));
+    if (hit) {
+      out.push({
+        kind: cp.namespace === undefined ? "CiliumClusterwideNetworkPolicy" : "CiliumNetworkPolicy",
+        ...(cp.namespace !== undefined ? { namespace: cp.namespace } : {}), name: cp.name, selectsAll: isEmptySelector(hit.endpointSelector),
+      });
+    }
+  }
+  for (const np of inv.networkPolicies) {
+    if (arr(np.egress).some((r) => arr(rec(r).to).some((t) => allowsImds(rec(rec(t).ipBlock).cidr, rec(rec(t).ipBlock).except)))) {
+      out.push({ kind: "NetworkPolicy", namespace: np.namespace, name: np.name, selectsAll: isEmptySelector(np.podSelector) });
+    }
+  }
+  return out.sort((a, b) => (`${a.namespace ?? ""}/${a.name}` < `${b.namespace ?? ""}/${b.name}` ? -1 : 1));
+}
+
+/**
+ * Key Vault audit logs (diagnostic setting → workspace): who used this identity, by client library and caller IP.
+ * Only the client ID's last 4 characters go in — the query never carries a full GUID.
+ */
+export function imdsKvQuery(clientId: string): string {
+  const t = clientId.trim().toLowerCase().slice(-4);
+  return `union isfuzzy=true
+  (AzureDiagnostics | where ResourceProvider == "MICROSOFT.KEYVAULT" | project TimeGenerated, appid = tostring(column_ifexists("identity_claim_appid_g", "")), client = tostring(column_ifexists("clientInfo_s", "")), ip = CallerIPAddress, op = OperationName),
+  (AZKVAuditLogs | project TimeGenerated, appid = tostring(Identity.claim.appid), client = tostring(column_ifexists("ClientInfo", "")), ip = CallerIpAddress, op = OperationName)
+| where TimeGenerated > ago(1d) and appid endswith "${t}"
+| summarize calls = count(), ops = make_set(op, 5) by library = tostring(split(client, " ")[0]), ip
+| order by calls desc`;
+}
 
 const SYSTEM_BINDING = (b: { name: string; labels?: Record<string, string> }) => b.name.startsWith("system:") || isAksManaged(b.labels);
 
@@ -218,13 +283,28 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
   // Relevant workloads: annotated SA, use label, or webhook traces in running pods
   const workloads: WiWorkload[] = [];
   const saKeys = new Set<string>();
+  // Pod → node pool (nodes[].pool); pools get ids "pool:<name>"
+  const poolOfNode = new Map((inv.nodes ?? []).filter((n) => n.pool).map((n) => [n.name, n.pool!]));
+  const poolsOf = (pods: PolicyInventory["pods"]) =>
+    [...new Set(pods.map((p) => (p.nodeName ? poolOfNode.get(p.nodeName) : undefined)).filter((x): x is string => !!x))].sort().map((x) => `pool:${x}`);
+  const others: WiOtherWorkload[] = [];
+  const wiPools = new Map<string, string[]>();
   for (const w of inv.workloads) {
     const sa = w.serviceAccountName ?? "default";
     const key = `${w.namespace}/${sa}`;
     const useLabel = w.podLabels?.[WI_USE_LABEL] === "true";
     const pods = (podsBySa.get(key) ?? []).filter((p) => p.name.startsWith(`${w.name}-`));
     const traced = pods.filter((p) => p.wi?.tokenFile);
-    if (!useLabel && !traced.length && !clientOf(key)) continue;
+    if (!useLabel && !traced.length && !clientOf(key)) {
+      // Not a workload identity user — listed so a namespace's absence from the map is explained, not guessed at
+      others.push({
+        id: `w:${w.namespace}/${w.kind}/${w.name}`, namespace: w.namespace, name: w.name, kind: w.kind, pods: pods.length,
+        managed: isAksManaged(w.labels) || w.namespace === "kube-system", serviceAccount: sa, pools: poolsOf(pods),
+        hostNetwork: w.security?.hostNetwork === true, usesSecrets: w.security?.usesSecrets === true,
+      });
+      continue;
+    }
+    wiPools.set(`w:${w.namespace}/${w.kind}/${w.name}`, poolsOf(pods));
     saKeys.add(key);
     const injClient = traced.map((p) => p.wi?.clientId).find(isGuid);
     workloads.push({
@@ -242,6 +322,13 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
   const identityIdOf = (i: InvIdentity) => opaqueId("mi", i.armId);
   const ficsOut: WiFic[] = [];
   const ficLinks: Array<{ fic: WiFic; saKey: string | null }> = [];
+  const poolsByIdentity = new Map<string, string[]>();
+  for (const np of input.nodePools ?? []) {
+    for (const a of np.identityArmIds) {
+      const k = a.toLowerCase();
+      poolsByIdentity.set(k, [...new Set([...(poolsByIdentity.get(k) ?? []), `pool:${np.pool}`])].sort());
+    }
+  }
 
   for (const i of input.identities) {
     const id = identityIdOf(i);
@@ -283,6 +370,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       location: i.location, clientIdTail: tail(i.clientId), ...(isGuid(i.tenantId) ? { tenantIdTail: tail(i.tenantId) } : {}),
       fic: { status, count: status === "ok" ? items.length : null, limit: FIC_LIMIT, ids, otherIssuers, regionUnsupported: FIC_UNSUPPORTED_REGIONS.includes(i.location.toLowerCase()) },
       roles: [], rolesStatus: input.roleAssignments ? "ok" : "notListed", scanned: i.scanned,
+      ...(poolsByIdentity.get(i.armId.toLowerCase())?.length ? { pools: poolsByIdentity.get(i.armId.toLowerCase())! } : {}),
     });
   }
 
@@ -490,6 +578,78 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
     }
   }
 
+  // ── Node pools and the IMDS path (WI-17): configuration — what pods *can* reach, never who did ──
+  const imdsIn = input.imds ?? { podAccess: null, restrictionBlockedBy: [], pools: "notRead" as const, nodeResourceGroup: null };
+  const allowPolicies = imdsAllowPolicies(inv);
+  const poolNames = [...new Set([...(input.nodePools ?? []).map((p) => p.pool), ...(inv.nodes ?? []).map((n) => n.pool).filter((x): x is string => !!x)])].sort();
+  const nodePools: WiNodePool[] = poolNames.map((name) => {
+    const id = `pool:${name}`;
+    const wi = workloads.filter((w) => wiPools.get(w.id)?.includes(id)).map((w) => ({ namespace: w.namespace, other: false }));
+    const ot = others.filter((o) => o.pools.includes(id)).map((o) => ({ namespace: o.namespace, other: true }));
+    const nsMap = new Map<string, { namespace: string; workloads: number; withoutWi: number }>();
+    for (const w of [...wi, ...ot]) {
+      const e = nsMap.get(w.namespace) ?? { namespace: w.namespace, workloads: 0, withoutWi: 0 };
+      e.workloads++;
+      if (w.other) e.withoutWi++;
+      nsMap.set(w.namespace, e);
+    }
+    return {
+      id, name,
+      identityIds: input.identities.filter((i) => poolsByIdentity.get(i.armId.toLowerCase())?.includes(id)).map(identityIdOf),
+      nodes: (inv.nodes ?? []).filter((n) => n.pool === name).length,
+      workloads: wi.length + ot.length, withoutWi: ot.length,
+      namespaces: [...nsMap.values()].sort((a, b) => b.withoutWi - a.withoutWi || (a.namespace < b.namespace ? -1 : 1)),
+    };
+  });
+  if (imdsIn.podAccess !== "restricted") {
+    const accessText = imdsIn.podAccess === "allowed" ? L("허용 (클러스터 기본값 — 제한 안 함)", "allowed (cluster default — not restricted)")
+      : L("확인 불가 (클러스터 설정을 읽지 못함)", "unknown (cluster setting not readable)");
+    const allow = allowPolicies.filter((p) => p.selectsAll).map((p) => `${p.namespace ? `${p.namespace}/` : ""}${p.name}`);
+    for (const idn of identities) {
+      if (!idn.pools?.length) continue;
+      const raw = input.identities.find((i) => identityIdOf(i) === idn.id)!;
+      const rawRoles = byPrincipal.get(raw.principalId.toLowerCase()) ?? [];
+      const pools = nodePools.filter((p) => idn.pools!.includes(p.id));
+      const fedSas = sas.filter((s) => s.identityId === idn.id && s.ficIds.length);
+      const onlyAcrPull = rawRoles.length > 0 && rawRoles.every((r) => r.roleDefGuid.toLowerCase() === ACR_PULL_ROLE);
+      const sev: WiSeverity | null = idn.rolesStatus !== "ok" ? "low"
+        : !idn.roles.length ? null
+          : idn.roles.some((r) => r.privileged) ? "crit"
+            : onlyAcrPull && !fedSas.length ? "info" : "warn";
+      if (!sev) continue;
+      const aksMade = !!imdsIn.nodeResourceGroup && raw.resourceGroup.toLowerCase() === imdsIn.nodeResourceGroup.toLowerCase();
+      const wl = pools.reduce((n, p) => n + p.workloads, 0);
+      const without = pools.reduce((n, p) => n + p.withoutWi, 0);
+      const nss = new Set(pools.flatMap((p) => p.namespaces.map((x) => x.namespace))).size;
+      const poolList = pools.map((p) => p.name).join(", ");
+      const roleList = idn.roles.slice(0, 4).map((r) => `${r.roleName} (${r.scope.label})`).join(", ") + (idn.roles.length > 4 ? ` +${idn.roles.length - 4}` : "");
+      const kv = idn.roles.some((r) => r.scope.resourceType?.toLowerCase() === "microsoft.keyvault/vaults");
+      add("WI-17", sev, idn.rolesStatus !== "ok" ? "unk" : "cfg", `${idn.id}:imds`, [idn.id, ...pools.map((p) => `${p.id}@${idn.id}`)],
+        L(`관리 ID ${idn.name}가 노드 풀 ${poolList}에 붙어 있음 — 워크로드 ID 없이 그 노드의 파드가 IMDS로 이 ID의 토큰을 받을 수 있음`,
+          `Managed identity ${idn.name} is attached to node pool ${poolList} — pods on those nodes can get its token through IMDS, without workload identity`),
+        [
+          L(`이 풀의 워크로드 ${wl}개(워크로드 ID 없음 ${without}개 · 네임스페이스 ${nss}개). 파드의 IMDS 접근: ${accessText}.`,
+            `Workloads on this pool: ${wl} (${without} without workload identity · ${nss} namespaces). Pod access to IMDS: ${accessText}.`),
+          idn.rolesStatus === "ok" ? L(`이 ID의 역할: ${roleList}.`, `This identity's roles: ${roleList}.`) : L("역할 할당을 읽지 못했습니다.", "Role assignments were not readable."),
+          fedSas.length ? L(`같은 ID를 서비스 계정 ${fedSas.length}개가 워크로드 ID(FIC)로도 씁니다 — FIC로 좁힌 범위가 노드 풀 전체로 넓어집니다.`,
+            `${fedSas.length} service accounts also use it through workload identity (FIC) — the credential's narrow scope is widened to the whole node pool.`) : "",
+          allow.length ? L(`IMDS 송신을 네임스페이스 전체에 명시적으로 허용하는 정책: ${allow.join(", ")}.`, `Policies explicitly allowing IMDS egress for a whole namespace: ${allow.join(", ")}.`) : "",
+          L("구성으로 본 '쓸 수 있음'입니다 — 실제 사용은 Azure 리소스의 로그로만 확인됩니다 (호출 IP가 노드 주소라 워크로드는 특정하지 못함).",
+            "This is configuration (\"can\") — actual use shows only in the Azure resource's logs (the caller IP is the node's, so the workload can't be told)."),
+        ].filter(Boolean).join(" "),
+        (aksMade
+          ? L("AKS가 노드에 붙인 ID입니다(노드 리소스 그룹) — 떼지 말고 필요 없는 역할 할당을 줄이세요 (예: Key Vault CSI를 워크로드 ID 모드(SecretProviderClass clientID)로 쓰면 추가 기능 ID에는 Key Vault 역할이 필요 없음).",
+            "AKS attached this identity (node resource group) — don't detach it; remove role assignments it doesn't need (e.g. with the Key Vault CSI driver in workload identity mode (SecretProviderClass clientID) the add-on identity needs no Key Vault role).")
+          : L("① 이 ID가 필요한 워크로드를 워크로드 ID로 옮기세요 (SA client-id 주석 + 파드 템플릿 use 라벨 + FIC) ② 그다음 노드 풀 VMSS에 이 ID를 붙인 출처(IaC·스크립트)에서 떼세요 — 노드 리소스 그룹의 리소스를 직접 바꾸는 것은 AKS 지원 범위 밖 ③ IMDS가 필요 없는 네임스페이스는 169.254.169.254 송신을 막으세요 (쓰는 앱이 있으면 ① 전에 막지 마세요).",
+            "① Move the workloads that need this identity to workload identity (SA client-id annotation + pod template use label + FIC) ② then detach it from the node pool scale set where it was attached (IaC, script) — changing node resource group resources directly is outside AKS support ③ block egress to 169.254.169.254 in namespaces that don't need IMDS (not before ① while apps still use it)."))
+          + (imdsIn.podAccess === "allowed" && imdsIn.restrictionBlockedBy.length
+            ? L(` 클러스터 단위 IMDS 제한(미리 보기)은 켜진 추가 기능(${imdsIn.restrictionBlockedBy.join(", ")}) 때문에 지금은 켤 수 없습니다.`,
+              ` The cluster-wide IMDS restriction (preview) can't be enabled while these add-ons are on: ${imdsIn.restrictionBlockedBy.join(", ")}.`)
+            : ""),
+        kv ? imdsKvQuery(raw.clientId) : undefined);
+    }
+  }
+
   findings.sort((a, b) => SEV_RANK[a.sev] - SEV_RANK[b.sev] || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.id < b.id ? -1 : 1));
   const resolved = identities.filter((i) => i.kind === "userAssigned");
   return {
@@ -501,6 +661,9 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
     fics: ficsOut,
     identities,
     findings,
+    nodePools,
+    imds: { podAccess: imdsIn.podAccess, restrictionBlockedBy: imdsIn.restrictionBlockedBy, allowPolicies, pools: imdsIn.pools },
+    otherWorkloads: others.sort((a, b) => Number(a.managed) - Number(b.managed) || (a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : a.name < b.name ? -1 : 1)),
     coverage: {
       serviceAccounts: input.saStatus,
       identitiesResolved: resolved.length,

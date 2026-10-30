@@ -170,15 +170,23 @@ export function mapPlans(rows: PlanRow[]): PostureDefenderPlan[] {
     .sort((a, b) => Number(b.tier === "Standard") - Number(a.tier === "Standard") || a.name.localeCompare(b.name));
 }
 
+/**
+ * Resource Graph returns an alert's Description, CompromisedEntity, Entities and ExtendedProperties as
+ * asterisks ("****…") — the same identity reads them in full from the Defender Alerts API (measured
+ * 2026-10-29: 10 of 10 alerts). A masked value is not text: never shown, searched or counted.
+ */
+export const isMaskedText = (v: unknown): boolean => typeof v === "string" && /^\s*\*{3,}\s*$/.test(v);
+const unmasked = (v: unknown): string | undefined => (isMaskedText(v) ? undefined : str(v));
+
 /** Remediation, compromised entity, Kubernetes entities, first activity, portal link (all optional, GUIDs masked) */
 export function alertExtras(r: AlertRow): Pick<PostureAlert, "remediation" | "entity" | "k8s" | "firstAt" | "portalUrl"> {
   const rem = (Array.isArray(r.rem) ? r.rem : typeof r.rem === "string" ? [r.rem] : [])
-    .map((x) => plainText(x, 400)).filter((x): x is string => !!x).slice(0, 8);
+    .filter((x) => !isMaskedText(x)).map((x) => plainText(x, 400)).filter((x): x is string => !!x).slice(0, 8);
   const k8s: NonNullable<PostureAlert["k8s"]> = {};
   for (const e of Array.isArray(r.ent) ? r.ent : []) {
     const o = (e ?? {}) as Record<string, unknown>;
     const type = String(o.Type ?? o.type ?? "").toLowerCase();
-    const name = str(o.Name ?? o.name);
+    const name = unmasked(o.Name ?? o.name);
     if (!name) continue;
     if (type === "k8s-namespace" && !k8s.namespace) k8s.namespace = name;
     if (type === "k8s-pod" && !k8s.pod) k8s.pod = name;
@@ -187,7 +195,7 @@ export function alertExtras(r: AlertRow): Pick<PostureAlert, "remediation" | "en
   const uri = str(r.uri);
   return {
     ...(rem.length ? { remediation: rem } : {}),
-    ...(str(r.ce) ? { entity: maskGuids(str(r.ce)!) } : {}),
+    ...(unmasked(r.ce) ? { entity: maskGuids(unmasked(r.ce)!) } : {}),
     ...(Object.keys(k8s).length ? { k8s } : {}),
     ...(str(r.t0) ? { firstAt: str(r.t0)! } : {}),
     ...(uri && /^https:\/\/portal\.azure\.com\//.test(uri) ? { portalUrl: uri } : {}),
@@ -212,7 +220,8 @@ export function mapAlerts(rows: AlertRow[]): PostureAlert[] {
         status: r.st ?? "Active",
         ...(r.intent ? { intent: r.intent } : {}),
         detectedAt: r.t ?? "",
-        description: plainText(r.dsc, 600) ?? "",
+        description: isMaskedText(r.dsc) ? "" : maskGuids(plainText(r.dsc, 600) ?? ""),
+        ...(isMaskedText(r.dsc) ? { descriptionHidden: true } : {}),
         resources,
         ...alertExtras(r),
       };
@@ -269,8 +278,49 @@ const Q = {
 };
 
 
+type DefenderAlert = { name?: string; properties?: { description?: string; compromisedEntity?: string; entities?: unknown } };
+const ALERTS_API = "2022-01-01";
+
+/**
+ * Fill the fields Resource Graph masks from the Defender Alerts API (same identity, `Microsoft.Security/locations/alerts/read`):
+ * description, compromised entity and entities only — ExtendedProperties (command lines, process trees) are not read.
+ * Best effort: a failed or missing alert keeps `descriptionHidden` and the UI points to the Defender portal.
+ */
+export async function unmaskAlertRows(arm: Pick<ArmFetcher, "fetchJson">, subs: string[], rows: AlertRow[]): Promise<AlertRow[]> {
+  const want = new Set(rows.filter((r) => isMaskedText(r.dsc) || isMaskedText(r.ce)).map((r) => (r.id.split("/").pop() ?? "").toLowerCase()));
+  if (!want.size) return rows;
+  const found = new Map<string, NonNullable<DefenderAlert["properties"]>>();
+  await Promise.all(subs.map(async (sub) => {
+    let url: string | undefined = `https://management.azure.com/subscriptions/${encodeURIComponent(sub)}/providers/Microsoft.Security/alerts?api-version=${ALERTS_API}`;
+    for (let page = 0; url && page < 5; page++) {
+      try {
+        const res: { value?: DefenderAlert[]; nextLink?: string } = await arm.fetchJson(url, { timeoutMs: 15_000 });
+        for (const a of res.value ?? []) {
+          const k = (a.name ?? "").toLowerCase();
+          if (want.has(k) && a.properties) found.set(k, a.properties);
+        }
+        url = res.nextLink && /^https:\/\/management\.azure\.com\//.test(res.nextLink) && found.size < want.size ? res.nextLink : undefined;
+      } catch (e: unknown) {
+        debug(`[posture] alert details: ${safeMessage(e)}`);
+        url = undefined;
+      }
+    }
+  }));
+  if (!found.size) return rows;
+  return rows.map((r) => {
+    const p = found.get((r.id.split("/").pop() ?? "").toLowerCase());
+    if (!p) return r;
+    return {
+      ...r,
+      ...(isMaskedText(r.dsc) && str(p.description) ? { dsc: p.description } : {}),
+      ...(isMaskedText(r.ce) && str(p.compromisedEntity) ? { ce: p.compromisedEntity } : {}),
+      ...(Array.isArray(p.entities) ? { ent: p.entities } : {}),
+    };
+  });
+}
+
 /** Run the six Resource Graph queries; a failing section becomes a gap. Throws only when every section fails. */
-export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: string[]): Promise<SecurityPostureResponse> {
+export async function collectPosture(arm: Pick<ArmFetcher, "postJson"> & Partial<Pick<ArmFetcher, "fetchJson">>, subs: string[]): Promise<SecurityPostureResponse> {
   const gaps: PostureGap[] = [];
   const run = async <T>(section: PostureSection, q: string): Promise<T[]> => {
     try {
@@ -309,14 +359,14 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson">, subs: st
     },
     compliance: mapCompliance(compliance),
     plans: mapPlans(plans),
-    alerts: mapAlerts(alerts),
+    alerts: mapAlerts(arm.fetchJson ? await unmaskAlertRows({ fetchJson: arm.fetchJson }, subs, alerts) : alerts),
     gaps,
   };
 }
 
 export type PostureDeps = {
-  obo: (env: Env, token: string) => Promise<Pick<ArmFetcher, "postJson">>;
-  sp: (env: Env) => Promise<Pick<ArmFetcher, "postJson">>;
+  obo: (env: Env, token: string) => Promise<Pick<ArmFetcher, "postJson"> & Partial<Pick<ArmFetcher, "fetchJson">>>;
+  sp: (env: Env) => Promise<Pick<ArmFetcher, "postJson"> & Partial<Pick<ArmFetcher, "fetchJson">>>;
 };
 const defaultDeps: PostureDeps = { obo: getArmFetcher, sp: (env) => getAnonymousArmFetcher(env, env.AZURE_SECURITY_SP_FALLBACK) };
 const inflight = new Map<string, Promise<SecurityPostureResponse>>();

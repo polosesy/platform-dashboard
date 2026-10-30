@@ -2,10 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PolicyInventory, InvWorkload } from "../src/services/policyAnalyzer.js";
 import {
-  WI_RULE_DOCS, buildWorkloadIdentityMap, classifyScope, compareExact, parseFicSubject, saRbac,
+  WI_RULE_DOCS, buildWorkloadIdentityMap, cidrHasImds, classifyScope, compareExact, imdsAllowPolicies, imdsKvQuery, parseFicSubject, saRbac,
   type InvIdentity, type InvRoleAssignment, type WiInput,
 } from "../src/services/workloadIdentity.js";
-import { roleAssignmentsQuery, uamiByClientIdQuery } from "../src/services/workloadIdentityCollector.js";
+import { imdsFacts, nodePoolIdentitiesQuery, nodePoolsFromRows, roleAssignmentsQuery, uamiByClientIdQuery } from "../src/services/workloadIdentityCollector.js";
 import { wiTraces } from "../src/services/k8sPolicyCollector.js";
 
 // Synthetic GUIDs (not tenant data)
@@ -205,4 +205,119 @@ test("WI-14 is one finding per identity and namespace; cluster-admin-only reach 
   // ops: the only other subject is worker-sa through cluster-admin → informational
   const ops = r.findings.find((f) => f.rule === "WI-14" && f.refs.includes("sa:ops/ops-sa"))!;
   assert.equal(ops.sev, "info");
+});
+
+// ── IMDS path: node pool scale sets carry identities any pod on those nodes can use (no workload identity needed) ──
+
+const UAMI_NODE = `/subscriptions/${SUB}/resourcegroups/mc-rg/providers/microsoft.managedidentity/userassignedidentities/agentpool`;
+const PRINC_NODE = "ffffffff-0000-0000-0000-00000000000f";
+const CLIENT_NODE = "99999999-0000-0000-0000-0000000000aa";
+function imdsInput(over: Partial<WiInput> = {}): WiInput {
+  const i = input();
+  i.inventory.nodes = [{ name: "aks-user-1-vmss000000", pool: "user" }, { name: "aks-sys-1-vmss000000", pool: "sys" }];
+  i.inventory.workloads.push(wl("app", "web", "web-sa", false), wl("kube-system", "coredns", "coredns", false));
+  i.inventory.pods.push(
+    { namespace: "app", name: "web-6d5f7-a", labels: {}, phase: "Running", serviceAccountName: "web-sa", nodeName: "aks-user-1-vmss000000" },
+    { namespace: "kube-system", name: "coredns-5c9-b", labels: {}, phase: "Running", serviceAccountName: "coredns", nodeName: "aks-sys-1-vmss000000" },
+  );
+  i.inventory.pods[0]!.nodeName = "aks-user-1-vmss000000";
+  i.identities.push({ ...ident(UAMI_NODE, "agentpool", CLIENT_NODE, PRINC_NODE), resourceGroup: "mc-rg", scanned: "nodePool" });
+  i.roleAssignments!.push({ principalId: PRINC_NODE, roleDefGuid: "7f951dda-4ed3-4680-a7ca-43fe172d538d", roleName: "AcrPull", roleType: "BuiltInRole", scope: `/subscriptions/${SUB}/resourceGroups/rg-acr/providers/Microsoft.ContainerRegistry/registries/acr1`, hasCondition: false, actions: [] });
+  i.inventory.ciliumPolicies = [{ namespace: "app", name: "baseline", specs: [{ endpointSelector: {}, egress: [{ toCIDR: ["169.254.169.254/32"], toPorts: [] }] }] }];
+  return {
+    ...i,
+    nodePools: [{ pool: "user", identityArmIds: [UAMI_A, UAMI_NODE] }, { pool: "sys", identityArmIds: [UAMI_NODE] }],
+    imds: { podAccess: "allowed", restrictionBlockedBy: ["Azure Policy", "Container Insights"], pools: "ok", nodeResourceGroup: "mc-rg" },
+    ...over,
+  };
+}
+
+test("workloads without workload identity are listed with the node pools they run on", () => {
+  const r = buildWorkloadIdentityMap(imdsInput());
+  const web = r.otherWorkloads.find((w) => w.name === "web")!;
+  assert.deepEqual([web.namespace, web.serviceAccount, web.pools, web.managed], ["app", "web-sa", ["pool:user"], false]);
+  assert.equal(r.otherWorkloads.find((w) => w.name === "coredns")!.managed, true, "kube-system is a system object");
+  assert.equal(r.otherWorkloads[r.otherWorkloads.length - 1]!.managed, true, "system objects last");
+  assert.ok(!r.otherWorkloads.some((w) => w.name === "api"), "workload identity users are not 'other'");
+  const user = r.nodePools.find((p) => p.name === "user")!;
+  assert.equal(user.nodes, 1);
+  assert.deepEqual(user.namespaces.find((n) => n.namespace === "app"), { namespace: "app", workloads: 2, withoutWi: 1 }, "api (WI) + web (not)");
+  const idA = r.identities.find((i) => i.name === "id-app")!;
+  assert.deepEqual(idA.pools, ["pool:user"]);
+  assert.deepEqual(user.identityIds.sort(), [idA.id, r.identities.find((i) => i.name === "agentpool")!.id].sort());
+  assert.deepEqual(r.imds.allowPolicies, [{ kind: "CiliumNetworkPolicy", namespace: "app", name: "baseline", selectsAll: true }]);
+});
+
+test("WI-17: an identity on a node pool scale set — severity by its roles, AKS-made vs attached by hand, nothing when restricted", async () => {
+  const r = buildWorkloadIdentityMap(imdsInput());
+  const f17 = r.findings.filter((f) => f.rule === "WI-17");
+  const app = f17.find((f) => f.title.includes("id-app"))!;
+  assert.equal(app.sev, "crit", "Owner at subscription — reachable from every pod on the pool");
+  assert.ok(app.refs.includes(`pool:user@${r.identities.find((i) => i.name === "id-app")!.id}`), "the pool card is referenced");
+  assert.match(app.detail, /baseline/, "the explicit IMDS allow policy is named");
+  assert.match(app.remediation, /①/, "attached by hand → move to workload identity, then detach");
+  assert.match(app.remediation, /Azure Policy, Container Insights/, "the add-ons blocking the IMDS restriction are named");
+  const node = f17.find((f) => f.title.includes("agentpool"))!;
+  assert.equal(node.sev, "info", "AcrPull only");
+  assert.match(node.remediation, /AKS/, "node resource group identity → don't detach");
+  assert.equal(node.code, undefined, "no Key Vault role → no Key Vault log query");
+  const restricted = buildWorkloadIdentityMap(imdsInput({ imds: { podAccess: "restricted", restrictionBlockedBy: [], pools: "ok", nodeResourceGroup: "mc-rg" } }));
+  assert.equal(restricted.findings.filter((f) => f.rule === "WI-17").length, 0);
+  // An unreadable setting is not "allowed" — and the text says so
+  const unk = buildWorkloadIdentityMap(imdsInput({ imds: { podAccess: null, restrictionBlockedBy: [], pools: "ok", nodeResourceGroup: "mc-rg" } }));
+  assert.match(unk.findings.find((f) => f.rule === "WI-17")!.detail, /확인 불가/);
+  const { withLang } = await import("../src/infra/lang.js");
+  assert.doesNotMatch(JSON.stringify(withLang("en", () => buildWorkloadIdentityMap(imdsInput()))), /[가-힯]/, "English has no Korean");
+  // Same no-GUID rule as everything else
+  assert.doesNotMatch(JSON.stringify({ ...r, clusterId: "" }), /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  // No node pools read → no pool links, no WI-17
+  const none = buildWorkloadIdentityMap(input());
+  assert.deepEqual([none.nodePools.length, none.imds.pools, none.findings.some((f) => f.rule === "WI-17")], [0, "notRead", false]);
+});
+
+test("Key Vault role → the finding carries a Key Vault log query with the client ID tail only", () => {
+  const i = imdsInput();
+  i.roleAssignments!.push({ principalId: PRINC_A, roleDefGuid: "4633458b-17de-408a-b874-0445c86b69e6", roleName: "Key Vault Secrets User", roleType: "BuiltInRole", scope: `/subscriptions/${SUB}/resourceGroups/rg-app/providers/Microsoft.KeyVault/vaults/kv1`, hasCondition: false, actions: [] });
+  const f = buildWorkloadIdentityMap(i).findings.find((x) => x.rule === "WI-17" && x.title.includes("id-app"))!;
+  assert.match(f.code ?? "", /appid endswith "000a"/);
+  assert.ok(!(f.code ?? "").includes(CLIENT_A));
+  assert.equal(imdsKvQuery(CLIENT_A).includes(CLIENT_A), false);
+});
+
+test("IMDS allow policies: explicit link-local CIDRs only, except removes it, NetworkPolicy ipBlock too", () => {
+  assert.equal(cidrHasImds("169.254.169.254/32"), true);
+  assert.equal(cidrHasImds("169.254.169.254"), true);
+  assert.equal(cidrHasImds("169.254.0.0/16"), true);
+  assert.equal(cidrHasImds("0.0.0.0/0"), false, "the whole internet is not an explicit IMDS allow");
+  assert.equal(cidrHasImds("10.0.0.0/8"), false);
+  assert.equal(cidrHasImds("169.254.169.0/24"), true);
+  assert.equal(cidrHasImds("nonsense"), false);
+  const inv0 = inv();
+  inv0.ciliumPolicies = [
+    { namespace: "a", name: "set", specs: [{ endpointSelector: { matchLabels: { app: "x" } }, egress: [{ toCIDRSet: [{ cidr: "169.254.0.0/16" }] }] }] },
+    { namespace: "a", name: "except", specs: [{ endpointSelector: {}, egress: [{ toCIDRSet: [{ cidr: "169.254.0.0/16", except: ["169.254.169.254/32"] }] }] }] },
+    { name: "cw", specs: [{ endpointSelector: {}, egress: [{ toCIDR: ["169.254.169.254/32"] }] }] },
+    { namespace: "a", name: "host", specs: [{ nodeSelector: {}, egress: [{ toCIDR: ["169.254.169.254/32"] }] }] },
+  ];
+  inv0.networkPolicies = [{ namespace: "b", name: "np", podSelector: {}, egress: [{ to: [{ ipBlock: { cidr: "169.254.169.254/32" } }] }] }];
+  assert.deepEqual(imdsAllowPolicies(inv0).map((p) => [p.kind, p.namespace ?? "", p.name, p.selectsAll]), [
+    ["CiliumClusterwideNetworkPolicy", "", "cw", true],
+    ["CiliumNetworkPolicy", "a", "set", false],
+    ["NetworkPolicy", "b", "np", true],
+  ]);
+});
+
+test("collector: preview cluster facts and scale set rows (pure)", () => {
+  assert.deepEqual(imdsFacts({ properties: { nodeResourceGroup: "mc-rg", networkProfile: { podLinkLocalAccess: "IMDS" }, addonProfiles: { omsagent: { enabled: true }, azurepolicy: { enabled: true }, azureKeyvaultSecretsProvider: { enabled: true }, aciConnectorLinux: { enabled: false } }, metricsProfile: { costAnalysis: { enabled: true } } } }),
+    { podAccess: "allowed", restrictionBlockedBy: ["Azure Policy", "Azure cost analysis", "Container Insights"], nodeResourceGroup: "mc-rg" });
+  assert.equal(imdsFacts({ properties: { networkProfile: { podLinkLocalAccess: "None" } } }).podAccess, "restricted");
+  assert.equal(imdsFacts({ properties: {} }).podAccess, null, "not reported → unknown, not 'allowed'");
+  const r = nodePoolsFromRows([
+    { name: "aks-user-12345678-vmss", pool: "user", ids: { [UAMI_A]: { clientId: CLIENT_A, principalId: PRINC_A }, [UAMI_NODE]: { clientId: CLIENT_NODE, principalId: PRINC_NODE } } },
+    { name: "aks-sys-87654321-vmss", ids: { [UAMI_NODE]: { clientId: CLIENT_NODE, principalId: PRINC_NODE }, "/not/an/identity": { clientId: "x", principalId: "y" } } },
+    { name: "aks-empty-1-vmss", ids: null },
+  ]);
+  assert.deepEqual(r.nodePools.map((p) => [p.pool, p.identityArmIds.length]), [["user", 2], ["sys", 1], ["empty", 0]], "pool from the tag, else the AKS name pattern");
+  assert.equal(r.attached.length, 2, "one entry per identity across pools");
+  assert.match(nodePoolIdentitiesQuery(`mc-rg" or 1==1`), /resourceGroup =~ "mc-rg\\" or 1==1"/);
 });

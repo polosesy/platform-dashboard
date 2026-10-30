@@ -15,8 +15,8 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
 import {
-  GLYPH, SIGNAL_GROUPS, attentionRows, cardShape, clusterGlance, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
-  legendLevels, levelIn, mosaicColumns, problemSignals, shortName, signalSummary, tileText, type HeatView,
+  GLYPH, SIGNAL_GROUPS, attentionRows, clusterGlance, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
+  legendLevels, levelIn, mosaicColumns, packMosaic, problemSignals, shortName, signalSummary, tileText, type HeatView,
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
 import styles from "../styles.module.css";
@@ -88,6 +88,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
   const ws = d?.workloads ?? [];
   const idleCount = useMemo(() => ws.filter((w) => isIdle(w) && (!ns || w.namespace === ns)).length, [ws, ns]);
   const groups = useMemo(() => groupByNamespace(ws, view, { namespace: ns || undefined, problemsOnly, hideIdle: !showIdle }), [ws, view, ns, problemsOnly, showIdle]);
+  const places = useMemo(() => packMosaic(groups.map((g) => g.workloads.length), mosaic.cols), [groups, mosaic.cols]);
   const allGroups = useMemo(() => groupByNamespace(ws, view), [ws, view]);
   const attn = useMemo(() => attentionRows(ns ? ws.filter((w) => w.namespace === ns) : ws, view), [ws, view, ns]);
   const signals = useMemo(() => (d ? signalSummary(d.flags, ws) : null), [d, ws]);
@@ -244,14 +245,15 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
 
       <div className={styles.hmLayout} data-open={!!sel || undefined}>
         <div className={styles.hmMain}>
+          <div className={styles.hmSurface}>
           <div ref={mosaic.ref} className={styles.hmGroups} style={{ "--hm-cols": mosaic.cols } as CSSProperties}>
             {groups.length === 0 && <div className={styles.hmEmpty}><EmptyState title={problemsOnly ? t("ob.hm.problemsOnlyEmpty") : t("ob.hm.empty")} /></div>}
-            {groups.map((g) => {
-              const shape = cardShape(g.workloads.length, mosaic.cols);
+            {groups.map((g, gi) => {
+              const at = places[gi]!;
               const others = g.workloads.length - g.counts.danger - g.counts.warn - g.counts.ok;
               return (
                 <section key={g.namespace} aria-label={g.namespace} className={styles.hmNs} data-level={g.worst}
-                  style={{ gridColumn: `span ${shape.cols}`, gridRow: `span ${shape.span}`, "--ns-cols": shape.cols } as CSSProperties}>
+                  style={{ gridColumn: `${at.col + 1} / span ${at.cols}`, gridRow: `${at.row + 1} / span ${at.span}`, "--ns-cols": at.cols } as CSSProperties}>
                   <header className={styles.hmNsHead} title={`${g.namespace} — ${t("ob.hm.nsCounts", { danger: g.counts.danger, warn: g.counts.warn, n: g.workloads.length })}`}>
                     <span className={styles.hmNsName}>
                       {g.namespace}{g.prefix ? <span className={styles.hmNsPrefix} title={t("ob.hm.prefix", { p: g.prefix })}> · {g.prefix}…</span> : null}
@@ -298,6 +300,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
               <Button size="sm" variant="ghost" onClick={() => setShowIdle(!showIdle)}>{t(showIdle ? "ob.hm.idleHide" : "ob.hm.idleShow")}</Button>
             </p>
           )}
+          </div>
         </div>
         {sel && (
           <div ref={panelRef} className={styles.hmPanelWrap}>

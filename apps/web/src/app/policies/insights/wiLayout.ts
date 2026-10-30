@@ -1,14 +1,15 @@
-// Workload identity map layout (pure): five columns — workloads · service accounts · federated credentials ·
-// managed identities · Azure roles — one horizontal band per identity (worst first), so the lines of a band never
-// cross into another. The column width follows the container (no sideways scrolling).
+// Workload identity map layout (pure): five columns — workloads · service accounts · token path (federated
+// credentials, and node pools whose scale set carries the identity — IMDS) · managed identities · Azure roles — one
+// horizontal band per identity (worst first), so the lines of a band never cross into another. The column width
+// follows the container (no sideways scrolling).
 
 import type { WiSeverity, WorkloadIdentityResponse, EvidenceKind } from "@aud/types";
 
 export type Pt = { x: number; y: number };
 export type WiCol = 0 | 1 | 2 | 3 | 4;
-export type WiKind = "workload" | "sa" | "fic" | "identity" | "role";
+export type WiKind = "workload" | "sa" | "fic" | "pool" | "identity" | "role";
 export type WiGraphNode = { id: string; col: WiCol; group: string; kind: WiKind; sev: WiSeverity | null; unk: boolean; h: number };
-export type WiGraphEdge = { from: string; to: string; ev: EvidenceKind; kind: "uses" | "federated" | "annotatedOnly" | "parent" | "assigned" };
+export type WiGraphEdge = { from: string; to: string; ev: EvidenceKind; kind: "uses" | "federated" | "annotatedOnly" | "parent" | "imds" | "assigned" };
 export type WiGroup = { id: string; identityId: string | null; sev: WiSeverity | null; size: number; title: string };
 export type WiGraph = { nodes: WiGraphNode[]; edges: WiGraphEdge[]; groups: WiGroup[]; hiddenGroups: number };
 export type WiLayoutOpts = { width: number; colGap: number; vGap: number; groupGap: number; headH: number; minColW: number };
@@ -22,7 +23,7 @@ export type WiLayout = {
 };
 
 /** Three text lines fit every card (title · sub · one extra line) */
-export const NODE_H: Record<WiKind, number> = { workload: 58, sa: 60, fic: 58, identity: 78, role: 58 };
+export const NODE_H: Record<WiKind, number> = { workload: 58, sa: 60, fic: 58, pool: 58, identity: 78, role: 58 };
 const SEV_RANK: Record<WiSeverity, number> = { crit: 0, warn: 1, low: 2, info: 3 };
 const worse = (a: WiSeverity | null, b: WiSeverity | null) => (!a ? b : !b ? a : SEV_RANK[a] <= SEV_RANK[b] ? a : b);
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -35,6 +36,23 @@ export function nodeSeverity(r: WorkloadIdentityResponse): Map<string, WiSeverit
   return m;
 }
 
+/** One card per (node pool, identity) — the same pool can carry several identities, each in its own band */
+export const poolNodeId = (poolId: string, identityId: string) => `${poolId}@${identityId}`;
+export const poolOfNodeId = (nodeId: string) => (nodeId.startsWith("pool:") ? nodeId.slice(0, nodeId.indexOf("@")) : null);
+
+/** Per namespace: workloads using workload identity vs not (system objects only when shown), most "without" first */
+export function namespaceCoverage(r: WorkloadIdentityResponse, opts: { showSystem: boolean }): Array<{ namespace: string; wi: number; other: number }> {
+  const m = new Map<string, { namespace: string; wi: number; other: number }>();
+  const bump = (ns: string, k: "wi" | "other") => {
+    const e = m.get(ns) ?? { namespace: ns, wi: 0, other: 0 };
+    e[k]++;
+    m.set(ns, e);
+  };
+  for (const w of r.workloads) if (opts.showSystem || !w.managed) bump(w.namespace, "wi");
+  for (const w of r.otherWorkloads) if (opts.showSystem || !w.managed) bump(w.namespace, "other");
+  return [...m.values()].sort((a, b) => Number(b.wi > 0) - Number(a.wi > 0) || b.other - a.other || cmp(a.namespace, b.namespace));
+}
+
 export function wiGraph(r: WorkloadIdentityResponse, opts: { showSystem: boolean }): WiGraph {
   const sev = nodeSeverity(r);
   const sas = r.serviceAccounts.filter((s) => opts.showSystem || !s.managed);
@@ -43,10 +61,12 @@ export function wiGraph(r: WorkloadIdentityResponse, opts: { showSystem: boolean
   const edges: WiGraphEdge[] = [];
   const groupOf = (identityId: string | null) => identityId ?? "none";
 
-  // Groups: one per identity that has a visible SA or a credential trusting this cluster, then "no identity"
-  const identities = r.identities.filter((i) => sas.some((s) => s.identityId === i.id) || i.fic.ids.length > 0);
+  // Groups: one per identity that has a visible SA, a credential trusting this cluster or a node pool (IMDS) — a
+  // node-pool-only identity without roles (AKS add-ons) only with system objects shown — then "no identity"
+  const identities = r.identities.filter((i) => sas.some((s) => s.identityId === i.id) || i.fic.ids.length > 0
+    || (!!i.pools?.length && (opts.showSystem || i.roles.length > 0 || i.rolesStatus !== "ok")));
   const groups: WiGroup[] = identities.map((i) => {
-    const members = [i.id, ...sas.filter((s) => s.identityId === i.id).map((s) => s.id), ...i.fic.ids, ...i.roles.map((x) => x.id)];
+    const members = [i.id, ...sas.filter((s) => s.identityId === i.id).map((s) => s.id), ...i.fic.ids, ...(i.pools ?? []).map((p) => poolNodeId(p, i.id)), ...i.roles.map((x) => x.id)];
     return {
       id: i.id, identityId: i.id, sev: members.reduce<WiSeverity | null>((a, id) => worse(a, sev.get(id) ?? null), null),
       size: sas.filter((s) => s.identityId === i.id).length, title: i.name ?? i.clientIdTail,
@@ -75,6 +95,11 @@ export function wiGraph(r: WorkloadIdentityResponse, opts: { showSystem: boolean
       nodes.push({ id: f.id, col: 2, group: i.id, kind: "fic", sev: sev.get(f.id) ?? null, unk: f.dangling === null, h: NODE_H.fic });
       if (f.saId && saIds.has(f.saId)) edges.push({ from: f.saId, to: f.id, ev: "cfg", kind: "federated" });
       edges.push({ from: f.id, to: i.id, ev: "cfg", kind: "parent" });
+    }
+    for (const p of i.pools ?? []) {
+      const id = poolNodeId(p, i.id);
+      nodes.push({ id, col: 2, group: i.id, kind: "pool", sev: sev.get(id) ?? null, unk: r.imds.podAccess === null, h: NODE_H.pool });
+      edges.push({ from: id, to: i.id, ev: "cfg", kind: "imds" });
     }
     for (const ra of i.roles) {
       nodes.push({ id: ra.id, col: 4, group: i.id, kind: "role", sev: sev.get(ra.id) ?? null, unk: false, h: NODE_H.role });

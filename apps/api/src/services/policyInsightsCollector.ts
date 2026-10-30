@@ -9,6 +9,7 @@ import { getHubbleFlows } from "./hubbleClient.js";
 import { getClusterContext, listAzureEndpoints, type ClusterContext } from "./azureEndpoints.js";
 import { buildPolicyInsights } from "./policyInsights.js";
 import { getServiceTagIndex, type ServiceTagIndex } from "./azureServiceTags.js";
+import { collectImageVulns } from "./imageVulns.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights collector
@@ -35,13 +36,19 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   ]);
   gaps.push(...inventory.capabilities.unavailable.map((u) => `Kubernetes ${u}`));
 
-  const [flowsR, azureR, ctxR] = await Promise.allSettled([
+  const images = [...new Set(inventory.workloads.flatMap((w) => (w.security?.containers ?? []).map((c) => c.image)).filter((i): i is string => !!i))];
+  const [flowsR, azureR, ctxR, vulnR] = await Promise.allSettled([
     env.HUBBLE_ENABLED
       ? getHubbleFlows(env, bearerToken, clusterId, { last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000), lang })
       : Promise.reject(new Error(tr("HUBBLE_ENABLED=false — 관측 트래픽 없이 구성·권한만 분석", "HUBBLE_ENABLED=false — configuration and permissions only, no observed traffic"))),
     listAzureEndpoints(env, bearerToken),
     getClusterContext(env, bearerToken, clusterId),
+    // The entry point of attack paths: Defender scans + exact-version SBOM lookups of the running images
+    collectImageVulns(env, bearerToken, clusterId, images),
   ]);
+  const vulns = vulnR.status === "fulfilled" ? vulnR.value : null;
+  if (vulnR.status === "rejected") gaps.push(`${tr("이미지 취약성", "Image vulnerabilities")}: ${msg(vulnR.reason)}`);
+  else if (vulns && vulns.coverage.defender === "failed") gaps.push(tr("이미지 취약성: Defender 결과를 읽지 못함 — SBOM 결과만", "Image vulnerabilities: Defender findings could not be read — SBOM results only"));
 
   let flows: HubbleFlowSet | null = null;
   let flowsError: string | undefined;
@@ -95,7 +102,7 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   const result = withLang(lang, () => buildPolicyInsights({
     clusterId, inventory, policy, flows, flowsError,
     azure: { ...azure, apiServerIps: ctx.apiServerIps, serviceTags },
-    containment: ctx.containment, gaps,
+    containment: ctx.containment, gaps, vulns,
   }));
   debug(`[policy-insights] ${clusterId}: ${result.rows.length} rows, ${result.issues.length} issues, ${result.network.edges.length} edges, gaps ${gaps.length}`);
   insightsCache.set(cacheKey, result);

@@ -27,7 +27,7 @@ const clusterCache = new CacheManager<ClusterContext>(10, 300_000);
 export type ClusterContext = {
   containment: ClusterContainment;
   apiServerIps: string[];
-  identity: { issuerUrl: string | null; oidcEnabled: boolean | null; wiEnabled: boolean | null };
+  identity: { issuerUrl: string | null; oidcEnabled: boolean | null; wiEnabled: boolean | null; nodeResourceGroup?: string | null };
 };
 
 type Props = Record<string, unknown>;
@@ -292,6 +292,7 @@ type ManagedCluster = {
     apiServerAccessProfile?: { enablePrivateCluster?: boolean; authorizedIPRanges?: string[] } | null;
     agentPoolProfiles?: Array<{ count?: number }>;
     oidcIssuerProfile?: { enabled?: boolean; issuerURL?: string } | null;
+    nodeResourceGroup?: string;
     securityProfile?: { workloadIdentity?: { enabled?: boolean } | null } | null;
   };
 };
@@ -335,6 +336,7 @@ export async function getClusterContext(env: Env, bearerToken: string | undefine
       issuerUrl: p.oidcIssuerProfile?.issuerURL ?? null,
       oidcEnabled: !!p.oidcIssuerProfile?.enabled,
       wiEnabled: !!p.securityProfile?.workloadIdentity?.enabled,
+      nodeResourceGroup: p.nodeResourceGroup ?? null,
     },
   };
   clusterCache.set(cacheKey, ctx);

@@ -24,6 +24,7 @@ const R: WorkloadIdentityResponse = {
   fics: [fic("fic:1", "mi:a", "sa:app/api-sa"), fic("fic:2", "mi:a", "sa:app/worker-sa"), fic("fic:3", "mi:a", null)],
   identities: [idn("mi:a", "id-app", ["fic:1", "fic:2", "fic:3"], ["ra:1", "ra:2"]), idn("mi:b", "id-ops", [], ["ra:3"])],
   findings: [{ id: "x", rule: "WI-11", sev: "crit", ev: "perm", title: "", detail: "", remediation: "", docUrl: "", docQuote: "", refs: ["mi:b", "ra:3"] }],
+  nodePools: [], imds: { podAccess: "allowed", restrictionBlockedBy: [], allowPolicies: [], pools: "ok" }, otherWorkloads: [],
   coverage: { serviceAccounts: "ok", identitiesResolved: 2, identitiesUnresolved: 0, ficListed: 2, ficFailed: 0, roleAssignments: "ok", pimEligibleIncluded: false, identityBindings: "notCollected", subscriptionScan: { requested: false, scanned: 0, total: null, cap: 50 } },
   gaps: [],
 };
@@ -65,4 +66,33 @@ test("FIC gauge: 15 ok · 16 warn · 20 crit · unknown", () => {
   assert.equal(L.ficGauge(16).tone, "warn");
   assert.deepEqual(L.ficGauge(20), { ratio: 1, tone: "crit", text: "20/20" });
   assert.deepEqual(L.ficGauge(null), { ratio: 0, tone: "unk", text: "?/20" });
+});
+
+test("IMDS path: a node pool card per (pool, identity) in the token-path column; node-only identities without roles only with system objects", () => {
+  const withPools: WorkloadIdentityResponse = {
+    ...R,
+    identities: [{ ...R.identities[0]!, pools: ["pool:user"] }, R.identities[1]!, { ...idn("mi:n", "agentpool", [], []), scanned: "nodePool", pools: ["pool:user", "pool:sys"] }],
+    nodePools: [
+      { id: "pool:user", name: "user", identityIds: ["mi:a", "mi:n"], nodes: 3, workloads: 4, withoutWi: 2, namespaces: [] },
+      { id: "pool:sys", name: "sys", identityIds: ["mi:n"], nodes: 2, workloads: 1, withoutWi: 1, namespaces: [] },
+    ],
+    otherWorkloads: [
+      { id: "w:app/Deployment/web", namespace: "app", name: "web", kind: "Deployment", pods: 2, managed: false, serviceAccount: "web", pools: ["pool:user"], hostNetwork: false, usesSecrets: false },
+      { id: "w:kube-system/Deployment/coredns", namespace: "kube-system", name: "coredns", kind: "Deployment", pods: 2, managed: true, serviceAccount: "coredns", pools: ["pool:sys"], hostNetwork: false, usesSecrets: false },
+    ],
+  };
+  const g = L.wiGraph(withPools, { showSystem: false });
+  const pool = g.nodes.find((n) => n.id === L.poolNodeId("pool:user", "mi:a"))!;
+  assert.deepEqual([pool.col, pool.kind, pool.group], [2, "pool", "mi:a"]);
+  assert.ok(g.edges.some((e) => e.kind === "imds" && e.from === pool.id && e.to === "mi:a"));
+  assert.ok(!g.groups.some((x) => x.id === "mi:n"), "no roles, no SA → hidden unless system objects are shown");
+  const sys = L.wiGraph(withPools, { showSystem: true });
+  assert.equal(sys.nodes.filter((n) => n.group === "mi:n" && n.kind === "pool").length, 2);
+  assert.equal(L.poolOfNodeId(pool.id), "pool:user");
+  assert.equal(L.poolOfNodeId("mi:a"), null);
+  const lay = L.layoutWi(g, { width: 1100 });
+  assert.ok(lay.edges.some((e) => e.kind === "imds"));
+  // Namespaces: those using workload identity first, then by how many don't; system only when shown
+  assert.deepEqual(L.namespaceCoverage(withPools, { showSystem: false }), [{ namespace: "app", wi: 2, other: 1 }, { namespace: "ops", wi: 1, other: 0 }]);
+  assert.ok(L.namespaceCoverage(withPools, { showSystem: true }).some((c) => c.namespace === "kube-system"));
 });

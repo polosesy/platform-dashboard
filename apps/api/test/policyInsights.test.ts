@@ -291,3 +291,105 @@ test("network: a PaaS reached on its public address keeps the Private Endpoint s
   assert.match(pe.desc, /20\.194\.59\.86/);
   assert.equal(r.network.serviceTagsMatched, null, "not attempted");
 });
+
+test("standing privilege: split by the heatmap's grade, riskiest first, every account listed, shared permission nodes, '+n' never silent", () => {
+  const inv = inventory();
+  const hardened = (name: string) => workload("argo", name, { security: { hostNetwork: false, hostPID: false, hostIPC: false, hostPaths: [], usesSecrets: false, runAsNonRoot: true,
+    containers: [{ name, image: `registry.example/argo/${name}:1.0`, init: false, allowPrivilegeEscalation: false, capAdd: [] }] } });
+  const readers = Array.from({ length: 10 }, (_, i) => `reader-${String(i).padStart(2, "0")}`);
+  inv.namespaces.push({ name: "argo", labels: { "pod-security.kubernetes.io/enforce": "restricted" } });
+  inv.workloads.push(...["app-controller", "server", "webhooker", ...readers].map(hardened));
+  inv.roles.push(
+    { kind: "ClusterRole", name: "secret-reader", labels: {}, rules: [{ apiGroups: [""], resources: ["secrets"], verbs: ["get", "list", "watch"] }], aggregated: false },
+    { kind: "ClusterRole", name: "webhooks", labels: {}, rules: [{ apiGroups: ["admissionregistration.k8s.io"], resources: ["mutatingwebhookconfigurations"], verbs: ["create", "update", "patch"] }], aggregated: false },
+  );
+  const crb = (name: string, role: string) => ({ kind: "ClusterRoleBinding" as const, name, labels: {}, roleRef: { kind: "ClusterRole", name: role }, subjects: [{ kind: "ServiceAccount", name, namespace: "argo" }] });
+  inv.bindings.push(crb("app-controller", "cluster-admin"), crb("server", "cluster-admin"), crb("webhooker", "webhooks"), ...readers.map((r) => crb(r, "secret-reader")));
+  const r = buildPolicyInsights({ ...input(FLOWS), inventory: inv, policy: analyzePolicies(inv, CLUSTER) });
+
+  const crit = r.issues.find((i) => i.id === "standing:crit")!;
+  const warn = r.issues.find((i) => i.id === "standing")!;
+  assert.equal(crit.sev, "crit", "a cluster-admin token is not 'caution'");
+  assert.equal(warn.sev, "warn");
+  assert.deepEqual(crit.members!.map((m) => m.name), ["app-controller", "server", "webhooker"], "riskiest first (most crit permissions), then name");
+  assert.equal(warn.members!.length, 10, "every account is a member — none dropped");
+  assert.ok(crit.title.length < 120 && !crit.title.includes("app-controller"), "the title is one line; names live in the members table");
+  // Every standing row points at the issue that lists it, with the heatmap's grade
+  for (const row of r.rows.filter((x) => x.combos.some((c) => c.type === "standing"))) {
+    const issue = r.issues.find((i) => i.id === row.combos.find((c) => c.type === "standing")!.issueId)!;
+    assert.ok(issue.members!.some((m) => m.rowId === row.id), row.name);
+    assert.equal(issue.sev, row.weights.highRbac === "crit" ? "crit" : "warn", `${row.name}: same grade as the heatmap`);
+  }
+  // Graph: 8 accounts drawn + one "+2" node that names the rest; 10 Secret readers share one permission node
+  const drawn = warn.nodes.filter((n) => n.type === "workload");
+  assert.equal(drawn.length, 9);
+  const more = drawn.find((n) => n.id === "more")!;
+  assert.match(more.label, /2/);
+  assert.equal(more.facts.length, 2);
+  assert.equal(warn.nodes.filter((n) => n.col === 3).length, 1, "one shared permission node");
+  assert.equal(crit.nodes.filter((n) => n.col === 3).length, 2, "cluster-admin ×2 share a node, webhook has its own");
+  assert.equal(crit.nodes.find((n) => n.type === "impact")!.label, "클러스터 전체");
+  // Each drawn account has its cut on a real edge; every member (drawn or not) has an action
+  const keys = new Set(warn.edges.map((e) => `${e.from}>${e.to}`));
+  for (const a of warn.actions) for (const c of a.cuts) assert.ok(keys.has(c), c);
+  assert.equal(warn.actions.length, 10);
+  assert.equal(warn.edges.filter((e) => e.cut).length, 8);
+});
+
+test("path header: four facts (who · reaches · cuts · evidence) and an evidence line that names its unit (links)", async () => {
+  const { issueGlance, insightLabels } = await import("../../web/src/app/policies/insights/model.ts");
+  const { MODULES } = await import("../../web/src/lib/i18nMessages.ts");
+  const all = Object.assign({}, ...Object.values(MODULES)) as Record<string, { ko: string }>;
+  const t = (key: string, vars: Record<string, string | number> = {}) =>
+    (all[key]?.ko ?? key).replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? `{${k}}`));
+  const r = buildPolicyInsights(input(FLOWS));
+  const take = r.issues.find((i) => i.kind === "takeover")!;
+  const g = issueGlance(take);
+  assert.equal(g.whoKind, "workloads");
+  assert.ok(g.reach.length === 1 && g.cuts >= 1);
+  assert.equal(g.unverified, take.edges.filter((e) => e.ev === "unk").length);
+  const lb = insightLabels(t);
+  assert.match(lb.confOf(take, null), /^선 \d+개 — /, "mixed evidence: count of links, then per kind");
+  const permOnly = { ...take, edges: take.edges.map((e) => ({ ...e, ev: "perm" as const })), confNote: undefined };
+  assert.equal(lb.confOf(permOnly, null), `선 ${take.edges.length}개 모두 RBAC 권한`);
+  assert.ok(lb.evidenceOf(permOnly).some(([, txt]) => txt === `권한 선 ${take.edges.length}`), "card chips say 'lines' too");
+});
+
+test("entry point: a scanned vulnerable image fills the takeover path's entry (cfg), the 12th factor and KBOM; no scan = 'unknown' with the reason", () => {
+  const base = input(FLOWS);
+  const agentImage = "docker.io/acme/agent:1.0";
+  const cov = { images: 3, scanned: 1, defender: "ok" as const, sbomMapped: 0, sbom: "ok" as const, pending: 0 };
+  const vuln = { image: agentImage, source: "defender" as const, basis: "tag" as const, counts: { critical: 1, high: 3, medium: 0, low: 0 }, exploited: "kev" as const, fixable: 2,
+    top: [{ id: "CVE-2026-0001", cve: "CVE-2026-0001", severity: "critical" as const, exploited: "kev" as const, pkg: "openssl", version: "3.0.1", fixed: "3.0.9", url: null }] };
+  const r = buildPolicyInsights({ ...base, vulns: { byImage: [vuln], coverage: cov } });
+  const agent = r.rows.find((x) => x.name === "agent")!;
+  assert.match(agent.cells.vuln!, /치명 1 · 높음 3 · KEV 악용 \(Defender\)/);
+  assert.equal(agent.weights.vuln, "crit", "exploited in the wild = critical");
+  assert.ok(r.factors.some((f) => f.key === "vuln"));
+  const take = r.issues.find((i) => i.kind === "takeover" && i.id.includes("agent"))!;
+  const entry = take.nodes.find((n) => n.id === "entry")!;
+  assert.equal(entry.unk, undefined);
+  assert.match(entry.label, /취약 이미지/);
+  assert.match(entry.sub!, /CVE-2026-0001/);
+  const edge = take.edges.find((e) => e.from === "entry")!;
+  assert.equal(edge.ev, "cfg", "a scan result, not a guess");
+  assert.match(edge.label, /CVE 4 · 악용/);
+  assert.deepEqual(take.extraEvidence, [["cfg", "진입: CVE 4"]]);
+  assert.equal(r.kbom.items.find((i) => i.repo === "docker.io/acme/agent")!.vuln!.exploited, "kev");
+  assert.equal(r.kbom.summary.vulnerable, 1);
+  assert.equal(r.kbom.summary.scanned, 1);
+  // web: not scanned → no cell, and the fact says why (not 'clean')
+  const web = r.rows.find((x) => x.name === "web")!;
+  assert.equal(web.cells.vuln, undefined);
+  // Without any vulnerability source: KBOM says null (not 0), entry unknown with the reason
+  const none = buildPolicyInsights(base);
+  assert.equal(none.kbom.summary.vulnerable, null);
+  const e0 = none.issues.find((i) => i.kind === "takeover")!.edges.find((e) => e.from === "entry")!;
+  assert.equal(e0.ev, "unk");
+  assert.match(e0.why!, /출처를 읽지 않음/);
+  // Sources read but this image not covered → reason names it
+  const unscanned = buildPolicyInsights({ ...base, vulns: { byImage: [], coverage: { ...cov, scanned: 0, defender: "noData" } } });
+  const why = unscanned.issues.find((i) => i.kind === "takeover")!.edges.find((e) => e.from === "entry")!.why!;
+  assert.match(why, /Defender 컨테이너 취약성 결과 0건/);
+  assert.match(why, /알려진 오픈소스 이미지/);
+});
