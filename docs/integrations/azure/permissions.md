@@ -31,7 +31,8 @@ covers: [apps/api/src/services/featureCatalog.ts]
 | 보안 개요·권고·위협·규정 준수 | **Security Reader** (Reader로도 대부분) | 구독 | Defender for Cloud | `security` |
 | 비용 관리 | **Cost Management Reader** | 구독 | Cost Management 쿼리·예산 | `cost` |
 | AKS 클러스터·모니터링·정책 점검 | **Azure Kubernetes Service Cluster User Role** | 클러스터 | `listClusterUserCredential` — API 서버 주소·CA (Entra 클러스터에서는 비밀 없음) | `aksCredential` |
-| (클러스터 안) 같은 화면 | Kubernetes **`aud-dashboard-reader`** (list만) | 클러스터 | [aks.md](./aks.md) · [templates/aks](./templates/aks/) | — |
+| (클러스터 안) 같은 화면 | Kubernetes **`aud-dashboard-reader`** (list만) | 클러스터 | [aks.md](./aks.md) · [templates/aks](./templates/aks/) — Argo CD `applications.argoproj.io` 포함(배포 출처·고칠 곳, 없으면 그 부분만 '권한 없음') | — |
+| AKS 보안 점검 — 이미지 취약성(진입점) | **Security Reader** (선택) | 구독 | Defender for Containers 취약성 결과(Resource Graph). 없으면 알려진 오픈소스 이미지의 버전 조회(OSV)만 | `security` |
 | NSG 흐름 로그 원본(blob) | **Storage Blob Data Reader** | 흐름 로그 스토리지 계정 | 데이터 평면 읽기 | `flowLogBlobs` |
 | Prometheus 메트릭 | **Monitoring Data Reader** | Azure Monitor 작업 영역 | PromQL | `prometheus` |
 

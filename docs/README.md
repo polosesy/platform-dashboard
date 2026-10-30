@@ -31,6 +31,10 @@ last-verified: 2026-10-30
 - [azure-resource-relationships.md](architecture/azure-resource-relationships.md) — 리소스 관계 사전 핵심(코드가 쓰는 행)
 - 영역별 관계 사전: [network-core.md](architecture/relationships/network-core.md) · [network-edge.md](architecture/relationships/network-edge.md) · [compute-containers.md](architecture/relationships/compute-containers.md) · [app-integration.md](architecture/relationships/app-integration.md) · [data.md](architecture/relationships/data.md) · [identity-security-monitoring.md](architecture/relationships/identity-security-monitoring.md) (+ `relationships/catalog.json`)
 
+## 보안 — `security/`
+
+- [security-operations-guide.md](security/security-operations-guide.md) — 보안 기능 운영: 이슈 목록(상태·예외·팀) · 위험 조합 읽는 법(4칸·근거 등급·고칠 곳) · 이미지 취약성 · 워크로드 ID WI-17/18 · 배포 출처 · '확인 불가' 이유표
+
 ## 관측 — `observability/`
 
 - [observability-instrumentation-guide.md](observability/observability-instrumentation-guide.md) — AKS 메트릭·로그 계측과 수집 경로

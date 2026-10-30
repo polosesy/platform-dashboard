@@ -10,6 +10,20 @@ covers: [apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadId
 
 > **5살 비유**: 도둑이 집에 들어오려면 ① 열린 창문(노출·취약한 이미지) ② 열쇠(권한) ③ 보물(데이터·클러스터)이 이어져야 해요. 따로따로 보면 "창문 하나 열림", "열쇠 하나 있음"이지만, **이어서 보면** "이 창문으로 들어와 이 열쇠로 보물상자를 열 수 있다"가 보여요. 우리는 이미 ②③을 잇고 있었고, ①(어느 창문이 정말 깨질 수 있는지)이 비어 있었어요.
 
+**한눈에 — 상태(2026-10-30)**
+
+| 단계 | 내용 | 상태 | 커밋 |
+|---|---|---|---|
+| P0 | 같은 사실 = 같은 등급(상시 고권한 분할·경로 머리 4칸) | 완료 | `f5d4262` |
+| P1 | 이미지 취약성 = 공격 경로 진입점(Defender + SBOM) | 완료 | `f5d4262` |
+| P2 | 통합 이슈 목록 + 상태·예외 저장 | 완료 | `402be59` |
+| P3 | 팀 소유(`owners`) + 받았지만 안 쓰는 권한(WI-18) | 완료 | `055f7d6` |
+| P4a | 배포 출처·고칠 곳(Argo CD) | 완료 | `7d4d5c2` |
+| P4b | 이미지 OCI 라벨 → 저장소·커밋 | 보류(라벨 없음·AcrPull 필요) | — |
+| P5 | 보안 그래프 탐색 | 계획 | — |
+
+사용법(화면 읽는 법·상태 규칙·'확인 불가' 이유)은 [보안 기능 운영 가이드](../security/security-operations-guide.md).
+
 ## 1. 비교 기준
 
 참고: "Wiz in Action: Risk-Based Code-to-Cloud Security Monitoring" 데모 영상(본문은 직접 확인 못 함) — 같은 데모를 소개한 [Bridewell 웨비나](https://www.bridewell.com/webinars/detail/seeing-the-full-attack-path-continuous-code-to-cloud-security-with-wiz)와 [Wiz 제품 페이지](https://www.wiz.io/product)의 공개 설명을 기준으로 삼았습니다.

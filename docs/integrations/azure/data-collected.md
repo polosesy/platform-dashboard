@@ -21,6 +21,10 @@ last-verified: 2026-10-30
 
 - **AKS 보안 점검 › 네트워크 노출**(관측 트래픽의 목적지 이름 붙이기): Resource Graph로 Private Endpoint와 그 NIC의 사설 IP, PaaS의 공용 액세스·네트워크 규칙·키 인증 설정을 읽고, 규칙이 하위 리소스에 있는 유형(PostgreSQL·MySQL·SQL·Redis·Mongo vCore 방화벽 규칙, Event Hubs·Service Bus 네트워크 규칙 세트, Azure Managed Redis 데이터베이스)은 ARM GET으로 읽습니다(공용 액세스가 꺼진 리소스는 읽지 않음, 최대 40개). 응답에는 **규칙 개수와 허용 VNet의 `vnet/서브넷` 이름만** — 허용 IP 값은 보내지 않습니다. 이름이 없는 공용 IP는 Microsoft **서비스 태그**(ARM Service Tag Discovery API, 클러스터 리전)로만 이름을 붙입니다 — Microsoft 공개 데이터라 리전별로 24시간 공유 캐시
 - **AKS 모니터링 › 노드 · 라이브 다이어그램 AKS 패널**(노드 유지 보수): 클러스터 리소스 그룹과 노드 리소스 그룹의 **Activity Log**(작업 이름·상태·시각·대상 리소스, 최대 30일)와 클러스터의 자동 업그레이드 채널·노드 풀·`maintenanceConfigurations`를 읽습니다. 작업한 사람·앱의 이름은 응답에 넣지 않고 **종류만**(AKS 자동·사용자·앱) 보냅니다. 노드 cordon·NotReady·재등록·커널/kubelet 버전과 다시 시작된 파드 수는 클러스터의 Azure Monitor 작업 영역(kube-state-metrics)에서 읽습니다.
+- **AKS 보안 점검 › 이미지 취약성(진입점)**: Resource Graph의 Defender for Containers 취약성 결과를 **이미지별 개수·상위 CVE 5개**로 요약해 읽고(패키지·현재·수정 버전), 알려진 오픈소스 이미지는 정확한 버전으로 OSV·CVE.org·CISA KEV를 조회합니다(아래 '밖으로 나가는 것'과 같은 주소·같은 스위치). 메모리 캐시 10분.
+- **AKS 보안 점검 › 배포 출처**: 클러스터의 Argo CD `Application`에서 저장소 주소(사용자 정보·토큰·쿼리를 지운 것)·경로/차트·Helm 값 파일 이름·동기화 리비전·관리 대상 목록만 — Secret·매니페스트 내용은 읽지 않음. 메모리 캐시.
+- **워크로드 ID › 사용 기록(WI-18)**: 관리 ID의 Key Vault·Storage 데이터 역할 범위에서 **접근 로그를 집계한 개수와 마지막 시각만**(이 ID의 요청 수 · 같은 범위 전체 요청 수, 최근 30일) — 로그 줄·호출 IP·비밀 이름은 가져오지 않음. 메모리 캐시 10분.
+- **위협 탐지 › 가려진 설명**: Resource Graph가 별표로 가린 경고만 Defender 경고 API에서 **설명·대상·엔터티 이름**을 읽음 — 확장 속성(명령줄·프로세스 트리)은 읽지 않음.
 - **Azure 데이터는 저장소에 쓰지 않습니다.** API를 재시작하면 캐시는 사라집니다. 라이브 다이어그램 스펙은 메모리에 사용자별로 보관됩니다.
 - **예외 — 팀 배치**: `AUD_ARRANGEMENT_DIR`을 설정하면 인프라 구성도의 게시된 배치가 구독마다 `<subscriptionId>.json` 하나로 저장됩니다(순서·칸·연결선 — 리소스 ID·이름을 담고 메트릭은 없음, 작성자는 표시 이름만). 설정하지 않으면 메모리.
 - **예외 — 이슈 상태**(통합 위험 › 이슈 목록): 팀이 정한 상태만 구독마다 `<subscriptionId>.json` 하나로 저장됩니다 — 이슈 키(출처·`리소스 그룹/클러스터`·점검 ID), 상태(열림·진행·예외·해결 표시), 메모·담당(자유 텍스트, 500·100자), 예외 끝나는 날, 변경 기록 20개(시각·**표시 이름**, 개체 ID 아님). 이슈 내용·Azure 데이터는 저장하지 않습니다(매번 출처에서 다시 계산). 위치 `AUD_ISSUE_STATE_DIR` → 없으면 `<AUD_ARRANGEMENT_DIR>/issues` → 없으면 메모리.
@@ -29,7 +33,7 @@ last-verified: 2026-10-30
 - **밖으로 나가는 것(긴급 취약점)** — 고정된 공식 주소만, https, 다른 주소로 리디렉션되면 거부:
   - `www.cisa.gov`·`nodejs.org`·`www.php.net`: GET만, 보내는 값 없음
   - `cveawg.mitre.org`(CVE.org)·`services.nvd.nist.gov`: **CVE 번호**만
-  - `api.osv.dev`(OSV): **패키지 이름·버전 목록** — 이 대시보드의 npm·OS 패키지, 클러스터의 Kubernetes 버전, 알려진 오픈소스 이미지(cilium·argo-cd 등)의 Go 모듈·버전. 고객 앱 이미지 이름·테넌트·리소스 이름은 보내지 않습니다. 이것만 끄려면 `AUD_ADVISORY_OSV=false`(이 탭이 비고 공지·KEV는 그대로)
+  - `api.osv.dev`(OSV): **패키지 이름·버전 목록** — 이 대시보드의 npm·OS 패키지, 클러스터의 Kubernetes 버전, 알려진 오픈소스 이미지(cilium·argo-cd 등)의 Go 모듈·버전(긴급 취약점과 AKS 보안 점검의 이미지 취약성이 같은 조회를 씀). 고객 앱 이미지 이름·테넌트·리소스 이름은 보내지 않습니다. 이것만 끄려면 `AUD_ADVISORY_OSV=false`(이 탭이 비고 공지·KEV는 그대로)
   - 폐쇄망은 `AUD_ADVISORY_FEEDS=false`(차트 `features.advisoryFeeds: false`) — 모두 끄고 Defender 결과와 대시보드 자체 버전만으로 판정
   - 로그인한 사용자에게만 정확한 버전(실행 환경·구성 요소 목록)을 보여 줍니다.
 - **감사 로그**(`AUD_AUDIT_LOG=stdout`, 프로덕션 기본): 요청마다 시각·요청 ID·사용자 `oid` 마지막 4자리·역할·연결 키·경로·상태 코드. 토큰·쿼리 문자열·본문·전체 GUID는 남기지 않습니다.

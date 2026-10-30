@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-29
-covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts]
+last-verified: 2026-10-30
+covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 에러 카탈로그
 
@@ -18,7 +18,7 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 3. [Azure 인증 · 플랫폼 역할](#3-azure-인증--플랫폼-역할)
 4. [Kubernetes API](#4-kubernetes-api)
 5. [프론트엔드 (Next.js / React)](#5-프론트엔드)
-6. [보안 (Defender for Cloud)](#6-보안-defender-for-cloud)
+6. [보안 (Defender for Cloud · 이슈 목록 · 워크로드 ID)](#6-보안-defender-for-cloud)
 7. [Azure 연결 (Connection)](#7-azure-연결-connection)
 8. [VNet 트래픽 (Flow Log)](#8-vnet-트래픽-flow-log)
 9. [리소스 상태 (Service Health 번역)](#9-리소스-상태-service-health-번역)
@@ -148,6 +148,10 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **원인**: 대상 pod가 응답하지 않거나 컨테이너 이름이 잘못됨
 - **해결**: 컨테이너 이름 자동 감지 로직 + 타임아웃 시 부분 결과 반환
 
+### K8S-003: AKS 보안 점검에 '배포 출처를 읽을 권한이 없습니다'
+- **원인**: 클러스터 읽기 역할에 Argo CD `applications.argoproj.io` list가 없음(403) — 2026-10-30에 읽기 범위에 추가됨, 고객 클러스터의 역할은 고객이 갱신해야 함. Argo CD가 없는 클러스터(404)는 안내 없이 비어 있음
+- **해결**: 갱신된 [`aud-dashboard-reader.yaml`](../integrations/azure/templates/aks/aud-dashboard-reader.yaml)(코드에서 생성 — `npx tsx apps/api/scripts/gen-aks-rbac.ts`)을 적용. 그 밖의 화면은 영향 없음
+
 ---
 
 ## 5. 프론트엔드
@@ -207,6 +211,27 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **원인**: 연결은 근거가 있을 때만 만듦 — ① 클러스터가 선택한 구독의 구성도에 없음(`clusterNotInGraph`), ② Hubble 관측 없음(`hubble`)이나 Azure PaaS 목록 실패(`azureMatch`), ③ Defender 샘플(권고당 최대 5개) 밖의 리소스, ④ 같은 키 후보가 둘 이상(모호), ⑤ 비로그인(예시 데이터는 조인하지 않음)
 - **해결**: 화면 위 '미확인' 알림의 항목부터 확인. 클러스터와 같은 구독을 고르고, AKS 보안 점검의 Hubble 상태를 확인. 연결 0건은 '안전'을 뜻하지 않으며 하단 '연결 근거가 없는 항목'에서 원 화면으로 이동
 
+### SEC-004: 위협 탐지 경고 설명이 가려짐
+- **증상**: 경고를 펼치면 설명 대신 'Azure Resource Graph가 이 경고의 설명을 가려서 주고(****)…' 안내 (예전 화면은 `********`를 그대로 보였음)
+- **원인**: Resource Graph `securityresources`는 경고의 `Description`·`CompromisedEntity`·`Entities`·`ExtendedProperties`를 별표로 가려서 줌(2026-10-29 실측 — 같은 신원으로 Defender 경고 API `Microsoft.Security/alerts`는 원문). API는 가려진 경고만 경고 API(2022-01-01, 구독별, 다음 쪽 5개까지)에서 설명·대상·엔터티를 채움(확장 속성 = 명령줄은 읽지 않음). 그 API가 실패하거나 그 경고를 돌려주지 않으면(오래된 경고) 안내만
+- **해결**: 'Defender에서 열기'로 원문. 계속이면 연결 신원에 구독 **Security Reader**(또는 Reader)가 있는지 확인(`Microsoft.Security/locations/alerts/read`)
+
+### SEC-005: 이슈 상태 저장이 '그사이 다른 사람이 바꿨습니다'(409 `issue_state_conflict`)
+- **원인**: 이슈마다 버전(`rev`)이 있어, 화면을 연 뒤 다른 사람이 같은 이슈를 바꾸면 저장을 거부(다른 이슈는 서로 막지 않음)
+- **해결**: 화면이 최신 상태를 다시 불러옴 — 확인하고 다시 저장
+
+### SEC-006: 이슈 상태 저장 400 — `issue_exception_reason` / `issue_exception_until` / `issue_until_only_exception` / `issue_state_full` / `role_required`
+- **원인**: 예외는 사유 3자 이상 + 끝나는 날(내일 ~ 1년) 필수 · 끝나는 날은 예외에만 · 구독당 상태 3,000개 한도 · 쓰기는 운영자(AUD.Operator) 이상
+- **해결**: 화면 문구대로 입력을 고치거나, 역할을 요청(`AUD.Operator`). 한도는 오래된 해결 표시 이슈를 정리(저장 파일 `<subscriptionId>.json`)
+
+### SEC-007: 이슈 목록 '상태가 서버 메모리에만 저장됩니다'
+- **원인**: `AUD_ISSUE_STATE_DIR`도 `AUD_ARRANGEMENT_DIR`도 없음 → API 메모리(재시작하면 사라짐)
+- **해결**: 쓰기 볼륨을 마운트하고 둘 중 하나를 설정. 온프렘 Docker는 기본 `state/arrangements` 안 `issues/`를 씀([container.md](../deployment/container.md))
+
+### SEC-008: 워크로드 ID 역할 '사용 기록 — 확인 불가'(WI-18이 안 나옴)
+- **원인**: ① 범위의 Key Vault 감사 로그·Storage 로그가 Log Analytics에 없음(`noLogs` — 진단 설정 없음·작업 영역 아님) ② 로그를 읽을 권한 없음(`noAccess` — 403) ③ 로그로 판정할 수 없는 역할(`notCovered` — 제어 평면 역할·AcrPull·관리 그룹 범위)
+- **해결**: ① Key Vault `AuditEvent`/Storage 로그 범주를 작업 영역으로 보내는 진단 설정 ② 범위에 Reader(리소스 로그 읽기 포함), 작업 영역 접근 모드 '리소스 또는 작업 영역 권한' ③ 정상 — 판정하지 않음. KQL 열 이름에 `last`를 쓰면 파싱 오류(SYN0002 — 예약어)라 `lastSeen`을 씀
+
 ---
 
 ## 7. Azure 연결 (Connection)
@@ -248,6 +273,11 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 ### CONN-009: 503 `connection_federation_mismatch`
 - **원인**: 페더레이션 연결(`federation: {kind: "kubernetes"}`)인데 고객 앱의 페더레이션 자격 증명이 플랫폼 서비스 계정 토큰의 발급자·주체와 맞지 않음(AADSTS70021·700211 발급자·700213 주체). 방금 만든 자격 증명은 디렉터리 캐시 때문에 몇 분간 실패할 수 있음
 - **해결**: 연결 점검에 나오는 발급자·주체(`AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT`)와 고객 앱의 자격 증명을 대소문자까지 비교, 대상 `api://AzureADTokenExchange` 확인 — [connect-tenant.md](../integrations/azure/connect-tenant.md) B-2
+
+### CONN-010: 연결 파일 `owners` 오류로 API가 시작하지 않음
+- **에러**: `Invalid connections file: … owners …` (`a team name, not an id` / `a namespace name or prefix*` / `a team needs namespaces or resourceGroups`)
+- **원인**: `owners`는 zod strict — 팀 이름 1~60자(GUID 거부), 네임스페이스·리소스 그룹은 정확한 이름 또는 끝 `*`, 팀마다 둘 중 하나 이상, 팀·규칙 각 100개까지
+- **해결**: 형식을 고치고 API 재시작. 배포 전 확인: 시작 로그 `Azure connections: …`. 예시는 [connect-tenant.md](../integrations/azure/connect-tenant.md)
 
 ---
 

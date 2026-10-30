@@ -275,6 +275,7 @@ Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE
 | `docs/getting-started/` | setup-guide(예시 데이터 실행 → 앱 등록 2개·`Azure.Read.All` → 연결·공급자 등록) |
 | `docs/deployment/` | container(온프렘 Docker·`audctl`·소스 없는 배포), kubernetes(AKS 네임스페이스·Helm 차트·워크로드 ID) |
 | `docs/architecture/` | security-roadmap(보안 고도화 계획 — CNAPP 데모 비교, P0 등급 정합성·P1 이미지 취약성 진입점·P2 통합 이슈 목록·P3 팀 소유·안 쓰는 권한·P4a 배포 출처(Argo CD) 구현, P4b OCI 라벨 보류·P5 보안 그래프 계획), multi-cloud(Azure·AWS·GCP 분석·단계 계획, Phase 0 = `cloud.ts` 타입 · `services/cloudKinds.ts` 표준 종류 표(Azure 유형은 관계 카탈로그에 있어야 함) · `infra/cloudRefs.ts` ID → 범위·마스킹 · 연결 `provider` 기본 azure, 테스트 `cloudKinds.test.ts`), GLOSSARY (용어집), azure-resource-relationships(리소스 관계 사전 핵심 — 입문 7장 + 코드가 쓰는 행), `relationships/`(영역 6개: network-core NET·network-edge EDG·compute-containers CMP·app-integration APP·data DAT·identity-security-monitoring IDM, 약 250행) + `relationships/catalog.json`(Azure REST API 스펙 리버스 엔지니어링: 유형 3,012·참조 속성 2,872, 공개 자료만). 재생성 `scripts/relationships/`(README) |
+| `docs/security/` | security-operations-guide(보안 기능 운영 — 이슈 목록 상태·예외·팀, 위험 조합 4칸·근거 등급·고칠 곳, 이미지 취약성, WI-17/18, 배포 출처, '확인 불가' 이유표 — 설계는 architecture/security-roadmap) |
 | `docs/observability/` | observability-instrumentation-guide, hubble-guide, hubble-troubleshooting, vnet-flow-logs(VNet 트래픽 화면) |
 | `docs/troubleshooting/` | error-catalog (도메인별 에러 통합 — AUTH·CONN·NET 포함) |
 | `docs/archive/` | 보관 문서(`<연도>/`, 머리 `status: archived`·`reason`·`replaced-by` + 배너, 색인 `archive/README.md`) — 현재 문서·이 파일은 링크하지 않음 |
