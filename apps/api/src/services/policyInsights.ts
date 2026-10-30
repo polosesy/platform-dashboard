@@ -34,6 +34,7 @@ import type {
 } from "@aud/types";
 import { L } from "../infra/lang.js";
 import { vulnWeight } from "./imageVulns.js";
+import { fixAtText, sourceOf } from "./gitopsSource.js";
 import { selectorMatches, type InvRbacRule, type InvWorkload, type PolicyInventory } from "./policyAnalyzer.js";
 import { isPrivateV4, lookupServiceTag, type ServiceTagIndex } from "./azureServiceTags.js";
 
@@ -486,7 +487,9 @@ export function parseImage(image: string): { repo: string; registry: string; tag
 export function buildKbom(workloads: InvWorkload[], input: InsightsInput): Kbom {
   const items = new Map<string, KbomItem & { tagSet: Set<string>; digestAll: boolean; images: Set<string> }>();
   const byImage = new Map((input.vulns?.byImage ?? []).map((v) => [v.image, v]));
+  const gitopsApps = input.inventory.gitops?.apps ?? [];
   for (const w of workloads) {
+    const src = gitopsApps.length ? sourceOf(gitopsApps, w) : undefined;
     for (const c of w.security?.containers ?? []) {
       if (!c.image) continue;
       const p = parseImage(c.image);
@@ -496,6 +499,7 @@ export function buildKbom(workloads: InvWorkload[], input: InsightsInput): Kbom 
       };
       it.tagSet.add(p.tag);
       it.images.add(c.image);
+      if (src && !(it.sources ?? []).some((x) => x.app === src.app && x.appNamespace === src.appNamespace)) it.sources = [...(it.sources ?? []), src];
       if (!it.workloads.includes(wid(w))) it.workloads.push(wid(w));
       if (!isAksManaged(w.labels)) it.managed = false;
       if (!p.digest) it.digestAll = false;
@@ -641,6 +645,7 @@ function buildRows(input: InsightsInput, workloads: InvWorkload[]): RowCtx[] {
   const { inventory: inv, policy } = input;
   const psaOf = new Map(policy.namespaces.map((n) => [n.name, n]));
   const byImage = new Map((input.vulns?.byImage ?? []).map((v) => [v.image, v]));
+  const gitopsApps = inv.gitops?.apps ?? [];
   return workloads.map((w) => {
     const sec = w.security;
     const sa = w.serviceAccountName ?? "default";
@@ -688,6 +693,7 @@ function buildRows(input: InsightsInput, workloads: InvWorkload[]): RowCtx[] {
       managed: isAksManaged(w.labels), owner: ownerOf(w), serviceAccount: sa,
       cells, weights, combos: [], score: 0, images: [...new Set((sec?.containers ?? []).map((c) => c.image).filter(Boolean))],
       bindings: rbac.map((b) => b.binding),
+      ...(gitopsApps.length ? (() => { const src = sourceOf(gitopsApps, w); return src ? { source: src } : {}; })() : {}),
     };
     return { row, w, sel, exposure, rbac, vuln, vulnCov: input.vulns?.coverage };
   });
@@ -792,6 +798,7 @@ function workloadFacts(c: RowCtx): FactRow[] {
     ...(c.exposure.services.length ? [{ k: "Service", v: c.exposure.services.join(", "), ev: "cfg" as EvidenceKind, src: L("Service selector 일치", "Service selector match") }] : []),
     { k: L("Ingress 정책", "Ingress policies"), v: c.sel.ingress.join(", ") || "0", ev: "cfg", src: L("NetworkPolicy·CiliumNetworkPolicy 선택 결과", "Selected by NetworkPolicy · CiliumNetworkPolicy") },
     { k: L("Egress 정책", "Egress policies"), v: c.sel.egress.join(", ") || "0", ev: "cfg", src: L("NetworkPolicy·CiliumNetworkPolicy 선택 결과", "Selected by NetworkPolicy · CiliumNetworkPolicy") },
+    ...(r.source ? [{ k: L("배포 출처", "Deployed from"), v: fixAtText(r.source), ev: "cfg" as EvidenceKind, src: L("Argo CD Application status.resources", "Argo CD Application status.resources"), mono: true }] : []),
     ...vulnFacts(c, c.vulnCov),
   ];
 }
@@ -821,6 +828,8 @@ export function paasFacts(n: NetNode): FactRow[] {
 }
 
 export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkInsight): RiskIssue[] {
+  /** "Where the change is made": the workload's GitOps source (Argo CD), when known */
+  const fixAt = (c: RowCtx): { fixAt?: string } => (c.row.source ? { fixAt: fixAtText(c.row.source) } : {});
   const { policy, containment } = input;
   const issues: RiskIssue[] = [];
   const cov = net.coverage;
@@ -918,10 +927,10 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
       { from: "app", to: "any", ev: "cfg", label: L("송신 제한 없음 ?", "No egress limit ?"), cut: fqdnId },
     ];
     const actions: RemediationAction[] = [
-      { id: fqdnId, title: L("ACNS FQDN 송신 정책 (관측된 목적지만 허용)", "ACNS FQDN egress policy (allow observed destinations only)"), desc: L(`관측 목적지 ${net.edges.filter((e) => e.from === r.id).length}곳 기준 초안. 관측 범위가 ${hubbleNote}라 드문 흐름은 빠져 있을 수 있음 → 관측 모드 운영 후 적용.`, `Draft based on ${net.edges.filter((e) => e.from === r.id).length} observed destinations. The observed window is ${hubbleNote}, so rare flows may be missing → run in audit mode before enforcing.`), risk: "warn", riskLabel: L("주의", "Caution"), closes: nsFindings(r.namespace, ["NET-003"]), cuts: ["app>any"], effect: "closed", code: egressPolicyCode(c, net) },
+      { id: fqdnId, title: L("ACNS FQDN 송신 정책 (관측된 목적지만 허용)", "ACNS FQDN egress policy (allow observed destinations only)"), desc: L(`관측 목적지 ${net.edges.filter((e) => e.from === r.id).length}곳 기준 초안. 관측 범위가 ${hubbleNote}라 드문 흐름은 빠져 있을 수 있음 → 관측 모드 운영 후 적용.`, `Draft based on ${net.edges.filter((e) => e.from === r.id).length} observed destinations. The observed window is ${hubbleNote}, so rare flows may be missing → run in audit mode before enforcing.`), risk: "warn", riskLabel: L("주의", "Caution"), closes: nsFindings(r.namespace, ["NET-003"]), cuts: ["app>any"], effect: "closed", code: egressPolicyCode(c, net), ...fixAt(c) },
       ...(pubPaas.length ? [{ id: peId, title: L(`Private Endpoint로 전환 후 ${pubPaas.map((n) => n!.label).join("·")} 공용 액세스 끄기`, `Move to Private Endpoints, then turn off public access on ${pubPaas.map((n) => n!.label).join("·")}`), desc: L(`관측한 목적지 IP가 공용 주소입니다(${pubIps(pubPaas)}) — 아웃바운드 SNAT으로 공용 엔드포인트에 갑니다. 다른 클라이언트가 공용 경로를 쓰는지 먼저 확인하세요.`, `The observed destination IPs are public (${pubIps(pubPaas)}) — traffic reaches the public endpoint through outbound SNAT. Check whether other clients use the public path first.`), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: ["app>dst0"], effect: "reduced" as const,
         code: pubPaas.map((n) => L(`# ${n!.label} (${n!.azureType})\naz network private-endpoint create -g ${containment.resourceGroup} -n pe-${n!.label} --vnet-name <aks-vnet> --subnet <pe-subnet> \\\n  --private-connection-resource-id <${n!.label} 리소스 ID> --group-id <하위 리소스> --connection-name ${n!.label}`, `# ${n!.label} (${n!.azureType})\naz network private-endpoint create -g ${containment.resourceGroup} -n pe-${n!.label} --vnet-name <aks-vnet> --subnet <pe-subnet> \\\n  --private-connection-resource-id <${n!.label} resource ID> --group-id <sub-resource> --connection-name ${n!.label}`)).join("\n") + L("\n# 파드에서 FQDN이 사설 IP로 풀리는지 확인한 뒤 공용 액세스를 끄세요", "\n# Check that the FQDN resolves to a private IP from a pod, then turn off public access") }] : []),
-      ...(r.cells.root || r.cells.privEsc ? [{ id: scId, title: L("securityContext 강화 (allowPrivilegeEscalation:false · runAsNonRoot)", "Harden securityContext (allowPrivilegeEscalation:false · runAsNonRoot)"), desc: L("이미지의 USER·setuid 사용 여부는 수집하지 않았습니다 → 스테이징에서 검증 후 적용.", "Whether the image uses USER or setuid was not collected → verify in staging first."), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: [], effect: "reduced" as const, code: securityContextCode(c) }] : []),
+      ...(r.cells.root || r.cells.privEsc ? [{ id: scId, title: L("securityContext 강화 (allowPrivilegeEscalation:false · runAsNonRoot)", "Harden securityContext (allowPrivilegeEscalation:false · runAsNonRoot)"), desc: L("이미지의 USER·setuid 사용 여부는 수집하지 않았습니다 → 스테이징에서 검증 후 적용.", "Whether the image uses USER or setuid was not collected → verify in staging first."), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: [], cuts: [], effect: "reduced" as const, code: securityContextCode(c), ...fixAt(c) }] : []),
       ...(r.cells.psa ? [{ id: psaId, title: L(`${r.namespace}에 PSA 라벨 (enforce=baseline · warn/audit=restricted)`, `PSA labels on ${r.namespace} (enforce=baseline · warn/audit=restricted)`), desc: L("enforce는 새로 생성되는 파드에만 적용됩니다. 먼저 warn/audit로 위반을 확인하세요.", "enforce applies only to newly created pods. Check violations with warn/audit first."), risk: "ok" as const, riskLabel: L("안전", "Safe"), closes: nsFindings(r.namespace, ["PSA-001", "PSA-002"]), cuts: [], effect: "closed" as const, code: psaCode(r.namespace, c0.k8sVersion) }] : []),
     ];
     issues.push({
@@ -979,8 +988,8 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
         { from: "perm", to: "impact", ev: "unk", label: L(`${crit.map((k) => riskLabel(k)).join("·")} 악용 ?`, `${crit.map((k) => riskLabel(k)).join("·")} abuse ?`), why: L("권한 정의에서 추론한 영향 — 재현 검증하지 않았습니다", "Impact inferred from the permission definitions — not verified by reproduction") },
       ],
       actions: [
-        { id: rbacId, title: L(`${r.name} 역할에서 ${crit.map((k) => riskLabel(k)).join("·")} 제거`, `Remove ${crit.map((k) => riskLabel(k)).join("·")} from the ${r.name} role`), desc: crit.includes("nodesProxy") ? L("nodes/proxy 대신 nodes/metrics·nodes/stats로 바꾸세요. kubelet 세분화 인가 지원 전에는 cAdvisor 수집이 끊길 수 있습니다.", "Use nodes/metrics · nodes/stats instead of nodes/proxy. Until kubelet fine-grained authorization is supported, cAdvisor collection may stop.") : L("필요한 리소스·동사만 남기세요. 벤더 차트면 예외 등록 + 보완 통제를 고려하세요.", "Keep only the resources and verbs you need. For a vendor chart, consider an exception plus compensating controls."), risk: "warn", riskLabel: L("주의", "Caution"), closes: rbacFindings(r.bindings), cuts: ["sa>perm"], effect: "closed", code: rbacReduceCode(c, crit) },
-        ...(r.cells.noEgress ? [{ id: egId, title: L(`${r.namespace} 송신 정책 (관측된 목적지만)`, `${r.namespace} egress policy (observed destinations only)`), desc: L(`관측 목적지 ${net.edges.filter((e) => e.from === r.id).length}곳 기준. ${hubbleNote}.`, `Based on ${net.edges.filter((e) => e.from === r.id).length} observed destinations. ${hubbleNote}.`), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: nsFindings(r.namespace, ["NET-003"]), cuts: [], effect: "reduced" as const, code: egressPolicyCode(c, net) }] : []),
+        { id: rbacId, title: L(`${r.name} 역할에서 ${crit.map((k) => riskLabel(k)).join("·")} 제거`, `Remove ${crit.map((k) => riskLabel(k)).join("·")} from the ${r.name} role`), desc: crit.includes("nodesProxy") ? L("nodes/proxy 대신 nodes/metrics·nodes/stats로 바꾸세요. kubelet 세분화 인가 지원 전에는 cAdvisor 수집이 끊길 수 있습니다.", "Use nodes/metrics · nodes/stats instead of nodes/proxy. Until kubelet fine-grained authorization is supported, cAdvisor collection may stop.") : L("필요한 리소스·동사만 남기세요. 벤더 차트면 예외 등록 + 보완 통제를 고려하세요.", "Keep only the resources and verbs you need. For a vendor chart, consider an exception plus compensating controls."), risk: "warn", riskLabel: L("주의", "Caution"), closes: rbacFindings(r.bindings), cuts: ["sa>perm"], effect: "closed", code: rbacReduceCode(c, crit), ...fixAt(c) },
+        ...(r.cells.noEgress ? [{ id: egId, title: L(`${r.namespace} 송신 정책 (관측된 목적지만)`, `${r.namespace} egress policy (observed destinations only)`), desc: L(`관측 목적지 ${net.edges.filter((e) => e.from === r.id).length}곳 기준. ${hubbleNote}.`, `Based on ${net.edges.filter((e) => e.from === r.id).length} observed destinations. ${hubbleNote}.`), risk: "warn" as const, riskLabel: L("주의", "Caution"), closes: nsFindings(r.namespace, ["NET-003"]), cuts: [], effect: "reduced" as const, code: egressPolicyCode(c, net), ...fixAt(c) }] : []),
       ],
     });
     r.combos.find((k) => k.type === "takeover")!.issueId = id;
@@ -1093,7 +1102,7 @@ export function buildIssues(input: InsightsInput, ctxs: RowCtx[], net: NetworkIn
         return {
           id: `${id}:${s.row.id}`, title: L(`${s.row.name} 권한 축소`, `Reduce permissions of ${s.row.name}`), desc: s.row.owner.startsWith("Helm") ? L("Helm values의 rbac/collectors 항목에서 제거해야 업그레이드 후에도 유지됩니다.", "Remove them in the Helm values (rbac/collectors) so the change survives upgrades.") : L("필요한 리소스·동사만 남기세요.", "Keep only the resources and verbs you need."),
           risk: "ok", riskLabel: L("안전", "Safe"), closes: rbacFindings(s.row.bindings), cuts: i >= 0 ? [`w${i}>p${sets.indexOf(setOf(s))}`] : [], effect: "closed",
-          code: rbacReduceCode(s, rbacKeys(s)),
+          code: rbacReduceCode(s, rbacKeys(s)), ...fixAt(s),
         };
       }),
     });
@@ -1173,6 +1182,7 @@ export function buildPolicyInsights(input: InsightsInput): PolicyInsightsRespons
     },
     kbom: buildKbom(workloads, input),
     vulns: input.vulns ?? null,
+    gitops: input.inventory.gitops ? { state: input.inventory.gitops.state, apps: input.inventory.gitops.apps.length, workloads: rows.filter((r) => r.source).length } : null,
     gaps: input.gaps,
   };
 }

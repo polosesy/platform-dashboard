@@ -2,7 +2,7 @@
 status: draft
 owner: platform-security
 last-verified: 2026-10-30
-covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+covers: [apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -129,10 +129,24 @@ covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/servic
 
 **한계(사실)**: 로그가 그 범위에서 작업 영역으로 가지 않으면 판정하지 않음(확인 불가). 제어 평면 역할의 '사용'은 읽기 호출이 Activity Log에 없어 판정하지 않음. Kubernetes RBAC 사용(감사 로그 `kube-audit`)은 아직 아님.
 
-### P4 — 이미지 → 코드
+### P4 — 이미지·워크로드 → 코드 (P4a 구현 2026-10-30, P4b 보류)
 
-- OCI 라벨(`org.opencontainers.image.source`·`revision`)을 레지스트리 매니페스트에서 읽어 KBOM에 '출처 저장소·커밋' 열
-- 조치 코드에 고칠 위치(Helm values 경로) — 고객 GitOps 저장소 연결은 선택
+> **5살 비유**: 장난감이 고장 나면 "어느 설명서(설계도)를 고쳐야 하나?"를 알아야 해요. 우리 반 장난감은 **선생님 장부(Argo CD)**에 "이 장난감은 저 설명서 몇 쪽"이라고 적혀 있어서 그걸 그대로 읽어요. 장난감 몸에 붙은 "공장 이름표(OCI 라벨)"는 대부분 비어 있어서 아직 못 읽어요.
+
+**실측(2026-10-30, 시험 ACR 이미지 설정 읽기)**: 고객 앱 이미지 24개는 OCI 라벨 `created·description·title·version`만 있고 **`source`·`revision`이 없음** — 이미지 → 저장소·커밋은 지금 데이터로 알 수 없음(업스트림 OSS인 argocd·dex만 `source` 있음). 라벨을 읽으려면 대시보드에 **AcrPull(이미지 내려받기)** 데이터 권한이 필요 — 라벨만 보자고 이미지 전체를 받을 권한을 주는 것은 과함(보안 관점) → **P4b 보류**: 고객 CI가 `org.opencontainers.image.source`·`revision`을 넣은 뒤(예: `docker build --label`, Jib `container.labels`) 다시 판단.
+
+**P4a — 배포 출처(GitOps)** (`services/gitopsSource.ts` 순수 + `k8sPolicyCollector`):
+
+| 단계 | 내용 |
+|---|---|
+| 읽기 | Argo CD `applications.argoproj.io`(v1alpha1) **list만**(CRD 선택 — 없으면 `notInstalled`, 403이면 `forbidden`·화면 안내). 읽기 역할 템플릿 `aud-dashboard-reader.yaml`에 추가(코드에서 생성) |
+| 정리 `parseArgoApplications` | 저장소 URL에서 사용자 정보·쿼리·조각 제거(`sanitizeRepoUrl`), 멀티 소스는 경로·차트가 있는 첫 소스가 주 소스, Helm 값 파일 `$ref/…`는 그 ref 저장소로 풀어 씀, 동기화된 리비전·상태 |
+| 연결 `sourceOf` | **`status.resources`**(Argo CD가 관리한다고 적은 목록)의 `apps` 그룹 Deployment·StatefulSet·DaemonSet와 정확히 일치할 때만 — 이름·라벨로 짐작 안 함 |
+| 화면 | 워크로드 사실 '배포 출처', 위험 조합 조치 '고칠 곳: Argo CD 앱 → 저장소/경로 @브랜치 · values: …'(RBAC 축소·securityContext·송신 정책·상시 고권한 계정별), KBOM '배포 출처' 열(앱·경로, 툴팁 저장소·리비전), 읽기 실패 안내 |
+
+**완료 조건**: `gitopsSource.test.ts`(자격 증명 제거·멀티 소스·`$ref` 값 파일·`status.resources` 일치만·고칠 곳 문장), `policyInsights.test.ts` "where to fix …"(행·조치·사실·KBOM·요약·미수집이면 없음), `k8sReadSurface.test.ts`(코드 ↔ 템플릿) — 충족.
+
+**한계**: Argo CD가 아닌 GitOps(Flux)는 아직 아님. 고객 클러스터에서는 읽기 역할을 갱신해야 보임(그전엔 '권한 없음' 안내).
 
 ### P5 — 보안 그래프 탐색
 

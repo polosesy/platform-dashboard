@@ -393,3 +393,27 @@ test("entry point: a scanned vulnerable image fills the takeover path's entry (c
   assert.match(why, /Defender 컨테이너 취약성 결과 0건/);
   assert.match(why, /알려진 오픈소스 이미지/);
 });
+
+test("where to fix (P4): a workload's Argo CD source on the row, the remediation, KBOM and the summary; not collected = absent", async () => {
+  const { parseArgoApplications } = await import("../src/services/gitopsSource.js");
+  const inv = inventory();
+  inv.gitops = { state: "ok", apps: parseArgoApplications([{
+    metadata: { name: "obs-agent", namespace: "argocd" },
+    spec: { source: { repoURL: "https://github.com/example/gitops.git", path: "obs/agent", targetRevision: "main" } },
+    status: { sync: { status: "Synced", revision: "abc123" }, resources: [{ group: "apps", kind: "DaemonSet", namespace: "obs", name: "agent" }] },
+  }]) };
+  const r = buildPolicyInsights({ ...input(FLOWS), inventory: inv, policy: analyzePolicies(inv, CLUSTER) });
+  const agent = r.rows.find((x) => x.name === "agent")!;
+  assert.equal(agent.source?.app, "obs-agent");
+  assert.equal(r.rows.find((x) => x.name === "web")!.source, undefined);
+  const take = r.issues.find((i) => i.kind === "takeover" && i.id.includes("agent"))!;
+  const rbac = take.actions.find((a) => a.id.endsWith(":rbac"))!;
+  assert.equal(rbac.fixAt, "Argo CD obs-agent → github.com/example/gitops/obs/agent @main");
+  assert.ok(take.nodes.find((n) => n.id === "app")!.facts.some((f) => f.v === rbac.fixAt), "workload facts say where it is deployed from");
+  assert.deepEqual(r.kbom.items.find((i) => i.repo === "docker.io/acme/agent")!.sources!.map((s) => s.app), ["obs-agent"]);
+  assert.deepEqual(r.gitops, { state: "ok", apps: 1, workloads: 1 });
+  // Not collected: no gitops summary, no source anywhere
+  const none = buildPolicyInsights(input(FLOWS));
+  assert.equal(none.gitops, null);
+  assert.ok(none.rows.every((x) => !x.source) && none.issues.every((i) => i.actions.every((a) => !a.fixAt)));
+});

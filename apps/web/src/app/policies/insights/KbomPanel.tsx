@@ -70,6 +70,9 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
         <div className={styles.kbSum}>
           {stats.map((x) => <Stat key={x.label} label={x.label} value={x.value} hint={x.hint} tone={x.warn ? "medium" : undefined} />)}
         </div>
+        {data.gitops && data.gitops.state !== "ok" && data.gitops.state !== "notInstalled" ? (
+          <div className={styles.muted} style={{ fontSize: 12 }}>{t(`ins.kbom.gitops.${data.gitops.state}`)}</div>
+        ) : null}
         <div className={styles.kbPlat}>
           {k.platform.map((p) => (
             <div key={p.label}>
@@ -81,7 +84,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.tbl}>
-            <thead><tr><th>{t("ins.kbom.col.tech")}</th><th>{t("ins.kbom.col.version")}</th><th>{t("ins.kbom.col.source")}</th><th>{t("ins.kbom.col.where")}</th><th>{t("ins.kbom.col.signals")}</th></tr></thead>
+            <thead><tr><th>{t("ins.kbom.col.tech")}</th><th>{t("ins.kbom.col.version")}</th><th>{t("ins.kbom.col.source")}</th><th>{t("ins.kbom.col.where")}</th><th>{t("ins.kbom.col.deployedFrom")}</th><th>{t("ins.kbom.col.signals")}</th></tr></thead>
             <tbody>
               {cats.map((cat) => {
                 const all = k.items.filter((i) => i.category === cat);
@@ -89,13 +92,18 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
                 if (!items.length) return null;
                 return (
                   <Fragment key={cat}>
-                    <tr className={styles.catRow}><td colSpan={5}>{cat} <span className={styles.muted} style={{ fontWeight: 500 }}>{items.length}{all.length > items.length ? ` (+${t("ins.managed")} ${all.length - items.length})` : ""}</span></td></tr>
+                    <tr className={styles.catRow}><td colSpan={6}>{cat} <span className={styles.muted} style={{ fontWeight: 500 }}>{items.length}{all.length > items.length ? ` (+${t("ins.managed")} ${all.length - items.length})` : ""}</span></td></tr>
                     {items.map((x) => (
                       <tr key={x.repo}>
                         <td><b>{x.tech}</b>{x.managed && <span className={styles.mgd}>{t("ins.managed")}</span>}<div className={`${styles.mono} ${styles.muted}`} style={{ fontSize: 11 }}>{x.repo}</div></td>
                         <td>{x.versions.map((v) => <span key={v} className={styles.ver} data-bad={/snapshot|latest/i.test(v) || x.versions.length > 1 || undefined}>{v}</span>)}</td>
                         <td className={styles.mono}>{x.registry}</td>
                         <td className={styles.muted} style={{ fontSize: 12 }}>{x.workloads.map((w) => w.split("/")[1]).join(", ")}</td>
+                        <td style={{ fontSize: 12 }}>{x.sources?.length ? x.sources.map((src) => (
+                          <div key={`${src.appNamespace}/${src.app}`} title={`${src.repo}${src.path ? ` · ${src.path}` : src.chart ? ` · chart ${src.chart}` : ""}${src.syncedRevision ? ` · ${src.syncedRevision.slice(0, 12)}` : ""}`}>
+                            <b>{src.app}</b> <span className={styles.muted}>{src.path ?? src.chart ?? ""}</span>
+                          </div>
+                        )) : <span className={styles.muted}>-</span>}</td>
                         <td>
                           {x.vuln && <VulnPill v={x.vuln} />}
                           {x.flags.map((f) => <Pill key={f.key} tone={FLAG_TONE[f.key]}>{f.label}</Pill>)}

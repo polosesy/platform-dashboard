@@ -39,7 +39,7 @@ flowchart LR
 | kubeconfig | `listClusterUserCredential` (Cluster User Role) | Entra 클러스터의 kubeconfig에는 **비밀이 없음**(서버 주소·CA·kubelogin 설정뿐) |
 | 로그인 | 연결의 자격 증명으로 `6dae42f8-4368-4678-94ff-3960e28e3630/.default` 토큰 (kubelogin이 내부에서 하는 일과 같음) | 외부 프로그램 실행 없음, 대상(aud)은 코드 상수 — kubeconfig의 `--server-id`는 **비교만**, 토큰 `aud`·`tid` 검증, TLS는 CA로 검증(`skipTLSVerify` 거부) |
 | 도달성 | DNS 조회 → TCP 443 (단계마다 `AUD_AKS_PROBE_TIMEOUT_MS`, 결과 60초 캐시) | 대상 호스트는 ARM 값만(사용자 입력 없음), 오류 문구에 호스트 이름 없음 |
-| 읽기 | `list`만 — 코드가 부르는 목록 = [`aud-dashboard-reader`](./templates/aks/aud-dashboard-reader.yaml) | `apps/api/test/k8sReadSurface.test.ts`가 코드 호출 ↔ 역할을 검사 |
+| 읽기 | `list`만 — 코드가 부르는 목록 = [`aud-dashboard-reader`](./templates/aks/aud-dashboard-reader.yaml) (2026-10-30: Argo CD `applications.argoproj.io` 추가 — AKS 보안 점검의 '배포 출처·고칠 곳', 없으면 그 부분만 '권한 없음') | `apps/api/test/k8sReadSurface.test.ts`가 코드 호출 ↔ 역할을 검사 |
 
 ### 접근 단계(Tier) — 고객이 고릅니다
 

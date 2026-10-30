@@ -48,6 +48,8 @@ export const K8S_READ_SURFACE: ReadRule[] = [
   r("cilium.io", "ciliumnetworkpolicies", [], true),
   r("cilium.io", "ciliumclusterwidenetworkpolicies", [], true),
   r("gateway.networking.k8s.io", "httproutes", [], true),
+  // Where a workload's manifests live (보안 고도화 P4): Argo CD Applications — spec.source(s) + status.resources only
+  r("argoproj.io", "applications", [], true),
 ];
 
 /** Pod logs — a namespaced Role per allowed namespace (connections file `aks.podLogNamespaces`), never cluster-wide */

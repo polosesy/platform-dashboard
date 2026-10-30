@@ -6,6 +6,7 @@ import type { KubernetesPolicyResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { debug } from "../infra/logger.js";
 import { loadKubeConfig } from "./kubernetes.js";
+import { parseArgoApplications } from "./gitopsSource.js";
 import { k8sError } from "./aksAccess.js";
 import { HttpError } from "../infra/requestParams.js";
 import {
@@ -240,7 +241,7 @@ export async function collectPolicyInventory(
     namespaces, pods, deployments, statefulSets, daemonSets, netpols,
     roles, clusterRoles, roleBindings, clusterRoleBindings,
     hpas, pdbs, quotas, limitRanges, vpas, cnps, ccnps,
-    services, ingresses, httpRoutes, nodes,
+    services, ingresses, httpRoutes, nodes, argoApps,
   ] = await Promise.all([
     list("Namespace", () => core.listNamespace()),
     list("Pod", () => core.listPodForAllNamespaces()),
@@ -267,6 +268,8 @@ export async function collectPolicyInventory(
     list<Record<string, unknown>>("HTTPRoute", () =>
       custom.listClusterCustomObject({ group: "gateway.networking.k8s.io", version: "v1", plural: "httproutes" }) as Promise<CustomList>, true),
     list("Node", () => core.listNode()),
+    list<Record<string, unknown>>("ArgoApplication", () =>
+      custom.listClusterCustomObject({ group: "argoproj.io", version: "v1alpha1", plural: "applications" }) as Promise<CustomList>, true),
   ]);
 
   if (!namespaces.ok) {
@@ -404,6 +407,10 @@ export async function collectPolicyInventory(
     resourceQuotas: quotas.items.map((q) => ({ namespace: q.metadata?.namespace ?? "", name: q.metadata?.name ?? "" })),
     limitRanges: limitRanges.items.map((l) => ({ namespace: l.metadata?.namespace ?? "", name: l.metadata?.name ?? "" })),
     capabilities: { vpaInstalled: vpas.ok, ciliumInstalled: cnps.ok || ccnps.ok, unavailable },
+    // 404 = Argo CD not installed (not a failure); 403 = the read role has no applications.argoproj.io yet
+    gitops: argoApps.ok
+      ? { state: "ok", apps: parseArgoApplications(argoApps.items) }
+      : { state: unavailable.some((u) => u.startsWith("ArgoApplication") && /forbid|403/i.test(u)) ? "forbidden" : unavailable.some((u) => u.startsWith("ArgoApplication")) ? "failed" : "notInstalled", apps: [] },
     services: services.items.map((s) => ({
       namespace: s.metadata?.namespace ?? "",
       name: s.metadata?.name ?? "",

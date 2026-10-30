@@ -62,6 +62,7 @@ function ActionRow({ a, checked, onToggle }: { a: RemediationAction; checked: bo
       <div>
         <div className={styles.actionT}>{a.title}</div>
         <div className={styles.actionD}>{a.desc}</div>
+        {a.fixAt ? <div className={styles.fixAt} title={a.fixAt}>{t("ins.combos.fixAt")}: <span className={styles.mono}>{a.fixAt}</span></div> : null}
       </div>
       <div className={styles.effect}>
         <Pill tone={a.risk}>{t("ins.combos.fixRisk")}: {a.riskLabel}</Pill>

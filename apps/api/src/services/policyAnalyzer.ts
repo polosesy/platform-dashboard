@@ -19,6 +19,7 @@ import type {
   WorkloadPolicyCoverage,
 } from "@aud/types";
 import { L } from "../infra/lang.js";
+import type { InvGitopsApp } from "./gitopsSource.js";
 
 // ──────────────────────────────────────────────────────────────
 // Cluster policy analyzer (pure — no I/O)
@@ -186,6 +187,8 @@ export type PolicyInventory = {
   services?: InvService[];
   routes?: InvRoute[];
   nodes?: InvNode[];
+  /** Argo CD Applications (where each workload's manifests live); absent = not collected */
+  gitops?: { state: "ok" | "notInstalled" | "forbidden" | "failed"; apps: InvGitopsApp[] };
 };
 
 // ── References ──

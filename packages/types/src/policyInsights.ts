@@ -60,6 +60,27 @@ export type RiskFactorDef = {
 
 export type ComboType = "exfil" | "takeover" | "standing" | "vnet";
 
+/**
+ * Where a workload's manifests come from (GitOps): the Argo CD Application whose `status.resources` lists it.
+ * The repository URL never carries credentials (user-info, query and fragment removed).
+ */
+export type WorkloadSource = {
+  tool: "argocd";
+  app: string;
+  appNamespace: string;
+  repo: string;
+  /** Directory of plain manifests / Kustomize, or a Helm chart name (chart repositories) */
+  path?: string;
+  chart?: string;
+  targetRevision?: string;
+  /** The commit (or chart version) Argo CD last synced */
+  syncedRevision?: string;
+  /** Helm value files ("$ref/…" resolved to "<repo>: <path>") — where a setting is usually changed */
+  valueFiles: string[];
+  /** Synced · OutOfSync · Unknown */
+  sync?: string;
+};
+
 export type WorkloadRiskRow = {
   /** `${namespace}/${name}` */
   id: string;
@@ -79,6 +100,8 @@ export type WorkloadRiskRow = {
   images: string[];
   /** RBAC bindings that give this workload's service account its risky permissions */
   bindings: string[];
+  /** GitOps source (Argo CD) — absent = not managed by a readable Application */
+  source?: WorkloadSource;
 };
 
 export type RbacRiskKey =
@@ -229,6 +252,8 @@ export type KbomItem = {
   flags: Array<{ key: "drift" | "snapshot" | "public"; label: string }>;
   /** Worst vulnerability result among this repo's running images (absent = not scanned) */
   vuln?: { counts: ImageVuln["counts"]; exploited: ImageVuln["exploited"]; source: ImageVuln["source"] };
+  /** Argo CD Applications that deploy the workloads running this image */
+  sources?: WorkloadSource[];
 };
 
 export type Kbom = {
@@ -283,6 +308,8 @@ export type RemediationAction = {
   effect: "closed" | "reduced" | "exception";
   /** Plain text; lines starting with "+ " / "- " / "# " are rendered as add / delete / comment */
   code: string;
+  /** Where the change is made — the GitOps source of the workload ("Argo CD app → repo/path · values …") */
+  fixAt?: string;
 };
 
 export type RiskIssue = {
@@ -317,6 +344,8 @@ export type PolicyInsightsResponse = {
   network: NetworkInsight;
   containment: ClusterContainment;
   kbom: Kbom;
+  /** Argo CD Applications read for "where to fix" (null = not collected) */
+  gitops?: { state: "ok" | "notInstalled" | "forbidden" | "failed"; apps: number; workloads: number } | null;
   /** Image vulnerabilities by image reference + what was covered; null = not collected (feature off / failed) */
   vulns?: { byImage: ImageVuln[]; coverage: VulnCoverage } | null;
   /** Sources that could not be read — each degrades its section only */
