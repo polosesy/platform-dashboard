@@ -27,6 +27,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `/api/cost/*` | `cost.ts` | 비용 분석 |
 | `/api/security/*` | `security.ts` | 보안 점수/경고 (로그인 사용자 — 연결의 자격 증명) |
 | `/api/security/advisories` | `advisories.ts` | 긴급 취약점 — CVE.org 기준 기록 + CISA KEV·공급사(Node.js·PHP) 공지 × 이 대시보드 런타임·SBOM(OSV)·클러스터 구성 요소·Defender 컨테이너 결과 |
+| `/api/security/issue-states` | `issues.ts` | 통합 위험 이슈 상태(열림·진행·예외·해결 표시) — GET 로그인 / PUT 운영자, 구독별 JSON(`issueStateStore.ts`), 이슈별 rev 409 |
 | `/api/security/posture` | `securityPosture.ts` | Defender 권고·컨트롤·규정 준수·플랜·경고 (Resource Graph `securityresources`, 섹션별 실패는 `gaps`) |
 | `/api/kubernetes/*` | `kubernetes.ts` | AKS 클러스터/워크로드 |
 | `/api/kubernetes/policies` | `policy.ts` | 클러스터 정책 점검 (PSA·NetworkPolicy·RBAC·VPA/HPA/PDB·리소스) |
@@ -49,7 +50,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `/kubernetes` | AKS 클러스터 | 클러스터 객체 브라우저 |
 | `/observability` | AKS 모니터링 | 탭 5개(2026-10-27 Datadog식 개편): 클러스터 · 워크로드(기본 — 맨 위 '클러스터 한눈에 보기' 띠 `clusterGlance`(히트맵이 잰 값만: 워크로드 쌓은 막대·Ready 파드·레플리카 부족·재시작·OOM, 칸 = 그 신호로 히트맵 칠하기, 미측정 '—') + [히트맵 \| 목록]) · 노드 · 로그 · 네트워크(Hubble) · 수집 상태. 옛 '개요'(Container Insights 요약)는 삭제 |
 | `/security/advisories` | 긴급 취약점 | 공식 출처의 긴급 취약점 소식 + 우리 대상(이미지·워크로드) + 현재 → 수정 버전 + 권장 조치 (`services/advisories*.ts`, `lib/advisoryView.ts`) |
-| `/security/risk` | 통합 위험 | 클러스터 위험 조합 + 근거로 연결된 Azure 리소스의 Defender 권고·경고 (`lib/riskJoin.ts`, 새 API 없음) |
+| `/security/risk` | 통합 위험 | 맨 위 **이슈 목록**(`IssueQueue.tsx` + 순수 `lib/issueQueue.ts` — 클러스터 위험 조합·워크로드 ID·긴급 취약점(affected)·Defender 경고를 한 목록, 상태·예외(사유·끝나는 날 ≤1년)·담당·기록, 출처가 이김: 해결 표시 뒤 다시 탐지 = 재발, 예외 만료 = 열림) + 클러스터 위험 조합 + 근거로 연결된 Azure 리소스의 Defender 권고·경고 (`lib/riskJoin.ts`) |
 | `/security` | 보안 개요 | Defender 점수·심각도별 권고·영역별 위험·위협·보호 범위 |
 | `/security/findings` | 보안 권고 | CSPM — 영역 탭(`?domain=`), 권고 행 펼치면 조치 방법·Portal |
 | `/security/identity` | ID·권한 | CIEM — IdentityAndAccess 권고 |
@@ -224,6 +225,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 
 ## Env
 `.env.example` 참조. 필수: `AZURE_AD_*`, `AZURE_SUBSCRIPTION_IDS`
+이슈 상태: `AUD_ISSUE_STATE_DIR`(없으면 `<AUD_ARRANGEMENT_DIR>/issues`, 둘 다 없으면 메모리)
 인증: `API_BIND_HOST`(기본 127.0.0.1 — 웹 rewrite는 localhost를 127.0.0.1로 바꿔 보냄), `NODE_ENV`, `AUD_DEFAULT_ROLE`(앱 역할 없을 때 — 개발 기본 viewer, 프로덕션은 none만), `AUD_AUDIT_LOG`, `AUD_ANONYMOUS_SP`·`AUD_ANONYMOUS_K8S`(기본 false, 로컬 전용), `AUD_AUTH_SCOPES`, `AUD_AUTH_AUDIENCES`
 연결: `AUD_CONNECTIONS_FILE`(→ `config/connections.json`, 커밋 금지; 옛 `AUD_TENANTS_FILE`도 읽음), `AUD_HOME_CONNECTION_MODE`(platform|delegated), `AUD_PLATFORM_CERT_PATH`, `AUD_CONN_<KEY>_SECRET`(servicePrincipal 비밀 값 — 파일엔 이름만), `AUD_FEDERATED_TOKEN_FILE`(페더레이션 연결의 서비스 계정 토큰, 절대 경로 — 없으면 `AZURE_FEDERATED_TOKEN_FILE`)·`AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT`(표시용 — 고객 FIC 작성)
 VNet 트래픽: `AZURE_LOG_ANALYTICS_WORKSPACE_ID`·`AZURE_LOG_ANALYTICS_TABLE`(기본 NTANetAnalytics)·`AZURE_NETWORK_COVERAGE_TTL_MS`
@@ -270,7 +272,7 @@ Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE
 | `docs/integrations/` | **연동 문서 표준**(`_template.md` 12절: 개요·동작·준비·자동 설정·Portal·권한·수집 데이터·확인·문제 해결·교체·해제·보안 FAQ). `azure/`: overview·sso(앱 역할)·connect-tenant(A 홈·B 고객 SP·C Lighthouse·연결 파일)·permissions·data-collected·verify·troubleshooting·lifecycle·security-faq + `templates/`(lighthouse ARM, service-principal `onboard.sh`·`roles.bicep`). `scripts/verify-tenant.sh` 읽기 전용 |
 | `docs/getting-started/` | setup-guide(예시 데이터 실행 → 앱 등록 2개·`Azure.Read.All` → 연결·공급자 등록) |
 | `docs/deployment/` | container(온프렘 Docker·`audctl`·소스 없는 배포), kubernetes(AKS 네임스페이스·Helm 차트·워크로드 ID) |
-| `docs/architecture/` | security-roadmap(보안 고도화 계획 — CNAPP 데모 비교, P0 등급 정합성·P1 이미지 취약성 진입점 구현, P2 통합 이슈·P3 소유·사용 권한·P4 이미지→코드·P5 보안 그래프), multi-cloud(Azure·AWS·GCP 분석·단계 계획, Phase 0 = `cloud.ts` 타입 · `services/cloudKinds.ts` 표준 종류 표(Azure 유형은 관계 카탈로그에 있어야 함) · `infra/cloudRefs.ts` ID → 범위·마스킹 · 연결 `provider` 기본 azure, 테스트 `cloudKinds.test.ts`), GLOSSARY (용어집), azure-resource-relationships(리소스 관계 사전 핵심 — 입문 7장 + 코드가 쓰는 행), `relationships/`(영역 6개: network-core NET·network-edge EDG·compute-containers CMP·app-integration APP·data DAT·identity-security-monitoring IDM, 약 250행) + `relationships/catalog.json`(Azure REST API 스펙 리버스 엔지니어링: 유형 3,012·참조 속성 2,872, 공개 자료만). 재생성 `scripts/relationships/`(README) |
+| `docs/architecture/` | security-roadmap(보안 고도화 계획 — CNAPP 데모 비교, P0 등급 정합성·P1 이미지 취약성 진입점·P2 통합 이슈 목록 구현, P2 통합 이슈·P3 소유·사용 권한·P4 이미지→코드·P5 보안 그래프), multi-cloud(Azure·AWS·GCP 분석·단계 계획, Phase 0 = `cloud.ts` 타입 · `services/cloudKinds.ts` 표준 종류 표(Azure 유형은 관계 카탈로그에 있어야 함) · `infra/cloudRefs.ts` ID → 범위·마스킹 · 연결 `provider` 기본 azure, 테스트 `cloudKinds.test.ts`), GLOSSARY (용어집), azure-resource-relationships(리소스 관계 사전 핵심 — 입문 7장 + 코드가 쓰는 행), `relationships/`(영역 6개: network-core NET·network-edge EDG·compute-containers CMP·app-integration APP·data DAT·identity-security-monitoring IDM, 약 250행) + `relationships/catalog.json`(Azure REST API 스펙 리버스 엔지니어링: 유형 3,012·참조 속성 2,872, 공개 자료만). 재생성 `scripts/relationships/`(README) |
 | `docs/observability/` | observability-instrumentation-guide, hubble-guide, hubble-troubleshooting, vnet-flow-logs(VNet 트래픽 화면) |
 | `docs/troubleshooting/` | error-catalog (도메인별 에러 통합 — AUTH·CONN·NET 포함) |
 | `docs/archive/` | 보관 문서(`<연도>/`, 머리 `status: archived`·`reason`·`replaced-by` + 배너, 색인 `archive/README.md`) — 현재 문서·이 파일은 링크하지 않음 |

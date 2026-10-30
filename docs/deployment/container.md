@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-ops
-last-verified: 2026-10-23
+last-verified: 2026-10-30
 covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts]
 ---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
@@ -156,7 +156,7 @@ scripts/onprem.sh restart       # 새 설정으로 재기동
 | `.env` | `AUD_IMAGE`·`AUD_HTTP_PORT` — `cd ~/aud-runtime && sudo docker compose ps`도 audctl 없이 동작 |
 | `.image-tag` · `.image-tag.prev` | 지금·이전 이미지(되돌리기용) |
 | `api.env` · `web.env` (600) · `config/` · `tls/` | 설정(`scripts/onprem.sh env`가 씀) |
-| `state/arrangements` (65532) | 팀 배치(유일한 쓰기 마운트) |
+| `state/arrangements` (65532) | 팀 배치 + 이슈 상태(`issues/` 하위 폴더) — 유일한 쓰기 마운트 |
 
 **예전 방식에서 옮기기(한 번)**: 새 `deploy`로 `audctl`이 설치된 뒤 `scripts/onprem.sh cleanup-source` — 예전 소스 `~/aud-dashboard`를 지웁니다(내 소유의 일반 폴더이고 `.source-sha`·`compose.yaml`이 있을 때만, sudo 없이). 실행 중인 컨테이너는 compose 프로젝트 이름(`aud-dashboard`)이 같아 그대로 이어받습니다.
 

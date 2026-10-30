@@ -2,11 +2,14 @@
 
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
-import type { ArchitectureGraph, PolicyInsightsResponse } from "@aud/types";
+import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, WorkloadIdentityResponse } from "@aud/types";
 import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Select, Stat } from "@/components/ui";
-import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { buildIssueQueue, type IssueSource, type QueueItem } from "@/lib/issueQueue";
 import { joinRisk, type RiskRow } from "@/lib/riskJoin";
+import { useApiToken } from "@/lib/useApiToken";
+import { IssueQueue, type SaveResult, type SourceState } from "./IssueQueue";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { EvidenceChip } from "../../policies/insights/Inspector";
@@ -46,6 +49,52 @@ export default function SecurityRiskPage() {
     [freshPosture, graph, insights, cluster],
   );
   const sample = freshPosture?.source === "mock" || graph?.source === "mock" || clustersMock;
+
+  // 이슈 목록: two more sources for the selected cluster + the team's status (subscription)
+  const live = ready && !!clusterId && !clustersMock && !clustersLoading;
+  const wiQ = useApiQuery(live ? `k8s-wi:${clusterId}:${locale}:false` : null, (token) =>
+    fetchJsonWithBearer<WorkloadIdentityResponse>(apiUrl("/api/kubernetes/policies/workload-identity", { clusterId, lang: locale }), token),
+  );
+  const advQ = useApiQuery(live ? `advisories:${clusterId}:${locale}` : null, (token) =>
+    fetchJsonWithBearer<AdvisoriesResponse>(apiUrl("/api/security/advisories", { clusterId, lang: locale }), token),
+  );
+  const statesQ = useApiQuery(ready && !sample ? `issue-states:${subscriptionId}` : null, (token) =>
+    fetchJsonWithBearer<IssueStatesResponse>(apiUrl("/api/security/issue-states", { subscriptionId: sub }), token),
+  );
+  const [saved, setSaved] = useState<Record<string, IssueState>>({});
+  const getToken = useApiToken();
+  const wi = !wiQ.loading && wiQ.data?.clusterId.toLowerCase() === clusterId.toLowerCase() ? wiQ.data : undefined;
+  const adv = !advQ.loading && advQ.data?.clusterId?.toLowerCase() === clusterId.toLowerCase() ? advQ.data : undefined;
+  const states = useMemo(() => ({ ...(statesQ.data?.states ?? {}), ...saved }), [statesQ.data, saved]);
+  const queue = useMemo(() => buildIssueQueue({
+    clusterId: cluster?.id ?? null, insights, wi, advisories: adv,
+    alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
+    alertsAt: freshPosture?.generatedAt ?? null, states, now: new Date(),
+  }), [cluster, insights, wi, adv, freshPosture, states]);
+  const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
+  const sources: Record<IssueSource, SourceState> = {
+    combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
+    wi: srcState(wiQ.loading, wiQ.error, wi, live),
+    vuln: srcState(advQ.loading, advQ.error, adv, live),
+    alert: postureLoading ? "loading" : !freshPosture || freshPosture.gaps.some((g) => g.section === "alerts") ? "failed" : "ok",
+  };
+  const saveState = async (item: QueueItem, change: { status: IssueStatus; note?: string; assignee?: string; until?: string }): Promise<SaveResult> => {
+    try {
+      const token = await getToken().catch(() => null);
+      const r = await fetchJsonWithBearer<{ state: IssueState }>(apiUrl("/api/security/issue-states", { subscriptionId: sub, key: item.key }), token,
+        { method: "PUT", body: JSON.stringify({ ...change, baseRev: item.stored?.rev ?? null }) });
+      setSaved((m) => ({ ...m, [item.key]: r.state }));
+      return "ok";
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Someone changed it since this page loaded — show theirs, the user decides again
+        await statesQ.reload?.();
+        setSaved((m) => { const n = { ...m }; delete n[item.key]; return n; });
+        return "conflict";
+      }
+      return e instanceof ApiError && e.code ? e.code : "issue_state_write_failed";
+    }
+  };
   const loading = !ready || postureLoading || graphQ.loading || clustersLoading || (!!clusterId && !clustersMock && insightsQ.loading);
 
   let body: React.ReactNode;
@@ -74,6 +123,10 @@ export default function SecurityRiskPage() {
             options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.resourceGroup})` }))}
           />
         </div>
+      ) : null}
+      {!sample && ready && clusters.length > 0 ? (
+        <IssueQueue queue={queue} sources={sources} durable={statesQ.data?.durable ?? true} canWrite={statesQ.data?.canWrite ?? false}
+          signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} />
       ) : null}
       {body}
     </div>

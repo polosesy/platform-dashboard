@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-23
+last-verified: 2026-10-30
 covers: [deploy/helm/aud-dashboard, deploy/kubernetes, docs/integrations/azure/templates/aks]
 ---
 # Kubernetes(AKS) 배포 — 클러스터 안 네임스페이스
@@ -87,7 +87,7 @@ az identity federated-credential create -g <home-rg> --identity-name <home-uami>
 
 ## 7. 수집 데이터
 
-온프레미스와 같습니다 — [data-collected.md](../integrations/azure/data-collected.md). 파드에 남는 것은 emptyDir(`/tmp`, Next 캐시)뿐이고 재시작하면 사라집니다(팀 배치는 `AUD_ARRANGEMENT_DIR`이 없으면 메모리).
+온프레미스와 같습니다 — [data-collected.md](../integrations/azure/data-collected.md). 파드에 남는 것은 emptyDir(`/tmp`, Next 캐시)뿐이고 재시작하면 사라집니다(팀 배치·이슈 상태는 `AUD_ARRANGEMENT_DIR`·`AUD_ISSUE_STATE_DIR`이 없으면 메모리 — 화면에 '서버 메모리에만 저장' 경고).
 
 ## 8. 확인
 

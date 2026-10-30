@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { KubernetesPolicyResponse, PolicyCategory, PolicyInsightsResponse, PolicySeverity, WorkloadIdentityResponse } from "@aud/types";
 import styles from "./styles.module.css";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
@@ -48,7 +49,18 @@ function Policies() {
   const group = groupOfPanel(tab);
   const [heatSel, setHeatSel] = useState<HeatSel | null>(null);
   const [heatManaged, setHeatManaged] = useState(false);
-  const [issueId, setIssueId] = useState("");
+  // Deep links from 통합 위험 › 이슈 목록: ?cluster=<ARM id>&issue=<risk combination id>
+  const linkParams = useSearchParams();
+  const [issueId, setIssueId] = useState(() => linkParams.get("issue") ?? "");
+  const linkCluster = linkParams.get("cluster");
+  const [linkApplied, setLinkApplied] = useState(false);
+  useEffect(() => {
+    if (linkApplied || !clusters.length) return;
+    setLinkApplied(true);
+    const c = linkCluster && clusters.find((x) => x.id.toLowerCase() === linkCluster.toLowerCase());
+    if (c) setClusterId(c.id);
+    if (linkParams.get("issue")) requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector("#policy-combos")?.scrollIntoView({ behavior: "smooth", block: "start" })));
+  }, [clusters, linkApplied, linkCluster, linkParams, setClusterId]);
   const [netSel, setNetSel] = useState<string | null>(null);
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [category, setCategory] = useState<PolicyCategory | "all">("all");

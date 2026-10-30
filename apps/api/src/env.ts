@@ -75,6 +75,8 @@ const EnvSchema = z.object({
   AUD_AUDIT_LOG: z.enum(["off", "stdout"]).optional(),
   /** Team layout of the infrastructure diagram: a writable directory (mounted volume); unset = in memory, lost on restart */
   AUD_ARRANGEMENT_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
+  /** 통합 위험 이슈 상태(열림·진행·해결·예외): a writable directory; unset = `<AUD_ARRANGEMENT_DIR>/issues`, else in memory */
+  AUD_ISSUE_STATE_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)

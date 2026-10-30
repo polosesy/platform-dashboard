@@ -2,7 +2,7 @@
 status: draft
 owner: platform-security
 last-verified: 2026-10-30
-covers: [apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+covers: [apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -29,7 +29,7 @@ covers: [apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsigh
 | 개념 | 이 대시보드 | 빈 곳 |
 |---|---|---|
 | 공격 경로 **진입점** | 노출(LoadBalancer·Ingress·HTTPRoute)만 — 대부분 '진입 미확인' | 실행 중인 이미지의 취약성과 경로가 이어지지 않음 → **P1 (구현)** |
-| Issues 단일 목록 | 클러스터 위험 조합(AKS 보안 점검) · 통합 위험 · WI-17 · Defender 경고가 화면마다 | 하나의 우선순위·상태(열림·진행·해결·예외) 없음 → P2 |
+| Issues 단일 목록 | 클러스터 위험 조합(AKS 보안 점검) · 통합 위험 · WI-17 · Defender 경고가 화면마다 | 하나의 우선순위·상태(열림·진행·해결·예외) 없음 → **P2 (구현)** |
 | 소유 | Helm 차트·kubectl로 추정 | 팀 단위 소유·필터 없음 → P3 |
 | CIEM | RBAC 행렬 · 워크로드 ID 매핑 · IMDS 경로 | 받은 권한 대비 **실제로 쓴** 권한 없음 → P3 |
 | Code-to-Cloud | KBOM(이미지·버전) | 이미지 → 저장소·커밋 연결 없음 → P4 |
@@ -77,11 +77,36 @@ covers: [apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsigh
 
 **완료 조건**: 테스트 `imageVulns.test.ts`(다이제스트·태그 일치, 미러 비매핑, KEV 우선, 병합·등급, 질의에 테넌트 값 없음) + `policyInsights.test.ts` "entry point …"(진입 노드·12번째 요인·KBOM·이유 문구) — 충족.
 
-### P2 — 통합 이슈 목록 (다음)
+### P2 — 통합 이슈 목록 + 상태·예외 (구현, 2026-10-30)
 
-- **무엇**: '통합 위험'(`/security/risk`)을 모든 출처의 이슈 목록으로 — 클러스터 위험 조합, WI-17(IMDS), 공용 노출, 긴급 취약점(악용), Defender 경고(경고가 있는 워크로드는 진입을 `obs`로)
-- **상태**: 열림 · 진행 · 해결 · 예외(사유·만료일) — 서버 저장(구성도 팀 배치 `arrangementStore` 방식 재사용: 연결별 JSON, 운영자 이상만 쓰기, 낙관적 잠금)
-- **완료 조건**: 같은 이슈 키가 재수집 뒤에도 유지(키 = 종류 + 대상 ARM/K8s ID), 예외 만료 시 다시 열림, 테스트
+> **5살 비유**: 장난감 고장 신고가 네 군데(클러스터·ID·취약점·경보)에 따로 붙어 있었어요. 이제 **게시판 하나**에 모으고, 신고마다 "고치는 중 / 나중에(이유·날짜) / 고쳤어요" 스티커를 붙여요. 스티커를 붙여도 장난감이 아직 고장 나 있으면 게시판이 **"다시 고장"**이라고 알려 줘요.
+
+**어디**: 보안 › 통합 위험(`/security/risk`) 맨 위 '이슈 목록' — 기존 자산 표는 그 아래 그대로.
+
+**출처 4곳**(웹 순수 `lib/issueQueue.ts` `buildIssueQueue` — 새 수집 API 없음, 각 출처는 따로 실패하고 칩으로 상태 표시)
+
+| 출처 | 무엇을 | 등급 | 키 |
+|---|---|---|---|
+| 클러스터 위험 조합 | AKS 보안 점검 `issues` | crit → 위험, warn → 높음 | `combo:<rg>/<cluster>:<조합 id>` |
+| 워크로드 ID | 위험·주의 점검(WI-17 포함, 낮음·정보 제외) | crit → 위험, warn → 높음 | `wi:<rg>/<cluster>:<점검 id>` |
+| 긴급 취약점 | 우리 대상에 영향(`affected`)인 것만 | KEV·실제 악용·CVSS 9 이상 → 위험, 그 밖 높음 | `vuln:<rg>/<cluster>:<공지 key>` |
+| Defender 경고 | 활성 경고(정보 제외), 같은 탐지는 한 이슈 ×n | High·Medium·Low 그대로 | `alert:<심각도>:<제목 slug>` |
+
+키는 공백 없는 ASCII(서버가 `ISSUE_KEY`로 검증), 구독 ID는 넣지 않음(저장 파일이 구독별).
+
+**상태**(`services/issueStateStore.ts`, `GET/PUT /api/security/issue-states?subscriptionId=[&key=]`)
+
+- 열림 · 진행 중 · 예외 · 해결 표시. 읽기 = 로그인, 쓰기 = **운영자 이상**(익명 거부), 구독 접근은 authorize 미들웨어가 먼저 확인
+- **예외**: 사유(3자 이상) + 끝나는 날(내일 ~ 1년) 필수 → 그날이 지나면 화면이 '예외 만료'로 다시 엶
+- **출처가 이김**: '해결 표시' 뒤에 출처가 다시 읽었는데 아직 있으면 '재발'(열림), 표시 뒤 아직 안 읽었으면 '다음 수집에서 확인'. 출처에서 사라진 이슈의 상태는 목록에 안 나오고 '더 이상 탐지 안 됨 n'(기록 보관) — 읽은 출처·지금 클러스터만 셈
+- **동시 편집**: 이슈마다 `rev` — 다른 이슈는 서로 막지 않음, 같은 이슈를 먼저 바꾼 사람이 있으면 409 + 최신 값(화면이 다시 불러옴)
+- **기록**: 변경 20개(시각·상태·표시 이름·메모·끝나는 날), 담당은 자유 텍스트(디렉터리 조회 안 함)
+- **저장 위치**: `AUD_ISSUE_STATE_DIR` → 없으면 `<AUD_ARRANGEMENT_DIR>/issues`(온프렘은 추가 설정 없이 기존 쓰기 마운트) → 없으면 메모리(화면 경고 '서버 메모리에만 저장'). 구독마다 JSON 하나, 임시 파일 → rename, 구독별 잠금, 최대 3,000개
+- **딥 링크**: 조합 이슈 → `/policies?tab=overview&cluster=…&issue=…`(그 클러스터·조합을 골라 엶), WI → 워크로드 ID 탭, 취약점 → 긴급 취약점, 경고 → 위협 탐지
+
+**완료 조건**: `issueQueue.test.ts` — 예외 규칙, 이슈별 rev 충돌·기록 20개·키 검증, 파일 저장·기본 위치, 실효 상태(재발·확인 대기·만료), 4출처 키·등급·정렬, 탐지 안 됨 셈 — 충족.
+
+**남은 것**: 이슈에 Defender 경고를 얹어 공격 경로 진입을 `obs`로(런타임), 이슈별 알림·티켓 연동(Teams·Jira), 팀 소유(P3)로 '내 팀' 필터.
 
 ### P3 — 소유와 실제 사용 권한
 
