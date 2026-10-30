@@ -28,6 +28,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `/api/security/*` | `security.ts` | 보안 점수/경고 (로그인 사용자 — 연결의 자격 증명) |
 | `/api/security/advisories` | `advisories.ts` | 긴급 취약점 — CVE.org 기준 기록 + CISA KEV·공급사(Node.js·PHP) 공지 × 이 대시보드 런타임·SBOM(OSV)·클러스터 구성 요소·Defender 컨테이너 결과 |
 | `/api/security/issue-states` | `issues.ts` | 통합 위험 이슈 상태(열림·진행·예외·해결 표시) — GET 로그인 / PUT 운영자, 구독별 JSON(`issueStateStore.ts`), 이슈별 rev 409 |
+| `/hooks/alerts/:source`, `/api/notifications*` | `notify.ts` | 알림 센터 — 수신기(`/api` 밖, 공유 토큰 `?token=`/Bearer) + 받은 알림·확인(운영자)·수신 상태(관리자)·시험 알림 |
 | `/api/security/saved-queries` | `issues.ts` | 그래프 탐색 팀 질문(이름·조건 키·감시·등급) — GET 로그인 / PUT·DELETE 운영자, 구독별 `<sub>.queries.json`(`savedQueryStore.ts`), 질문별 rev 409. 감시 질문 = 이슈 목록 출처 `query` |
 | `/api/security/posture` | `securityPosture.ts` | Defender 권고·컨트롤·규정 준수·플랜·경고 (Resource Graph `securityresources`, 섹션별 실패는 `gaps`) |
 | `/api/kubernetes/*` | `kubernetes.ts` | AKS 클러스터/워크로드 |
@@ -59,10 +60,11 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 | `/security/compliance` | 규정 준수 | 표준별 통과·실패 + Defender 플랜 |
 | `/policies` | AKS 보안 점검 | 탭 그룹(`?tab=<패널>`): 위험 개요(+ **그래프 탐색** `?tab=explore&q=a.b` — 순수 `lib/securityGraph.ts` 워크로드별 조건 25개 예·아니요·판단 불가 + AND 질의, 판단 불가는 따로, 프리셋 8, 통신하는 Azure 리소스(외부 접근·키 인증·**Defender 권고는 리소스 ID로 정확히** `services/paasDefender.ts` → `NetNode.defender`, 평가 없음 = 판단 불가)·역할 범위, 브라우저 저장 `aud.explore.saved` + 팀 질문(운영자, '감시' = 이슈 출처)) · 네트워크 노출(워크로드 네트워크 맵 · 네트워크 정책 · **정책 시뮬레이션** `?tab=netpolSim`) · ID·권한(권한 탐색·RBAC·워크로드 ID) · 구성 점검 · 인벤토리 (`policies/tabs.ts`) |
 | `/cost` | 비용 관리 | 비용 추이·예산·예측 + 예약 인스턴스 사용률 |
+| `/notifications` | 알림 센터 | Azure Monitor(액션 그룹 웹훅·일반 경고 스키마)·Grafana Alerting/Alertmanager(연락처 웹훅)를 **대시보드가 직접 수신**(사내 메신저 웹훅 불가 — 거버넌스). 탭(`?tab=`) 받은 알림·기능별 매핑·연동 설정, 상단 종(`NotificationBell` — 진행 중 미확인, 60초, 데스크톱 알림 SEV1·2 opt-in). API `services/alertPayloads.ts`(순수 — `data.essentials` = Azure / `alerts[]` = Grafana(`orgId`·`values`)·Alertmanager, sev1~4(Azure Sev0→1 … · 라벨 severity 우선), 분류 incident·security·monitoring·change = 라벨 `category` > Azure `monitoringService` > 이름 > SEV1 > 기본 + `categoryBasis`, 라벨 허용 목록·`safeUrl`(자격 증명·비밀 쿼리 제거)·Portal은 portal.azure.com만, `featureLinks` 대시보드 화면) → `notifyStore.ts`(`alerts.json`, 같은 알림 한 항목·재발 시 확인 해제·보관 `AUD_NOTIFY_RETENTION_DAYS`·3,000개) → 선택 사내 전달 `notifyRelay.ts`(`AUD_NOTIFY_RELAY_URL` https 하나, `{title, message}`) · 가시성 = 구독 알림은 연결 접근 역할만. 웹 순수 `lib/notifyView.ts`. 문서 `docs/observability/alert-center.md`. 테스트 `notify.test.ts` |
 | `/settings/connections` | Azure 연결 | 연결 목록(방식·구독·작업 영역·테넌트 이름·디렉터리 ID) + 관리자 점검: 토큰·보이는 구독 → **기능별 준비 상태**(패키지별, 펼치면 권한 표·이 연결 결과·부여 명령 복사) → 클러스터 권한 점검(SSAR) → 접힌 '권한 × 구독'(+ 리소스 표본 행) → 워크스페이스 요약 |
 | `/settings/features` | 기능·권한 | 패키지(안) 기본·프로·엔터프라이즈 카드(Elastic 가격 페이지식 "X의 모든 기능, 그리고:") + 기능별 필요 권한(필수/선택·부여 위치·용도·없을 때) + 전체 권한 목록. 정적(테넌트 데이터 없음) |
 
-**메뉴** (`apps/web/src/lib/navConfig.ts` 단일 설정 → TopNav·Sidebar·홈 카드): 개요 · Azure 리소스(인프라 구성도·라이브 다이어그램·리소스 상태) · 네트워크(VNet 트래픽·Pod 트래픽) · Kubernetes(AKS 클러스터·AKS 모니터링) · 보안(소제목 Azure + 클러스터: 통합 위험 / Azure 보안: 보안 개요·보안 권고·ID·권한·위협 탐지·규정 준수 / 클러스터 보안: AKS 보안 점검) · 비용 · 설정(Azure 연결·기능·권한)
+**메뉴** (`apps/web/src/lib/navConfig.ts` 단일 설정 → TopNav·Sidebar·홈 카드): 개요 · Azure 리소스(인프라 구성도·라이브 다이어그램·리소스 상태) · 네트워크(VNet 트래픽·Pod 트래픽) · Kubernetes(AKS 클러스터·AKS 모니터링) · 보안(소제목 Azure + 클러스터: 통합 위험 / Azure 보안: 보안 개요·보안 권고·ID·권한·위협 탐지·규정 준수 / 클러스터 보안: AKS 보안 점검) · 비용 · 알림(알림 센터) · 설정(Azure 연결·기능·권한)
 - 활성 항목은 최장 접두사 일치 `activeNavItem()` (`/security/findings`에서 `/security`는 비활성)
 - 소제목은 `NavItem.section`(i18n 키), 같은 소제목은 연속 배치
 - 페이지를 추가하면 메뉴에도 넣어야 `navConfig.test.ts`(경로 ↔ 메뉴 1:1)가 통과
@@ -230,6 +232,7 @@ AKS 클러스터 + Azure 리소스의 시각화/모니터링/운영을 단일 �
 ## Env
 `.env.example` 참조. 필수: `AZURE_AD_*`, `AZURE_SUBSCRIPTION_IDS`
 이슈 상태: `AUD_ISSUE_STATE_DIR`(없으면 `<AUD_ARRANGEMENT_DIR>/issues`, 둘 다 없으면 메모리)
+알림 센터: `AUD_ALERT_RECEIVER_TOKEN`(32자+, 없으면 수신 404)·`AUD_NOTIFY_DIR`(없으면 `<AUD_ARRANGEMENT_DIR>/notifications`)·`AUD_NOTIFY_RETENTION_DAYS`(30)·`AUD_NOTIFY_RELAY_URL`(https, 선택)·`AUD_NOTIFY_RELAY_MIN_SEVERITY`(sev2)
 인증: `API_BIND_HOST`(기본 127.0.0.1 — 웹 rewrite는 localhost를 127.0.0.1로 바꿔 보냄), `NODE_ENV`, `AUD_DEFAULT_ROLE`(앱 역할 없을 때 — 개발 기본 viewer, 프로덕션은 none만), `AUD_AUDIT_LOG`, `AUD_ANONYMOUS_SP`·`AUD_ANONYMOUS_K8S`(기본 false, 로컬 전용), `AUD_AUTH_SCOPES`, `AUD_AUTH_AUDIENCES`
 연결: `AUD_CONNECTIONS_FILE`(→ `config/connections.json`, 커밋 금지; 옛 `AUD_TENANTS_FILE`도 읽음), `AUD_HOME_CONNECTION_MODE`(platform|delegated), `AUD_PLATFORM_CERT_PATH`, `AUD_CONN_<KEY>_SECRET`(servicePrincipal 비밀 값 — 파일엔 이름만), `AUD_FEDERATED_TOKEN_FILE`(페더레이션 연결의 서비스 계정 토큰, 절대 경로 — 없으면 `AZURE_FEDERATED_TOKEN_FILE`)·`AUD_PLATFORM_OIDC_ISSUER`·`AUD_PLATFORM_FEDERATION_SUBJECT`(표시용 — 고객 FIC 작성)
 VNet 트래픽: `AZURE_LOG_ANALYTICS_WORKSPACE_ID`·`AZURE_LOG_ANALYTICS_TABLE`(기본 NTANetAnalytics)·`AZURE_NETWORK_COVERAGE_TTL_MS`
@@ -278,7 +281,7 @@ Hubble: `HUBBLE_ENABLED`, `HUBBLE_RELAY_NAMESPACE`, `HUBBLE_RELAY_PORT`, `HUBBLE
 | `docs/deployment/` | container(온프렘 Docker·`audctl`·소스 없는 배포), kubernetes(AKS 네임스페이스·Helm 차트·워크로드 ID) |
 | `docs/architecture/` | security-roadmap(보안 고도화 계획 — CNAPP 데모 비교, P0 등급 정합성·P1 이미지 취약성 진입점·P2 통합 이슈 목록·P3 팀 소유·안 쓰는 권한·P4a 배포 출처(Argo CD)·P5 그래프 탐색(클러스터 범위 + 통신하는 Azure 리소스·팀 질문·감시) 구현, P4b OCI 라벨 보류), multi-cloud(Azure·AWS·GCP 분석·단계 계획, Phase 0 = `cloud.ts` 타입 · `services/cloudKinds.ts` 표준 종류 표(Azure 유형은 관계 카탈로그에 있어야 함) · `infra/cloudRefs.ts` ID → 범위·마스킹 · 연결 `provider` 기본 azure, 테스트 `cloudKinds.test.ts`), GLOSSARY (용어집), azure-resource-relationships(리소스 관계 사전 핵심 — 입문 7장 + 코드가 쓰는 행), `relationships/`(영역 6개: network-core NET·network-edge EDG·compute-containers CMP·app-integration APP·data DAT·identity-security-monitoring IDM, 약 250행) + `relationships/catalog.json`(Azure REST API 스펙 리버스 엔지니어링: 유형 3,012·참조 속성 2,872, 공개 자료만). 재생성 `scripts/relationships/`(README) |
 | `docs/security/` | security-operations-guide(보안 기능 운영 — 이슈 목록 상태·예외·팀, 위험 조합 4칸·근거 등급·고칠 곳, 이미지 취약성, WI-17/18, 배포 출처, '확인 불가' 이유표 — 설계는 architecture/security-roadmap) |
-| `docs/observability/` | observability-instrumentation-guide, hubble-guide, hubble-troubleshooting, vnet-flow-logs(VNet 트래픽 화면) |
+| `docs/observability/` | observability-instrumentation-guide, hubble-guide, hubble-troubleshooting, vnet-flow-logs(VNet 트래픽 화면), alert-center(알림 센터 — Azure·Grafana 웹훅 수신) |
 | `docs/troubleshooting/` | error-catalog (도메인별 에러 통합 — AUTH·CONN·NET 포함) |
 | `docs/archive/` | 보관 문서(`<연도>/`, 머리 `status: archived`·`reason`·`replaced-by` + 배너, 색인 `archive/README.md`) — 현재 문서·이 파일은 링크하지 않음 |
 

@@ -37,7 +37,7 @@ export type PermissionDef = {
 export type FeatureId =
   | "inventoryDiagram" | "liveDiagram" | "resourceHealth" | "costManagement"
   | "vnetTraffic" | "privateLinkUsage" | "defenderPosture" | "aksClusters" | "aksMonitoring"
-  | "aksSecurityCheck" | "integratedRisk" | "urgentVulnerabilities" | "podTraffic" | "multiTenantConnections";
+  | "aksSecurityCheck" | "integratedRisk" | "urgentVulnerabilities" | "podTraffic" | "alertCenter" | "multiTenantConnections";
 
 export type FeatureDef = {
   id: FeatureId;

@@ -1,0 +1,5 @@
+.bell { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; color: inherit; text-decoration: none; }
+.bell:hover { background: rgba(var(--ink-rgb), 0.06); }
+.count { position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; background: rgba(var(--warning-rgb), 0.95); color: var(--ink); }
+/* White text on the danger fill (kept literal like the other white-on-colour labels) */
+.count[data-urgent] { background: var(--danger); color: white; }

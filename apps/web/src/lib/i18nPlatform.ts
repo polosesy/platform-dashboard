@@ -313,6 +313,8 @@ export const PLATFORM_T: Translations = {
   "feat.resourceHealth.name": { ko: "리소스 상태", en: "Resource health" },
   "feat.resourceHealth.desc": { ko: "Service Health·Resource Health", en: "Service Health and Resource Health" },
   "feat.costManagement.name": { ko: "비용 관리", en: "Cost management" },
+  "feat.alertCenter.name": { ko: "알림 센터", en: "Alert center" },
+  "feat.alertCenter.desc": { ko: "Azure Monitor·Grafana 알림을 대시보드가 직접 받아 장애·보안·모니터링·변경별로 — 메신저 웹훅 불필요", en: "Azure Monitor and Grafana alerts received by the dashboard, by incident · security · monitoring · change — no messenger webhook" },
   "feat.costManagement.desc": { ko: "비용 추이·예산·예측", en: "Cost trend, budgets, forecast" },
   "feat.vnetTraffic.name": { ko: "VNet 트래픽", en: "VNet traffic" },
   "feat.vnetTraffic.desc": { ko: "흐름 로그 + Traffic Analytics 감사", en: "Flow logs + Traffic Analytics audit" },

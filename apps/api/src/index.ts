@@ -33,6 +33,7 @@ import { createAuthMiddleware, verifierFromEnv } from "./auth.js";
 import { registerAllRoutes } from "./routes/index.js";
 import { requestIdMiddleware } from "./middleware/requestId.js";
 import { setDebugLogging } from "./infra/logger.js";
+import { registerNotifyHooks } from "./routes/notify.js";
 
 const env = loadEnv(process.env);
 // Fail fast on a bad connections file (schema, duplicate subscriptions, secrets in the file …)
@@ -60,6 +61,8 @@ app.use(
     allowedHeaders: ["authorization", "content-type", "x-request-id"],
   })
 );
+// 알림 센터 receiver: outside /api (Azure action groups and Grafana carry a shared secret, not an SSO token)
+registerNotifyHooks(app, env);
 // Every Authorization header is verified before a route runs; no header = anonymous (sample data / 401)
 app.use("/api", createAuthMiddleware(verifierFromEnv(env)));
 // Platform role + connection access (403 before routes), audit line per signed-in request

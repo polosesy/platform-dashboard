@@ -323,6 +323,7 @@ const CORE: Translations = {
   "nav.group.security": { ko: "보안", en: "Security" },
   "nav.group.cost": { ko: "비용", en: "Cost" },
   "nav.group.settings": { ko: "설정", en: "Settings" },
+  "nav.group.notify": { ko: "알림", en: "Alerts" },
   "nav.section.crossRisk": { ko: "Azure + 클러스터", en: "Azure + Cluster" },
   "nav.section.azureSecurity": { ko: "Azure 보안", en: "Azure Security" },
   "nav.section.clusterSecurity": { ko: "클러스터 보안", en: "Cluster Security" },
@@ -470,6 +471,7 @@ const CORE: Translations = {
   "nav.item.costManagement": { ko: "비용 관리", en: "Cost Management" },
   "nav.item.connections": { ko: "Azure 연결", en: "Azure Connections" },
   "nav.item.features": { ko: "기능·권한", en: "Features & Permissions" },
+  "nav.item.notifications": { ko: "알림 센터", en: "Alert Center" },
   "nav.desc.overview": { ko: "구독 전체 요약 — 리소스·상태·비용·보안", en: "Subscription summary — resources, health, cost, security" },
   "nav.desc.health": { ko: "Service Health · Resource Health (리전별)", en: "Service Health · Resource Health by region" },
   "nav.desc.liveDiagram": { ko: "VNet 1개 — 실측 메트릭·알림·장애 영향", en: "One VNet — measured metrics, alerts, fault impact" },
@@ -488,6 +490,7 @@ const CORE: Translations = {
   "nav.desc.clusterSecurity": { ko: "AKS 위험 개요·공격 경로·네트워크 노출·권한·구성 점검·인벤토리", en: "AKS risk overview, attack paths, exposure, permissions, config checks, inventory" },
   "nav.desc.costManagement": { ko: "비용 추이 · 예산 · 예측 · 예약", en: "Cost trend · budgets · forecast · reservations" },
   "nav.desc.connections": { ko: "플랫폼이 Azure를 읽는 연결 · 기능별 준비 상태 점검", en: "How the platform reads Azure · feature readiness check" },
+  "nav.desc.notifications": { ko: "Azure Monitor·Grafana 알림을 대시보드가 직접 받아 장애·보안·모니터링·변경별로 보여 줌 — 메신저 웹훅 없이", en: "Azure Monitor and Grafana alerts received by the dashboard itself, by incident · security · monitoring · change — no messenger webhook" },
   "nav.desc.features": { ko: "패키지(안)별 기능과 필요한 최소 Azure·Kubernetes 읽기 권한", en: "Features by package (proposal) and the minimum Azure / Kubernetes read permissions they need" },
 
   // ── Infrastructure diagram (/architecture) ──

@@ -320,6 +320,24 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **화면 문구별**: '번역 키가 거부됨 (HTTP 401/403)' = 키 값 또는 지역 불일치 · '할당량 초과 (429)' = 가격 계층 한도 · '번역 실패' = 그 밖(시간 초과 10초 등, `AUD_DEBUG=true`로 `[health]` 로그 확인)
 - 번역 결과는 문장별로 하루 캐시(키 과금 절약). 비로그인 사용자는 키를 쓰지 않음(예시 이벤트는 내장 번역)
 
+## 10. 알림 센터
+
+### NOTIFY-001: Azure·Grafana가 보내는데 알림 센터에 안 나옴 — 404 `receiver_disabled` / 401 `unauthorized`
+- **원인**: 404 = API에 `AUD_ALERT_RECEIVER_TOKEN`이 없음(수신 꺼짐) · 401 = 토큰이 없거나 다름(Azure는 URL `?token=`, Grafana는 `Authorization: Bearer`). 공개 주소에 `/hooks/alerts/*` 경로가 없으면 보내는 쪽에 연결 실패만 보임
+- **해결**: 토큰 설정 후 API 재시작, 보내는 쪽 값 확인. 액션 그룹 '테스트'·Grafana 연락처 'Test'로 확인. 공개 주소(Front Door·AGC)에 `/hooks/alerts/*`만 열기([alert-center.md](../observability/alert-center.md) §3.3)
+
+### NOTIFY-002: 400 `unsupported_payload` (`azure_not_common_schema` · `unknown_shape` · `no_alerts`) / `payload_mismatch`
+- **원인**: Azure 액션 그룹의 '일반 경고 스키마 사용'이 꺼짐(옛 형식) · 알 수 없는 JSON · 알림 0건 · `/hooks/alerts/azure`에 Grafana 형식처럼 경로와 내용이 다름
+- **해결**: 액션 그룹 웹후크에서 일반 경고 스키마 = 예. 경로를 형식에 맞추거나 `/hooks/alerts/auto` 사용
+
+### NOTIFY-003: 알림이 재시작 후 사라짐 / '메모리에만 저장' 경고
+- **원인**: `AUD_NOTIFY_DIR`·`AUD_ARRANGEMENT_DIR` 둘 다 없음 → API 메모리. 복제본이 둘 이상이면 복제본마다 따로 받음
+- **해결**: 쓰기 볼륨을 마운트하고 `AUD_NOTIFY_DIR` 설정(온프렘은 `state/arrangements` 안 `notifications/`), 쿠버네티스는 복제본 1개 또는 공유 볼륨
+
+### NOTIFY-004: 어떤 알림이 안 보이는 사용자가 있음 / 확인 버튼이 없음
+- **원인**: 구독이 붙은 Azure 알림은 그 구독의 Azure 연결을 쓸 수 있는 역할만 봄(관리자는 전부) · 확인은 운영자(AUD.Operator) 이상 · 데스크톱 알림은 브라우저 권한이 거부되면 꺼짐
+- **해결**: 연결의 역할(`roles`) 또는 앱 역할 확인. 브라우저 사이트 설정에서 알림 허용
+
 ---
 
 ## 에러 추가 가이드

@@ -40,6 +40,11 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${apiUrl}/api/:path*`,
       },
+      // 알림 센터 receiver (Azure action groups · Grafana contact points) — token-checked by the API
+      {
+        source: "/hooks/alerts/:path*",
+        destination: `${apiUrl}/hooks/alerts/:path*`,
+      },
     ];
   },
 };

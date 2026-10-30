@@ -9,6 +9,7 @@ import { useWebConfig } from "@/lib/webConfig";
 import { useI18n } from "@/lib/i18n";
 import { useMe } from "@/lib/useMe";
 import { Badge } from "@/components/ui";
+import { NotificationBell } from "./NotificationBell";
 import styles from "./TopNav.module.css";
 
 /** Sign-in / signed-in user / sign-out, with visible errors instead of console-only failures. */
@@ -38,6 +39,7 @@ export function AuthControls() {
   return (
     <div className={styles.right}>
       <AuthenticatedTemplate>
+        <NotificationBell />
         <div className={styles.user} title={user?.username}>
           <span className={styles.userDot} aria-hidden="true" />
           <span className={styles.userName}>{user?.name ?? user?.username ?? t("auth.signedIn")}</span>

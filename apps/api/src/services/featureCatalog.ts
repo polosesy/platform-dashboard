@@ -67,6 +67,8 @@ export const FEATURES: FeatureDef[] = [
   // Official feeds and the dashboard's own runtime need no Azure permission; Defender findings and cluster images add targets
   { id: "urgentVulnerabilities", tier: "pro", routes: ["/security/advisories"], requires: [], optional: ["security", "aksCredential", "k8sRead"] },
   { id: "podTraffic", tier: "enterprise", routes: ["/hubble"], requires: ["aksCredential", "hubbleExec"], optional: [], preconditions: AKS_PRE },
+  // The dashboard is the receiver (Azure action groups · Grafana contact points push to it) — no Azure read permission
+  { id: "alertCenter", tier: "core", routes: ["/notifications"], requires: [], optional: [] },
   { id: "multiTenantConnections", tier: "enterprise", routes: ["/settings/connections"], requires: [], optional: [] },
 ];
 

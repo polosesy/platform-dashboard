@@ -1,0 +1,55 @@
+/* 알림 센터 */
+.stack { display: grid; gap: 14px; margin-top: 14px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); grid-auto-rows: 1fr; gap: 10px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.search { font: inherit; font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; min-width: 180px; }
+.list { list-style: none; margin: 0; padding: 0; }
+.item { border-top: 1px solid var(--line); }
+.item:first-child { border-top: none; }
+.row { display: grid; grid-template-columns: 4px auto minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 10px 14px 10px 0; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.row:hover { background: rgba(var(--ink-rgb), 0.03); }
+.sevBar { align-self: stretch; border-radius: 0 3px 3px 0; background: rgba(var(--ink-rgb), 0.15); }
+.item[data-sev="sev1"] .sevBar { background: var(--danger); }
+.item[data-sev="sev2"] .sevBar { background: var(--warning-strong); }
+.item[data-sev="sev3"] .sevBar { background: rgba(var(--warning-rgb), 0.7); }
+.item[data-status="resolved"] .row { opacity: 0.7; }
+.main { display: grid; gap: 2px; min-width: 0; }
+.main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; font-size: 12px; }
+.chip { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.label { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
+.status { font-size: 11.5px; font-weight: 650; }
+.status[data-status="firing"] { color: var(--danger); }
+.status[data-status="resolved"] { color: var(--success); }
+.ack { font-size: 11.5px; color: var(--success); }
+.muted { font-size: 12px; color: var(--muted); }
+.mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.detail { display: grid; gap: 10px; padding: 4px 14px 14px 18px; }
+.detailGrid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
+.summary { margin: 0 0 6px; font-weight: 600; }
+.desc { margin: 0; white-space: pre-wrap; font: inherit; font-size: 12.5px; color: var(--muted); max-height: 220px; overflow: auto; }
+.kv { display: flex; flex-wrap: wrap; gap: 6px; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.link { font-size: 12.5px; color: var(--accent); text-decoration: none; }
+.link:hover { text-decoration: underline; }
+.facts { display: grid; gap: 6px; margin: 0; font-size: 12.5px; }
+.facts div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; }
+.history { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.ackRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.err { font-size: 12px; color: var(--danger); }
+.lead { margin: 0; font-size: 13px; color: var(--muted); }
+.mapGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; align-items: stretch; }
+.mapList { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }
+.mapList li span { display: block; }
+.rules { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; }
+.urlRow { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+.urlRow code { padding: 4px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); }
+.code { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; overflow: auto; white-space: pre; }
+@media (max-width: 860px) {
+  .row { grid-template-columns: 4px auto minmax(0, 1fr); }
+  .meta { grid-column: 2 / -1; justify-content: flex-start; }
+  .detailGrid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -77,6 +77,16 @@ const EnvSchema = z.object({
   AUD_ARRANGEMENT_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
   /** 통합 위험 이슈 상태(열림·진행·해결·예외): a writable directory; unset = `<AUD_ARRANGEMENT_DIR>/issues`, else in memory */
   AUD_ISSUE_STATE_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
+  /** 알림 센터 receiver (POST /hooks/alerts/*): the shared secret Azure action groups (?token=) and Grafana
+   *  (Authorization: Bearer) send — unset = the receiver answers 404. At least 32 characters. */
+  AUD_ALERT_RECEIVER_TOKEN: z.string().min(32).optional(),
+  /** Where received alerts are kept: a writable directory; unset = `<AUD_ARRANGEMENT_DIR>/notifications`, else in memory */
+  AUD_NOTIFY_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
+  AUD_NOTIFY_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  /** Optional internal relay (https, set by the platform admin): each new / changed alert at or above the minimum
+   *  severity is POSTed as {title, message, …} — e.g. an in-house bot or mail gateway. Never a messenger by default. */
+  AUD_NOTIFY_RELAY_URL: z.string().url().refine((v) => v.startsWith("https://"), "https only").optional(),
+  AUD_NOTIFY_RELAY_MIN_SEVERITY: z.enum(["sev1", "sev2", "sev3", "sev4"]).default("sev2"),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)
