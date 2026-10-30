@@ -417,3 +417,125 @@ test("where to fix (P4): a workload's Argo CD source on the row, the remediation
   assert.equal(none.gitops, null);
   assert.ok(none.rows.every((x) => !x.source) && none.issues.every((i) => i.actions.every((a) => !a.fixAt)));
 });
+
+test("security graph (P5): facts per workload answer yes / no / unknown with evidence; AND query keeps 'can't tell' apart", async () => {
+  const mod = await import("../../web/src/lib/securityGraph.ts");
+  const G = ((mod as { default?: typeof mod }).default ?? mod) as typeof mod;
+  const cov = { images: 3, scanned: 1, defender: "ok" as const, sbomMapped: 0, sbom: "ok" as const, pending: 0 };
+  const vuln = { image: "docker.io/acme/agent:1.0", source: "defender" as const, basis: "tag" as const, counts: { critical: 1, high: 0, medium: 0, low: 0 }, exploited: "kev" as const, fixable: 1, top: [] };
+  const r = buildPolicyInsights({ ...input(FLOWS), vulns: { byImage: [vuln], coverage: cov } });
+  const g = G.buildGraph(r);
+  const by = (n: string) => g.find((w) => w.name === n)!;
+  assert.equal(by("agent").facts.vulnExploited.state, "yes");
+  assert.equal(by("web").facts.vulnSevere.state, "unknown", "not scanned is 'can't tell', not 'no'");
+  assert.equal(by("web").facts.vulnSevere.reason, "vulnNotScanned");
+  assert.equal(by("agent").facts.rbacTakeover.ev, "perm");
+  // Takeover preset: agent holds all three
+  const take = G.runQuery(g, ["rbacTakeover", "tokenMounted", "weakRuntime"]);
+  assert.deepEqual(take.matches.map((w) => w.name), ["agent"]);
+  // Severe image: agent matches, web can't be told
+  const sev = G.runQuery(g, ["vulnSevere"]);
+  assert.deepEqual([sev.matches.map((w) => w.name), sev.maybe.map((w) => w.name).includes("web")], [["agent"], true]);
+  // Azure identity conditions without the workload identity view: unknown everywhere, nothing invented
+  const noWi = G.runQuery(g, ["keyVaultRole"]);
+  assert.equal(noWi.matches.length, 0);
+  assert.ok(noWi.maybe.length > 0 && noWi.maybe.every((w) => w.facts.keyVaultRole.reason === "wiNotLoaded"));
+  assert.equal(G.runQuery(g, ["keyVaultRole"], { includeManaged: true }).total, r.rows.length, "managed only on request");
+
+  // With the workload identity view: a federated identity (WI) and a node pool identity (IMDS)
+  const role = (roleName: string, data: { svc: "keyVault" | "storage"; write: boolean }, unused = false) => ({ id: roleName, roleName, builtIn: true, privileged: null, wildcardActions: false, conditional: false, scope: { level: "resource" as const, label: "res1" }, data, ...(unused ? { usage: { state: "unused" as const, source: data.svc, days: 30, requests: 0, logsInScope: 9 } } : {}) });
+  const wi = {
+    clusterId: r.clusterId, generatedAt: "", cluster: { oidcIssuerEnabled: true, workloadIdentityEnabled: true, issuerMasked: null },
+    workloads: [{ id: "w:app/Deployment/web", namespace: "app", name: "web", kind: "Deployment", pods: 2, managed: false, saId: "sa:app/web", useLabel: true, injected: "yes" as const, pools: ["pool:user"] }],
+    serviceAccounts: [{ id: "sa:app/web", namespace: "app", name: "web", exists: true, managed: false, tenantMatch: null, identityId: "mi:app", ficIds: [], k8sRbac: [], canUseIdentity: [] }],
+    fics: [],
+    identities: [
+      { id: "mi:app", kind: "userAssigned" as const, name: "id-app", clientIdTail: "…0001", fic: { status: "ok" as const, count: 1, limit: 20 as const, ids: [], otherIssuers: 0, regionUnsupported: false }, roles: [role("Key Vault Secrets User", { svc: "keyVault", write: false }, true)], rolesStatus: "ok" as const, scanned: "annotated" as const },
+      { id: "mi:node", kind: "userAssigned" as const, name: "id-node", clientIdTail: "…0002", fic: { status: "ok" as const, count: 0, limit: 20 as const, ids: [], otherIssuers: 0, regionUnsupported: false }, roles: [role("Storage Blob Data Contributor", { svc: "storage", write: true })], rolesStatus: "ok" as const, scanned: "nodePool" as const, pools: ["pool:user"] },
+    ],
+    findings: [], nodePools: [], otherWorkloads: [{ id: "w:obs/DaemonSet/agent", namespace: "obs", name: "agent", kind: "DaemonSet", pods: 3, managed: false, serviceAccount: "agent", pools: ["pool:user"], hostNetwork: false, usesSecrets: false }],
+    imds: { podAccess: "allowed" as const, restrictionBlockedBy: [], allowPolicies: [], pools: "ok" as const },
+    coverage: {}, gaps: [],
+  } as unknown as Parameters<typeof G.buildGraph>[1];
+  const g2 = G.buildGraph(r, wi);
+  const web = g2.find((w) => w.name === "web")!, agent = g2.find((w) => w.name === "agent")!;
+  assert.deepEqual(["azureIdentity", "keyVaultRole", "unusedRole", "imdsIdentity", "storageWriteRole"].map((k) => web.facts[k as "azureIdentity"].state), ["yes", "yes", "yes", "yes", "yes"]);
+  assert.equal(web.facts.unusedRole.ev, "obs", "unused = access log observed");
+  assert.deepEqual([agent.facts.azureIdentity.state, agent.facts.imdsIdentity.state, agent.facts.keyVaultRole.state], ["no", "yes", "no"]);
+  assert.deepEqual(G.runQuery(g2, ["imdsIdentity", "storageWriteRole"]).matches.map((w) => w.name).sort(), ["agent", "web"]);
+  // IMDS restricted cluster-wide: the IMDS path is gone
+  const g3 = G.buildGraph(r, { ...wi!, imds: { ...wi!.imds, podAccess: "restricted" } });
+  assert.equal(g3.find((w) => w.name === "agent")!.facts.imdsIdentity.state, "no");
+  // URL form
+  assert.deepEqual(G.decodeQuery("exposed.bogus.exposed.vulnSevere"), ["exposed", "vulnSevere"]);
+  assert.equal(G.encodeQuery(["exposed", "vulnSevere"]), "exposed.vulnSevere");
+  assert.ok(G.PRESETS.every((p) => p.keys.every((k) => G.CONDITIONS.some((c) => c.key === k))));
+});
+
+test("security graph — subscription reach: Azure resources it talks to (exposure · key auth · Defender by exact ID) and role scope; watched team questions become issues", async () => {
+  const gm = await import("../../web/src/lib/securityGraph.ts");
+  const G = ((gm as { default?: typeof gm }).default ?? gm) as typeof gm;
+  const qm = await import("../../web/src/lib/issueQueue.ts");
+  const IQ = ((qm as { default?: typeof qm }).default ?? qm) as typeof qm;
+  const { defenderByResource, paasDefenderQuery } = await import("../src/services/paasDefender.js");
+  const { ISSUE_KEY } = await import("../src/services/issueStateStore.js");
+
+  // Defender per exact resource: one summed row per resource, titles ordered by severity (top 3), no row = not assessed
+  const ids = ["/subscriptions/s/resourcegroups/rg-aks/providers/microsoft.storage/storageaccounts/stagentdata", "/subscriptions/s/resourcegroups/rg-aks/providers/microsoft.dbforpostgresql/flexibleservers/psql-app"];
+  const by = defenderByResource(ids, [{ rid: ids[0]!.toUpperCase(), high: 2, medium: 1, low: 0, healthy: 5,
+    top: [{ t: "Low thing", s: "Low" }, { t: "Public network access should be disabled", s: "High" }, { t: "Secure transfer", s: "Medium" }, { t: "Another high", s: "High" }] }]);
+  const st = by.get(ids[0]!)!;
+  assert.ok(st.state === "ok" && st.high === 2 && st.top.length === 3 && st.top[0]!.severity === "High" && st.top[2]!.severity === "Medium");
+  assert.deepEqual(by.get(ids[1]!), { state: "notAssessed" }, "no assessment is not 'healthy'");
+  const kql = paasDefenderQuery(["/subscriptions/s/x/O'Neil"]);
+  assert.match(kql, /summarize .* by rid$/);
+  assert.ok(!kql.includes("O'Neil") && kql.includes("'/subscriptions/s/x/oneil'"), "lowercase, quotes stripped");
+
+  const r = buildPolicyInsights(input(FLOWS));
+  const node = (id: string) => r.network.nodes.find((n) => n.id === id)!;
+  Object.assign(node("azure:storageaccounts/stagentdata"), { defender: st, exposure: "open", keyAuth: "on" });
+  Object.assign(node("azure:flexibleservers/psql-app"), { defender: by.get(ids[1]!), exposure: "closed", keyAuth: "off" });
+  const g = G.buildGraph(r);
+  const agent = g.find((w) => w.id === "obs/agent")!, web = g.find((w) => w.id === "app/web")!;
+  assert.deepEqual([agent.facts.paasDefenderHigh.state, agent.facts.paasOpen.state, agent.facts.paasKeyAuth.state], ["yes", "yes", "yes"]);
+  assert.match(agent.facts.paasDefenderHigh.detail!, /stagentdata: High 2/);
+  assert.deepEqual([web.facts.paasDefenderHigh.state, web.facts.paasDefenderHigh.reason], ["unknown", "defenderUnknown"], "not assessed = can't tell");
+  assert.deepEqual([web.facts.paasOpen.state, web.facts.paasKeyAuth.state], ["no", "no"]);
+  assert.equal(agent.paas.find((p) => p.label === "stagentdata")!.defender?.state, "ok", "the detail panel gets what is known");
+  // Without observed traffic every PaaS condition is unknown, never "no"
+  const blind = G.buildGraph(buildPolicyInsights(input(null)));
+  assert.ok(blind.every((w) => w.facts.paasOpen.state === "unknown" && w.facts.paasOpen.reason === "networkUnavailable"));
+
+  // Role scope: privileged / subscription-wide roles of a reachable identity
+  const wi = {
+    clusterId: r.clusterId, generatedAt: "2026-10-12T00:00:00Z", cluster: {},
+    workloads: [{ id: "w:app/Deployment/web", namespace: "app", name: "web", kind: "Deployment", pods: 1, managed: false, saId: "sa:app/web", pools: [] }],
+    serviceAccounts: [{ id: "sa:app/web", namespace: "app", name: "web", identityId: "mi:web" }],
+    identities: [{ id: "mi:web", kind: "userAssigned", name: "id-web", clientIdTail: "…0001", rolesStatus: "ok",
+      roles: [{ id: "c", roleName: "Contributor", builtIn: true, privileged: "contributor", wildcardActions: true, conditional: false, scope: { level: "subscription", label: "sub-name" } }] }],
+    otherWorkloads: [], imds: { podAccess: "restricted", restrictionBlockedBy: [], allowPolicies: [], pools: "ok" }, findings: [], fics: [], nodePools: [], coverage: {}, gaps: [],
+  } as unknown as Parameters<typeof G.buildGraph>[1];
+  const g2 = G.buildGraph(r, wi);
+  const web2 = g2.find((w) => w.id === "app/web")!;
+  assert.deepEqual([web2.facts.rolePrivileged.state, web2.facts.roleBroad.state], ["yes", "yes"]);
+  assert.equal(g2.find((w) => w.id === "obs/agent")!.facts.rolePrivileged.state, "no");
+  assert.ok(G.PRESETS.some((p) => p.id === "vulnerableToWeakPaas") && G.PRESETS.every((p) => p.keys.every((k) => G.CONDITIONS.some((c) => c.key === k))));
+
+  // Watched team questions → one issue per (question, matched workload); unwatched and "can't tell" raise nothing
+  const scope = IQ.clusterScope(r.clusterId);
+  const q = (id: string, qq: string, watch: boolean) => ({ id, name: id.toUpperCase(), q: qq, includeManaged: false, watch, sev: "critical" as const, rev: 1, updatedAt: "" });
+  const queue = IQ.buildIssueQueue({
+    clusterId: r.clusterId, insights: r, wi: null, now: new Date("2026-10-30T00:00:00Z"),
+    queries: [q("weak-paas", "paasDefenderHigh", true), q("open", "paasOpen", false)],
+    states: {
+      [`query:${scope}:weak-paas/app/gone`]: { status: "resolved", rev: 1, updatedAt: "2026-10-01T00:00:00Z", history: [] },
+      [`query:${scope}:open/app/x`]: { status: "inProgress", rev: 1, updatedAt: "2026-10-01T00:00:00Z", history: [] },
+    },
+  });
+  const raised = queue.items.filter((i) => i.source === "query");
+  assert.deepEqual(raised.map((i) => [i.key, i.sev, i.target]), [[`query:${scope}:weak-paas/obs/agent`, "critical", "obs/agent"]], "web (can't tell) raises nothing");
+  assert.ok(raised.every((i) => ISSUE_KEY.test(i.key)));
+  assert.match(raised[0]!.href, /tab=explore&cluster=.*&q=paasDefenderHigh/);
+  assert.equal(raised[0]!.evidence, "cfg");
+  assert.equal(queue.notDetected, 1, "the gone match of the watched question — not the unwatched one's state");
+});

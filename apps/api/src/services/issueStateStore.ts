@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { IssueState, IssueStatus } from "@aud/types";
 
 /** source:scope:id — printable ASCII without spaces (the web builds keys that way) */
-export const ISSUE_KEY = /^(combo|wi|alert|vuln):[\x21-\x7e]{1,700}$/;
+export const ISSUE_KEY = /^(combo|wi|alert|vuln|query):[\x21-\x7e]{1,700}$/;
 const MAX_KEYS = 3000;
 const HISTORY = 20;
 const DAY = 86_400_000;

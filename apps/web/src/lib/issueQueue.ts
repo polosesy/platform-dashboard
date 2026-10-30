@@ -1,14 +1,16 @@
 // 통합 위험 › 이슈 목록 (pure) — one queue over sources that each find risk on their own, with the team's status.
+// A watched question of the graph explorer is a source too: each workload it matches (all conditions yes) is an issue.
 // Issues are recomputed from the sources on every load; the stored state is only what the team said. When the two
 // disagree the source wins: "resolved" that is still detected after the claim is open again (reopened), an expired
 // exception is open again (expired). Keys are printable ASCII without spaces (the API validates `source:scope:id`).
 
 import type {
-  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, WorkloadIdentityResponse,
+  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, SavedQuery, WorkloadIdentityResponse,
 } from "@aud/types";
 import { groupAlerts } from "./alertGroups";
+import { buildGraph, decodeQuery, runQuery } from "./securityGraph";
 
-export type IssueSource = "combo" | "wi" | "alert" | "vuln";
+export type IssueSource = "combo" | "wi" | "alert" | "vuln" | "query";
 export type IssueSev = "critical" | "high" | "medium" | "low";
 
 export type QueueItem = {
@@ -45,6 +47,8 @@ export type QueueInput = {
   alertsAt?: string | null;
   advisories?: AdvisoriesResponse | null;
   states: Record<string, IssueState>;
+  /** Team questions of the graph explorer — only `watch` ones raise issues */
+  queries?: SavedQuery[] | null;
   /** Team rules of the subscription's connection */
   owners?: OwnerRule[];
   now: Date;
@@ -59,7 +63,8 @@ export type IssueQueue = {
 
 const SEV_RANK: Record<IssueSev, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const STATUS_RANK: Record<IssueStatus, number> = { open: 0, inProgress: 1, accepted: 2, resolved: 3 };
-const SOURCE_RANK: Record<IssueSource, number> = { combo: 0, wi: 1, vuln: 2, alert: 3 };
+const SOURCE_RANK: Record<IssueSource, number> = { combo: 0, wi: 1, query: 2, vuln: 3, alert: 4 };
+const EV_RANK: Record<EvidenceKind, number> = { unk: 0, cfg: 1, perm: 2, obs: 3 };
 
 /** "/subscriptions/x/resourceGroups/RG/providers/…/managedClusters/AKS1" → "rg/aks1" (the state file is per subscription) */
 export function clusterScope(clusterId: string): string {
@@ -146,7 +151,26 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
       });
     }
   }
-  // ④ Defender active alerts (the subscription — one issue per detection, instances inside)
+  // ④ Watched graph questions: one issue per (question, matched workload). Only all-yes matches — "can't tell" raises
+  // nothing; the evidence is the weakest of the facts it rests on. Workload identity conditions need that view.
+  const watched = (input.queries ?? []).filter((q) => q.watch);
+  if (scope && input.insights && watched.length) {
+    const graph = buildGraph(input.insights, input.wi ?? null);
+    for (const q of watched) {
+      const keys = decodeQuery(q.q);
+      if (!keys.length) continue;
+      for (const w of runQuery(graph, keys, { includeManaged: q.includeManaged }).matches) {
+        const ev = keys.map((k) => w.facts[k].ev).sort((a, b) => EV_RANK[a] - EV_RANK[b])[0] ?? "cfg";
+        raw.push({
+          key: `query:${scope}:${q.id}/${ascii(w.id, 300)}`, source: "query", sev: q.sev,
+          title: `${q.name} · ${w.name}`, target: `${w.namespace}/${w.name}`, evidence: ev,
+          href: `/policies?tab=explore&cluster=${cluster}&q=${encodeURIComponent(q.q)}`, seenAt: input.insights.generatedAt,
+          namespaces: [w.namespace], resourceGroups: uniq([clusterRg]),
+        });
+      }
+    }
+  }
+  // ⑤ Defender active alerts (the subscription — one issue per detection, instances inside)
   if (input.alerts) {
     for (const g of groupAlerts(input.alerts)) {
       if (g.severity === "Informational") continue;
@@ -170,7 +194,8 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
   items.sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || SEV_RANK[a.sev] - SEV_RANK[b.sev] || SOURCE_RANK[a.source] - SOURCE_RANK[b.source] || a.title.localeCompare(b.title));
 
   // Stored states of this scope that no source produced now — only for sources that were actually read
-  const read = (k: string) => (k.startsWith("combo:") ? !!input.insights : k.startsWith("wi:") ? !!input.wi : k.startsWith("vuln:") ? !!input.advisories : k.startsWith("alert:") ? !!input.alerts : false);
+  const read = (k: string) => (k.startsWith("query:") ? !!input.insights && !!input.queries && watched.some((q) => k.startsWith(`query:${scope}:${q.id}/`))
+    : k.startsWith("combo:") ? !!input.insights : k.startsWith("wi:") ? !!input.wi : k.startsWith("vuln:") ? !!input.advisories : k.startsWith("alert:") ? !!input.alerts : false);
   const inScope = (k: string) => k.startsWith("alert:") || (!!scope && k.split(":")[1] === scope);
   const notDetected = Object.keys(input.states).filter((k) => inScope(k) && read(k) && !seen.has(k)).length;
 

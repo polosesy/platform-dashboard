@@ -28,6 +28,8 @@ export type WiWorkload = {
   /** Running pods carry AZURE_FEDERATED_TOKEN_FILE (the webhook mutated them) */
   injected: "yes" | "no" | "mixed" | "noRunningPods";
   injectedClientIdTail?: string;
+  /** Node pools its pods run on (pool:<name>) — the IMDS path reaches workload identity users too */
+  pools?: string[];
 };
 
 export type WiK8sBinding = {
@@ -103,6 +105,8 @@ export type WiRoleAssignment = {
   scope: WiScope;
   /** Absent = usage not checked */
   usage?: WiRoleUsage;
+  /** Data-plane role (by definition ID): which service's data it opens, and whether it writes */
+  data?: { svc: "keyVault" | "storage"; write: boolean };
 };
 
 export type WiIdentity = {

@@ -270,7 +270,7 @@ export async function listAzureEndpoints(env: Env, bearerToken: string | undefin
 
   const dns = await mapLimit(rows, 16, async (r) => [...new Set((await Promise.all(r.hosts.map(resolveAll))).flat())]);
   const endpoints: AzureEndpoint[] = rows
-    .map(({ id: _id, ...r }, i) => ({ ...r, ips: [...new Set([...r.peIps, ...dns[i]!])] }))
+    .map(({ id, ...r }, i) => ({ ...r, armId: id, ips: [...new Set([...r.peIps, ...dns[i]!])] }))
     .filter((r) => r.ips.length);
   debug(`[azure-endpoints] ${rows.length} PaaS resources (${peIps.size} PE targets), ${endpoints.length} with IPs, rules read for ${needRules.length}`);
   const out = { endpoints };

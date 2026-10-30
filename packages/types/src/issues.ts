@@ -48,3 +48,40 @@ export type IssueStateUpdate = {
   /** The `rev` the caller saw (null = the issue had no state yet) */
   baseRev: number | null;
 };
+
+// ── 그래프 탐색 › 팀 저장 질문 (보안 고도화 P5) ──
+
+/** A question of the graph explorer kept for the team. `watch` = every match becomes an issue in the issue list. */
+export type SavedQuery = {
+  /** Lowercase slug, unique per subscription */
+  id: string;
+  name: string;
+  /** Condition keys joined by "." (the explorer's URL form) */
+  q: string;
+  includeManaged: boolean;
+  watch: boolean;
+  /** Severity of the issues a watched question raises */
+  sev: "critical" | "high" | "medium";
+  rev: number;
+  updatedAt: string;
+  /** Display name from the token (never an object id) */
+  updatedBy?: string;
+};
+
+export type SavedQueriesResponse = {
+  queries: SavedQuery[];
+  durable: boolean;
+  signedIn: boolean;
+  /** Operator or above may save, change or delete */
+  canWrite: boolean;
+};
+
+export type SavedQueryUpdate = {
+  name: string;
+  q: string;
+  includeManaged: boolean;
+  watch: boolean;
+  sev: SavedQuery["sev"];
+  /** The `rev` the caller saw (null = new) */
+  baseRev: number | null;
+};

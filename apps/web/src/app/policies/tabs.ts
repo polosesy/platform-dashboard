@@ -2,13 +2,13 @@
 // Ten existing panels are grouped on the Wiz/KSPM axes; the URL keeps the panel id (?tab=rbac),
 // so deep links name an exact panel and the group follows from it.
 
-export const PANELS = ["overview", "network", "networkPolicy", "permissions", "rbac", "workloadIdentity", "findings", "psa", "namespaces", "autoscaling", "kbom"] as const;
+export const PANELS = ["overview", "explore", "network", "networkPolicy", "permissions", "rbac", "workloadIdentity", "findings", "psa", "namespaces", "autoscaling", "kbom"] as const;
 export type Panel = (typeof PANELS)[number];
 
 export type PolicyGroup = { id: "overview" | "exposure" | "identity" | "config" | "inventory"; panels: Panel[] };
 
 export const POLICY_GROUPS: PolicyGroup[] = [
-  { id: "overview", panels: ["overview"] },
+  { id: "overview", panels: ["overview", "explore"] },
   { id: "exposure", panels: ["network", "networkPolicy"] },
   { id: "identity", panels: ["permissions", "rbac", "workloadIdentity"] },
   { id: "config", panels: ["findings", "psa", "namespaces", "autoscaling"] },

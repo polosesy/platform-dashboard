@@ -102,6 +102,8 @@ export type WorkloadRiskRow = {
   bindings: string[];
   /** GitOps source (Argo CD) — absent = not managed by a readable Application */
   source?: WorkloadSource;
+  /** Risky RBAC permission kinds of its service account (confirmed and conditional) */
+  rbacKeys?: RbacRiskKey[];
 };
 
 export type RbacRiskKey =
@@ -183,10 +185,18 @@ export type NetNode = {
   network?: PaasNetworkRules | null;
   /** Key / shared-key / local authentication: on = a leaked key works from wherever the network allows */
   keyAuth?: "on" | "off" | null;
+  /** Defender for Cloud recommendations on this exact resource (assessments by resource ID). `notAssessed` = Defender
+   *  holds no assessment for it (plan off or type not covered — not "healthy"); null = could not be read; absent = the
+   *  resource ID is not known (no unique ARM match) */
+  defender?: PaasDefender | null;
   /** azureService only: the service tag (e.g. AzureActiveDirectory) and the most specific matching prefix */
   serviceTag?: string;
   prefix?: string;
 };
+
+export type PaasDefender =
+  | { state: "notAssessed" }
+  | { state: "ok"; high: number; medium: number; low: number; healthy: number; top: Array<{ title: string; severity: "High" | "Medium" | "Low" }> };
 
 export type NetEdge = {
   from: string;

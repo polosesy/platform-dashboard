@@ -11,7 +11,7 @@ import s from "./risk.module.css";
 
 export type SourceState = "ok" | "loading" | "failed" | "off";
 type Filter = "active" | "accepted" | "resolved" | "all";
-const SOURCES: IssueSource[] = ["combo", "wi", "vuln", "alert"];
+const SOURCES: IssueSource[] = ["combo", "wi", "query", "vuln", "alert"];
 const SEV_TONE = { critical: "high", high: "high", medium: "medium", low: "low" } as const;
 const STATUS_TONE = { open: "high", inProgress: "info", accepted: "neutral", resolved: "success" } as const;
 

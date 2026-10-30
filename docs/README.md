@@ -27,13 +27,13 @@ last-verified: 2026-10-30
 
 - [GLOSSARY.md](architecture/GLOSSARY.md) — 용어 사전
 - [multi-cloud.md](architecture/multi-cloud.md) — 멀티클라우드(Azure·AWS·GCP) 분석·단계별 계획 (초안, Phase 0 구현) · 참고 그림 [`image/aws-azure-gcp-system.gif`](image/aws-azure-gcp-system.gif)
-- [security-roadmap.md](architecture/security-roadmap.md) — 보안 기능 고도화 계획(CNAPP 데모 비교 · P0~P3·P4a 배포 출처(Argo CD) 구현, P4b OCI 라벨 보류·P5 계획)
+- [security-roadmap.md](architecture/security-roadmap.md) — 보안 기능 고도화 계획(CNAPP 데모 비교 · P0~P3·P4a 배포 출처·P5 그래프 탐색 구현, P4b OCI 라벨 보류)
 - [azure-resource-relationships.md](architecture/azure-resource-relationships.md) — 리소스 관계 사전 핵심(코드가 쓰는 행)
 - 영역별 관계 사전: [network-core.md](architecture/relationships/network-core.md) · [network-edge.md](architecture/relationships/network-edge.md) · [compute-containers.md](architecture/relationships/compute-containers.md) · [app-integration.md](architecture/relationships/app-integration.md) · [data.md](architecture/relationships/data.md) · [identity-security-monitoring.md](architecture/relationships/identity-security-monitoring.md) (+ `relationships/catalog.json`)
 
 ## 보안 — `security/`
 
-- [security-operations-guide.md](security/security-operations-guide.md) — 보안 기능 운영: 이슈 목록(상태·예외·팀) · 위험 조합 읽는 법(4칸·근거 등급·고칠 곳) · 이미지 취약성 · 워크로드 ID WI-17/18 · 배포 출처 · '확인 불가' 이유표
+- [security-operations-guide.md](security/security-operations-guide.md) — 보안 기능 운영: 이슈 목록(상태·예외·팀) · 위험 조합 읽는 법(4칸·근거 등급·고칠 곳) · 이미지 취약성 · 워크로드 ID WI-17/18 · 배포 출처 · 그래프 탐색 · '확인 불가' 이유표
 
 ## 관측 — `observability/`
 

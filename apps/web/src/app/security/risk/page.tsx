@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, WorkloadIdentityResponse } from "@aud/types";
+import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, SavedQueriesResponse, WorkloadIdentityResponse } from "@aud/types";
 import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Select, Stat } from "@/components/ui";
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -61,21 +61,28 @@ export default function SecurityRiskPage() {
   const statesQ = useApiQuery(ready && !sample ? `issue-states:${subscriptionId}` : null, (token) =>
     fetchJsonWithBearer<IssueStatesResponse>(apiUrl("/api/security/issue-states", { subscriptionId: sub }), token),
   );
+  // Team questions of the graph explorer — the watched ones raise issues (source "query")
+  const queriesQ = useApiQuery(ready && !sample ? `saved-queries:${subscriptionId}` : null, (token) =>
+    fetchJsonWithBearer<SavedQueriesResponse>(apiUrl("/api/security/saved-queries", { subscriptionId: sub }), token),
+  );
   const [saved, setSaved] = useState<Record<string, IssueState>>({});
   const getToken = useApiToken();
   const wi = !wiQ.loading && wiQ.data?.clusterId.toLowerCase() === clusterId.toLowerCase() ? wiQ.data : undefined;
   const adv = !advQ.loading && advQ.data?.clusterId?.toLowerCase() === clusterId.toLowerCase() ? advQ.data : undefined;
   const states = useMemo(() => ({ ...(statesQ.data?.states ?? {}), ...saved }), [statesQ.data, saved]);
   const queue = useMemo(() => buildIssueQueue({
-    clusterId: cluster?.id ?? null, insights, wi, advisories: adv,
+    clusterId: cluster?.id ?? null, insights, wi, advisories: adv, queries: queriesQ.data?.queries ?? null,
     alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
     alertsAt: freshPosture?.generatedAt ?? null, states, owners: statesQ.data?.owners ?? [], now: new Date(),
-  }), [cluster, insights, wi, adv, freshPosture, states, statesQ.data?.owners]);
+  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners]);
   const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
   const sources: Record<IssueSource, SourceState> = {
     combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
     wi: srcState(wiQ.loading, wiQ.error, wi, live),
     vuln: srcState(advQ.loading, advQ.error, adv, live),
+    // No watched question = nothing to read ("n/a"); otherwise it rests on the questions and the cluster insights
+    query: !live ? "off" : queriesQ.loading ? "loading" : queriesQ.error ? "failed" : !queriesQ.data?.queries.some((q) => q.watch) ? "off"
+      : srcState(insightsQ.loading, insightsQ.error, insights, true),
     alert: postureLoading ? "loading" : !freshPosture || freshPosture.gaps.some((g) => g.section === "alerts") ? "failed" : "ok",
   };
   const saveState = async (item: QueueItem, change: { status: IssueStatus; note?: string; assignee?: string; until?: string }): Promise<SaveResult> => {

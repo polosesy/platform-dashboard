@@ -65,6 +65,8 @@ export type AzureEndpoint = {
   peIps?: string[];
   network?: PaasNetworkRules | null;
   keyAuth?: "on" | "off" | null;
+  /** ARM resource ID — server side only (Defender lookup by exact ID), never copied into the response */
+  armId?: string;
 };
 
 export type InsightsInput = {
@@ -693,6 +695,7 @@ function buildRows(input: InsightsInput, workloads: InvWorkload[]): RowCtx[] {
       managed: isAksManaged(w.labels), owner: ownerOf(w), serviceAccount: sa,
       cells, weights, combos: [], score: 0, images: [...new Set((sec?.containers ?? []).map((c) => c.image).filter(Boolean))],
       bindings: rbac.map((b) => b.binding),
+      ...(rbac.length ? { rbacKeys: [...new Set(rbac.flatMap((b) => b.keys))].sort() } : {}),
       ...(gitopsApps.length ? (() => { const src = sourceOf(gitopsApps, w); return src ? { source: src } : {}; })() : {}),
     };
     return { row, w, sel, exposure, rbac, vuln, vulnCov: input.vulns?.coverage };

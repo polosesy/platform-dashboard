@@ -6,10 +6,11 @@ import { tryGetSecurityPosture } from "../services/securityPosture.js";
 import { queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
-import type { IssueStatesResponse } from "@aud/types";
+import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { IssueStateBody, issueStateDir, readIssueStates, writeIssueState } from "../services/issueStateStore.js";
+import { SavedQueryBody, readSavedQueries, writeSavedQuery } from "../services/savedQueryStore.js";
 
 export function registerSecurityRoutes(router: Router, env: Env) {
   const enabled = env.AZURE_SECURITY_ENABLED;
@@ -92,4 +93,41 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       sendError(res, e, "issue_state_write_failed");
     }
   });
+  // 그래프 탐색 › 팀 저장 질문 (P5): the questions only (results are recomputed). Same rights as the issue states.
+  router.get("/api/security/saved-queries", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.json({ queries: [], durable: !!stateDir, signedIn: false, canWrite: false } satisfies SavedQueriesResponse);
+      const subscriptionId = querySubscriptionId(req, env);
+      const canWrite = roleAtLeast(callerOf(env, req.auth.bearerToken)?.role ?? null, "operator");
+      res.json({ queries: subscriptionId ? await readSavedQueries(stateDir, subscriptionId) : [], durable: !!stateDir, signedIn: true, canWrite } satisfies SavedQueriesResponse);
+    } catch (e: unknown) {
+      sendError(res, e, "saved_query_read_failed");
+    }
+  });
+  const writeQuery = (remove: boolean) => async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      const id = typeof req.query.id === "string" && req.query.id ? req.query.id : null;
+      let body: SavedQueryBody | { baseRev: number };
+      if (remove) {
+        const rev = Number(req.query.baseRev);
+        if (!id || !Number.isInteger(rev) || rev < 1) return res.status(400).json({ error: "saved_query_invalid" });
+        body = { baseRev: rev };
+      } else {
+        const parsed = SavedQueryBody.safeParse(req.body);
+        if (!parsed.success) return res.status(400).json({ error: "saved_query_invalid" });
+        body = parsed.data;
+      }
+      const r = await writeSavedQuery(stateDir, subscriptionId, id, body, { by: req.auth.principal.name, remove });
+      if (r.ok) return res.json({ query: r.query, durable: !!stateDir });
+      if (r.error === "conflict") return res.status(409).json({ error: "saved_query_conflict", current: "current" in r ? r.current : null });
+      res.status(400).json({ error: r.error });
+    } catch (e: unknown) {
+      sendError(res, e, "saved_query_write_failed");
+    }
+  };
+  router.put("/api/security/saved-queries", requireRole(env, "operator"), writeQuery(false));
+  router.delete("/api/security/saved-queries", requireRole(env, "operator"), writeQuery(true));
 }

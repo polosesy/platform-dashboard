@@ -232,6 +232,14 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **원인**: ① 범위의 Key Vault 감사 로그·Storage 로그가 Log Analytics에 없음(`noLogs` — 진단 설정 없음·작업 영역 아님) ② 로그를 읽을 권한 없음(`noAccess` — 403) ③ 로그로 판정할 수 없는 역할(`notCovered` — 제어 평면 역할·AcrPull·관리 그룹 범위)
 - **해결**: ① Key Vault `AuditEvent`/Storage 로그 범주를 작업 영역으로 보내는 진단 설정 ② 범위에 Reader(리소스 로그 읽기 포함), 작업 영역 접근 모드 '리소스 또는 작업 영역 권한' ③ 정상 — 판정하지 않음. KQL 열 이름에 `last`를 쓰면 파싱 오류(SYN0002 — 예약어)라 `lastSeen`을 씀
 
+### SEC-009: 그래프 탐색 팀 질문 저장 실패 — 409 `saved_query_conflict` / 400 `saved_query_invalid`·`query_store_full`·`query_id_invalid` / 403 `role_required`
+- **원인**: 질문마다 버전(`rev`) — 화면을 연 뒤 다른 사람이 같은 질문을 바꾸거나 지움(409) · 이름 1~40자, 조건 1~8개(영문 키) · 구독당 50개 · 쓰기는 운영자(AUD.Operator) 이상
+- **해결**: 409는 목록이 다시 읽힘 — 확인하고 다시. 한도는 안 쓰는 팀 질문을 삭제(저장 파일 `<subscriptionId>.queries.json`). 저장소가 메모리이면 SEC-007과 같음
+
+### SEC-010: 그래프 탐색 'Defender 높음 권고 있는 리소스'가 판단 불가
+- **원인**: 통신한 리소스에 Defender 평가가 하나도 없음(`notAssessed` — 그 유형의 Defender 플랜 꺼짐·미지원) 또는 평가 읽기 실패(gaps 'Azure 리소스의 Defender 권고: …') 또는 리소스를 하나로 특정 못 함(같은 유형·이름 둘 이상)
+- **해결**: 구독 **Security Reader**, 해당 Defender 플랜(Storage·Key Vault·Databases …) 켜기. '평가 없음'은 '건강함'이 아님
+
 ---
 
 ## 7. Azure 연결 (Connection)

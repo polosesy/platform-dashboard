@@ -10,6 +10,7 @@ import { getClusterContext, listAzureEndpoints, type ClusterContext } from "./az
 import { buildPolicyInsights } from "./policyInsights.js";
 import { getServiceTagIndex, type ServiceTagIndex } from "./azureServiceTags.js";
 import { collectImageVulns } from "./imageVulns.js";
+import { attachPaasDefender } from "./paasDefender.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights collector
@@ -104,6 +105,14 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
     azure: { ...azure, apiServerIps: ctx.apiServerIps, serviceTags },
     containment: ctx.containment, gaps, vulns,
   }));
+  // Defender recommendations on the exact Azure resources the cluster talks to (the graph explorer's subscription reach)
+  if (azure.available) {
+    try {
+      await attachPaasDefender(env, bearerToken, result, azure.endpoints);
+    } catch (e) {
+      result.gaps.push(`${tr("Azure 리소스의 Defender 권고", "Defender recommendations of Azure resources")}: ${msg(e)}`);
+    }
+  }
   debug(`[policy-insights] ${clusterId}: ${result.rows.length} rows, ${result.issues.length} issues, ${result.network.edges.length} edges, gaps ${gaps.length}`);
   insightsCache.set(cacheKey, result);
   return result;

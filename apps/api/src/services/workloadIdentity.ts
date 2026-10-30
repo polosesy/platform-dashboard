@@ -391,6 +391,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       managed: isAksManaged(w.labels), saId: `sa:${key}`, useLabel,
       injected: !pods.length ? "noRunningPods" : traced.length === pods.length ? "yes" : traced.length ? "mixed" : "no",
       ...(injClient ? { injectedClientIdTail: tail(injClient) } : {}),
+      pools: poolsOf(pods),
     });
   }
   for (const [key, s] of saList) if (isGuid(s.annotations[WI_ANN.clientId])) saKeys.add(key);
@@ -502,6 +503,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       conditional: r.hasCondition,
       scope: classifyScope(r.scope, input.subNames),
       ...(input.roleUsage ? { usage: input.roleUsage.get(usageKey(i.principalId, r.roleDefGuid, r.scope)) ?? { state: "unknown" as const, source: null, days: USAGE_DAYS, reason: "notCovered" as const } } : {}),
+      ...(DATA_ROLES[r.roleDefGuid.toLowerCase()] ? { data: DATA_ROLES[r.roleDefGuid.toLowerCase()]! } : {}),
     })).sort((a, b) => (a.privileged ? 0 : 1) - (b.privileged ? 0 : 1) || scopeBreadth(b.scope.level) - scopeBreadth(a.scope.level) || (a.roleName < b.roleName ? -1 : 1));
   }
 

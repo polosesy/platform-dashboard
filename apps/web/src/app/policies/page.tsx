@@ -19,6 +19,7 @@ import { PolicyOverview } from "./insights/PolicyOverview";
 import { NetworkMap } from "./insights/NetworkMap";
 import { PermissionMatrix } from "./insights/PermissionMatrix";
 import { KbomPanel } from "./insights/KbomPanel";
+import { ExplorePanel } from "./insights/ExplorePanel";
 import { WorkloadIdentityPanel } from "./insights/WorkloadIdentityPanel";
 import type { HeatSel } from "./insights/RiskHeatmap";
 import type { InsightsNav } from "./insights/model";
@@ -75,7 +76,7 @@ function Policies() {
   );
   // Workload identity map: read only when its tab opens (Azure lookups per identity); scan = other identities too
   const [wiScan, setWiScan] = useState(false);
-  const wiQuery = useApiQuery(tab === "workloadIdentity" && clusterId ? `k8s-wi:${clusterId}:${locale}:${wiScan}` : null, (token) =>
+  const wiQuery = useApiQuery((tab === "workloadIdentity" || tab === "explore") && clusterId ? `k8s-wi:${clusterId}:${locale}:${wiScan}` : null, (token) =>
     fetchJsonWithBearer<WorkloadIdentityResponse>(apiUrl("/api/kubernetes/policies/workload-identity", { clusterId, lang: locale, ...(wiScan ? { scan: "subscription" } : {}) }), token),
   );
   const wi = wiQuery.data?.clusterId === clusterId ? wiQuery.data : undefined;
@@ -235,6 +236,9 @@ function Policies() {
               onToggleAction={toggleAction}
               nav={nav}
             />
+          )}
+          {tab === "explore" && insights && (
+            <ExplorePanel clusterId={clusterId} insights={insights} wi={wi ?? null} wiState={wi ? "ok" : wiQuery.error ? "failed" : "loading"} nav={nav} />
           )}
           {tab === "network" && insights && (
             <div className={insightStyles.root}><NetworkMap data={insights} sel={netSel} onSelect={setNetSel} nav={nav} /></div>
