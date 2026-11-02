@@ -9,11 +9,11 @@ import { useMemo, useState } from "react";
 import type { NetpolModel, NetworkInsight } from "@aud/types";
 import { Button, Select, Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
-import { changeKey, endpointsOf, groupOf, matrixOf, simulate, type DirVerdict, type EdgeState, type FlowVerdict, type MatrixCell, type SimChange, type SimEdge } from "@/lib/netpolSim";
+import { changeEffects, changeKey, endpointsOf, groupOf, matrixOf, simulate, withoutAllows, type DirVerdict, type EdgeState, type FlowVerdict, type MatrixCell, type SimChange, type SimEdge } from "@/lib/netpolSim";
 import { Badge } from "./shared";
 import styles from "../styles.module.css";
 
-const STATE_CLASS: Record<EdgeState, string> = { allow: "npAllow", deny: "npDeny", partial: "npPartial", unknown: "npUnknown" };
+const STATE_CLASS: Record<EdgeState, string> = { allow: "npAllow", open: "npOpen", deny: "npDeny", partial: "npPartial", unknown: "npUnknown" };
 
 export function NetpolSimPanel({ model, network, includeSystem }: { model: NetpolModel; network: NetworkInsight; includeSystem: boolean }) {
   const { t } = useI18n();
@@ -24,6 +24,8 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
   const [cellKey, setCellKey] = useState<string | null>(null);
 
   const sim = useMemo(() => simulate(model, network, changes, { includeSystem }), [model, network, changes, includeSystem]);
+  // Each change on its own: a change that does nothing says why (allow rules are a union — see changeEffects)
+  const effects = useMemo(() => changeEffects(model, network, changes, { includeSystem }), [model, network, changes, includeSystem]);
   const matrix = useMemo(() => matrixOf(model, network, sim), [model, network, sim]);
   const eps = useMemo(() => endpointsOf(model, network), [model, network]);
   const policyName = useMemo(() => new Map(model.policies.map((p) => [p.id, `${p.namespace ? `${p.namespace}/` : ""}${p.name}`])), [model]);
@@ -33,6 +35,17 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
   const toggle = (c: SimChange) => { setChanges(has(c) ? changes.filter((x) => changeKey(x) !== changeKey(c)) : [...changes, c]); setCellKey(null); };
   const auditPolicies = model.policies.filter((p) => (p.ingress && !p.ingress.isolates) || (p.egress && !p.egress.isolates));
   const enforceAll = () => setChanges([...changes.filter((c) => c.op !== "enforce"), ...auditPolicies.map((p) => ({ op: "enforce" as const, policyId: p.id }))]);
+  // "What do this namespace's allow rules do?" — its policies off + default-deny both ways (adds what is missing)
+  const stripAllows = () => { const add = withoutAllows(model, curNs).filter((c) => !has(c)); setChanges([...changes, ...add]); setCellKey(null); };
+  const effectText = (c: SimChange) => {
+    const e = effects.get(changeKey(c));
+    if (!e) return "";
+    if (e.why) return t(`nps.effect.none.${e.why}`);
+    return [e.broken ? t("nps.effect.broken", { n: e.broken }) : null, e.opened ? t("nps.effect.opened", { n: e.opened }) : null,
+      !e.broken && !e.opened && e.changed ? t("nps.effect.changed", { n: e.changed }) : null,
+      e.isolation ? t("nps.effect.isolation", { n: e.isolation > 0 ? `+${e.isolation}` : e.isolation }) : null].filter(Boolean).join(" · ");
+  };
+  const noEffect = changes.length > 0 && !sim.counts.broken && !sim.counts.opened && !sim.counts.changed && sim.isolation.every((r) => r.ingress[0] === r.ingress[1] && r.egress[0] === r.egress[1]);
 
   const groupLabel = (g: string) => (g.startsWith("ns:") ? g.slice(3) : t(`nps.group.${g}`));
   const nodeLabel = (id: string) => eps.nodes.get(id)?.label ?? id;
@@ -47,7 +60,7 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
   const cell = cellKey ? matrix.cells.get(cellKey) : undefined;
   // Without a picked cell: the connections that change (or, with no change, those the policies don't decide clearly)
   const listed: SimEdge[] = cell ? cell.edges
-    : changed ? sim.edges.filter((x) => x.broken.length || x.opened.length || x.before !== x.after)
+    : changed ? sim.edges.filter((x) => x.broken.length || x.opened.length || x.changed)
       : sim.edges.filter((x) => x.mismatch || x.after === "deny" || x.after === "partial");
 
   const nsPolicies = model.policies.filter((p) => p.namespace === curNs || p.source === "cilium-clusterwide");
@@ -63,7 +76,7 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
         </div>
         <div className={styles.npStats}>
           <Stat label={t("nps.stat.edges")} value={sim.counts.edges} hint={t("nps.stat.edgesHint")} />
-          <Stat label={t(changed ? "nps.stat.after" : "nps.stat.now")} value={`${sim.counts.allow} · ${sim.counts.deny + sim.counts.partial} · ${sim.counts.unknown}`} hint={t("nps.stat.nowHint")} />
+          <Stat label={t(changed ? "nps.stat.after" : "nps.stat.now")} value={`${sim.counts.allow} · ${sim.counts.open} · ${sim.counts.deny + sim.counts.partial} · ${sim.counts.unknown}`} hint={t("nps.stat.nowHint")} />
           <Stat label={t("nps.stat.broken")} value={changed ? sim.counts.broken : "—"} hint={changed ? t("nps.stat.brokenHint") : t("nps.stat.noChange")} tone={sim.counts.broken ? "high" : undefined} />
           <Stat label={t("nps.stat.opened")} value={changed ? sim.counts.opened : "—"} hint={changed ? t("nps.stat.openedHint") : t("nps.stat.noChange")} tone={sim.counts.opened ? "medium" : undefined} />
           <Stat label={t("nps.stat.mismatch")} value={sim.counts.mismatch} hint={t("nps.stat.mismatchHint")} tone={sim.counts.mismatch ? "medium" : undefined} />
@@ -77,13 +90,17 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
             {changed ? (
               <div className={styles.chips}>
                 {changes.map((c) => (
-                  <button key={changeKey(c)} type="button" className={styles.npChip} onClick={() => toggle(c)} title={t("nps.remove")}>
-                    {c.op === "off" || c.op === "enforce" ? t(`nps.op.${c.op}`, { name: nameOf(c.policyId) }) : c.op === "allowDns" ? t("nps.op.allowDns", { ns: c.namespace }) : t(`nps.op.${c.op}.${c.dir}`, { ns: c.namespace })} ×
-                  </button>
+                  <span key={changeKey(c)} className={styles.npChange}>
+                    <button type="button" className={styles.npChip} onClick={() => toggle(c)} title={t("nps.remove")}>
+                      {c.op === "off" || c.op === "enforce" ? t(`nps.op.${c.op}`, { name: nameOf(c.policyId) }) : c.op === "allowDns" ? t("nps.op.allowDns", { ns: c.namespace }) : t(`nps.op.${c.op}.${c.dir}`, { ns: c.namespace })} ×
+                    </button>
+                    <span className={styles.npEffect} data-none={effects.get(changeKey(c))?.why ? true : undefined}>{effectText(c)}</span>
+                  </span>
                 ))}
                 <button type="button" className={styles.linkBtn} onClick={() => { setChanges([]); setCellKey(null); }}>{t("nps.reset")}</button>
               </div>
             ) : <div className={styles.muted}>{t("nps.noChanges")}</div>}
+            {noEffect ? <div className={styles.npHint}>{t("nps.noEffect")}</div> : null}
             {auditPolicies.length ? (
               <div className={styles.npHint}>
                 {t("nps.auditHint", { n: auditPolicies.length })}{" "}
@@ -100,6 +117,9 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
               ))}
               <Button size="sm" onClick={() => toggle({ op: "allowDns", namespace: curNs })} disabled={!curNs}>
                 {has({ op: "allowDns", namespace: curNs }) ? "✓ " : "+ "}{t("nps.op.allowDns", { ns: "" }).trim()}
+              </Button>
+              <Button size="sm" variant="primary" onClick={stripAllows} disabled={!curNs} title={t("nps.stripAllowsHint")}>
+                {t("nps.stripAllows")}
               </Button>
               {(["ingress", "egress"] as const).map((d) => (
                 <Button size="sm" key={`obs-${d}`} onClick={() => toggle({ op: "allowObserved", namespace: curNs, dir: d })} disabled={!curNs}>
@@ -141,7 +161,8 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
             <div className={styles.panelHeader}>
               <div className={styles.panelTitle}>{t("nps.matrix")}</div>
               <div className={styles.npLegend}>
-                {(["allow", "partial", "deny", "unknown"] as const).map((s) => <span key={s}><i className={styles[STATE_CLASS[s]]} />{t(`nps.state.${s}`)}</span>)}
+                {(["allow", "open", "partial", "deny", "unknown"] as const).map((s) => <span key={s}><i className={styles[STATE_CLASS[s]]} />{t(`nps.state.${s}`)}</span>)}
+                <span><i className={styles.npChangedKey} />{t("nps.legend.changed")}</span>
                 <span>▼ {t("nps.legend.broken")}</span><span>▲ {t("nps.legend.opened")}</span><span>! {t("nps.legend.mismatch")}</span>
               </div>
             </div>
@@ -164,7 +185,7 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
                           if (!x) return <td key={c} />;
                           return (
                             <td key={c}>
-                              <button type="button" className={`${styles.npCell} ${styles[STATE_CLASS[x.state]]}`} aria-pressed={cellKey === k}
+                              <button type="button" className={`${styles.npCell} ${styles[STATE_CLASS[x.state]]}`} aria-pressed={cellKey === k} data-changed={changed && x.changed ? true : undefined}
                                 title={t("nps.cellTitle", { from: groupLabel(r), to: groupLabel(c), n: x.edges.length, state: t(`nps.state.${x.state}`) })}
                                 onClick={() => setCellKey(cellKey === k ? null : k)}>
                                 {x.edges.length}

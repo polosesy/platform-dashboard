@@ -161,3 +161,31 @@ test("matching details: CIDR except, FQDN pattern, named ports and unread labels
   assert.equal(job.before, "unknown");
   assert.equal(job.ports[0]!.before.egress!.reason, "unknownSelection");
 });
+
+test("open vs allowed by a rule; a default-deny on an isolated namespace says why it changes nothing; 'without the allow rules' shows what they pass", () => {
+  const model = buildNetpolModel(inventory(), (ns) => isSystemNamespace(ns));
+  const net = network();
+  const base = S.simulate(model, net, [], { includeSystem: true });
+  const by = (sim: ReturnType<typeof S.simulate>, f: string, t: string) => sim.edges.find((x) => x.edge.from === f && x.edge.to === t)!;
+  assert.equal(by(base, "app/web", "ext:world").before, "open", "app egress is audit-only and the Internet has no ingress side — nobody checks");
+  assert.equal(by(base, "app/web", "app/api").before, "allow", "api ingress is isolated and a rule allows web");
+  assert.ok(base.counts.open > 0);
+
+  // db is already isolated (allow-api): a default-deny ingress there changes nothing — and says why
+  const c1 = { op: "denyAll" as const, namespace: "db", dir: "ingress" as const };
+  const eff = S.changeEffects(model, net, [c1], { includeSystem: true }).get(S.changeKey(c1))!;
+  assert.deepEqual([eff.broken, eff.changed, eff.isolation, eff.why], [0, 0, 0, "alreadyIsolated"]);
+  // On the open app namespace the same change does something: isolation +2, the Internet edge is no longer "open"
+  const c2 = { op: "denyAll" as const, namespace: "app", dir: "egress" as const };
+  const eff2 = S.changeEffects(model, net, [c2], { includeSystem: true }).get(S.changeKey(c2))!;
+  assert.ok(eff2.why === null && eff2.isolation === 2 && eff2.broken > 0);
+  // Without db's allow rules: app/api → postgres breaks — the rule was what let it through
+  const strip = S.withoutAllows(model, "db");
+  assert.deepEqual(strip.map(S.changeKey), ["off:kubernetes:db/allow-api", "denyAll:db:ingress", "denyAll:db:egress"]);
+  const r = S.simulate(model, net, strip, { includeSystem: true });
+  assert.deepEqual(by(r, "app/api", "db/postgres").broken, ["5432"]);
+  assert.equal(by(r, "app/api", "db/postgres").changed, true);
+  const m = S.matrixOf(model, net, r);
+  assert.ok(m.cells.get("ns:app|ns:db")!.changed >= 1);
+  assert.equal(S.matrixOf(model, net, base).cells.get("ns:app|internet")!.state, "open");
+});

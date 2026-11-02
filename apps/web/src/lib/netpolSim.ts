@@ -317,7 +317,12 @@ export function applyChanges(model: NetpolModel, net: NetworkInsight | null, cha
 
 // ── The simulation ──
 
-export type EdgeState = "allow" | "deny" | "partial" | "unknown";
+/**
+ * allow = a rule lets it through · open = nothing isolates either side (it passes because no policy applies — the
+ * map colours this apart: "allowed by a rule" and "nobody checks" are different security facts) · deny · partial
+ * (some ports blocked) · unknown
+ */
+export type EdgeState = "allow" | "open" | "deny" | "partial" | "unknown";
 export type SimEdge = {
   edge: NetEdge;
   ports: Array<{ port: string; before: FlowVerdict; after: FlowVerdict }>;
@@ -330,18 +335,26 @@ export type SimEdge = {
   observed: "passed" | "dropped" | "mixed";
   /** The verdict for the deployed policies disagrees with what was observed (model incomplete, policy changed, audit mode) */
   mismatch: boolean;
+  /** The state changed (allowed by a rule ↔ open counts too — a default-deny on an open namespace shows up here) */
+  changed: boolean;
 };
 
 export type IsolationRow = { namespace: string; workloads: number; ingress: [number, number]; egress: [number, number]; ingressUnknown: [number, number]; egressUnknown: [number, number] };
 
 export type SimResult = {
   edges: SimEdge[];
-  counts: { edges: number; allow: number; deny: number; partial: number; unknown: number; broken: number; opened: number; mismatch: number };
+  counts: { edges: number; allow: number; open: number; deny: number; partial: number; unknown: number; broken: number; opened: number; mismatch: number; changed: number };
   /** Per namespace: isolated workloads [before, after] per direction */
   isolation: IsolationRow[];
 };
 
-const edgeState = (vs: Verdict[]): EdgeState => (vs.every((v) => v === "allow") ? "allow" : vs.every((v) => v === "deny") ? "deny" : vs.includes("deny") && vs.includes("allow") ? "partial" : vs.includes("unknown") ? "unknown" : "partial");
+/** A verdict that passes only because neither side is isolated (or it comes from the node) */
+const isOpen = (f: FlowVerdict) => f.v === "allow" && [f.egress, f.ingress].every((d) => !d || d.reason === "notIsolated" || d.reason === "hostAlways");
+const edgeState = (fs: FlowVerdict[]): EdgeState => {
+  const vs = fs.map((f) => f.v);
+  if (vs.every((v) => v === "allow")) return fs.every(isOpen) ? "open" : "allow";
+  return vs.every((v) => v === "deny") ? "deny" : vs.includes("deny") && vs.includes("allow") ? "partial" : vs.includes("unknown") ? "unknown" : "partial";
+};
 
 function isolatedOf(policies: SimPolicy[], pod: Extract<Endpoint, { kind: "pod" }>, dir: Dir, ctx: Ctx): Tri {
   const xs = policies.filter((p) => p[dir]?.isolates).map((p) => selects(p, pod, ctx));
@@ -361,20 +374,22 @@ export function simulate(model: NetpolModel, net: NetworkInsight | null, changes
       const sys = (ep: Endpoint) => ep.kind === "pod" && sysNs.has(ep.namespace);
       if (!opts.includeSystem && (sys(src) || (src.kind !== "pod" && sys(dst)))) continue;
       const ports = (e.ports.length ? e.ports : ["0"]).map((p) => ({ port: p, before: flowVerdict(before, src, dst, p, ctx), after: flowVerdict(after, src, dst, p, ctx) }));
-      const b = edgeState(ports.map((p) => p.before.v)), a = edgeState(ports.map((p) => p.after.v));
+      const b = edgeState(ports.map((p) => p.before)), a = edgeState(ports.map((p) => p.after));
       const observed = e.dropped === 0 ? "passed" : e.dropped >= e.count ? "dropped" : "mixed";
       edges.push({
         edge: e, ports, before: b, after: a,
         broken: ports.filter((p) => p.before.v === "allow" && p.after.v === "deny").map((p) => p.port),
         opened: ports.filter((p) => p.before.v === "deny" && p.after.v === "allow").map((p) => p.port),
         observed,
-        mismatch: (observed === "dropped" && b === "allow") || (observed === "passed" && b === "deny"),
+        mismatch: (observed === "dropped" && (b === "allow" || b === "open")) || (observed === "passed" && b === "deny"),
+        changed: b !== a,
       });
     }
   }
-  const counts = { edges: edges.length, allow: 0, deny: 0, partial: 0, unknown: 0, broken: 0, opened: 0, mismatch: 0 };
+  const counts = { edges: edges.length, allow: 0, open: 0, deny: 0, partial: 0, unknown: 0, broken: 0, opened: 0, mismatch: 0, changed: 0 };
   for (const x of edges) {
     counts[x.after]++;
+    if (x.changed) counts.changed++;
     if (x.broken.length) counts.broken++;
     if (x.opened.length) counts.opened++;
     if (x.mismatch) counts.mismatch++;
@@ -397,6 +412,45 @@ export function simulate(model: NetpolModel, net: NetworkInsight | null, changes
   return { edges, counts, isolation: [...rows.values()].sort((a, b) => a.namespace.localeCompare(b.namespace)) };
 }
 
+/**
+ * What one change does on its own (against the deployed policies) — so a change with no effect says why instead of
+ * silently showing nothing. Allow rules are a union: a default-deny on a namespace that other policies already
+ * isolate adds nothing, the existing allow rules still let the observed connections through.
+ */
+export type ChangeEffect = {
+  broken: number;
+  opened: number;
+  /** Connections whose state changed (open → allowed by a rule counts) */
+  changed: number;
+  /** Isolated workloads added (+) or removed (−), both directions */
+  isolation: number;
+  /** Why nothing changed, when nothing did */
+  why: "alreadyIsolated" | "noTraffic" | "rulesAllow" | null;
+};
+
+export function changeEffects(model: NetpolModel, net: NetworkInsight | null, changes: SimChange[], opts: { includeSystem?: boolean } = {}): Map<string, ChangeEffect> {
+  const out = new Map<string, ChangeEffect>();
+  for (const c of changes) {
+    const r = simulate(model, net, [c], opts);
+    const isolation = r.isolation.reduce((s, x) => s + (x.ingress[1] - x.ingress[0]) + (x.egress[1] - x.egress[0]), 0);
+    const nsOf = c.op === "off" || c.op === "enforce" ? model.policies.find((p) => p.id === c.policyId)?.namespace ?? "" : c.namespace;
+    const touches = r.edges.filter((x) => x.edge.from.startsWith(`${nsOf}/`) || x.edge.to.startsWith(`${nsOf}/`)).length;
+    const nothing = !r.counts.broken && !r.counts.opened && !r.counts.changed && !isolation;
+    const why: ChangeEffect["why"] = !nothing ? null
+      : c.op === "denyAll" ? "alreadyIsolated"
+        : !touches ? "noTraffic" : "rulesAllow";
+    out.set(changeKey(c), { broken: r.counts.broken, opened: r.counts.opened, changed: r.counts.changed, isolation, why });
+  }
+  return out;
+}
+
+/** "What if this namespace kept only default-deny?" — every policy of the namespace off + a virtual default-deny both ways */
+export const withoutAllows = (model: NetpolModel, namespace: string): SimChange[] => [
+  ...model.policies.filter((p) => p.namespace === namespace).map((p) => ({ op: "off" as const, policyId: p.id })),
+  { op: "denyAll", namespace, dir: "ingress" },
+  { op: "denyAll", namespace, dir: "egress" },
+];
+
 // ── The namespace matrix ──
 
 /** Column / row group of an endpoint: its namespace, or the kind of the outside peer */
@@ -407,7 +461,7 @@ export function groupOf(id: string, eps: Endpoints): string {
   return n?.kind === "apiserver" || id === "apiserver" ? "apiserver" : n?.kind ?? (id.startsWith("ext:host") || id.startsWith("ext:remote") ? "node" : "unknown");
 }
 
-export type MatrixCell = { row: string; col: string; edges: SimEdge[]; state: EdgeState; broken: number; opened: number; mismatch: number };
+export type MatrixCell = { row: string; col: string; edges: SimEdge[]; state: EdgeState; broken: number; opened: number; mismatch: number; changed: number };
 export type Matrix = { rows: string[]; cols: string[]; cells: Map<string, MatrixCell> };
 
 const COL_ORDER = ["apiserver", "paas", "azureService", "private", "internet", "node", "platform", "probe", "unknown"];
@@ -419,16 +473,19 @@ export function matrixOf(model: NetpolModel, net: NetworkInsight | null, sim: Si
   for (const x of sim.edges) {
     const row = groupOf(x.edge.from, eps), col = groupOf(x.edge.to, eps);
     const k = `${row}|${col}`;
-    const c = cells.get(k) ?? { row, col, edges: [], state: "allow" as EdgeState, broken: 0, opened: 0, mismatch: 0 };
+    const c = cells.get(k) ?? { row, col, edges: [], state: "allow" as EdgeState, broken: 0, opened: 0, mismatch: 0, changed: 0 };
     c.edges.push(x);
     if (x.broken.length) c.broken++;
     if (x.opened.length) c.opened++;
     if (x.mismatch) c.mismatch++;
+    if (x.changed) c.changed++;
     cells.set(k, c);
   }
   for (const c of cells.values()) {
     const s = new Set(c.edges.map((x) => x.after));
-    c.state = s.size === 1 ? [...s][0]! : s.has("deny") || s.has("partial") ? "partial" : "unknown";
+    c.state = s.size === 1 ? [...s][0]!
+      : s.has("deny") || s.has("partial") ? "partial"
+        : [...s].every((x) => x === "allow" || x === "open") ? (s.has("open") ? "open" : "allow") : "unknown";
   }
   const nsFirst = (a: string, b: string) => {
     const ia = a.startsWith("ns:") ? -1 : COL_ORDER.indexOf(a), ib = b.startsWith("ns:") ? -1 : COL_ORDER.indexOf(b);
