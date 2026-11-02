@@ -189,3 +189,45 @@ test("open vs allowed by a rule; a default-deny on an isolated namespace says wh
   assert.ok(m.cells.get("ns:app|ns:db")!.changed >= 1);
   assert.equal(S.matrixOf(model, net, base).cells.get("ns:app|internet")!.state, "open");
 });
+
+test("cell detail: the deciding rule is recorded; checkpoints; who blocked / which rule let through / who doesn't check; ports grouped; rule text", () => {
+  const model = buildNetpolModel(inventory(), (ns) => isSystemNamespace(ns));
+  const net = network();
+  const sim = S.simulate(model, net, [], { includeSystem: true });
+  const by = (f: string, t: string) => sim.edges.find((x) => x.edge.from === f && x.edge.to === t)!;
+  // The allow rule that let web → api through: policy + rule 1
+  const hit = by("app/web", "app/api").ports[0]!.before.ingress!.hits![0]!;
+  assert.deepEqual([hit.policy, hit.index], ["cilium:app/api-ingress", 0]);
+  assert.deepEqual(S.peerText(hit.rule.peers[0]!), { kind: "endpoints", text: "app=web" });
+  assert.equal(S.portsText(hit.rule.ports), "TCP 8080");
+  // Checkpoints: sender egress not checked (audit) → receiver ingress passes; the Internet side is outside
+  const f = by("app/web", "app/api").ports[0]!.before;
+  assert.deepEqual([S.gateOf(f.egress), S.gateOf(f.ingress)], ["unchecked", "pass"]);
+  assert.equal(S.gateOf(by("app/web", "ext:world").ports[0]!.before.ingress), "outside");
+  assert.equal(S.gateOf(by("app/web", "db/postgres").ports[0]!.before.ingress), "block");
+  assert.equal(S.gateOf(by("ext:host", "app/api").ports[0]!.before.ingress), "host");
+  // Status grammar: rule-allowed ● ok, open ▲ warn, blocked ■ danger
+  assert.deepEqual([S.STATE_LEVEL.allow, S.STATE_LEVEL.open, S.STATE_LEVEL.deny, S.STATE_GLYPH.partial], ["ok", "warn", "danger", "◧"]);
+  // The app → db cell: one blocked (no allow rule, isolated by allow-api), one let through by allow-api rule 1
+  const cell = S.matrixOf(model, net, sim).cells.get("ns:app|ns:db")!;
+  const rs = S.cellReasons(cell.edges, "before");
+  const block = rs.find((r) => r.kind === "block")!;
+  assert.ok(block.kind === "block" && block.how === "noRule" && block.policies[0] === "kubernetes:db/allow-api" && block.edges === 1);
+  const allow = rs.find((r) => r.kind === "allow")!;
+  assert.ok(allow.kind === "allow" && allow.hit.policy === "kubernetes:db/allow-api" && allow.edges === 1);
+  const pk = S.peerText(allow.hit.rule.peers[0]!);
+  assert.deepEqual(pk, { kind: "podsNs", text: "app=api", ns: "team=a" });
+  const unchecked = rs.filter((r) => r.kind === "unchecked");
+  assert.deepEqual(unchecked.map((r) => r.kind === "unchecked" && `${r.namespace}:${r.dir}`), ["app:egress"], "both connections leave app with no egress isolation");
+  assert.equal(rs[0]!.kind, "block", "blocked first");
+  // After a virtual default-deny the verdict names the virtual policy
+  const after = S.simulate(model, net, [{ op: "denyAll", namespace: "app", dir: "egress" }], { includeSystem: true });
+  const d = after.edges.find((x) => x.edge.from === "app/web" && x.edge.to === "ext:world")!.ports[0]!.after.egress!;
+  assert.deepEqual([d.reason, d.by], ["noRule", ["virtual:denyAll:app:egress"]]);
+  assert.deepEqual(S.virtualChange("virtual:denyAll:app:egress"), { op: "denyAll", namespace: "app", dir: "egress" });
+  assert.equal(S.virtualChange("cilium:app/api-ingress"), null);
+  // Ports with identical verdicts share one row
+  const multi = { ...by("app/web", "app/api"), ports: [by("app/web", "app/api").ports[0]!, { ...by("app/web", "app/api").ports[0]!, port: "8081" }] };
+  assert.deepEqual(S.portGroups(multi).map((g) => g.ports), [["8080", "8081"]]);
+  assert.equal(S.selectorText({ matchExpressions: [{ key: "k8s:io.kubernetes.pod.namespace", operator: "In", values: ["a", "b"] }, { key: "tier", operator: "Exists" }] }), "ns In (a,b), tier");
+});

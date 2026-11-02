@@ -3,17 +3,20 @@
 // AKS 보안 점검 › 네트워크 노출 › 정책 시뮬레이션: the deployed network policies as a namespace matrix of the connections
 // Hubble observed (allowed · blocked · can't tell), and a what-if — turn a policy off, enforce an audit policy, add a
 // virtual default-deny / DNS allow / "allow what was observed" — showing which observed connections would break or
-// open, and which workloads gain or lose isolation. The engine is the pure lib/netpolSim.ts.
+// open, and which workloads gain or lose isolation. The engine is the pure lib/netpolSim.ts. Colours and glyphs follow the
+// platform status grammar (● rule-allowed · ▲ open · ■ blocked · ◧ partly · ? can't tell — STATE_LEVEL / STATE_GLYPH).
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { NetpolModel, NetworkInsight } from "@aud/types";
 import { Button, Select, Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
-import { changeEffects, changeKey, endpointsOf, groupOf, matrixOf, simulate, withoutAllows, type DirVerdict, type EdgeState, type FlowVerdict, type MatrixCell, type SimChange, type SimEdge } from "@/lib/netpolSim";
+import {
+  STATE_GLYPH, STATE_LEVEL, changeEffects, changeKey, endpointsOf, groupOf, matrixOf, simulate, virtualChange, withoutAllows,
+  type MatrixCell, type SimChange, type SimEdge,
+} from "@/lib/netpolSim";
+import { NetpolFlowDetail } from "./NetpolFlowDetail";
 import { Badge } from "./shared";
 import styles from "../styles.module.css";
-
-const STATE_CLASS: Record<EdgeState, string> = { allow: "npAllow", open: "npOpen", deny: "npDeny", partial: "npPartial", unknown: "npUnknown" };
 
 export function NetpolSimPanel({ model, network, includeSystem }: { model: NetpolModel; network: NetworkInsight; includeSystem: boolean }) {
   const { t } = useI18n();
@@ -29,7 +32,18 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
   const matrix = useMemo(() => matrixOf(model, network, sim), [model, network, sim]);
   const eps = useMemo(() => endpointsOf(model, network), [model, network]);
   const policyName = useMemo(() => new Map(model.policies.map((p) => [p.id, `${p.namespace ? `${p.namespace}/` : ""}${p.name}`])), [model]);
-  const nameOf = (id: string) => policyName.get(id) ?? id.replace(/^virtual:/, `${t("nps.virtual")} `);
+  const changeLabel = (c: SimChange): string => (c.op === "off" || c.op === "enforce" ? t(`nps.op.${c.op}`, { name: nameOf(c.policyId) })
+    : c.op === "allowDns" ? t("nps.op.allowDns", { ns: c.namespace }) : t(`nps.op.${c.op}.${c.dir}`, { ns: c.namespace }));
+  const nameOf = (id: string): string => {
+    const v = virtualChange(id);
+    return v ? `${t("nps.virtual")} · ${changeLabel(v)}` : policyName.get(id) ?? id;
+  };
+  const detailRef = useRef<HTMLDivElement>(null);
+  const pick = (k: string | null) => {
+    setCellKey(k);
+    // The detail sits under the wide matrix — bring it into view so the click visibly does something
+    if (k) requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+  };
 
   const has = (c: SimChange) => changes.some((x) => changeKey(x) === changeKey(c));
   const toggle = (c: SimChange) => { setChanges(has(c) ? changes.filter((x) => changeKey(x) !== changeKey(c)) : [...changes, c]); setCellKey(null); };
@@ -49,12 +63,6 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
 
   const groupLabel = (g: string) => (g.startsWith("ns:") ? g.slice(3) : t(`nps.group.${g}`));
   const nodeLabel = (id: string) => eps.nodes.get(id)?.label ?? id;
-  const dirText = (d: DirVerdict | undefined, dir: "egress" | "ingress") => {
-    if (!d) return null;
-    const who = d.by.map(nameOf).join(", ");
-    return `${t(`nps.dir.${dir}`)}: ${t(`nps.reason.${d.reason}`, { by: who || "—" })}`;
-  };
-  const verdictText = (v: FlowVerdict) => [dirText(v.egress, "egress"), dirText(v.ingress, "ingress")].filter(Boolean).join(" · ");
 
   const changed = changes.length > 0;
   const cell = cellKey ? matrix.cells.get(cellKey) : undefined;
@@ -66,7 +74,7 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
   const nsPolicies = model.policies.filter((p) => p.namespace === curNs || p.source === "cilium-clusterwide");
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${styles.npRoot}`}>
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
@@ -76,7 +84,13 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
         </div>
         <div className={styles.npStats}>
           <Stat label={t("nps.stat.edges")} value={sim.counts.edges} hint={t("nps.stat.edgesHint")} />
-          <Stat label={t(changed ? "nps.stat.after" : "nps.stat.now")} value={`${sim.counts.allow} · ${sim.counts.open} · ${sim.counts.deny + sim.counts.partial} · ${sim.counts.unknown}`} hint={t("nps.stat.nowHint")} />
+          <Stat label={t(changed ? "nps.stat.after" : "nps.stat.now")} hint={t("nps.stat.nowHint")} value={
+            <span className={styles.npStatSplit}>
+              {([["allow", sim.counts.allow], ["open", sim.counts.open], ["deny", sim.counts.deny + sim.counts.partial], ["unknown", sim.counts.unknown]] as const).map(([s, n]) => (
+                <span key={s} data-level={STATE_LEVEL[s]} title={t(`nps.state.${s}`)}><span className={styles.npGlyph} aria-hidden="true">{STATE_GLYPH[s]}</span>{n}</span>
+              ))}
+            </span>
+          } />
           <Stat label={t("nps.stat.broken")} value={changed ? sim.counts.broken : "—"} hint={changed ? t("nps.stat.brokenHint") : t("nps.stat.noChange")} tone={sim.counts.broken ? "high" : undefined} />
           <Stat label={t("nps.stat.opened")} value={changed ? sim.counts.opened : "—"} hint={changed ? t("nps.stat.openedHint") : t("nps.stat.noChange")} tone={sim.counts.opened ? "medium" : undefined} />
           <Stat label={t("nps.stat.mismatch")} value={sim.counts.mismatch} hint={t("nps.stat.mismatchHint")} tone={sim.counts.mismatch ? "medium" : undefined} />
@@ -92,12 +106,12 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
                 {changes.map((c) => (
                   <span key={changeKey(c)} className={styles.npChange}>
                     <button type="button" className={styles.npChip} onClick={() => toggle(c)} title={t("nps.remove")}>
-                      {c.op === "off" || c.op === "enforce" ? t(`nps.op.${c.op}`, { name: nameOf(c.policyId) }) : c.op === "allowDns" ? t("nps.op.allowDns", { ns: c.namespace }) : t(`nps.op.${c.op}.${c.dir}`, { ns: c.namespace })} ×
+                      {changeLabel(c)} ×
                     </button>
                     <span className={styles.npEffect} data-none={effects.get(changeKey(c))?.why ? true : undefined}>{effectText(c)}</span>
                   </span>
                 ))}
-                <button type="button" className={styles.linkBtn} onClick={() => { setChanges([]); setCellKey(null); }}>{t("nps.reset")}</button>
+                <button type="button" className={styles.linkBtn} onClick={() => { setChanges([]); pick(null); }}>{t("nps.reset")}</button>
               </div>
             ) : <div className={styles.muted}>{t("nps.noChanges")}</div>}
             {noEffect ? <div className={styles.npHint}>{t("nps.noEffect")}</div> : null}
@@ -161,9 +175,13 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
             <div className={styles.panelHeader}>
               <div className={styles.panelTitle}>{t("nps.matrix")}</div>
               <div className={styles.npLegend}>
-                {(["allow", "open", "partial", "deny", "unknown"] as const).map((s) => <span key={s}><i className={styles[STATE_CLASS[s]]} />{t(`nps.state.${s}`)}</span>)}
-                <span><i className={styles.npChangedKey} />{t("nps.legend.changed")}</span>
-                <span>▼ {t("nps.legend.broken")}</span><span>▲ {t("nps.legend.opened")}</span><span>! {t("nps.legend.mismatch")}</span>
+                {(["allow", "open", "partial", "deny", "unknown"] as const).map((s) => (
+                  <span key={s} data-level={STATE_LEVEL[s]}><i className={styles.npSwatch}><span className={styles.npGlyph}>{STATE_GLYPH[s]}</span></i>{t(`nps.state.${s}`)}</span>
+                ))}
+                <span><i className={styles.npSwatch} data-changed /> {t("nps.legend.changed")}</span>
+                <span><b className={styles.npBroken}>↓</b> {t("nps.legend.broken")}</span>
+                <span><b className={styles.npOpened}>↑</b> {t("nps.legend.opened")}</span>
+                <span><b className={styles.npMismatch}>!</b> {t("nps.legend.mismatch")}</span>
               </div>
             </div>
             {!network.available ? <div className={styles.empty}>{t("nps.noFlows", { reason: network.reason ?? "" })}</div> : (
@@ -185,12 +203,13 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
                           if (!x) return <td key={c} />;
                           return (
                             <td key={c}>
-                              <button type="button" className={`${styles.npCell} ${styles[STATE_CLASS[x.state]]}`} aria-pressed={cellKey === k} data-changed={changed && x.changed ? true : undefined}
+                              <button type="button" className={styles.npCell} data-level={STATE_LEVEL[x.state]} aria-pressed={cellKey === k} data-changed={changed && x.changed ? true : undefined}
                                 title={t("nps.cellTitle", { from: groupLabel(r), to: groupLabel(c), n: x.edges.length, state: t(`nps.state.${x.state}`) })}
-                                onClick={() => setCellKey(cellKey === k ? null : k)}>
-                                {x.edges.length}
-                                {x.broken ? <b className={styles.npBroken}>▼{x.broken}</b> : null}
-                                {x.opened ? <b className={styles.npOpened}>▲{x.opened}</b> : null}
+                                onClick={() => pick(cellKey === k ? null : k)}>
+                                <span className={styles.npGlyph} aria-hidden="true">{STATE_GLYPH[x.state]}</span>
+                                <span className={styles.npCellN}>{x.edges.length}</span>
+                                {x.broken ? <b className={styles.npBroken}>↓{x.broken}</b> : null}
+                                {x.opened ? <b className={styles.npOpened}>↑{x.opened}</b> : null}
                                 {x.mismatch ? <b className={styles.npMismatch}>!</b> : null}
                               </button>
                             </td>
@@ -204,33 +223,18 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
             )}
           </div>
 
-          <div className={styles.panel}>
+          <div className={styles.panel} ref={detailRef}>
             <div className={styles.panelHeader}>
-              <div className={styles.panelTitle}>
-                {cell ? t("nps.list.cell", { from: groupLabel(cell.row), to: groupLabel(cell.col) }) : t(changed ? "nps.list.changed" : "nps.list.blocked")} ({listed.length})
+              <div>
+                <div className={styles.panelTitle}>
+                  {cell ? t("nps.list.cell", { from: groupLabel(cell.row), to: groupLabel(cell.col) }) : t(changed ? "nps.list.changed" : "nps.list.blocked")} ({listed.length})
+                </div>
+                <div className={styles.muted}>{t(cell ? "nps.d.sub" : "nps.d.subPick")}</div>
               </div>
-              {cell ? <button type="button" className={styles.linkBtn} onClick={() => setCellKey(null)}>{t("nps.list.clear")}</button> : null}
+              {cell ? <button type="button" className={styles.linkBtn} onClick={() => pick(null)}>{t("nps.list.clear")}</button> : null}
             </div>
             {listed.length ? (
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <thead><tr><th>{t("nps.col.flow")}</th><th>{t("nps.col.port")}</th><th>{t("nps.col.verdict")}</th><th>{t("nps.col.why")}</th><th>{t("nps.col.observed")}</th></tr></thead>
-                  <tbody>
-                    {listed.slice(0, 200).flatMap((x) => x.ports.map((p, i) => (
-                      <tr key={`${x.edge.from}>${x.edge.to}:${p.port}`}>
-                        {i === 0 ? <td rowSpan={x.ports.length} className={styles.mono}>{nodeLabel(x.edge.from)} → {nodeLabel(x.edge.to)}<div className={styles.muted}>{groupLabel(groupOf(x.edge.from, eps))} → {groupLabel(groupOf(x.edge.to, eps))}</div></td> : null}
-                        <td className={styles.mono}>{p.port}</td>
-                        <td>
-                          <span className={`${styles.npPill} ${styles[STATE_CLASS[p.before.v]]}`}>{t(`nps.state.${p.before.v}`)}</span>
-                          {changed && p.after.v !== p.before.v ? <> → <span className={`${styles.npPill} ${styles[STATE_CLASS[p.after.v]]}`}>{t(`nps.state.${p.after.v}`)}</span></> : null}
-                        </td>
-                        <td className={styles.npWhy}>{verdictText(changed ? p.after : p.before)}</td>
-                        {i === 0 ? <td rowSpan={x.ports.length}>{t(`nps.observed.${x.observed}`, { n: x.edge.count, d: x.edge.dropped })}{x.mismatch ? <div className={styles.npMismatchText}>{t("nps.mismatch")}</div> : null}</td> : null}
-                      </tr>
-                    )))}
-                  </tbody>
-                </table>
-              </div>
+              <NetpolFlowDetail edges={listed} changed={changed} nameOf={nameOf} nodeLabel={nodeLabel} groupOf={(id) => groupLabel(groupOf(id, eps))} />
             ) : <div className={styles.empty}>{t(changed ? "nps.list.noneChanged" : "nps.list.noneBlocked")}</div>}
           </div>
 

@@ -23,7 +23,9 @@ export type Endpoint =
   | { kind: "ext"; entities: string[] | null; ips: string[] | null; names: string[]; host?: "local" | "remote" };
 
 export type DirReason = "notIsolated" | "allowed" | "noRule" | "denyRule" | "unknownMatch" | "unknownSelection" | "hostAlways" | "unknownEndpoint";
-export type DirVerdict = { v: Verdict; reason: DirReason; by: string[] };
+/** The rule that decided: policy id, the rule, its position in that direction's list (shown as "rule n") */
+export type RuleHit = { policy: string; rule: NetpolRule; index: number };
+export type DirVerdict = { v: Verdict; reason: DirReason; by: string[]; hits?: RuleHit[] };
 export type FlowVerdict = { v: Verdict; egress?: DirVerdict; ingress?: DirVerdict };
 
 /** A policy of the simulation — deployed or virtual (added by a change) */
@@ -193,22 +195,23 @@ export function dirVerdict(policies: SimPolicy[], subject: Extract<Endpoint, { k
   const sel = policies.map((p) => ({ p, d: p[dir], s: p[dir] ? selects(p, subject, ctx) : ("no" as Tri) })).filter((x) => x.d && x.s !== "no");
   // Deny rules first — they win over every allow
   let denyUnknown = false;
-  for (const x of sel) for (const r of x.d!.rules) if (r.deny) {
+  for (const x of sel) for (const [i, r] of x.d!.rules.entries()) if (r.deny) {
     const m = ruleMatch(r, x.p, peer, port, ctx);
-    if (m === "yes" && x.s === "yes") return { v: "deny", reason: "denyRule", by: [x.p.id] };
+    if (m === "yes" && x.s === "yes") return { v: "deny", reason: "denyRule", by: [x.p.id], hits: [{ policy: x.p.id, rule: r, index: i }] };
     if (m !== "no") denyUnknown = true;
   }
   const isolating = sel.filter((x) => x.d!.isolates);
   const isolated: Tri = isolating.some((x) => x.s === "yes") ? "yes" : isolating.length ? "unknown" : "no";
   const allowedBy: string[] = [];
+  const hits: RuleHit[] = [];
   let allowUnknown = false;
-  for (const x of sel) for (const r of x.d!.rules) if (!r.deny) {
+  for (const x of sel) for (const [i, r] of x.d!.rules.entries()) if (!r.deny) {
     const m = ruleMatch(r, x.p, peer, port, ctx);
-    if (m === "yes" && x.s === "yes") { allowedBy.push(x.p.id); break; }
+    if (m === "yes" && x.s === "yes") { allowedBy.push(x.p.id); hits.push({ policy: x.p.id, rule: r, index: i }); break; }
     if (m !== "no") allowUnknown = true;
   }
   if (isolated === "no") return denyUnknown ? { v: "unknown", reason: "unknownMatch", by: [] } : { v: "allow", reason: "notIsolated", by: [] };
-  if (allowedBy.length) return denyUnknown ? { v: "unknown", reason: "unknownMatch", by: allowedBy } : { v: "allow", reason: "allowed", by: allowedBy };
+  if (allowedBy.length) return denyUnknown ? { v: "unknown", reason: "unknownMatch", by: allowedBy, hits } : { v: "allow", reason: "allowed", by: allowedBy, hits };
   if (isolated === "unknown") return { v: "unknown", reason: "unknownSelection", by: isolating.map((x) => x.p.id) };
   if (allowUnknown || denyUnknown || (peer.kind === "ext" && !peer.entities)) return { v: "unknown", reason: peer.kind === "ext" && !peer.entities ? "unknownEndpoint" : "unknownMatch", by: [] };
   return { v: "deny", reason: "noRule", by: isolating.filter((x) => x.s === "yes").map((x) => x.p.id) };
@@ -494,4 +497,120 @@ export function matrixOf(model: NetpolModel, net: NetworkInsight | null, sim: Si
   const rows = [...new Set([...cells.values()].map((c) => c.row))].sort(nsFirst);
   const cols = [...new Set([...cells.values()].map((c) => c.col))].sort(nsFirst);
   return { rows, cols, cells };
+}
+
+// ── Reading a verdict: the platform status grammar, the two checkpoints, who blocked and who let through ──
+
+/**
+ * The platform's status grammar (live card · workload heatmap · Hubble map): ● ok · ▲ warn · ■ danger · ? can't tell.
+ * Rule-allowed = ok (a policy decided and let it through) · open = warn (nobody checks — a gap, not an error) ·
+ * blocked = danger, partly blocked ◧ (half a square: some ports) · can't tell = neutral, never a colour of its own.
+ */
+export type Level = "ok" | "warn" | "danger" | "unknown";
+export const STATE_LEVEL: Record<EdgeState, Level> = { allow: "ok", open: "warn", partial: "danger", deny: "danger", unknown: "unknown" };
+export const STATE_GLYPH: Record<EdgeState, string> = { allow: "●", open: "▲", partial: "◧", deny: "■", unknown: "?" };
+
+/**
+ * One checkpoint of a connection: the sender's egress, then the receiver's ingress. pass = a rule let it through ·
+ * block = isolated and no rule (or a deny rule) · unchecked = no policy isolates that side · host = from the node,
+ * always allowed · unknown · outside = that side is not a pod (internet, Azure, the API server) — no policy there.
+ */
+export type Gate = "pass" | "block" | "unchecked" | "host" | "unknown" | "outside";
+export const gateOf = (d: DirVerdict | undefined): Gate =>
+  !d ? "outside" : d.reason === "hostAlways" ? "host" : d.reason === "notIsolated" ? "unchecked" : d.v === "allow" ? "pass" : d.v === "deny" ? "block" : "unknown";
+export const GATE_LEVEL: Record<Gate, Level> = { pass: "ok", host: "ok", block: "danger", unchecked: "warn", unknown: "unknown", outside: "unknown" };
+export const GATE_GLYPH: Record<Gate, string> = { pass: "●", host: "●", block: "■", unchecked: "▲", unknown: "?", outside: "·" };
+
+const dirSig = (d: DirVerdict | undefined) => (d ? `${d.v}:${d.reason}:${d.by.join(",")}:${(d.hits ?? []).map((h) => `${h.policy}#${h.index}`).join(",")}` : "-");
+const flowSig = (f: FlowVerdict) => `${dirSig(f.egress)}|${dirSig(f.ingress)}`;
+
+/** A connection's ports grouped by identical verdicts (before and after) — "443, 8443" on one row when the same rules decide */
+export type PortGroup = { ports: string[]; before: FlowVerdict; after: FlowVerdict };
+export function portGroups(x: SimEdge): PortGroup[] {
+  const out = new Map<string, PortGroup>();
+  for (const p of x.ports) {
+    const k = `${flowSig(p.before)}/${flowSig(p.after)}`;
+    const g = out.get(k);
+    if (g) g.ports.push(p.port);
+    else out.set(k, { ports: [p.port], before: p.before, after: p.after });
+  }
+  return [...out.values()];
+}
+
+/**
+ * Who blocked and who let through, over a set of connections (a matrix cell) — counted in connections, each reason once
+ * per connection. block: isolated by `policies` with no matching allow rule, or a deny rule · allow: the rule that let it
+ * through (the exception to a default-deny) · unchecked: the namespace whose side nothing isolates · unknown: why not.
+ */
+export type ReasonItem =
+  | { kind: "block"; dir: Dir; how: "noRule"; policies: string[]; edges: number }
+  | { kind: "block"; dir: Dir; how: "denyRule"; hit: RuleHit; edges: number }
+  | { kind: "allow"; dir: Dir; hit: RuleHit; edges: number }
+  | { kind: "unchecked"; dir: Dir; namespace: string; edges: number }
+  | { kind: "host"; edges: number }
+  | { kind: "unknown"; dir: Dir; reason: DirReason; policies: string[]; edges: number };
+
+export function cellReasons(edges: SimEdge[], when: "before" | "after"): ReasonItem[] {
+  const acc = new Map<string, { item: ReasonItem; seen: Set<number> }>();
+  const add = (key: string, i: number, make: () => ReasonItem) => {
+    const a = acc.get(key) ?? { item: make(), seen: new Set<number>() };
+    a.seen.add(i);
+    acc.set(key, a);
+  };
+  edges.forEach((x, i) => {
+    for (const p of x.ports) {
+      const f = p[when];
+      for (const dir of ["egress", "ingress"] as const) {
+        const d = f[dir];
+        if (!d) continue;
+        const ns = (dir === "egress" ? x.edge.from : x.edge.to).split("/")[0] ?? "";
+        const h = d.hits?.[0];
+        if (d.reason === "hostAlways") add("host", i, () => ({ kind: "host", edges: 0 }));
+        else if (d.reason === "notIsolated") add(`unchecked|${dir}|${ns}`, i, () => ({ kind: "unchecked", dir, namespace: ns, edges: 0 }));
+        else if (d.reason === "denyRule" && h) add(`deny|${dir}|${h.policy}#${h.index}`, i, () => ({ kind: "block", dir, how: "denyRule", hit: h, edges: 0 }));
+        else if (d.reason === "noRule") add(`noRule|${dir}|${d.by.join(",")}`, i, () => ({ kind: "block", dir, how: "noRule", policies: d.by, edges: 0 }));
+        else if (d.v === "allow") for (const x2 of d.hits ?? []) add(`allow|${dir}|${x2.policy}#${x2.index}`, i, () => ({ kind: "allow", dir, hit: x2, edges: 0 }));
+        else add(`unknown|${dir}|${d.reason}|${d.by.join(",")}`, i, () => ({ kind: "unknown", dir, reason: d.reason, policies: d.by, edges: 0 }));
+      }
+    }
+  });
+  const rank = { block: 0, allow: 1, unchecked: 2, host: 3, unknown: 4 } as const;
+  return [...acc.values()].map((a) => ({ ...a.item, edges: a.seen.size })).sort((a, b) => rank[a.kind] - rank[b.kind] || b.edges - a.edges);
+}
+
+// ── Rules as short text (labels and numbers only — the screen adds the words) ──
+
+const shortKey = (k: string) => k.replace(/^(k8s|any):/, "").replace(/^io\.kubernetes\.pod\.namespace$/, "ns").replace(/^io\.cilium\.k8s\.namespace\.labels\./, "ns.")
+  .replace(/^kubernetes\.io\/metadata\.name$/, "ns").replace(/^io\.cilium\.k8s\.policy\.serviceaccount$/, "sa");
+/** "app=web, tier In (a,b)" — "" = every pod */
+export function selectorText(s: NetpolSelector): string {
+  return [
+    ...Object.entries(s.matchLabels ?? {}).map(([k, v]) => `${shortKey(k)}=${v}`),
+    ...(s.matchExpressions ?? []).map((e) => (e.operator === "Exists" ? shortKey(e.key) : e.operator === "DoesNotExist" ? `!${shortKey(e.key)}`
+      : `${shortKey(e.key)} ${e.operator} (${(e.values ?? []).join(",")})`)),
+  ].join(", ");
+}
+export type PeerKind = "any" | "podsSame" | "podsAll" | "podsNs" | "endpoints" | "cidr" | "entity" | "fqdn";
+export function peerText(p: NetpolPeer): { kind: PeerKind; text: string; ns?: string } {
+  if (p.kind === "any") return { kind: "any", text: "" };
+  if (p.kind === "pods") {
+    const pods = p.pods ? selectorText(p.pods) : "";
+    return p.ns === "same" ? { kind: "podsSame", text: pods } : p.ns === "all" ? { kind: "podsAll", text: pods } : { kind: "podsNs", text: pods, ns: selectorText(p.ns) };
+  }
+  if (p.kind === "endpoints") return { kind: "endpoints", text: selectorText(p.selector) };
+  if (p.kind === "cidr") return { kind: "cidr", text: `${p.cidr}${p.except?.length ? ` − ${p.except.join(", ")}` : ""}` };
+  if (p.kind === "entity") return { kind: "entity", text: p.entity };
+  return { kind: "fqdn", text: p.name ?? p.pattern ?? "" };
+}
+/** "TCP 443, UDP 53, TCP 8000-8100" — "" = every port */
+export const portsText = (ports: NetpolPort[]) =>
+  ports.map((x) => `${x.protocol === "ANY" ? "" : `${x.protocol} `}${x.port ?? "*"}${x.endPort !== undefined ? `-${x.endPort}` : ""}`.trim()).join(", ");
+
+/** A virtual policy id (from a change) back to its change — for naming it on screen */
+export function virtualChange(id: string): SimChange | null {
+  const [v, op, ns, dir] = id.split(":");
+  if (v !== "virtual" || !ns) return null;
+  if (op === "allowDns") return { op, namespace: ns };
+  if ((op === "denyAll" || op === "allowObserved") && (dir === "ingress" || dir === "egress")) return { op, namespace: ns, dir };
+  return null;
 }
