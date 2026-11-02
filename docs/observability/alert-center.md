@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-02
-covers: [apps/api/src/services/notifyChannels.ts, apps/web/src/app/notifications/Channels.tsx, apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
+covers: [apps/api/src/services/grafanaAlertPull.ts, apps/api/src/services/notifyChannels.ts, apps/web/src/app/notifications/Channels.tsx, apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
 ---
 # 알림 센터 — Azure Monitor · Grafana 알림을 대시보드가 직접 받기
 
@@ -116,7 +116,43 @@ AUD_NOTIFY_URL_SLACK_SEC=<Slack 웹훅 주소 — 비밀>
 
 ### 3.4 네트워크
 - Azure 액션 그룹·Azure Managed Grafana는 **공용 인터넷**에서 보냄 → 공개 주소(Front Door·AGC)에 `/hooks/alerts/*` 경로만 열기. 가능하면 WAF·방화벽에서 출발지를 서비스 태그 `ActionGroup`·Grafana 송신 IP로 제한
-- 클러스터 시험 배포(포트 포워딩)처럼 공개 주소가 없으면 외부 알림은 못 받음 — 화면 '시험 알림' 버튼으로 확인
+- 클러스터 시험 배포(포트 포워딩)처럼 공개 주소가 없으면 외부 알림은 못 받음 — 화면 '시험 알림' 버튼으로 확인. **사설 클러스터는 3.5 'Grafana에서 가져오기'**
+
+### 3.5 Grafana에서 가져오기 — 사설 클러스터 (웹훅 없이)
+
+> **5살 비유**: 우체부(Grafana)가 우리 집(사설 클러스터) 골목에 못 들어와요. 그래서 우리가 우체국에 가서 "나한테 온 편지 있어요?" 하고 1분마다 물어봐요. 우체부는 원래 하던 대로 구글챗 집에도 똑같이 편지를 배달해요.
+
+**왜**: Azure Managed Grafana의 연락처 웹훅은 **공용 인터넷**에서 나갑니다(관리형 PE는 데이터 소스 전용). 사설 AKS 안의 `/hooks/alerts/grafana`에는 닿지 않고, 공개 주소를 여는 것은 고객 인프라 변경입니다. 대시보드가 **밖으로 나가서** Grafana의 활성 알림을 읽으면 공개 주소도, Grafana 연락처 변경도 필요 없습니다.
+
+**동작**(`services/grafanaAlertPull.ts`):
+- `GET <grafana>/api/alertmanager/grafana/api/v2/alerts?active=true&silenced=false&inhibited=false` — 무음·억제된 알림 제외(Grafana도 Google Chat에 안 보냄)
+- **연락처 필터** `AUD_NOTIFY_PULL_RECEIVERS` — 그 연락처로 가는 알림만(예: stg Google Chat 긴급·정보 연락처 = Google Chat이 받는 것과 같은 알림). 비우면 전체
+- 새로 활성 = 발생, 목록에서 빠짐 = 해소(그 시각). **읽기 실패 때는 아무것도 해소하지 않음**
+- 웹훅과 같은 해석기·같은 ID(`gf:` + fingerprint) → 받은 알림 한 항목, 보내는 곳(Flow 등)으로는 **새 발생·해소만** 채널마다 한 번
+- 시작 직후 첫 읽기: 시작 전부터 울리던 알림은 **기록만**(Google Chat은 이미 받았음 — 재시작마다 Flow로 다시 보내지 않음), 시작 뒤 울린 것은 보냄
+- 인증: `*.grafana.azure.com` = 플랫폼 ID(관리 ID)의 Entra 토큰(대상 Azure Managed Grafana 앱) — Grafana 리소스에 **Grafana Viewer** 역할, 비밀 없음 / 그 밖 Grafana = Viewer 서비스 계정 토큰 `AUD_NOTIFY_PULL_GRAFANA_TOKEN`(비밀)
+- 10초 제한·리디렉션 안 따라감·응답 본문은 저장·출력 안 함. 상태(정상·실패 이유·지금 활성 수·마지막 읽은 시각)는 연동 설정 '상태'
+
+```bash
+AUD_NOTIFY_PULL_GRAFANA_URL=https://<grafana-name>.<region>.grafana.azure.com
+AUD_NOTIFY_PULL_RECEIVERS=<긴급 연락처>,<정보 연락처>
+AUD_NOTIFY_PULL_INTERVAL_SEC=60          # 15–600
+az role assignment create --assignee <platform-identity-client-id> --role "Grafana Viewer" --scope <grafana-resource-id>
+# 쿠버네티스 송신: 차트 networkPolicy.extraFqdns 에 Grafana 호스트, 그리고 보내는 곳(Flow) 호스트
+```
+
+#### 시험: 같은 알림을 Google Chat과 Flow에 동시에
+
+| 단계 | 하는 일 | 바뀌는 것 |
+|---|---|---|
+| 1 | Flow에 시험용 BOT 웹훅(템플릿 `{{title}}`/`{{message}}`) | Flow — 새 웹훅 하나 |
+| 2 | 플랫폼 ID에 Grafana Viewer 역할 | Azure RBAC 읽기 역할 하나 |
+| 3 | API 환경: `AUD_NOTIFY_PULL_*` + `AUD_NOTIFY_CHANNELS`(형식 `flow`, 머리말 `[STG-TEST] `) + `AUD_NOTIFY_URL_*`(Secret) | 대시보드만 |
+| 4 | 연동 설정 › 보내는 곳 '시험 전송' → Flow 도착 확인 | — |
+| 5 | Grafana 규칙이 울릴 때(또는 기존 E2E 방법 — 시험 파드로 로그 주입) Google Chat·Flow 둘 다 도착 확인, 해소도 | — |
+| 되돌리기 | `AUD_NOTIFY_PULL_GRAFANA_URL` 지우기 | Google Chat 경로는 처음부터 그대로 |
+
+**Grafana 연락처에 웹훅을 하나 더 붙이는 방법**(같은 연락처에 googlechat + webhook)도 '동시'가 되지만 ① 공개 주소가 필요하고 ② Terraform으로 관리되는 연락처를 바꾸며(웹훅 변수 누락 = 연락처 삭제 위험 — 고객 문서의 주의) ③ 그 연락처를 쓰는 모든 규칙이 바뀝니다. 공개 주소가 있는 환경에서, 시험이 끝난 뒤의 운영 방식으로 검토합니다.
 
 ## 4. 받은 알림 화면 (알림 센터 › 받은 알림)
 

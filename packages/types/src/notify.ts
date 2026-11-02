@@ -101,12 +101,32 @@ export type NotificationsResponse = {
   canWrite: boolean;
 };
 
+export type NotifyPullInfo = {
+  enabled: boolean;
+  /** Grafana host only — never a token */
+  host?: string;
+  /** Contact points mirrored (empty = all) */
+  receivers?: string[];
+  intervalSec?: number;
+  /** entra = the platform identity (Azure Managed Grafana, role Grafana Viewer) · token = a service account token */
+  auth?: "entra" | "token";
+  state: "off" | "starting" | "ok" | "failed";
+  /** forbidden · notFound · timeout · network · http · shape */
+  error?: string;
+  lastAt?: string;
+  lastOkAt?: string;
+  /** Active alerts routed to those contact points at the last poll */
+  active?: number;
+};
+
 export type NotifyReceiverInfo = {
   enabled: boolean;
   /** Path to append to the dashboard's public address — the token is never returned */
   paths: { azure: string; grafana: string; auto: string };
   tokenHint: string | null;
   channels: NotifyChannelInfo[];
+  /** Grafana pull (the dashboard reads Grafana's active alerts — private clusters) */
+  pull: NotifyPullInfo;
   durable: boolean;
   retentionDays: number;
 };

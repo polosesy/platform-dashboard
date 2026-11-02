@@ -91,6 +91,14 @@ const EnvSchema = z.object({
    *  urlEnv: "AUD_NOTIFY_URL_<X>", minSeverity, categories, teams, statuses, lang, prefix, allowHttp}] — the webhook URLs
    *  live in their own AUD_NOTIFY_URL_* variables (secrets). Validated at startup (services/notifyChannels.ts). */
   AUD_NOTIFY_CHANNELS: z.string().optional(),
+  /** Pull the active alerts of a Grafana (https; Azure Managed Grafana = the platform identity's Entra token, role
+   *  "Grafana Viewer") into the inbox + channels — for a private cluster that Grafana's webhooks can't reach. Unset = off.
+   *  AUD_NOTIFY_PULL_RECEIVERS = contact point names to mirror (comma; empty = all). services/grafanaAlertPull.ts */
+  AUD_NOTIFY_PULL_GRAFANA_URL: z.string().optional(),
+  AUD_NOTIFY_PULL_RECEIVERS: z.string().optional(),
+  AUD_NOTIFY_PULL_INTERVAL_SEC: z.coerce.number().int().min(15).max(600).default(60),
+  /** Grafana service account token (Viewer) — required for a Grafana outside *.grafana.azure.com; a secret */
+  AUD_NOTIFY_PULL_GRAFANA_TOKEN: z.string().optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)

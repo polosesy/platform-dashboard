@@ -7,6 +7,7 @@ import { azureSeverity, classify, labelSeverity, parseAlertPayload, safeUrl, sam
 import { applyDelivery, clearNotifyMemory, listAlerts, ownerTeam, prune } from "../src/services/notifyStore.js";
 import { relayChanged, sendToChannel } from "../src/services/notifyRelay.js";
 import { channelInfo, channelPayload, channelUrl, channelWants, loadChannels, timeText, type Channel } from "../src/services/notifyChannels.js";
+import { activeAlerts, asWebhookBody, pollOnce, pollStep, pullConfig, pullError, type PullConfig, type PullState, type PulledAlert } from "../src/services/grafanaAlertPull.js";
 import { inboxResponse, registerNotifyHooks, registerNotifyRoutes, tokenMatches, visibleTo } from "../src/routes/notify.js";
 import * as viewMod from "../../web/src/lib/notifyView.ts";
 const V = ((viewMod as { default?: typeof viewMod }).default ?? viewMod) as typeof viewMod;
@@ -320,4 +321,74 @@ test("sending: Flow mock receives the JSON once; 5xx retried once; 4xx not retri
   } finally {
     srv.close();
   }
+});
+
+// ── Grafana pull (private clusters: the dashboard reads Grafana's active alerts) ──
+
+const amAlert = (fp: string, receivers: string[], over: Record<string, unknown> = {}) => ({
+  fingerprint: fp, labels: { alertname: `Rule-${fp}`, severity: "sev2", namespace: "example", pod: `p-${fp}` },
+  annotations: { summary: "s", description: "d" }, startsAt: "2026-10-30T08:59:00Z", endsAt: "2026-10-30T09:10:00Z",
+  receivers: receivers.map((name) => ({ name })), status: { state: "active", silencedBy: [], inhibitedBy: [] }, ...over,
+});
+
+test("grafana pull: config — https only, no credentials in the URL, a token outside Azure Managed Grafana; off when unset", () => {
+  const base = { AUD_NOTIFY_PULL_INTERVAL_SEC: 60 } as const;
+  assert.equal(pullConfig(base), null);
+  const c = pullConfig({ ...base, AUD_NOTIFY_PULL_GRAFANA_URL: "https://g-example.krc.grafana.azure.com/", AUD_NOTIFY_PULL_RECEIVERS: " urgent , info ,," })!;
+  assert.deepEqual([c.url, c.host, c.receivers, c.intervalMs, c.auth], ["https://g-example.krc.grafana.azure.com", "g-example.krc.grafana.azure.com", ["urgent", "info"], 60_000, "entra"]);
+  assert.throws(() => pullConfig({ ...base, AUD_NOTIFY_PULL_GRAFANA_URL: "http://g-example.krc.grafana.azure.com" }), /https/);
+  assert.throws(() => pullConfig({ ...base, AUD_NOTIFY_PULL_GRAFANA_URL: "https://u:p@g-example.krc.grafana.azure.com" }), /credentials/);
+  assert.throws(() => pullConfig({ ...base, AUD_NOTIFY_PULL_GRAFANA_URL: "https://grafana.example.com" }), /TOKEN/);
+  assert.equal(pullConfig({ ...base, AUD_NOTIFY_PULL_GRAFANA_URL: "https://grafana.example.com", AUD_NOTIFY_PULL_GRAFANA_TOKEN: "t" })!.auth, "token");
+});
+
+test("grafana pull: only active alerts of the chosen contact points; left the list = resolved; first look records old alerts quietly", () => {
+  const list = [amAlert("a", ["urgent"]), amAlert("b", ["prd-urgent"]), amAlert("c", ["info"], { status: { state: "suppressed" } }), { nope: 1 }];
+  assert.deepEqual(activeAlerts(list, ["urgent", "info"]).map((a) => a.fingerprint), ["a"]);
+  assert.deepEqual(activeAlerts(list, []).map((a) => a.fingerprint), ["a", "b"], "empty = every contact point");
+  assert.throws(() => activeAlerts({ data: [] }, []), /unexpected_shape/);
+  const started = new Date("2026-10-30T09:00:00Z");
+  const old = { ...activeAlerts([amAlert("a", ["urgent"])], [])[0]!, startsAt: "2026-10-30T07:00:00Z" };
+  const fresh = { ...activeAlerts([amAlert("n", ["urgent"])], [])[0]!, startsAt: "2026-10-30T08:59:30Z" };
+  const s1 = pollStep(null, [old, fresh], started, started, 60_000);
+  assert.deepEqual([...s1.quiet], ["a"], "already firing before the start → recorded, not resent");
+  assert.equal(s1.deliver.length, 2);
+  const s2 = pollStep(s1.next, [fresh], new Date("2026-10-30T09:01:00Z"), started, 60_000);
+  assert.deepEqual(s2.deliver.map((a) => `${a.fingerprint}:${a.status}`), ["n:firing", "a:resolved"]);
+  assert.equal(s2.deliver[1]!.endsAt, "2026-10-30T09:01:00.000Z");
+  assert.equal(s2.quiet.size, 0, "after the first look everything changed is relayed");
+  // The pulled body parses as Grafana — the same ids a webhook delivery of that alert would get
+  const r = parseAlertPayload(asWebhookBody(s2.deliver));
+  assert.ok(r.kind === "grafana");
+  const hook = parseAlertPayload({ orgId: 1, status: "firing", alerts: [{ ...amAlert("n", ["urgent"]), status: "firing" }] });
+  assert.ok(hook.kind === "grafana" && r.alerts[0]!.id === hook.alerts[0]!.id);
+  assert.deepEqual(r.alerts.map((a) => a.status), ["firing", "resolved"]);
+});
+
+test("grafana pull: a poll — Bearer token, no redirects; 403 = forbidden and the previous list is kept (nothing resolved)", async () => {
+  const cfg: PullConfig = { url: "https://g-example.krc.grafana.azure.com", host: "g-example.krc.grafana.azure.com", receivers: ["urgent"], intervalMs: 60_000, auth: "entra" };
+  const calls: Array<{ url: string; auth?: string; redirect?: string }> = [];
+  let answer: { status: number; body: unknown } = { status: 200, body: [amAlert("a", ["urgent"], { startsAt: "2026-10-30T09:00:30Z" })] };
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    calls.push({ url, auth: (init.headers as Record<string, string>).authorization, redirect: init.redirect });
+    return new Response(JSON.stringify(answer.body), { status: answer.status });
+  }) as unknown as typeof fetch;
+  const delivered: Array<{ fps: string[]; quiet: string[] }> = [];
+  const state: PullState = { enabled: true, state: "starting" };
+  const mem = { prev: null as Map<string, PulledAlert> | null, startedAt: new Date("2026-10-30T09:00:00Z"), state };
+  const deps = { token: async () => "tok", fetchImpl, now: () => new Date("2026-10-30T09:01:00Z"), deliver: async (b: ReturnType<typeof asWebhookBody>, q: Set<string>) => { delivered.push({ fps: b.alerts.map((a) => `${a.fingerprint}:${a.status}`), quiet: [...q] }); } };
+  await pollOnce(cfg, deps, mem);
+  assert.equal(calls[0]!.url, "https://g-example.krc.grafana.azure.com/api/alertmanager/grafana/api/v2/alerts?active=true&silenced=false&inhibited=false");
+  assert.deepEqual([calls[0]!.auth, calls[0]!.redirect], ["Bearer tok", "error"]);
+  assert.deepEqual(delivered, [{ fps: ["a:firing"], quiet: [] }], "began after the start → relayed");
+  assert.deepEqual([state.state, state.active], ["ok", 1]);
+  answer = { status: 403, body: {} };
+  await pollOnce(cfg, deps, mem);
+  assert.deepEqual([state.state, state.error], ["failed", "forbidden"]);
+  assert.equal(delivered.length, 1, "a failed poll resolves nothing");
+  assert.equal(mem.prev!.size, 1);
+  answer = { status: 200, body: [] };
+  await pollOnce(cfg, deps, mem);
+  assert.deepEqual(delivered[1]!.fps, ["a:resolved"]);
+  assert.deepEqual([pullError({ status: 404 }), pullError({ name: "TimeoutError" }), pullError(new Error("x"))], ["notFound", "timeout", "network"]);
 });

@@ -6,7 +6,7 @@
 
 import { Suspense, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import type { NotificationsResponse, NotifyAlert, NotifyReceiverInfo } from "@aud/types";
+import type { NotificationsResponse, NotifyAlert, NotifyPullInfo, NotifyReceiverInfo } from "@aud/types";
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -14,7 +14,7 @@ import { useApiToken } from "@/lib/useApiToken";
 import { usePolling } from "@/lib/usePolling";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, Panel, Segmented, Select, Stat, Tabs, Toggle } from "@/components/ui";
-import { CATEGORIES, DEFAULT_FILTER, MAPPING, SEVERITIES, azureSnippet, filterInbox, grafanaSnippet, receiverUrls, targetText, teamsOf, type InboxFilter } from "@/lib/notifyView";
+import { CATEGORIES, DEFAULT_FILTER, MAPPING, SEVERITIES, azureSnippet, filterInbox, grafanaSnippet, pullSnippet, receiverUrls, targetText, teamsOf, type InboxFilter } from "@/lib/notifyView";
 import { DesktopToggle } from "./DesktopToggle";
 import { Channels } from "./Channels";
 import s from "./notifications.module.css";
@@ -213,7 +213,7 @@ function Mapping() {
 }
 
 function Setup({ data, reload }: { data: NotificationsResponse | null; reload: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const getToken = useApiToken();
   const info = useApiQuery<NotifyReceiverInfo>("notify-receiver", (token) => fetchJsonWithBearer(apiUrl("/api/notifications/receiver"), token));
   const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -227,6 +227,14 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
     } catch (e) { setMsg(e instanceof ApiError && e.code ? e.code : String(e)); }
   };
   const copy = (text: string) => { void navigator.clipboard?.writeText(text); setMsg(t("notify.setup.copied")); };
+  const pullText = (p: NotifyPullInfo | undefined) => {
+    if (!p?.enabled) return t("notify.pull.off");
+    const at = p.lastAt ? new Date(p.lastAt).toLocaleTimeString(dateLocale(locale)) : "—";
+    const recv = p.receivers?.length ? p.receivers.join(", ") : t("notify.pull.allReceivers");
+    if (p.state === "failed") return t("notify.pull.failed", { host: p.host ?? "", at, why: t(`notify.pull.err.${p.error ?? "network"}`) });
+    if (p.state === "starting") return t("notify.pull.starting", { host: p.host ?? "" });
+    return t("notify.pull.ok", { host: p.host ?? "", recv, n: p.active ?? 0, at, sec: p.intervalSec ?? 60 });
+  };
   const i = info.data;
   return (
     <div className={s.stack}>
@@ -236,6 +244,7 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
             <div><dt>{t("notify.setup.receiver")}</dt><dd>{i.enabled ? t("notify.setup.on", { hint: i.tokenHint ?? "" }) : t("notify.setup.off")}</dd></div>
             <div><dt>{t("notify.setup.store")}</dt><dd>{i.durable ? t("notify.setup.durable", { d: i.retentionDays }) : t("notify.memory")}</dd></div>
             <div><dt>{t("notify.setup.relay")}</dt><dd>{i.channels.length ? t("notify.setup.channels", { n: i.channels.length, ok: i.channels.filter((c) => c.configured && c.enabled).length }) : t("notify.setup.relayOff")}</dd></div>
+            <div><dt>{t("notify.setup.pull")}</dt><dd>{pullText(i.pull)}</dd></div>
           </dl>
         )}
         {data?.canWrite ? (
@@ -247,6 +256,10 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
         ) : null}
       </Panel>
       {i ? <Channels channels={i.channels} /> : null}
+      <Panel title={t("notify.pull.title")} sub={t("notify.pull.sub")}>
+        <ol className={s.rules}>{[1, 2, 3, 4].map((n) => <li key={n}>{t(`notify.pull.step${n}`)}</li>)}</ol>
+        <pre className={s.code}>{pullSnippet()}</pre>
+      </Panel>
       <div className={s.mapGrid}>
         <Panel title={t("notify.setup.azure")} sub={t("notify.setup.azureSub")}>
           <ol className={s.rules}>{[1, 2, 3, 4].map((n) => <li key={n}>{t(`notify.setup.azureStep${n}`)}</li>)}</ol>

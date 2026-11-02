@@ -7,6 +7,8 @@
 //   POST /api/notifications/test — a sample Azure / Grafana delivery through the same parser (operator)
 //   GET  /api/notifications/channels/:key/preview — the body a channel would get for a sample alert (admin)
 //   POST /api/notifications/channels/:key/test    — send that sample to the channel now (admin)
+// Grafana pull (AUD_NOTIFY_PULL_GRAFANA_URL) — the same inbox + channels fed by reading Grafana's active alerts
+// (services/grafanaAlertPull.ts), for a private cluster that Grafana's webhooks can't reach
 // Outbound channels (Flow · Slack · Google Chat · Teams · Azure / Grafana shapes) — services/notifyChannels.ts
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response, Router } from "express";
@@ -20,6 +22,8 @@ import { parseAlertPayload, samplePayload, type ParsedAlert } from "../services/
 import { applyDelivery, ingest, listAlerts, notifyDir, ownerTeam, setAck, setDeliveries } from "../services/notifyStore.js";
 import { channelInfo, channelPayload, loadChannels, type Channel } from "../services/notifyChannels.js";
 import { relayChanged, sendToChannel, testResult } from "../services/notifyRelay.js";
+import { MANAGED_GRAFANA_SCOPE, pullConfig, startGrafanaAlertPull, type PullState } from "../services/grafanaAlertPull.js";
+import { credentials } from "../infra/connectionCredentials.js";
 
 const SEV_RANK: Record<NotifySeverity, number> = { sev1: 1, sev2: 2, sev3: 3, sev4: 4 };
 const PER_MINUTE = 600;
@@ -59,9 +63,11 @@ function ownersFor(env: Env, a: ParsedAlert): OwnerRule[] {
   return getConnections(env).flatMap((c) => c.owners ?? []);
 }
 
-async function deliver(env: Env, parsed: ParsedAlert[]): Promise<number> {
+/** Records the alerts; relays the new / changed ones — except `quiet` ids (recorded only: the Grafana pull's first look) */
+async function deliver(env: Env, parsed: ParsedAlert[], quiet?: Set<string>): Promise<number> {
   const dir = notifyDir(env);
-  const changed = await ingest(dir, parsed, { retentionDays: env.AUD_NOTIFY_RETENTION_DAYS, teamOf: (a) => ownerTeam(a, ownersFor(env, a)) });
+  const recorded = await ingest(dir, parsed, { retentionDays: env.AUD_NOTIFY_RETENTION_DAYS, teamOf: (a) => ownerTeam(a, ownersFor(env, a)) });
+  const changed = quiet?.size ? recorded.filter((a) => !quiet.has(a.id)) : recorded;
   const channels = channelsOf(env);
   if (channels.length && changed.length) {
     // Fire and forget — the receiver answers the sender at once; the inbox records each channel's result
@@ -69,11 +75,40 @@ async function deliver(env: Env, parsed: ParsedAlert[]): Promise<number> {
       .then((byId) => Promise.all([...byId].map(([id, ds]) => setDeliveries(dir, id, ds))))
       .catch(() => undefined);
   }
-  return changed.length;
+  return recorded.length;
+}
+
+let pull: { state: PullState } | null = null;
+/** The Grafana pull's state for the setup screen */
+export const pullState = (): PullState => pull?.state ?? { enabled: false, state: "off" };
+
+function startPull(env: Env) {
+  const cfg = pullConfig(env); // throws on an invalid setting — the API does not start half-configured
+  if (!cfg || pull) return;
+  pull = startGrafanaAlertPull(cfg, {
+    token: async () => {
+      if (cfg.auth === "token") return env.AUD_NOTIFY_PULL_GRAFANA_TOKEN!;
+      const t = await credentials().platformCredential(env).getToken(MANAGED_GRAFANA_SCOPE);
+      if (!t?.token) throw new Error("no token");
+      return t.token;
+    },
+    deliver: async (body, quietFps) => {
+      // parseAlertPayload reads up to 200 alerts a body; the pulled list maps 1:1 to parsed alerts within a chunk
+      for (let i = 0; i < body.alerts.length; i += 200) {
+        const chunk = { ...body, alerts: body.alerts.slice(i, i + 200) };
+        const r = parseAlertPayload(chunk, new Date());
+        if (r.kind === "unsupported") continue;
+        const quiet = new Set(r.alerts.filter((_, j) => quietFps.has(chunk.alerts[j]!.fingerprint)).map((a) => a.id));
+        const n = await deliver(env, r.alerts, quiet);
+        debug(`[notify] grafana pull: ${r.alerts.length} alert(s), ${n} new / changed, ${quiet.size} recorded quietly`);
+      }
+    },
+  });
 }
 
 export function registerNotifyHooks(app: Express, env: Env) {
   channelsOf(env); // fail at startup on an invalid AUD_NOTIFY_CHANNELS
+  startPull(env);
   let windowStart = 0, count = 0;
   app.post("/hooks/alerts/:source", async (req: Request, res: Response) => {
     res.setHeader("cache-control", "no-store");
@@ -169,6 +204,7 @@ export function registerNotifyRoutes(router: Router, env: Env) {
       paths: { azure: "/hooks/alerts/azure", grafana: "/hooks/alerts/grafana", auto: "/hooks/alerts/auto" },
       tokenHint: env.AUD_ALERT_RECEIVER_TOKEN ? `…${env.AUD_ALERT_RECEIVER_TOKEN.slice(-4)}` : null,
       channels: channelsOf(env).map((c) => channelInfo(c, vars())),
+      pull: pullState(),
       durable: !!dir, retentionDays: env.AUD_NOTIFY_RETENTION_DAYS,
     } satisfies NotifyReceiverInfo);
   });

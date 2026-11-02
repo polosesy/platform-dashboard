@@ -110,6 +110,22 @@ title:   {{data.essentials.alertRule}} ({{data.essentials.severity}} · {{data.e
 message: {{data.essentials.description}}  /  {{data.alertContext.labels.namespace}} {{data.alertContext.labels.pod}}`;
 }
 
+/** Grafana pull — for a private cluster Grafana's webhooks can't reach (the dashboard reads the active alerts itself) */
+export function pullSnippet(): string {
+  return `# API environment — mirror the alerts of the Google Chat contact points (Grafana keeps sending to Google Chat)
+AUD_NOTIFY_PULL_GRAFANA_URL=https://<grafana-name>.<region>.grafana.azure.com
+AUD_NOTIFY_PULL_RECEIVERS=<urgent-contact-point>,<info-contact-point>
+AUD_NOTIFY_PULL_INTERVAL_SEC=60
+
+# Azure Managed Grafana: the platform identity reads with its Entra token — no secret
+az role assignment create --assignee <platform-identity-client-id> --role "Grafana Viewer" \
+  --scope <grafana-resource-id>
+# Any other Grafana: a Viewer service account token (secret)
+# AUD_NOTIFY_PULL_GRAFANA_TOKEN=<service account token>
+
+# Kubernetes egress (chart): networkPolicy.extraFqdns: ["<grafana-name>.<region>.grafana.azure.com"]`;
+}
+
 export function grafanaSnippet(origin: string): string {
   const { grafana } = receiverUrls(origin);
   return `# Grafana → Alerting → Contact points → Webhook
