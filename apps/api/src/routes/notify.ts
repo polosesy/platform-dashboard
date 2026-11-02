@@ -5,17 +5,21 @@
 //   PUT  /api/notifications/ack  — acknowledge / clear (operator)
 //   GET  /api/notifications/receiver — receiver status and paths (admin; the token itself is never returned)
 //   POST /api/notifications/test — a sample Azure / Grafana delivery through the same parser (operator)
+//   GET  /api/notifications/channels/:key/preview — the body a channel would get for a sample alert (admin)
+//   POST /api/notifications/channels/:key/test    — send that sample to the channel now (admin)
+// Outbound channels (Flow · Slack · Google Chat · Teams · Azure / Grafana shapes) — services/notifyChannels.ts
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response, Router } from "express";
-import type { NotificationsResponse, NotifyAlert, NotifyCategory, NotifyReceiverInfo, NotifySeverity, OwnerRule } from "@aud/types";
+import type { NotificationsResponse, NotifyAlert, NotifyCategory, NotifyChannelTest, NotifyReceiverInfo, NotifySeverity, OwnerRule } from "@aud/types";
 import type { Env } from "../env.js";
 import { accessibleConnections, callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription, getConnections } from "../infra/connectionRegistry.js";
 import { sendError } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import { parseAlertPayload, samplePayload, type ParsedAlert } from "../services/alertPayloads.js";
-import { ingest, listAlerts, notifyDir, ownerTeam, setAck, setRelayResult } from "../services/notifyStore.js";
-import { relay, relayWanted } from "../services/notifyRelay.js";
+import { applyDelivery, ingest, listAlerts, notifyDir, ownerTeam, setAck, setDeliveries } from "../services/notifyStore.js";
+import { channelInfo, channelPayload, loadChannels, type Channel } from "../services/notifyChannels.js";
+import { relayChanged, sendToChannel, testResult } from "../services/notifyRelay.js";
 
 const SEV_RANK: Record<NotifySeverity, number> = { sev1: 1, sev2: 2, sev3: 3, sev4: 4 };
 const PER_MINUTE = 600;
@@ -33,11 +37,21 @@ function presentedToken(req: Request): string | undefined {
   return typeof req.query.token === "string" ? req.query.token : undefined;
 }
 
-/** The dashboard's public origin (relay links): the first CORS origin when it is https */
-const publicBase = (env: Env): string | null => {
+/** The dashboard's public origin (links in relayed messages): the first CORS origin — https, or http on a non-loopback host */
+export const publicBase = (env: Pick<Env, "CORS_ORIGIN">): string | null => {
   const o = env.CORS_ORIGIN.split(",")[0]?.trim() ?? "";
-  return /^https:\/\//.test(o) ? o.replace(/\/$/, "") : null;
+  if (/^https:\/\//.test(o)) return o.replace(/\/$/, "");
+  return /^http:\/\/(?!localhost\b|127\.)/.test(o) ? o.replace(/\/$/, "") : null;
 };
+
+let channelsCache: { raw: string; channels: Channel[] } | null = null;
+/** Outbound channels — validated at startup (registerNotifyHooks); an invalid definition stops the API */
+export function channelsOf(env: Env): Channel[] {
+  const raw = `${env.AUD_NOTIFY_CHANNELS ?? ""}|${env.AUD_NOTIFY_RELAY_URL ?? ""}|${env.AUD_NOTIFY_RELAY_MIN_SEVERITY}`;
+  if (channelsCache?.raw !== raw) channelsCache = { raw, channels: loadChannels(env) };
+  return channelsCache.channels;
+}
+const vars = () => process.env as Record<string, string | undefined>;
 
 function ownersFor(env: Env, a: ParsedAlert): OwnerRule[] {
   const sub = a.target.subscriptionId;
@@ -48,17 +62,18 @@ function ownersFor(env: Env, a: ParsedAlert): OwnerRule[] {
 async function deliver(env: Env, parsed: ParsedAlert[]): Promise<number> {
   const dir = notifyDir(env);
   const changed = await ingest(dir, parsed, { retentionDays: env.AUD_NOTIFY_RETENTION_DAYS, teamOf: (a) => ownerTeam(a, ownersFor(env, a)) });
-  const url = env.AUD_NOTIFY_RELAY_URL;
-  if (url) {
-    // Fire and forget — the receiver answers the sender at once; the inbox records each result
-    for (const a of changed.filter((x) => relayWanted(x, env.AUD_NOTIFY_RELAY_MIN_SEVERITY))) {
-      void relay(url, a, publicBase(env)).then((r) => setRelayResult(dir, a.id, { at: new Date().toISOString(), ok: r.ok, ...(r.status ? { status: r.status } : {}) })).catch(() => undefined);
-    }
+  const channels = channelsOf(env);
+  if (channels.length && changed.length) {
+    // Fire and forget — the receiver answers the sender at once; the inbox records each channel's result
+    void relayChanged(channels, changed, publicBase(env), vars())
+      .then((byId) => Promise.all([...byId].map(([id, ds]) => setDeliveries(dir, id, ds))))
+      .catch(() => undefined);
   }
   return changed.length;
 }
 
 export function registerNotifyHooks(app: Express, env: Env) {
+  channelsOf(env); // fail at startup on an invalid AUD_NOTIFY_CHANNELS
   let windowStart = 0, count = 0;
   app.post("/hooks/alerts/:source", async (req: Request, res: Response) => {
     res.setHeader("cache-control", "no-store");
@@ -149,14 +164,43 @@ export function registerNotifyRoutes(router: Router, env: Env) {
   // requireRole lets anonymous callers through (the routes answer signin_required themselves) — every handler checks
   router.get("/api/notifications/receiver", requireRole(env, "admin"), (req: Request, res: Response) => {
     if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
-    const url = env.AUD_NOTIFY_RELAY_URL;
     res.json({
       enabled: !!env.AUD_ALERT_RECEIVER_TOKEN,
       paths: { azure: "/hooks/alerts/azure", grafana: "/hooks/alerts/grafana", auto: "/hooks/alerts/auto" },
       tokenHint: env.AUD_ALERT_RECEIVER_TOKEN ? `…${env.AUD_ALERT_RECEIVER_TOKEN.slice(-4)}` : null,
-      relay: { configured: !!url, host: url ? new URL(url).host : null, minSeverity: env.AUD_NOTIFY_RELAY_MIN_SEVERITY },
+      channels: channelsOf(env).map((c) => channelInfo(c, vars())),
       durable: !!dir, retentionDays: env.AUD_NOTIFY_RETENTION_DAYS,
     } satisfies NotifyReceiverInfo);
+  });
+
+  // A sample alert as the channel would see it — from the same parser as real deliveries
+  const sampleAlert = (kind: "azure" | "grafana"): NotifyAlert => {
+    const r = parseAlertPayload(samplePayload(kind));
+    if (r.kind === "unsupported") throw new Error("sample_unparsed");
+    const { next } = applyDelivery({}, [{ ...r.alerts[0]!, labels: { ...r.alerts[0]!.labels, test: "true" } }], new Date(), () => "platform");
+    return Object.values(next)[0]!;
+  };
+  const channelFor = (req: Request) => channelsOf(env).find((c) => c.key === req.params.key);
+
+  router.get("/api/notifications/channels/:key/preview", requireRole(env, "admin"), (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+    const c = channelFor(req);
+    if (!c) return res.status(404).json({ error: "channel_not_found" });
+    const a = sampleAlert(req.query.kind === "azure" ? "azure" : "grafana");
+    res.json({ format: c.format, body: channelPayload(c, a, publicBase(env)) });
+  });
+
+  router.post("/api/notifications/channels/:key/test", requireRole(env, "admin"), async (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+    const c = channelFor(req);
+    if (!c) return res.status(404).json({ error: "channel_not_found" });
+    try {
+      const r = await sendToChannel(c, sampleAlert(req.query.kind === "azure" ? "azure" : "grafana"), publicBase(env), vars());
+      debug(`[notify] channel test ${c.key}: ${r.ok ? "ok" : r.error} ${r.status ?? ""} ${r.ms}ms`);
+      res.json(testResult(r) satisfies NotifyChannelTest);
+    } catch (e: unknown) {
+      sendError(res, e, "channel_test_failed");
+    }
   });
 
   router.post("/api/notifications/test", requireRole(env, "operator"), async (req: Request, res: Response) => {

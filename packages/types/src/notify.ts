@@ -1,6 +1,7 @@
 // 알림 센터 — alerts from Azure Monitor (action group webhook, common alert schema) and Grafana Alerting / Alertmanager
 // (webhook contact point), received by the dashboard itself and shown to the people who may see them. Messenger
-// webhooks (Slack · Teams · Google Chat) are not required: the inbox is the channel; an internal relay is optional.
+// webhooks are not required to see them (the inbox is a channel), and the dashboard relays them on to chat tools
+// (Flow · Slack · Google Chat · Teams) in each tool's own payload shape — see apps/api/src/services/notifyChannels.ts.
 
 /** sev1 critical (outage, data loss) · sev2 major · sev3 warning · sev4 info — the Grafana standard of the platform */
 export type NotifySeverity = "sev1" | "sev2" | "sev3" | "sev4";
@@ -60,9 +61,30 @@ export type NotifyAlert = {
   refired: number;
   ack?: { by: string; at: string; note?: string };
   history: NotifyEvent[];
-  /** Outbound relay result of the last change (when a relay is configured) */
-  relay?: { at: string; ok: boolean; status?: number };
+  /** Last delivery per outbound channel (Flow · Slack · Google Chat · Teams …) */
+  deliveries?: NotifyDelivery[];
 };
+
+export type NotifyDelivery = { channel: string; at: string; ok: boolean; status?: number; attempts: number; error?: "timeout" | "network" | "http" | "notConfigured" };
+
+/** An outbound channel as the admin sees it — the webhook URL (a secret) is never returned, only its host */
+export type NotifyChannelInfo = {
+  key: string;
+  name: string;
+  format: "flow" | "azureCommon" | "grafana" | "slack" | "googleChat" | "teams" | "json";
+  host: string | null;
+  /** The URL variable is set (and https, or http allowed) */
+  configured: boolean;
+  enabled: boolean;
+  minSeverity: NotifySeverity;
+  categories: NotifyCategory[];
+  teams: string[];
+  statuses: Array<"firing" | "resolved">;
+  lang: "ko" | "en";
+  prefix: string;
+};
+
+export type NotifyChannelTest = { ok: boolean; status?: number; ms: number; attempts: number; error?: NotifyDelivery["error"] };
 
 export type NotificationsResponse = {
   items: NotifyAlert[];
@@ -84,7 +106,7 @@ export type NotifyReceiverInfo = {
   /** Path to append to the dashboard's public address — the token is never returned */
   paths: { azure: string; grafana: string; auto: string };
   tokenHint: string | null;
-  relay: { configured: boolean; host: string | null; minSeverity: NotifySeverity };
+  channels: NotifyChannelInfo[];
   durable: boolean;
   retentionDays: number;
 };

@@ -16,6 +16,7 @@ import { useQueryParam } from "@/lib/useQueryParam";
 import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, Panel, Segmented, Select, Stat, Tabs, Toggle } from "@/components/ui";
 import { CATEGORIES, DEFAULT_FILTER, MAPPING, SEVERITIES, azureSnippet, filterInbox, grafanaSnippet, receiverUrls, targetText, teamsOf, type InboxFilter } from "@/lib/notifyView";
 import { DesktopToggle } from "./DesktopToggle";
+import { Channels } from "./Channels";
 import s from "./notifications.module.css";
 
 const TABS = ["inbox", "mapping", "setup"] as const;
@@ -160,7 +161,7 @@ function Detail({ a, canWrite, reload }: { a: NotifyAlert; canWrite: boolean; re
           <div><dt>{t("notify.fact.category")}</dt><dd>{t(`notify.cat.${a.category}`)} <span className={s.muted}>({t(`notify.basis.${a.categoryBasis}`)})</span></dd></div>
           <div><dt>{t("notify.fact.since")}</dt><dd>{when(a.startsAt, locale)}{a.endsAt ? ` → ${when(a.endsAt, locale)}` : ""}</dd></div>
           <div><dt>{t("notify.fact.received")}</dt><dd>{t("notify.fact.receivedText", { n: a.received, r: a.refired, at: when(a.lastReceivedAt, locale) })}</dd></div>
-          {a.relay ? <div><dt>{t("notify.fact.relay")}</dt><dd>{a.relay.ok ? t("notify.relay.ok") : t("notify.relay.failed", { s: a.relay.status ?? "—" })}</dd></div> : null}
+          {a.deliveries?.length ? <div><dt>{t("notify.fact.relay")}</dt><dd>{a.deliveries.map((d) => <div key={d.channel}>{d.channel}: {d.ok ? t("notify.relay.ok") : t("notify.relay.failed", { s: d.status ?? d.error ?? "—" })} <span className={s.muted}>{when(d.at, locale)}</span></div>)}</dd></div> : null}
         </dl>
       </div>
       {Object.keys(a.labels).length ? <div className={s.kv}>{Object.entries(a.labels).map(([k, v]) => <span key={k} className={s.label}>{k}={v}</span>)}</div> : null}
@@ -234,7 +235,7 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
           <dl className={s.facts}>
             <div><dt>{t("notify.setup.receiver")}</dt><dd>{i.enabled ? t("notify.setup.on", { hint: i.tokenHint ?? "" }) : t("notify.setup.off")}</dd></div>
             <div><dt>{t("notify.setup.store")}</dt><dd>{i.durable ? t("notify.setup.durable", { d: i.retentionDays }) : t("notify.memory")}</dd></div>
-            <div><dt>{t("notify.setup.relay")}</dt><dd>{i.relay.configured ? t("notify.setup.relayOn", { host: i.relay.host ?? "", sev: t(`notify.sev.${i.relay.minSeverity}`) }) : t("notify.setup.relayOff")}</dd></div>
+            <div><dt>{t("notify.setup.relay")}</dt><dd>{i.channels.length ? t("notify.setup.channels", { n: i.channels.length, ok: i.channels.filter((c) => c.configured && c.enabled).length }) : t("notify.setup.relayOff")}</dd></div>
           </dl>
         )}
         {data?.canWrite ? (
@@ -245,6 +246,7 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
           </div>
         ) : null}
       </Panel>
+      {i ? <Channels channels={i.channels} /> : null}
       <div className={s.mapGrid}>
         <Panel title={t("notify.setup.azure")} sub={t("notify.setup.azureSub")}>
           <ol className={s.rules}>{[1, 2, 3, 4].map((n) => <li key={n}>{t(`notify.setup.azureStep${n}`)}</li>)}</ol>

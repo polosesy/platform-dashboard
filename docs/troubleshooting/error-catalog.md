@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-30
+last-verified: 2026-11-02
 covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 에러 카탈로그
@@ -324,7 +324,7 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 
 ### NOTIFY-001: Azure·Grafana가 보내는데 알림 센터에 안 나옴 — 404 `receiver_disabled` / 401 `unauthorized`
 - **원인**: 404 = API에 `AUD_ALERT_RECEIVER_TOKEN`이 없음(수신 꺼짐) · 401 = 토큰이 없거나 다름(Azure는 URL `?token=`, Grafana는 `Authorization: Bearer`). 공개 주소에 `/hooks/alerts/*` 경로가 없으면 보내는 쪽에 연결 실패만 보임
-- **해결**: 토큰 설정 후 API 재시작, 보내는 쪽 값 확인. 액션 그룹 '테스트'·Grafana 연락처 'Test'로 확인. 공개 주소(Front Door·AGC)에 `/hooks/alerts/*`만 열기([alert-center.md](../observability/alert-center.md) §3.3)
+- **해결**: 토큰 설정 후 API 재시작, 보내는 쪽 값 확인. 액션 그룹 '테스트'·Grafana 연락처 'Test'로 확인. 공개 주소(Front Door·AGC)에 `/hooks/alerts/*`만 열기([alert-center.md](../observability/alert-center.md) §3.4)
 
 ### NOTIFY-002: 400 `unsupported_payload` (`azure_not_common_schema` · `unknown_shape` · `no_alerts`) / `payload_mismatch`
 - **원인**: Azure 액션 그룹의 '일반 경고 스키마 사용'이 꺼짐(옛 형식) · 알 수 없는 JSON · 알림 0건 · `/hooks/alerts/azure`에 Grafana 형식처럼 경로와 내용이 다름
@@ -337,6 +337,10 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 ### NOTIFY-004: 어떤 알림이 안 보이는 사용자가 있음 / 확인 버튼이 없음
 - **원인**: 구독이 붙은 Azure 알림은 그 구독의 Azure 연결을 쓸 수 있는 역할만 봄(관리자는 전부) · 확인은 운영자(AUD.Operator) 이상 · 데스크톱 알림은 브라우저 권한이 거부되면 꺼짐
 - **해결**: 연결의 역할(`roles`) 또는 앱 역할 확인. 브라우저 사이트 설정에서 알림 허용
+
+### NOTIFY-005: 채널 시험 전송 실패 / API가 시작하지 않음 (`AUD_NOTIFY_CHANNELS: …`)
+- **원인**: 시작 실패 = 채널 정의 JSON 오류·`urlEnv`가 `AUD_NOTIFY_URL_*`가 아님·키 중복·모르는 항목(엄격) · 시험 전송 '주소 변수가 없거나 https가 아님' = 변수 없음 또는 http(`allowHttp` 없음) · '응답 4xx' = 받는 쪽이 거부(웹훅 주소·Flow 템플릿·Teams Workflows가 아닌 옛 커넥터) · '연결 안 됨' = 주소·방화벽(차트 `networkPolicy.extraFqdns`)·사내 인증서(`NODE_EXTRA_CA_CERTS`) · 3xx = 리디렉션은 따라가지 않음(웹훅 주소를 최종 주소로)
+- **해결**: 알림 센터 › 연동 설정 › 보내는 곳에서 '보낼 내용 미리 보기'로 모양 확인 → 시험 전송. Flow는 BOT 템플릿 `{{title}}`/`{{message}}` 또는 기존 Azure 템플릿
 
 ---
 

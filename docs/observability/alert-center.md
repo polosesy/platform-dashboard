@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-10-30
-covers: [apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
+last-verified: 2026-11-02
+covers: [apps/api/src/services/notifyChannels.ts, apps/web/src/app/notifications/Channels.tsx, apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
 ---
 # 알림 센터 — Azure Monitor · Grafana 알림을 대시보드가 직접 받기
 
@@ -36,7 +36,8 @@ Alertmanager ─────────── webhook_configs ─────�
 | `AUD_ALERT_RECEIVER_TOKEN` | 수신 토큰(32자 이상). 없으면 수신 주소는 404. Azure는 URL `?token=`, Grafana는 `Authorization: Bearer` |
 | `AUD_NOTIFY_DIR` | 저장 폴더(없으면 `<AUD_ARRANGEMENT_DIR>/notifications`, 둘 다 없으면 메모리 — 재시작하면 사라짐) |
 | `AUD_NOTIFY_RETENTION_DAYS` | 해소된 알림 보관 일수(기본 30). 진행 중인 알림은 항상 보관, 최대 3,000개 |
-| `AUD_NOTIFY_RELAY_URL` · `AUD_NOTIFY_RELAY_MIN_SEVERITY` | (선택) 사내 전달 주소(https 하나) · 최소 등급(기본 sev2) — 새 알림과 진행 ↔ 해소 변화만 `{title, message, status, severity, category, target, links}`로 한 번 POST(5초, 재시도·리디렉션 없음) |
+| `AUD_NOTIFY_CHANNELS` · `AUD_NOTIFY_URL_*` | **보내는 곳(채팅 채널)** — §3.3. 채널 정의(JSON, 비밀 없음)와 채널마다 웹훅 주소 변수(비밀) |
+| `AUD_NOTIFY_RELAY_URL` · `AUD_NOTIFY_RELAY_MIN_SEVERITY` | (옛 설정, 계속 읽음) 형식 `json` 채널 하나(`relay`)로 바뀜 |
 
 토큰은 비밀 값입니다 — Key Vault·Kubernetes Secret·`api.env`(gitignore)에만, 화면·로그·응답에 나오지 않습니다(화면은 끝 4자리만).
 
@@ -70,7 +71,50 @@ resource "grafana_contact_point" "aud_dashboard" {
 }
 ```
 
-### 3.3 네트워크
+### 3.3 보내는 곳 — Flow(마드라스체크)·Slack·Google Chat·Teams (대시보드 = 중계 서버)
+
+받은 알림(Azure 일반 경고 스키마·Grafana·Alertmanager)을 **채팅 도구가 읽는 모양으로 바꿔** 보냅니다. 받는 형식과 보내는 형식이 따로라, Grafana 알림을 Azure 형식으로 보내는 것도 됩니다(예전 Flow 템플릿이 빈칸이던 문제를 어댑터 없이 해결).
+
+| 형식 `format` | 받는 곳 | 보내는 모양 |
+|---|---|---|
+| `flow` | **Flow(마드라스체크) BOT 웹훅**(flowLabs, 템플릿형 수신기 `{{json.path}}`) | Azure 일반 경고 스키마 경로(`data.essentials.*`·`data.alertContext.*`) **+** 완성된 `title`·`message` — 기존 Azure 템플릿과 `{{title}}`/`{{message}}` 템플릿이 둘 다 그대로 동작 |
+| `azureCommon` | 액션 그룹용으로 만든 수신기 | Azure 일반 경고 스키마 |
+| `grafana` | Grafana 연락처용으로 만든 수신기 | Grafana 웹훅 모양(`alerts[]`·`title`·`message`) |
+| `slack` | Slack incoming webhook | `text` + Block Kit(머리·본문·링크 버튼) |
+| `googleChat` | Google Chat incoming webhook | `text`(굵게·`<url|이름>` 링크) |
+| `teams` | Teams **Workflows** 웹훅(옛 Office 365 커넥터 아님) | Adaptive Card 1.4 메시지 |
+| `json` | 그 밖 사내 수신기 | `{title, message, status, severity, category, target, links}` |
+
+메시지(모든 형식 공통): `[STG] 🟠 [SEV2·중대][발생] 알림 이름 — ns/pod` · 📋 요약 · 💡 조치 · 대상·발생(UTC · KST)·분류·팀 · 🔗 대시보드·Grafana·런북 링크(대시보드 링크는 공개 주소가 https일 때만).
+
+```bash
+# API 환경 (api.env · Helm api.extraEnv — 주소는 Secret/Key Vault에서)
+AUD_NOTIFY_CHANNELS='[
+  {"key":"flow-ops","name":"Flow ops room","format":"flow","urlEnv":"AUD_NOTIFY_URL_FLOW_OPS",
+   "minSeverity":"sev3","categories":["incident","security","monitoring"],"prefix":"[STG] ","lang":"ko"},
+  {"key":"slack-sec","name":"Slack #security","format":"slack","urlEnv":"AUD_NOTIFY_URL_SLACK_SEC",
+   "minSeverity":"sev2","categories":["security"],"statuses":["firing"]}
+]'
+AUD_NOTIFY_URL_FLOW_OPS=<Flow BOT 웹훅 주소 — 비밀>
+AUD_NOTIFY_URL_SLACK_SEC=<Slack 웹훅 주소 — 비밀>
+```
+
+| 채널 항목 | 뜻 (기본값) |
+|---|---|
+| `key` · `name` · `format` | 식별자(소문자) · 화면 이름 · 위 표 |
+| `urlEnv` | 웹훅 주소를 담은 변수 이름 — `AUD_NOTIFY_URL_` 로 시작해야 함(다른 비밀 변수를 읽지 못하게) |
+| `authHeaderEnv` | (선택) `Authorization` 헤더 값을 담은 변수 — `AUD_NOTIFY_AUTH_` 로 시작 |
+| `minSeverity` · `categories` · `teams` · `statuses` | 이 등급 이상(sev3) · 분류만(전체) · 팀만(전체, `"none"` = 팀 없음) · 발생·해소(둘 다) |
+| `prefix` · `lang` | 제목 앞 글자(공유 방에서 환경 구분, 없음) · 문장 언어(ko) |
+| `allowHttp` · `enabled` | 사내 http 서버 허용(false — 기본 https만) · 끄기(true) |
+
+**규칙**: 새 알림과 발생 ↔ 해소 변화만 채널마다 한 번(같은 알림 반복은 안 보냄). 5초·5xx/429/네트워크 오류 1번 재시도·**리디렉션 따라가지 않음**. 결과는 알림 상세 '보낸 곳'에 채널별로 남음. 정의가 틀리면 API가 시작하지 않음(조용히 알림을 버리지 않게). 화면에는 주소의 **호스트만** — 경로의 토큰은 나가지 않음.
+
+**확인**: 알림 센터 › 연동 설정 › '보내는 곳' — 채널마다 **보낼 내용 미리 보기**(Grafana·Azure 시험 알림으로)와 **시험 전송**(응답 코드·시간·시도 수). 실패 문구: 응답 n = 받는 쪽 거부(주소·템플릿) · 5초 안에 응답 없음 · 연결 안 됨(주소·방화벽·사내 인증서 — `NODE_EXTRA_CA_CERTS`).
+
+**Flow(온프렘)**: Flow 관리 화면에서 BOT 웹훅을 만들고 템플릿을 `{{title}}`/`{{message}}`로 두거나 기존 Azure 템플릿(`{{data.essentials.alertRule}}` …)을 그대로 씁니다. 대시보드(API 파드)에서 Flow 서버 주소로 나가는 길이 있어야 합니다 — 쿠버네티스는 차트 `networkPolicy.extraFqdns`에 Flow 호스트(443), 온프렘 Docker는 같은 사내망이면 그대로·프록시를 쓰면 `NO_PROXY`.
+
+### 3.4 네트워크
 - Azure 액션 그룹·Azure Managed Grafana는 **공용 인터넷**에서 보냄 → 공개 주소(Front Door·AGC)에 `/hooks/alerts/*` 경로만 열기. 가능하면 WAF·방화벽에서 출발지를 서비스 태그 `ActionGroup`·Grafana 송신 IP로 제한
 - 클러스터 시험 배포(포트 포워딩)처럼 공개 주소가 없으면 외부 알림은 못 받음 — 화면 '시험 알림' 버튼으로 확인
 
@@ -110,5 +154,6 @@ resource "grafana_contact_point" "aud_dashboard" {
 
 - 대시보드가 스스로 만드는 알림(통합 위험 감시 질문·관측 스택 저하·노드 유지 보수·긴급 취약점 KEV) — 현재는 각 화면에서만
 - 사내 메일 릴레이(SMTP) 채널 — 거버넌스 승인 후
+- 채널을 화면에서 추가·수정(지금은 관리자가 환경 변수로) · 같은 알림 묶어 보내기(그룹·대기 시간)
 - Azure 액션 그룹 **보안 웹후크**(Entra 토큰) 검증 — 공유 토큰 대신
 - 공유 저장소(여러 복제본)·알림 무음(규칙별 기간)

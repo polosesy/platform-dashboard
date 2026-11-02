@@ -5,7 +5,7 @@
 // for the retention days, at most MAX items (oldest resolved dropped first).
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { NotifyAlert, OwnerRule } from "@aud/types";
+import type { NotifyAlert, NotifyDelivery, OwnerRule } from "@aud/types";
 import type { ParsedAlert } from "./alertPayloads.js";
 
 const MAX = 3000;
@@ -137,12 +137,15 @@ export async function setAck(dir: string | undefined, id: string, ack: { by: str
   });
 }
 
-export async function setRelayResult(dir: string | undefined, id: string, relay: NonNullable<NotifyAlert["relay"]>): Promise<void> {
+/** Record the last delivery per channel (a newer one replaces the channel's older result) */
+export async function setDeliveries(dir: string | undefined, id: string, deliveries: NotifyDelivery[]): Promise<void> {
+  if (!deliveries.length) return;
   await serial(async () => {
     const doc = await load(dir);
     const a = doc.alerts[id];
     if (!a) return;
-    await save(dir, { v: 1, alerts: { ...doc.alerts, [id]: { ...a, relay } } });
+    const keep = (a.deliveries ?? []).filter((d) => !deliveries.some((x) => x.channel === d.channel));
+    await save(dir, { v: 1, alerts: { ...doc.alerts, [id]: { ...a, deliveries: [...deliveries, ...keep].slice(0, 20) } } });
   });
 }
 

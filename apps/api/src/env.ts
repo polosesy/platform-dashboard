@@ -87,6 +87,10 @@ const EnvSchema = z.object({
    *  severity is POSTed as {title, message, …} — e.g. an in-house bot or mail gateway. Never a messenger by default. */
   AUD_NOTIFY_RELAY_URL: z.string().url().refine((v) => v.startsWith("https://"), "https only").optional(),
   AUD_NOTIFY_RELAY_MIN_SEVERITY: z.enum(["sev1", "sev2", "sev3", "sev4"]).default("sev2"),
+  /** Outbound chat channels (JSON array, no secrets): [{key, name, format flow|azureCommon|grafana|slack|googleChat|teams|json,
+   *  urlEnv: "AUD_NOTIFY_URL_<X>", minSeverity, categories, teams, statuses, lang, prefix, allowHttp}] — the webhook URLs
+   *  live in their own AUD_NOTIFY_URL_* variables (secrets). Validated at startup (services/notifyChannels.ts). */
+  AUD_NOTIFY_CHANNELS: z.string().optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),
 
   // Verbose diagnostic logging (graph build, hubble strategies, KQL row counts)

@@ -85,6 +85,31 @@ webhook_receiver {
 }`;
 }
 
+/** The admin's channel definition (no secrets — each webhook URL is its own variable) */
+export function channelsSnippet(): string {
+  return `# API environment (api.env · Helm api.extraEnv · Key Vault/Secret for the URLs)
+AUD_NOTIFY_CHANNELS='[
+  {"key":"flow-ops","name":"Flow ops room","format":"flow","urlEnv":"AUD_NOTIFY_URL_FLOW_OPS",
+   "minSeverity":"sev3","categories":["incident","security","monitoring"],"prefix":"[STG] ","lang":"ko"},
+  {"key":"slack-sec","name":"Slack #security","format":"slack","urlEnv":"AUD_NOTIFY_URL_SLACK_SEC",
+   "minSeverity":"sev2","categories":["security"],"statuses":["firing"]}
+]'
+AUD_NOTIFY_URL_FLOW_OPS=<Flow BOT webhook URL — secret>
+AUD_NOTIFY_URL_SLACK_SEC=<Slack incoming webhook URL — secret>
+# formats: flow · azureCommon · grafana · slack · googleChat · teams · json
+# optional: "teams":["platform"] (connection file owners) · "authHeaderEnv":"AUD_NOTIFY_AUTH_X" · "allowHttp":true (internal http only)`;
+}
+
+/** Flow (Madras Check) BOT webhook template — the body carries both the Azure paths and finished text */
+export function flowTemplateHint(): string {
+  return `# Flow BOT webhook template (either works with format "flow")
+title:   {{title}}
+message: {{message}}
+# or the existing Azure common-schema template:
+title:   {{data.essentials.alertRule}} ({{data.essentials.severity}} · {{data.essentials.monitorCondition}})
+message: {{data.essentials.description}}  /  {{data.alertContext.labels.namespace}} {{data.alertContext.labels.pod}}`;
+}
+
 export function grafanaSnippet(origin: string): string {
   const { grafana } = receiverUrls(origin);
   return `# Grafana → Alerting → Contact points → Webhook

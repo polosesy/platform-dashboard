@@ -53,3 +53,8 @@
   .meta { grid-column: 2 / -1; justify-content: flex-start; }
   .detailGrid { grid-template-columns: minmax(0, 1fr); }
 }
+.chList { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.chItem { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.chHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.howTo { margin-top: 12px; }
+.howTo summary { cursor: pointer; font-size: 13px; color: var(--accent); }
