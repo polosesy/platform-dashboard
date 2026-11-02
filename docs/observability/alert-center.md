@@ -130,14 +130,15 @@ AUD_NOTIFY_URL_SLACK_SEC=<Slack 웹훅 주소 — 비밀>
 - 새로 활성 = 발생, 목록에서 빠짐 = 해소(그 시각). **읽기 실패 때는 아무것도 해소하지 않음**
 - 웹훅과 같은 해석기·같은 ID(`gf:` + fingerprint) → 받은 알림 한 항목, 보내는 곳(Flow 등)으로는 **새 발생·해소만** 채널마다 한 번
 - 시작 직후 첫 읽기: 시작 전부터 울리던 알림은 **기록만**(Google Chat은 이미 받았음 — 재시작마다 Flow로 다시 보내지 않음), 시작 뒤 울린 것은 보냄
-- 인증: `*.grafana.azure.com` = 플랫폼 ID(관리 ID)의 Entra 토큰(대상 Azure Managed Grafana 앱) — Grafana 리소스에 **Grafana Viewer** 역할, 비밀 없음 / 그 밖 Grafana = Viewer 서비스 계정 토큰 `AUD_NOTIFY_PULL_GRAFANA_TOKEN`(비밀)
+- 인증: `*.grafana.azure.com` = **Grafana가 있는 테넌트의 Azure 연결**(`AUD_NOTIFY_PULL_CONNECTION`, 기본 홈) 신원의 Entra 토큰(대상 Azure Managed Grafana 앱, 연결의 테넌트 검사 그대로) — Grafana 리소스에 **Grafana Viewer** 역할, 비밀 없음. delegated 연결은 불가(백그라운드엔 로그인 사용자가 없음, 시작 실패). 다른 신원으로 폴백하지 않음 / 그 밖 Grafana = Viewer 서비스 계정 토큰 `AUD_NOTIFY_PULL_GRAFANA_TOKEN`(비밀)
 - 10초 제한·리디렉션 안 따라감·응답 본문은 저장·출력 안 함. 상태(정상·실패 이유·지금 활성 수·마지막 읽은 시각)는 연동 설정 '상태'
 
 ```bash
 AUD_NOTIFY_PULL_GRAFANA_URL=https://<grafana-name>.<region>.grafana.azure.com
 AUD_NOTIFY_PULL_RECEIVERS=<긴급 연락처>,<정보 연락처>
 AUD_NOTIFY_PULL_INTERVAL_SEC=60          # 15–600
-az role assignment create --assignee <platform-identity-client-id> --role "Grafana Viewer" --scope <grafana-resource-id>
+AUD_NOTIFY_PULL_CONNECTION=<연결 키>      # Grafana가 있는 테넌트의 연결 (기본 홈)
+az role assignment create --assignee <그 연결의 client id> --role "Grafana Viewer" --scope <grafana-resource-id>
 # 쿠버네티스 송신: 차트 networkPolicy.extraFqdns 에 Grafana 호스트, 그리고 보내는 곳(Flow) 호스트
 ```
 
@@ -146,7 +147,7 @@ az role assignment create --assignee <platform-identity-client-id> --role "Grafa
 | 단계 | 하는 일 | 바뀌는 것 |
 |---|---|---|
 | 1 | Flow에 시험용 BOT 웹훅(템플릿 `{{title}}`/`{{message}}`) | Flow — 새 웹훅 하나 |
-| 2 | 플랫폼 ID에 Grafana Viewer 역할 | Azure RBAC 읽기 역할 하나 |
+| 2 | 고객 테넌트 연결의 신원에 Grafana Viewer 역할 | Azure RBAC 읽기 역할 하나 |
 | 3 | API 환경: `AUD_NOTIFY_PULL_*` + `AUD_NOTIFY_CHANNELS`(형식 `flow`, 머리말 `[STG-TEST] `) + `AUD_NOTIFY_URL_*`(Secret) | 대시보드만 |
 | 4 | 연동 설정 › 보내는 곳 '시험 전송' → Flow 도착 확인 | — |
 | 5 | Grafana 규칙이 울릴 때(또는 기존 E2E 방법 — 시험 파드로 로그 주입) Google Chat·Flow 둘 다 도착 확인, 해소도 | — |

@@ -105,6 +105,8 @@ export type NotifyPullInfo = {
   enabled: boolean;
   /** Grafana host only — never a token */
   host?: string;
+  /** The Azure connection whose identity reads it (entra) */
+  connection?: string;
   /** Contact points mirrored (empty = all) */
   receivers?: string[];
   intervalSec?: number;

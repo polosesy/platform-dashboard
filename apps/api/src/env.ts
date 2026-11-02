@@ -97,6 +97,9 @@ const EnvSchema = z.object({
   AUD_NOTIFY_PULL_GRAFANA_URL: z.string().optional(),
   AUD_NOTIFY_PULL_RECEIVERS: z.string().optional(),
   AUD_NOTIFY_PULL_INTERVAL_SEC: z.coerce.number().int().min(15).max(600).default(60),
+  /** The Azure connection whose identity reads the Grafana (its tenant owns the Grafana) — unset = the home connection.
+   *  A delegated connection can't (no signed-in user in the background) */
+  AUD_NOTIFY_PULL_CONNECTION: z.string().optional(),
   /** Grafana service account token (Viewer) — required for a Grafana outside *.grafana.azure.com; a secret */
   AUD_NOTIFY_PULL_GRAFANA_TOKEN: z.string().optional(),
   AZURE_SUBSCRIPTION_IDS: z.string().optional(),

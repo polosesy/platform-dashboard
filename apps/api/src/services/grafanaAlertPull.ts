@@ -9,8 +9,9 @@
 // status.state). Silenced / inhibited alerts are left out (Grafana does not send them to Google Chat either).
 // Filter: the receivers (contact points) the alert is routed to — e.g. only the stg Google Chat contact points.
 // Resolved: an alert seen before that is no longer active (the API lists active alerts only).
-// Auth: Azure Managed Grafana (*.grafana.azure.com) — the platform identity's Entra token (role "Grafana Viewer" on the
-// Grafana resource, no secret); any other Grafana — a service account token (AUD_NOTIFY_PULL_GRAFANA_TOKEN, Viewer).
+// Auth: Azure Managed Grafana (*.grafana.azure.com) — an Entra token of the Azure connection whose tenant owns the
+// Grafana (AUD_NOTIFY_PULL_CONNECTION, default home; role "Grafana Viewer" on the Grafana resource, no secret); any
+// other Grafana — a service account token (AUD_NOTIFY_PULL_GRAFANA_TOKEN, Viewer).
 
 import type { Env } from "../env.js";
 
@@ -93,6 +94,8 @@ export const asWebhookBody = (alerts: PulledAlert[]) => ({ orgId: 1, status: ale
 export type PullState = {
   enabled: boolean;
   host?: string;
+  /** The Azure connection whose identity reads (entra auth) */
+  connection?: string;
   receivers?: string[];
   intervalSec?: number;
   auth?: "entra" | "token";
@@ -106,6 +109,9 @@ export type PullState = {
 
 /** The failure reason of one poll — a code, never the response body */
 export function pullError(e: unknown): string {
+  // Token errors (connection_* codes from the credential provider) — the identity, not Grafana
+  const code = (e as { code?: string })?.code;
+  if (typeof code === "string" && code.startsWith("connection_")) return "identity";
   const status = (e as { status?: number })?.status;
   if (status === 401 || status === 403) return "forbidden";
   if (status === 404) return "notFound";

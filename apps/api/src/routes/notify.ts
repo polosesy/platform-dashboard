@@ -15,7 +15,7 @@ import type { Express, Request, Response, Router } from "express";
 import type { NotificationsResponse, NotifyAlert, NotifyCategory, NotifyChannelTest, NotifyReceiverInfo, NotifySeverity, OwnerRule } from "@aud/types";
 import type { Env } from "../env.js";
 import { accessibleConnections, callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
-import { connectionForSubscription, getConnections } from "../infra/connectionRegistry.js";
+import { connectionForSubscription, credentialGroup, getConnections, homeConnection } from "../infra/connectionRegistry.js";
 import { sendError } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import { parseAlertPayload, samplePayload, type ParsedAlert } from "../services/alertPayloads.js";
@@ -85,13 +85,16 @@ export const pullState = (): PullState => pull?.state ?? { enabled: false, state
 function startPull(env: Env) {
   const cfg = pullConfig(env); // throws on an invalid setting — the API does not start half-configured
   if (!cfg || pull) return;
+  // The connection whose tenant owns the Grafana reads it (Entra) — its own identity, never another one as a fallback
+  const conn = cfg.auth === "entra"
+    ? (env.AUD_NOTIFY_PULL_CONNECTION ? getConnections(env).find((c) => c.key === env.AUD_NOTIFY_PULL_CONNECTION) : homeConnection(env))
+    : undefined;
+  if (cfg.auth === "entra") {
+    if (!conn) throw new Error(`AUD_NOTIFY_PULL_CONNECTION: no connection "${env.AUD_NOTIFY_PULL_CONNECTION}"`);
+    if (credentialGroup(env, conn) === "delegated") throw new Error(`AUD_NOTIFY_PULL_CONNECTION: "${conn.key}" is delegated — it has no identity of its own to read in the background`);
+  }
   pull = startGrafanaAlertPull(cfg, {
-    token: async () => {
-      if (cfg.auth === "token") return env.AUD_NOTIFY_PULL_GRAFANA_TOKEN!;
-      const t = await credentials().platformCredential(env).getToken(MANAGED_GRAFANA_SCOPE);
-      if (!t?.token) throw new Error("no token");
-      return t.token;
-    },
+    token: async () => (cfg.auth === "token" ? env.AUD_NOTIFY_PULL_GRAFANA_TOKEN! : credentials().token(env, conn!, MANAGED_GRAFANA_SCOPE)),
     deliver: async (body, quietFps) => {
       // parseAlertPayload reads up to 200 alerts a body; the pulled list maps 1:1 to parsed alerts within a chunk
       for (let i = 0; i < body.alerts.length; i += 200) {
@@ -104,6 +107,7 @@ function startPull(env: Env) {
       }
     },
   });
+  if (conn) pull.state.connection = conn.key;
 }
 
 export function registerNotifyHooks(app: Express, env: Env) {

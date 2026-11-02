@@ -233,7 +233,7 @@ function Setup({ data, reload }: { data: NotificationsResponse | null; reload: (
     const recv = p.receivers?.length ? p.receivers.join(", ") : t("notify.pull.allReceivers");
     if (p.state === "failed") return t("notify.pull.failed", { host: p.host ?? "", at, why: t(`notify.pull.err.${p.error ?? "network"}`) });
     if (p.state === "starting") return t("notify.pull.starting", { host: p.host ?? "" });
-    return t("notify.pull.ok", { host: p.host ?? "", recv, n: p.active ?? 0, at, sec: p.intervalSec ?? 60 });
+    return t("notify.pull.ok", { host: p.host ?? "", recv, n: p.active ?? 0, at, sec: p.intervalSec ?? 60, conn: p.connection ? t("notify.pull.conn", { key: p.connection }) : "" });
   };
   const i = info.data;
   return (

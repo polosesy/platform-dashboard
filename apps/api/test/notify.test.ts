@@ -390,5 +390,5 @@ test("grafana pull: a poll — Bearer token, no redirects; 403 = forbidden and t
   answer = { status: 200, body: [] };
   await pollOnce(cfg, deps, mem);
   assert.deepEqual(delivered[1]!.fps, ["a:resolved"]);
-  assert.deepEqual([pullError({ status: 404 }), pullError({ name: "TimeoutError" }), pullError(new Error("x"))], ["notFound", "timeout", "network"]);
+  assert.deepEqual([pullError({ status: 404 }), pullError({ name: "TimeoutError" }), pullError(new Error("x")), pullError({ code: "connection_tenant_mismatch" })], ["notFound", "timeout", "network", "identity"], "a token error names the identity, not Grafana");
 });

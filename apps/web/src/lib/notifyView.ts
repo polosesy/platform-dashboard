@@ -117,8 +117,10 @@ AUD_NOTIFY_PULL_GRAFANA_URL=https://<grafana-name>.<region>.grafana.azure.com
 AUD_NOTIFY_PULL_RECEIVERS=<urgent-contact-point>,<info-contact-point>
 AUD_NOTIFY_PULL_INTERVAL_SEC=60
 
-# Azure Managed Grafana: the platform identity reads with its Entra token — no secret
-az role assignment create --assignee <platform-identity-client-id> --role "Grafana Viewer" \
+# Azure Managed Grafana: an Azure connection's identity reads with its Entra token — no secret.
+# The connection whose tenant owns the Grafana (default: the home connection):
+AUD_NOTIFY_PULL_CONNECTION=<connection key>
+az role assignment create --assignee <that connection's client id> --role "Grafana Viewer" \\
   --scope <grafana-resource-id>
 # Any other Grafana: a Viewer service account token (secret)
 # AUD_NOTIFY_PULL_GRAFANA_TOKEN=<service account token>
