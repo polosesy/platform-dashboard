@@ -6,7 +6,7 @@ import type { Env } from "../src/env.js";
 import { azureSeverity, classify, labelSeverity, parseAlertPayload, safeUrl, samplePayload, type ParsedAlert } from "../src/services/alertPayloads.js";
 import { applyDelivery, clearNotifyMemory, listAlerts, ownerTeam, prune } from "../src/services/notifyStore.js";
 import { relayBody, relayWanted } from "../src/services/notifyRelay.js";
-import { inboxResponse, registerNotifyHooks, tokenMatches, visibleTo } from "../src/routes/notify.js";
+import { inboxResponse, registerNotifyHooks, registerNotifyRoutes, tokenMatches, visibleTo } from "../src/routes/notify.js";
 import * as viewMod from "../../web/src/lib/notifyView.ts";
 const V = ((viewMod as { default?: typeof viewMod }).default ?? viewMod) as typeof viewMod;
 
@@ -188,4 +188,35 @@ test("web view: filters, new urgent alerts, setup snippets carry placeholders on
   assert.match(V.azureSnippet("https://aud.example.com"), /\/hooks\/alerts\/azure\?token=<AUD_ALERT_RECEIVER_TOKEN>/);
   assert.match(V.grafanaSnippet("https://aud.example.com/"), /url\s+= "https:\/\/aud\.example\.com\/hooks\/alerts\/grafana"/);
   assert.ok(V.MAPPING.every((m) => m.screens.length > 0) && V.MAPPING.map((m) => m.category).join() === V.CATEGORIES.join());
+});
+
+test("anonymous callers get signin_required on every inbox route — requireRole lets them through, so each handler checks", async () => {
+  clearNotifyMemory();
+  const app = express();
+  app.use(express.json());
+  registerNotifyRoutes(app as unknown as express.Router, { AUD_NOTIFY_RETENTION_DAYS: 30, AUD_NOTIFY_RELAY_MIN_SEVERITY: "sev2", CORS_ORIGIN: "http://localhost:3000" } as unknown as Env);
+  const srv = app.listen(0);
+  try {
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const calls: Array<[string, string]> = [["GET", "/api/notifications"], ["GET", "/api/notifications/receiver"], ["POST", "/api/notifications/test?kind=azure"], ["PUT", "/api/notifications/ack?id=az:0123456789abcdef01234567"]];
+    for (const [method, path] of calls) {
+      const r = await fetch(`${base}${path}`, { method, headers: { "content-type": "application/json" }, body: method === "GET" ? undefined : "{}" });
+      assert.equal(r.status, 401, `${method} ${path}`);
+    }
+    assert.equal((await listAlerts(undefined)).length, 0, "nothing was added");
+  } finally {
+    srv.close(); clearNotifyMemory();
+  }
+});
+
+test("requireRole refuses anonymous callers itself (401) — gated routes never depend on each handler remembering", async () => {
+  const { requireRole } = await import("../src/infra/platformAccess.js");
+  const app = express();
+  let reached = false;
+  app.get("/gated", requireRole({} as Env, "operator"), (_req, res) => { reached = true; res.json({ ok: true }); });
+  const srv = app.listen(0);
+  try {
+    const r = await fetch(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/gated`);
+    assert.deepEqual([r.status, ((await r.json()) as { error: string }).error, reached], [401, "signin_required", false]);
+  } finally { srv.close(); }
 });

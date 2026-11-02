@@ -84,10 +84,14 @@ export function initPlatformAccess(env: Env): void {
 export const roleRequired =(min: PlatformRole) => new HttpError(403, "role_required", `This needs the ${min} role`);
 export const connectionForbidden = () => new HttpError(403, "connection_forbidden", "Your role cannot read this Azure connection");
 
-/** Route gate: a signed-in user with at least `min` (anonymous → signin_required through the routes' own handling) */
+/**
+ * Route gate: a signed-in user with at least `min`. Anonymous callers get 401 signin_required here — no gated route
+ * serves sample data. (It used to pass them on for each handler to refuse: the two log routes did not, and an
+ * anonymous request with a real cluster id reached the in-cluster Loki — 2026-11-02.)
+ */
 export function requireRole(env: Env, min: PlatformRole) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.auth?.bearerToken) return next();
+    if (!req.auth?.bearerToken) return sendError(res, new HttpError(401, "signin_required", "Sign in first"), "signin_required");
     if (roleAtLeast(callerOf(env, req.auth.bearerToken)?.role ?? null, min)) return next();
     sendError(res, roleRequired(min), "role_required");
   };

@@ -146,7 +146,9 @@ export function registerNotifyRoutes(router: Router, env: Env) {
     }
   });
 
-  router.get("/api/notifications/receiver", requireRole(env, "admin"), (_req: Request, res: Response) => {
+  // requireRole lets anonymous callers through (the routes answer signin_required themselves) — every handler checks
+  router.get("/api/notifications/receiver", requireRole(env, "admin"), (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
     const url = env.AUD_NOTIFY_RELAY_URL;
     res.json({
       enabled: !!env.AUD_ALERT_RECEIVER_TOKEN,
@@ -158,6 +160,7 @@ export function registerNotifyRoutes(router: Router, env: Env) {
   });
 
   router.post("/api/notifications/test", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
     try {
       const kind = req.query.kind === "grafana" ? "grafana" : "azure";
       const r = parseAlertPayload(samplePayload(kind));
