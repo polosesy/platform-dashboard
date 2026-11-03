@@ -216,3 +216,18 @@ test("cluster at a glance: counts only what was measured — idle apart, unmeasu
   assert.equal(none.pods, null, "no Ready series → null, never 0/0");
   assert.equal(none.restarts, null, "no restart series → null, never 0");
 });
+
+test("table: the heatmap's cells as rows — measured columns only, sorted by a column's level then value", () => {
+  // ready·memory·restarts·logErrors measured, http5xx only 'noTraffic' (still a reading), the rest never measured
+  assert.deepEqual(v.tableColumns(WS), ["ready", "memory", "restarts", "http5xx", "logErrors"]);
+  const worst = v.tableRows(WS, "worst", { by: "worst", dir: "worse" });
+  assert.deepEqual(worst.map((w) => w.workload).slice(0, 3), ["signal-service", "argocd-server", "console-service"], "danger, then warn (ties by ns/name)");
+  const byRestarts = v.tableRows(WS, "worst", { by: "restarts", dir: "worse" });
+  assert.deepEqual(byRestarts.map((w) => w.workload).slice(0, 2), ["argocd-server", "signal-service"], "same level → higher value first");
+  const better = v.tableRows(WS, "worst", { by: "restarts", dir: "better" });
+  assert.equal(better.at(-1)!.workload, "argocd-server", "reversed");
+  assert.deepEqual(v.tableRows(WS, "worst", { by: "worst", dir: "worse" }, { namespace: "argocd", problemsOnly: true }).map((w) => w.workload), ["argocd-server"]);
+  // JVM headroom: lower is worse
+  const jv = [wl("a", "x", { jvmHeadroom: { value: 300e6, level: "warn" } }), wl("a", "y", { jvmHeadroom: { value: 100e6, level: "warn" } })];
+  assert.deepEqual(v.tableRows(jv, "worst", { by: "jvmHeadroom", dir: "worse" }).map((w) => w.workload), ["y", "x"]);
+});

@@ -19,7 +19,8 @@ export const FEED_URLS = {
   phpAtom: "https://www.php.net/feed.atom",
   phpReleases: "https://www.php.net/releases/index.php?json&version=8&max=200",
 } as const;
-const ALLOWED_HOSTS = new Set(["www.cisa.gov", "services.nvd.nist.gov", "nodejs.org", "www.php.net", "cveawg.mitre.org", "api.osv.dev"]);
+// cve-api.prod-aks.azure.com · releases.aks.azure.com — AKS 관리 부품 (services/aksManagedVulns.ts)
+const ALLOWED_HOSTS = new Set(["www.cisa.gov", "services.nvd.nist.gov", "nodejs.org", "www.php.net", "cveawg.mitre.org", "api.osv.dev", "cve-api.prod-aks.azure.com", "releases.aks.azure.com"]);
 
 const CVE_RE = /CVE-\d{4}-\d{4,7}/g;
 export const isCveId = (s: string) => /^CVE-\d{4}-\d{4,7}$/.test(s);

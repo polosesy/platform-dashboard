@@ -280,3 +280,41 @@ test("Scoring excludes system findings; finding ids are unique; order puts user 
   assert.equal(cr.summary.score, 100);
   assert.equal(cr.findings.length, 0);
 });
+
+// ── Availability + proportional scoring ──
+
+test("AVL-001 single replica (or HPA floor 1); area score = share of healthy objects, high caps at 79, empty = null", () => {
+  const inv = emptyInventory();
+  inv.namespaces = [{ name: "app", labels: { "pod-security.kubernetes.io/enforce": "restricted" } }];
+  const ok = { requests: { cpu: "50m", memory: "64Mi" }, limits: { memory: "64Mi" } };
+  inv.workloads = [
+    { kind: "Deployment", namespace: "app", name: "one", replicas: 1, podLabels: { app: "one" }, serviceAccountName: "one", containers: [{ name: "c", ...ok }] },
+    { kind: "Deployment", namespace: "app", name: "two", replicas: 2, podLabels: { app: "two" }, serviceAccountName: "two", containers: [{ name: "c", ...ok }] },
+    { kind: "Deployment", namespace: "app", name: "scaled", replicas: 3, podLabels: { app: "scaled" }, serviceAccountName: "s", containers: [{ name: "c", ...ok }] },
+    { kind: "Deployment", namespace: "app", name: "off", replicas: 0, podLabels: { app: "off" }, serviceAccountName: "o", containers: [{ name: "c", ...ok }] },
+  ];
+  inv.hpas = [{ namespace: "app", name: "scaled", target: { kind: "Deployment", name: "scaled" }, minReplicas: 1, maxReplicas: 5, metrics: [] }];
+  inv.pdbs = [
+    { namespace: "app", name: "two", selector: { matchLabels: { app: "two" } }, maxUnavailable: 1, disruptionsAllowed: 1 },
+    { namespace: "app", name: "scaled", selector: { matchLabels: { app: "scaled" } }, maxUnavailable: 1, disruptionsAllowed: 1 },
+  ];
+  const r = analyzePolicies(inv, "c");
+  const avl = ids(r, "AVL-001").map((f) => f.resource?.name).sort();
+  assert.deepEqual(avl, ["one", "scaled"], "1 replica and HPA minReplicas 1 — not 2 replicas, not scaled to 0");
+  assert.match(ids(r, "AVL-001").find((f) => f.resource?.name === "scaled")!.title, /HPA/);
+  const auto = r.summary.categories.find((c) => c.category === "autoscaling")!;
+  // units: the 4 Deployments (healthy HPA / PDBs don't dilute them); two at medium (0.3) → (2 + 0.6) / 4 = 65
+  assert.equal(auto.evaluated, 4);
+  assert.equal(auto.clean, 2);
+  assert.equal(auto.score, 65);
+  // a single high among many still can't read green
+  inv.bindings = [{ kind: "ClusterRoleBinding", name: "app-admin", labels: {}, roleRef: { kind: "ClusterRole", name: "cluster-admin" }, subjects: [{ kind: "ServiceAccount", name: "one", namespace: "app" }] }];
+  const r2 = analyzePolicies(inv, "c");
+  const rbac = r2.summary.categories.find((c) => c.category === "rbac")!;
+  assert.ok(rbac.findings.high > 0);
+  assert.ok(rbac.score! <= 79 && rbac.capped, `capped (${rbac.score})`);
+  // nothing to evaluate → null (not 100), and the overall average skips it
+  const empty = analyzePolicies(emptyInventory(), "c");
+  assert.ok(empty.summary.categories.every((c) => c.score === null && c.evaluated === 0));
+  assert.equal(empty.summary.score, null);
+});

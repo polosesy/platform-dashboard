@@ -130,6 +130,8 @@ export type PolicyInventory = {
     serviceAccountName?: string;
     /** Workload identity webhook traces: AZURE_FEDERATED_TOKEN_FILE present (name only), AZURE_CLIENT_ID / AZURE_TENANT_ID GUIDs */
     wi?: { tokenFile: boolean; clientId?: string; tenantId?: string };
+    /** Running Microsoft images (mcr.microsoft.com) — container, image as pulled, sha256 digest (AKS 관리 부품) */
+    mcr?: { container: string; image: string; digest?: string }[];
   }>;
   workloads: InvWorkload[];
   networkPolicies: Array<{
@@ -209,6 +211,7 @@ const REF = {
   aksVpa: "https://learn.microsoft.com/azure/aks/vertical-pod-autoscaler",
   hpa: "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/",
   pdb: "https://kubernetes.io/docs/concepts/workloads/pods/disruptions/",
+  reliability: "https://learn.microsoft.com/azure/aks/best-practices-app-cluster-reliability",
   resources: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
   quota: "https://kubernetes.io/docs/concepts/policy/resource-quotas/",
   limitRange: "https://kubernetes.io/docs/concepts/policy/limit-range/",
@@ -297,6 +300,14 @@ export function formatSelector(sel: LabelSelector | undefined): string {
 // ── Findings builder ──
 
 const SEVERITY_WEIGHT: Record<PolicySeverity, number> = { high: 10, medium: 4, low: 1, info: 0 };
+/**
+ * Area score = the share of evaluated objects that are healthy (Defender secure score style), each object credited by
+ * its worst finding in the area: none/info 1 · low 0.7 · medium 0.3 · high 0. The old "100 minus 10/4/1 per finding"
+ * was not relative to size — a cluster with 9 risky bindings read 0 whatever it had, and an area with no rule that
+ * fires read 100 whatever it lacked. Any high finding caps the area below the green band (79) so it never reads healthy.
+ */
+const UNIT_CREDIT: Record<PolicySeverity, number> = { high: 0, medium: 0.3, low: 0.7, info: 1 };
+const HIGH_CAP = 79;
 const CATEGORIES: PolicyCategory[] = ["psa", "networkPolicy", "rbac", "autoscaling", "resources"];
 
 function emptyCounts(): Record<PolicySeverity, number> {
@@ -723,6 +734,21 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
         reference: REF.pdb,
       });
     }
+    // One pod at its lowest = nothing takes over while it restarts, is evicted (node upgrade / drain) or OOM-killed.
+    // HPA-managed: its minReplicas is the floor (it scales down to that when idle). replicas 0 = scaled down on purpose.
+    const hpaInfo = hpaByTarget.get(workloadKey(w.kind, w.namespace, w.name));
+    const floor = hpaInfo ? hpaInfo.minReplicas : w.replicas;
+    if ((w.kind === "Deployment" || w.kind === "StatefulSet") && floor === 1) {
+      findings.add({
+        ...base, ruleId: "AVL-001", category: "autoscaling", severity: "medium",
+        title: hpaInfo ? L("HPA 최소 레플리카 1개 — 대신할 파드 없음", "HPA minimum of 1 replica — nothing takes over") : L("레플리카 1개 — 대신할 파드 없음", "1 replica — nothing takes over"),
+        detail: hpaInfo
+          ? L(`HPA '${hpaInfo.name}'의 minReplicas가 1이라 한가할 때 파드가 하나로 줄어듭니다. 그 파드가 재시작·노드 업그레이드·드레인·OOM으로 내려가는 동안 서비스가 멈춥니다.`, `HPA '${hpaInfo.name}' has minReplicas 1, so it scales down to one pod when idle. While that pod restarts or is evicted (node upgrade, drain, OOM) the service is down.`)
+          : L(`파드가 하나뿐이라 재시작·노드 업그레이드·드레인·OOM으로 내려가는 동안 서비스가 멈춥니다${w.kind === "StatefulSet" ? " (StatefulSet — 여러 개로 늘릴 수 없는 단일 인스턴스면 이슈 목록에서 예외로 표시)" : ""}.`, `With a single pod the service is down while it restarts or is evicted (node upgrade, drain, OOM)${w.kind === "StatefulSet" ? " (StatefulSet — if it can only run as one instance, mark it as an exception in the issue list)" : ""}.`),
+        recommendation: L("replicas(또는 HPA minReplicas)를 2 이상으로 두고, PDB maxUnavailable: 1과 topologySpreadConstraints(kubernetes.io/hostname)로 다른 노드에 나눠 두세요.", "Run at least 2 replicas (or HPA minReplicas 2), with a PDB maxUnavailable: 1 and topologySpreadConstraints on kubernetes.io/hostname so they land on different nodes."),
+        reference: REF.reliability,
+      });
+    }
   }
 
   // ── RBAC ──
@@ -977,7 +1003,6 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
   // ── Severity counts + scores (system objects excluded from scoring) ──
   const nsByName = new Map(namespaces.map((n) => [n.name, n]));
   const totals = emptyCounts();
-  const penalty = new Map<PolicyCategory, number>(CATEGORIES.map((c) => [c, 0]));
   const perCategory = new Map<PolicyCategory, Record<PolicySeverity, number>>(CATEGORIES.map((c) => [c, emptyCounts()]));
   for (const f of findings.items) {
     if (f.namespace) {
@@ -987,14 +1012,46 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     if (f.system) continue;
     totals[f.severity]++;
     perCategory.get(f.category)![f.severity]++;
-    penalty.set(f.category, penalty.get(f.category)! + SEVERITY_WEIGHT[f.severity]);
   }
-  const categories: PolicyCategoryScore[] = CATEGORIES.map((category) => ({
-    category,
-    score: Math.max(0, 100 - penalty.get(category)!),
-    findings: perCategory.get(category)!,
-  }));
-  const score = Math.round(categories.reduce((s, c) => s + c.score, 0) / categories.length);
+  // Evaluated objects per area (non-system) — what the area protects (namespaces, workloads, bindings), plus any object a
+  // finding names (an HPA / VPA / PDB counts only when it is wrong — healthy config objects would dilute the workloads)
+  const refKey = (r: { kind: string; namespace?: string; name: string }) => `${r.kind}/${r.namespace ?? ""}/${r.name}`;
+  const units = new Map<PolicyCategory, Map<string, number>>(CATEGORIES.map((c) => [c, new Map()]));
+  const unit = (c: PolicyCategory, key: string) => { if (!units.get(c)!.has(key)) units.get(c)!.set(key, 1); };
+  const userNs = namespaces.filter((n) => !n.system);
+  const userWl = workloads.filter((w) => !w.system);
+  for (const n of userNs) { unit("psa", refKey({ kind: "Namespace", name: n.name })); unit("networkPolicy", refKey({ kind: "Namespace", name: n.name })); }
+  for (const w of userWl) {
+    const k = refKey({ kind: w.kind, namespace: w.namespace, name: w.name });
+    unit("resources", k);
+    unit("rbac", k);
+    if (w.kind === "Deployment" || w.kind === "StatefulSet") unit("autoscaling", k);
+  }
+  for (const n of userNs) if (n.workloadCount > 0) unit("resources", refKey({ kind: "Namespace", name: n.name }));
+  for (const b of bindings) if (!b.system) unit("rbac", refKey({ kind: b.kind, namespace: b.namespace, name: b.name }));
+  const highIn = new Set<PolicyCategory>();
+  for (const f of findings.items) {
+    if (f.system || f.severity === "info") continue; // info never costs credit (and a cluster-wide note is not an object)
+    const key = f.resource ? refKey(f.resource) : `cluster/${f.ruleId}`;
+    const m = units.get(f.category)!;
+    m.set(key, Math.min(m.get(key) ?? 1, UNIT_CREDIT[f.severity]));
+    if (f.severity === "high") highIn.add(f.category);
+  }
+  const categories: PolicyCategoryScore[] = CATEGORIES.map((category) => {
+    const m = units.get(category)!;
+    const credits = [...m.values()];
+    const raw = credits.length ? Math.round((100 * credits.reduce((a, b) => a + b, 0)) / credits.length) : null;
+    return {
+      category,
+      score: raw === null ? null : highIn.has(category) ? Math.min(raw, HIGH_CAP) : raw,
+      evaluated: credits.length,
+      clean: credits.filter((c) => c === 1).length,
+      ...(highIn.has(category) && raw !== null && raw > HIGH_CAP ? { capped: true } : {}),
+      findings: perCategory.get(category)!,
+    };
+  });
+  const scored = categories.filter((c) => c.score !== null);
+  const score = scored.length ? Math.round(scored.reduce((s, c) => s + c.score!, 0) / scored.length) : null;
 
   const severityOrder: Record<PolicySeverity, number> = { high: 0, medium: 1, low: 2, info: 3 };
   findings.items.sort(

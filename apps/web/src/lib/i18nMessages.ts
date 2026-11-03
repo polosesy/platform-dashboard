@@ -1150,6 +1150,7 @@ const CORE: Translations = {
   "pol.panel.namespaces": { ko: "네임스페이스", en: "Namespaces" },
   "pol.panel.autoscaling": { ko: "오토스케일링·리소스", en: "Autoscaling & resources" },
   "pol.panel.kbom": { ko: "구성 목록 (KBOM)", en: "KBOM" },
+  "pol.panel.managed": { ko: "AKS 관리 부품", en: "AKS managed parts" },
   "pol.azureIdentity": { ko: "Azure 구독의 ID·권한 권고 보기", en: "Azure identity & access findings" },
   "pol.azureExposure": { ko: "Azure 공용 IP·진입점은 인프라 구성도에서", en: "Azure public IPs and entry points in the Infrastructure Diagram" },
 

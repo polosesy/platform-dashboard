@@ -161,8 +161,17 @@ export type WorkloadPolicyCoverage = {
 
 export type PolicyCategoryScore = {
   category: PolicyCategory;
-  /** 0–100, higher is better. */
-  score: number;
+  /**
+   * 0–100 = the share of evaluated objects that are healthy, each credited by its worst finding (none/info 1 · low 0.7 ·
+   * medium 0.3 · high 0), capped at 79 when any high finding exists. null = nothing to evaluate in this area.
+   */
+  score: number | null;
+  /** Objects evaluated (non-system namespaces / workloads / bindings by area, plus objects a finding names) */
+  evaluated: number;
+  /** Of them, with no finding above info */
+  clean: number;
+  /** The high-finding cap lowered the score */
+  capped?: boolean;
   findings: Record<PolicySeverity, number>;
 };
 
@@ -176,7 +185,8 @@ export type KubernetesPolicyResponse = {
     unavailable: string[];
   };
   summary: {
-    score: number;
+    /** Average of the areas that have something to evaluate (null = none) */
+    score: number | null;
     categories: PolicyCategoryScore[];
     findings: Record<PolicySeverity, number>;
     namespaces: number;

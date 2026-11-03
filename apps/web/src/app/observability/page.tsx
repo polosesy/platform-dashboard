@@ -4,12 +4,10 @@ import { useState } from "react";
 import type {
   ObservabilityOverview,
   ObservabilitySourcesResponse,
-  ObservabilityWorkloadsResponse,
   ObservabilityNodesResponse,
 } from "@aud/types";
 import styles from "./styles.module.css";
 import { DataSourceBadges } from "./components/DataSourceBadges";
-import { WorkloadsTab } from "./components/WorkloadsTab";
 import { InfraTab } from "./components/InfraTab";
 import { LogsTab } from "./components/LogsTab";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
@@ -34,18 +32,18 @@ export default function ObservabilityPage() {
   const { clusters, clusterId, setClusterId, loading: clustersLoading } = useAksClusters();
   // Free-text cluster ID (used when the cluster list is unavailable) — committed on blur / Enter
   const [clusterDraft, setClusterDraft] = useState<string | null>(null);
-  const [selectedWorkload, setSelectedWorkload] = useState<string | null>(null);
-  // 워크로드: heatmap (Azure Monitor workspace — every workload) or the list (Container Insights)
-  const [wlView, setWlView] = useState<"heatmap" | "list">("heatmap");
+  // 워크로드: the heatmap's cells as tiles or as a sortable table — one source (the Azure Monitor workspace). The old
+  // Container Insights list is gone: empty whenever the DCR collects only Perf · Syslog, and its pod states repeated
+  // the AKS 클러스터 browser
+  const [wlView, setWlView] = useState<"tiles" | "table">("tiles");
 
   const clusterName = clusters.find((c) => c.id === clusterId)?.name ?? clusterId;
   const query = useApiQuery(clusterId ? `observability:${clusterId}` : null, async (token) => {
-    const [overview, workloads, nodes] = await Promise.all([
+    const [overview, nodes] = await Promise.all([
       fetchJsonWithBearer<ObservabilityOverview>(apiUrl("/api/observability/overview", { clusterId, clusterName }), token),
-      fetchJsonWithBearer<ObservabilityWorkloadsResponse>(apiUrl("/api/observability/workloads", { clusterId }), token),
       fetchJsonWithBearer<ObservabilityNodesResponse>(apiUrl("/api/observability/nodes", { clusterId }), token),
     ]);
-    return { clusterId, overview, workloads, nodes, fetchedAt: new Date() };
+    return { clusterId, overview, nodes, fetchedAt: new Date() };
   });
   // Loki · Tempo · Pyroscope · Grafana: read / link only / blocked (light, separate from the overview)
   const sourcesQ = useApiQuery(clusterId ? `obs-sources:${clusterId}` : null, (token) =>
@@ -55,7 +53,6 @@ export default function ObservabilityPage() {
   // Only show data belonging to the selected cluster
   const current = query.data?.clusterId === clusterId ? query.data : undefined;
   const overview = current?.overview ?? null;
-  const workloadsResp = current?.workloads ?? null;
   const nodesResp = current?.nodes ?? null;
   const loading = query.loading;
   const error = query.error;
@@ -66,19 +63,8 @@ export default function ObservabilityPage() {
     setClusterDraft(null);
   };
 
-  function handleWorkloadSelect(name: string, ns: string) {
-    if (!name) {
-      setSelectedWorkload(null);
-      return;
-    }
-    setSelectedWorkload(`${ns}/${name}`);
-    setTab("overview");
-    setWlView("list");
-  }
-
   const dsStatus =
     overview?.dataSourceStatus ??
-    workloadsResp?.dataSourceStatus ??
     nodesResp?.dataSourceStatus ??
     null;
 
@@ -130,25 +116,16 @@ export default function ObservabilityPage() {
       )}
 
       {/* Tabs */}
-      {clusterId && (overview || workloadsResp || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview") && (
+      {clusterId && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 
           {tab === "overview" && (
             <Segmented label={t("ob.hm.view")} value={wlView} onChange={setWlView}
-              items={[{ id: "heatmap", label: t("ob.hm.view.heatmap") }, { id: "list", label: t("ob.hm.view.list") }]} />
+              items={[{ id: "tiles", label: t("ob.hm.view.heatmap") }, { id: "table", label: t("ob.hm.view.table") }]} />
           )}
 
-          {tab === "overview" && wlView === "heatmap" && <WorkloadHeatmap clusterId={clusterId} />}
-
-          {tab === "overview" && wlView === "list" && workloadsResp && (
-            <WorkloadsTab
-              workloads={workloadsResp.workloads}
-              onWorkloadSelect={handleWorkloadSelect}
-              selectedKey={selectedWorkload}
-              clusterId={clusterId}
-            />
-          )}
+          {tab === "overview" && <WorkloadHeatmap clusterId={clusterId} layout={wlView} />}
 
           {tab === "infra" && <NodeMaintenancePanel clusterId={clusterId} />}
           {tab === "infra" && nodesResp && (

@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-security
-last-verified: 2026-11-02
-covers: [apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
+last-verified: 2026-11-03
+covers: [apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 보안 기능 운영 가이드 — 이슈 목록 · 위험 조합 · 워크로드 ID
 
@@ -215,7 +215,44 @@ AKS가 관리하는 워크로드(kube-system·추가 기능)는 기본으로 빠
 
 **네트워크 정책 탭의 격리 수**도 같은 규칙으로 셉니다 — 관찰용 정책은 표에 **'관찰용 — 차단 안 함 (Egress)'** 배지가 붙고 격리 수에 들어가지 않습니다(2026-10-30 수정 전에는 들어갔음).
 
-## 9. '확인 불가'·비어 보일 때
+## 9. 점수 읽는 법 (AKS 보안 점검 맨 위 카드)
+
+> **5살 비유**: 반 친구 40명 중 숙제를 다 한 친구가 몇 명인지 세는 것과 같아요. 조금 빼먹은 친구는 반쯤, 아예 안 한 친구는 0점. 한 명이라도 크게 빼먹으면 "아주 잘함(초록)"은 못 받아요.
+
+| | 예전 | 지금 (2026-11-03) |
+|---|---|---|
+| 계산 | 영역마다 100점에서 발견 하나마다 높음 10 · 중간 4 · 낮음 1점 빼기 | 영역마다 **점검한 객체 중 건강한 비율** — 객체마다 가장 나쁜 발견으로 문제 없음 1 · 낮음 0.7 · 중간 0.3 · 높음 0 |
+| 높음 | 10점 감점 | 하나라도 있으면 그 영역은 **최대 79점**(초록 80 이상이 되지 않음, 카드에 '높음 → 최대 79') |
+| 점검 대상 없음 | 100점 | **'—'·'점검할 객체 없음'**(종합 평균에서 뺌) |
+| 카드 보조 줄 | — | '문제 없음 n/m'(점검한 객체 m개 중 발견 없는 n개) |
+
+**점검 대상(객체)** — 시스템 객체 제외: Pod Security·네트워크 정책 = 네임스페이스(+ 문제가 있는 정책), RBAC = 바인딩 + 워크로드(ServiceAccount 토큰), 오토스케일링·가용성 = Deployment·StatefulSet(+ 문제가 있는 HPA·VPA·PDB — 건강한 설정 객체는 워크로드 비율을 묽게 하므로 세지 않음), 리소스 = 워크로드 + 워크로드가 있는 네임스페이스.
+
+**왜 바꿨나**: 예전 식은 클러스터 크기와 무관해, 위험 바인딩 9개면 다른 바인딩이 몇백 개여도 RBAC 0점, 규칙이 하나도 안 걸리는 영역은 무엇이 빠졌든 100점이었습니다. stg 실측(2026-11-03): **오토스케일링·가용성 100점 = 레플리카 1개를 보는 규칙이 없었음** — 사용자 워크로드 40개 중 15개가 레플리카 1개(argocd 8·monitoring 5 등), HPA 0개, 레플리카 2개 이상은 모두 PDB·분산 배치가 있었음.
+
+**AVL-001 레플리카 1개** (중간): Deployment·StatefulSet의 최소 파드 수가 1(replicas 1, HPA가 있으면 `minReplicas` 1)이면 재시작·노드 업그레이드·드레인·OOM 동안 서비스가 멈춥니다. replicas 0(일부러 내림)은 제외. 조치 = 2개 이상 + PDB `maxUnavailable: 1` + `topologySpreadConstraints`(hostname). 여러 개로 늘릴 수 없는 단일 인스턴스(StatefulSet DB 등)는 이슈 목록에서 **예외**로 표시합니다(근거: [AKS 안정성 모범 사례](https://learn.microsoft.com/azure/aks/best-practices-app-cluster-reliability)).
+
+## 10. AKS 관리 부품 (AKS 보안 점검 › 인벤토리 › AKS 관리 부품)
+
+> **5살 비유**: 아파트 엘리베이터는 관리실이 고쳐요. 우리는 못 고치고, 게시판에서 "언제 고쳐요?"만 볼 수 있어요. 이 화면이 그 게시판이에요.
+
+ama-logs·ama-metrics·Cilium·CNS·CSI·Defender·Azure Policy·CoreDNS처럼 **AKS가 설치·관리하는 이미지**(`mcr.microsoft.com`, kube-*·aks-*·azure-*·gatekeeper-system 등)는 고객이 패치할 수 없습니다. Microsoft 원칙([Learn](https://learn.microsoft.com/azure/aks/concepts-vulnerability-management)): 벤더 수정이 있는 CVE는 매주 다시 빌드하고, 최신 노드 이미지라면 벤더 수정이 나온 지 30일 넘은 컨테이너 이미지 CVE는 남지 않습니다.
+
+| 판정 | 뜻 | 할 일 |
+|---|---|---|
+| ▲ Microsoft 수정 대기 | Microsoft가 내놓은 **가장 새 태그에도** 남아 있음(대부분 벤더 수정 대기) | 기다림 — KEV면 Azure 지원에 일정 문의 |
+| ↑ 새 태그에서 고쳐짐 | 더 새 태그(스캔 있음)에는 없음 | 다음 AKS 릴리스·추가 기능 업데이트·클러스터 업그레이드로 받음 — 이 리전 도착은 위 '이 리전의 AKS 릴리스' |
+| ? 판정 불가 | 비교할 더 새 태그의 스캔이 아직 없음 | — (깨끗하다는 뜻 아님) |
+| ■ KEV | CISA가 실제 악용을 확인 | Microsoft·Azure 지원에 문의 |
+| 보고서 없음 | 이 태그의 Microsoft 스캔이 없음(최근 스캔보다 새 빌드 — ama-*는 릴리스 사이에 자주 바뀜) | 다음 스캔 뒤 다시 |
+
+**어떻게 판정하나**(`services/aksManagedVulns.ts`): 실행 중인 이미지(파드 `imageID`)마다 [AKS 취약점 데이터 API](https://learn.microsoft.com/azure/aks/security-vulnerability-api-reference)의 `container-images/<이미지>:<태그>/scan-reports`(Microsoft의 trivy 스캔) → 같은 이미지의 더 새 태그(최신 AKS 릴리스·이 리전 릴리스·클러스터 Kubernetes 버전 보고서에서, 새 것부터 스캔이 있는 것 최대 3개 시도)와 CVE 목록 비교. 이미지별 '조치 보고서'(mitigation-reports)는 이미지 하나가 최대 8MB라 쓰지 않습니다. 이 리전의 AKS 릴리스는 [AKS 릴리스 추적](https://releases.aks.azure.com)의 데이터(`parsed_data.json`, 약 25MB — 6시간에 한 번 읽고 작은 값만 보관). 노드 이미지는 노드 라벨 `kubernetes.azure.com/node-image-version` → `vhd-releases/<distro>/<버전>/scan-reports`(OS 패키지 — 커널은 버전만으로 대부분의 커널 CVE와 맞아 숫자가 큼, 한 줄로 묶음). 심각도 = CVE.org, 악용 = CISA KEV. 결과는 30분 캐시(일부 실패·CVE 상세 대기 중이면 2분).
+
+stg 실측(2026-11-03, 리전 릴리스 v20260925 · 최신 v20261025 미도착): 관리 이미지 51개 중 Microsoft 스캔 있음 34개, 서로 다른 CVE 87개 — 새 태그에서 고쳐짐 62·수정 대기 113·판정 불가 40(이미지별 합계), KEV 1. CoreDNS v1.14.7-2의 CVE 28개 중 26개는 v1.14.7-6에서 고쳐짐, Cilium·CNS·Defender는 이미 가장 새 태그(남은 CVE 전부 Microsoft 수정 대기). 노드 이미지 Ubuntu 24.04 202610.23.0 = 이 리전 최신 빌드, CVE 3,254개 중 커널 3,183개.
+
+네트워크: API가 `cve-api.prod-aks.azure.com`·`releases.aks.azure.com`에 GET(Microsoft 이미지 이름만 — 앱 이미지 이름은 보내지 않음). 쿠버네티스 차트는 `features.advisoryFeeds`가 켜져 있으면 두 FQDN을 허용, `AUD_ADVISORY_FEEDS=false`면 이 화면은 '꺼짐'.
+
+## 11. '확인 불가'·비어 보일 때
 
 | 화면 | 원인 | 할 일 |
 |---|---|---|
@@ -229,7 +266,7 @@ AKS가 관리하는 워크로드(kube-system·추가 기능)는 기본으로 빠
 | 배포 출처 없음 | Argo CD 권한 없음 / Argo CD가 관리하지 않는 워크로드 | §6 |
 | 히트맵 '취약 이미지' 열이 없음 | 아무 워크로드에도 치명·높음 결과가 없음(빈 요인 열은 접힘) | '빈 요인 보기' |
 
-## 10. 관련 문서
+## 12. 관련 문서
 
 - [보안 고도화 계획](../architecture/security-roadmap.md) — 설계·단계(P0~P5)·실측
 - [aks.md](../integrations/azure/aks.md) — 클러스터 읽기 권한·WI 점검 표(WI-01~18)

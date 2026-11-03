@@ -7,6 +7,7 @@
 // as a tinted pill for warn/danger. DaemonSets no node matches are hidden by default (one quiet line says how many).
 // Levels come from the API (services/workloadHeatmap.ts, the customer's Grafana container-map thresholds); the view
 // model is lib/workloadHeatView.ts. Clicking a tile opens its pods, Warning events and log stream beside it.
+// layout "table" = the same cells as sortable rows (one request — replaced the Container Insights list).
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } from "@aud/types";
@@ -16,7 +17,8 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
 import {
   GLYPH, SIGNAL_GROUPS, attentionRows, clusterGlance, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
-  legendLevels, levelIn, mosaicColumns, packMosaic, problemSignals, shortName, signalSummary, tileText, type HeatView,
+  legendLevels, levelIn, mosaicColumns, packMosaic, problemSignals, shortName, signalSummary, tableColumns, tableRows, tileText,
+  type HeatView, type TableSort,
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
 import styles from "../styles.module.css";
@@ -68,7 +70,7 @@ function useMosaicColumns() {
   return { ref, cols };
 }
 
-export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
+export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: string; layout?: "tiles" | "table" }) {
   const { t, locale } = useI18n();
   const [win, setWin] = useState<number>(60);
   const [view, setView] = useState<HeatView>("worst");
@@ -77,6 +79,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
   const [showIdle, setShowIdle] = useState(false);
   const [allAttn, setAllAttn] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [sort, setSort] = useState<TableSort>({ by: "worst", dir: "worse" });
   const lastTile = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const mosaic = useMosaicColumns();
@@ -93,6 +96,12 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
   const attn = useMemo(() => attentionRows(ns ? ws.filter((w) => w.namespace === ns) : ws, view), [ws, view, ns]);
   const signals = useMemo(() => (d ? signalSummary(d.flags, ws) : null), [d, ws]);
   const glance = useMemo(() => clusterGlance(ws), [ws]);
+  const cols = useMemo(() => tableColumns(ws), [ws]);
+  const rows = useMemo(() => (layout === "table" ? tableRows(ws, view, sort, { namespace: ns || undefined, problemsOnly, hideIdle: !showIdle }) : []),
+    [layout, ws, view, sort, ns, problemsOnly, showIdle]);
+  const sortBy = (by: HeatView) => setSort(sort.by === by ? { by, dir: sort.dir === "worse" ? "better" : "worse" } : { by, dir: "worse" });
+  const sortMark = (by: HeatView) => (sort.by === by ? (sort.dir === "worse" ? " ▼" : " ▲") : "");
+  const ariaSort = (by: HeatView) => (sort.by === by ? (sort.dir === "worse" ? "descending" : "ascending") : "none");
   const sel = ws.find((w) => heatKey(w) === selected) ?? null;
 
   const open = (w: HeatWorkload, from: HTMLElement) => {
@@ -246,6 +255,57 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
       <div className={styles.hmLayout} data-open={!!sel || undefined}>
         <div className={styles.hmMain}>
           <div className={styles.hmSurface}>
+          {layout === "table" ? (
+            rows.length === 0 ? <EmptyState title={problemsOnly ? t("ob.hm.problemsOnlyEmpty") : t("ob.hm.empty")} /> : (
+              <div className={styles.hmTableWrap}>
+                <table className={styles.hmTable}>
+                  <caption className={styles.srOnly}>{t("ob.hm.tableCaption", { n: rows.length })}</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">{t("ob.hm.col.workload")}</th>
+                      <th scope="col" aria-sort={ariaSort("worst")}>
+                        <button type="button" onClick={() => sortBy("worst")}>{t("ob.hm.metric.worst")}{sortMark("worst")}</button>
+                      </th>
+                      {cols.map((m) => (
+                        <th key={m} scope="col" aria-sort={ariaSort(m)} data-active={view === m || undefined}>
+                          <button type="button" title={t(`ob.hm.metric.${m}`)} onClick={() => sortBy(m)}>{t(`ob.hm.short.${m}`)}{sortMark(m)}</button>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((w) => {
+                      const k = heatKey(w);
+                      const probs = problemSignals(w);
+                      return (
+                        <tr key={k} data-level={w.worst} aria-selected={selected === k}>
+                          <th scope="row">
+                            <button type="button" className={styles.hmRowName} onClick={(e) => open(w, e.currentTarget)} title={`${k}
+${t("ob.hm.tileHint")}`}>
+                              <span className={styles.hmRowNs}>{w.namespace}</span> <strong>{w.workload}</strong>
+                              {w.kind ? <span className={styles.hmRowKind}> · {w.kind}</span> : null}
+                            </button>
+                          </th>
+                          <td data-level={w.worst}>
+                            <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[w.worst]}</span> {t(`ob.hm.level.${w.worst}`)}
+                            {probs.length > 1 ? <span className={styles.hmTileMore}> ×{probs.length}</span> : null}
+                          </td>
+                          {cols.map((m) => {
+                            const lv = w.cells[m].level;
+                            return (
+                              <td key={m} data-level={lv}>
+                                <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[lv]}</span> {formatCell(m, w, t)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
           <div ref={mosaic.ref} className={styles.hmGroups} style={{ "--hm-cols": mosaic.cols } as CSSProperties}>
             {groups.length === 0 && <div className={styles.hmEmpty}><EmptyState title={problemsOnly ? t("ob.hm.problemsOnlyEmpty") : t("ob.hm.empty")} /></div>}
             {groups.map((g, gi) => {
@@ -293,6 +353,7 @@ export function WorkloadHeatmap({ clusterId }: { clusterId: string }) {
               );
             })}
           </div>
+          )}
           {idleCount > 0 && (
             <p className={styles.hmIdle}>
               <span className={styles.hmGlyph} aria-hidden="true">{GLYPH.stopped}</span>{" "}

@@ -22,6 +22,7 @@ import { PermissionMatrix } from "./insights/PermissionMatrix";
 import { KbomPanel } from "./insights/KbomPanel";
 import { ExplorePanel } from "./insights/ExplorePanel";
 import { WorkloadIdentityPanel } from "./insights/WorkloadIdentityPanel";
+import { ManagedComponentsPanel } from "./components/ManagedComponentsPanel";
 import type { HeatSel } from "./insights/RiskHeatmap";
 import type { InsightsNav } from "./insights/model";
 import insightStyles from "./insights/insights.module.css";
@@ -167,7 +168,7 @@ function Policies() {
           <div className={styles.scoreStrip}>
             <button className={`${styles.scoreCard} ${category === "all" && tab === "findings" ? styles.scoreCardActive : ""}`} onClick={() => openCategory("all")}>
               <div className={styles.scoreLabel}>{t("polc.page.overall")}</div>
-              <div className={`${styles.scoreValue} ${scoreClass(data.summary.score)}`}>{data.summary.score}</div>
+              <div className={`${styles.scoreValue} ${scoreClass(data.summary.score)}`}>{data.summary.score ?? "—"}</div>
               <div className={styles.scoreCounts}>
                 {SEVERITIES.map((s) => (
                   <SeverityBadge key={s} severity={s} count={data.summary.findings[s]} />
@@ -179,9 +180,14 @@ function Policies() {
                 key={c.category}
                 className={`${styles.scoreCard} ${category === c.category && tab === "findings" ? styles.scoreCardActive : ""}`}
                 onClick={() => openCategory(c.category)}
+                title={c.evaluated ? t("polc.page.basisTip", { clean: c.clean, n: c.evaluated }) + (c.capped ? `
+${t("polc.page.capped")}` : "") : t("polc.page.noUnits")}
               >
                 <div className={styles.scoreLabel}>{categoryLabel(t, c.category)}</div>
-                <div className={`${styles.scoreValue} ${scoreClass(c.score)}`}>{c.score}</div>
+                <div className={styles.scoreValueRow}>
+                  <span className={`${styles.scoreValue} ${scoreClass(c.score)}`}>{c.score ?? "—"}</span>
+                  <span className={styles.scoreBasis}>{c.evaluated ? t("polc.page.basis", { clean: c.clean, n: c.evaluated }) : t("polc.page.noUnits")}{c.capped ? " · " + t("polc.page.cappedShort") : ""}</span>
+                </div>
                 <div className={styles.scoreCounts}>
                   {SEVERITIES.filter((s) => c.findings[s] > 0).map((s) => (
                     <SeverityBadge key={s} severity={s} count={c.findings[s]} />
@@ -247,6 +253,7 @@ function Policies() {
           {tab === "permissions" && insights && (
             <div className={insightStyles.root}><PermissionMatrix data={insights} nav={nav} /></div>
           )}
+          {tab === "managed" && clusterId && <ManagedComponentsPanel clusterId={clusterId} />}
           {tab === "kbom" && insights && (
             <div className={insightStyles.root}><KbomPanel data={insights} /></div>
           )}

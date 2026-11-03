@@ -107,6 +107,8 @@
 .scoreWarn { color: var(--warning); }
 .scoreBad { color: var(--danger); }
 
+.scoreValueRow { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.scoreBasis { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .scoreCounts {
   display: flex;
   gap: 4px;
@@ -452,3 +454,41 @@
   .npArrow { transform: rotate(90deg); }
 }
 @media (max-width: 960px) { .npGrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* AKS 관리 부품 — platform status grammar: ▲ warn (Microsoft has not fixed it) · ↑ info (fixed in a newer tag) ·
+   ? unknown (dashed, neutral) · ■ danger (exploited — KEV) */
+.mgRoot { display: grid; gap: 12px; min-width: 0; }
+.mgRoot [data-level="warn"] { --mg: var(--warning); --mg-rgb: var(--warning-rgb); }
+.mgRoot [data-level="info"] { --mg: var(--accent); --mg-rgb: var(--accent-rgb); }
+.mgRoot [data-level="danger"] { --mg: var(--danger); --mg-rgb: var(--danger-rgb); }
+.mgRoot [data-level="unknown"] { --mg: var(--muted); --mg-rgb: var(--ink-rgb); }
+.mgStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); grid-auto-rows: 1fr; gap: 10px; }
+.mgLegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.mgLegend strong { color: var(--ink); font-weight: 600; }
+.mgGlyph { color: var(--mg); font-weight: 700; display: inline-block; min-width: 1em; text-align: center; }
+.mgTableWrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel-solid); }
+.mgTable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mgTable thead th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mgTable tbody th, .mgTable tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; font-weight: 400; vertical-align: top; }
+.mgTable tbody tr[data-open] > * { background: rgba(var(--accent-rgb), 0.05); }
+.mgFamily th { background: var(--panel-sunken); font-weight: 700 !important; }
+.mgFamily th > * { margin-left: 8px; }
+.mgNotes { font-weight: 400; font-size: 11px; }
+.mgName { all: unset; cursor: pointer; white-space: nowrap; }
+.mgName:disabled { cursor: default; }
+.mgName:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mgWhere { color: var(--muted); max-width: 320px; overflow-wrap: anywhere; }
+.mgCounts { display: inline-flex; gap: 4px; flex-wrap: wrap; vertical-align: middle; }
+.mgPill {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: var(--mg); background: rgba(var(--mg-rgb), 0.10); border: 1px solid rgba(var(--mg-rgb), 0.35);
+}
+.mgPill[data-level="unknown"] { border-style: dashed; background: transparent; }
+.mgCves ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 16px; }
+.mgCves li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.mgCves li[data-level="danger"] a { color: var(--danger); font-weight: 700; }
+.mgNodes { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; background: var(--panel-solid); display: grid; gap: 10px; }
+.mgNodes h4 { margin: 0; font-size: 13px; }
+.mgNode p { margin: 4px 0 0; font-size: 12px; }
+.mgTop { margin: 6px 0 0; padding-left: 18px; font-size: 12px; columns: 2 280px; }
+.mgRoot .srOnly, .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -166,6 +166,17 @@ const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * What the azure-workload-identity webhook injected into a running pod — only the token file variable's name and the
  * client / tenant GUIDs are kept; no other environment variable (names or values) leaves this function.
  */
+/** Running images from Microsoft's registry with their digest (imageID "…@sha256:…") — the AKS managed parts */
+export function mcrImages(statuses: Array<{ name: string; image?: string; imageID?: string }>): { mcr?: { container: string; image: string; digest?: string }[] } {
+  const out = statuses
+    .filter((s) => (s.image ?? "").startsWith("mcr.microsoft.com/"))
+    .map((s) => {
+      const d = /@(sha256:[0-9a-f]{64})$/.exec(s.imageID ?? "")?.[1];
+      return { container: s.name, image: s.image!, ...(d ? { digest: d } : {}) };
+    });
+  return out.length ? { mcr: out } : {};
+}
+
 export function wiTraces(containers: Array<{ env?: Array<{ name: string; value?: string }> }>): { wi?: { tokenFile: boolean; clientId?: string; tenantId?: string } } {
   let tokenFile = false;
   let clientId: string | undefined, tenantId: string | undefined;
@@ -291,6 +302,7 @@ export async function collectPolicyInventory(
       ...(p.spec?.nodeName ? { nodeName: p.spec.nodeName } : {}),
       ...(p.spec?.serviceAccountName ? { serviceAccountName: p.spec.serviceAccountName } : {}),
       ...wiTraces(p.spec?.containers ?? []),
+      ...mcrImages([...(p.status?.containerStatuses ?? []), ...(p.status?.initContainerStatuses ?? [])]),
     })),
     workloads: [
       ...deployments.items.map((d) => toWorkload("Deployment", d)),

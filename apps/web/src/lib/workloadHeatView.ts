@@ -115,6 +115,30 @@ export function groupByNamespace(ws: HeatWorkload[], view: HeatView, opts: { nam
     b.workloads.length - a.workloads.length || cmp(a.namespace, b.namespace));
 }
 
+/**
+ * 표 보기 — the heatmap's own cells as rows (same request, same levels; replaced the Container Insights list, which was
+ * empty whenever the DCR collected only Perf · Syslog). Columns = signals at least one workload measures (a column of
+ * '미측정'/'계측 안 됨' only is noise); sort = that column's level, then its value (worse first — lower for JVM headroom),
+ * then namespace/name. `by` "worst" sorts by the row's worst level and its problem count.
+ */
+export type TableSort = { by: HeatView; dir: "worse" | "better" };
+
+export function tableColumns(ws: HeatWorkload[]): HeatMetric[] {
+  return HEAT_METRICS.filter((m) => ws.some((w) => w.cells[m].level !== "notMeasured" && w.cells[m].level !== "notInstrumented"));
+}
+
+export function tableRows(ws: HeatWorkload[], view: HeatView, sort: TableSort, opts: { namespace?: string; problemsOnly?: boolean; hideIdle?: boolean } = {}): HeatWorkload[] {
+  const rows = ws.filter((w) => (!opts.namespace || w.namespace === opts.namespace) && !(opts.hideIdle && isIdle(w)) && !(opts.problemsOnly && !isProblem(levelIn(w, view))));
+  const worse = (a: HeatWorkload, b: HeatWorkload): number => {
+    if (sort.by === "worst") return LEVEL_RANK[a.worst] - LEVEL_RANK[b.worst] || problemSignals(b).length - problemSignals(a).length;
+    const ca = a.cells[sort.by], cb = b.cells[sort.by];
+    const sign = sort.by === "jvmHeadroom" ? -1 : 1;
+    // a measured value sorts before a missing one at the same level
+    return LEVEL_RANK[ca.level] - LEVEL_RANK[cb.level] || Number(ca.value === null) - Number(cb.value === null) || ((cb.value ?? 0) - (ca.value ?? 0)) * sign;
+  };
+  return [...rows].sort((a, b) => (sort.dir === "worse" ? worse(a, b) : -worse(a, b)) || cmp(heatKey(a), heatKey(b)));
+}
+
 export type AttentionRow = { w: HeatWorkload; level: "danger" | "warn"; signals: HeatMetric[] };
 
 /** "주의 필요" list: danger first, then more problem signals, then (one signal) the higher value, then ns/name */

@@ -4,6 +4,7 @@ import type { KubernetesClusterInfo } from "@aud/types";
 import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes.js";
 import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
+import { collectAksManagedVulns } from "../services/aksManagedVulns.js";
 import { collectWorkloadIdentity } from "../services/workloadIdentityCollector.js";
 import { queryLang } from "../infra/lang.js";
 import { assertArmResourceId, isSigninRequired, queryArmResourceId, querySubscriptionId, respondWithFallback, sendError, upstreamError } from "../infra/requestParams.js";
@@ -71,6 +72,17 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
       res.json(await collectPolicyInsights(env, req.auth?.bearerToken, clusterId, queryLang(req)));
     } catch (e: unknown) {
       sendError(res, e, "policy_insights_failed", "kubernetes");
+    }
+  });
+
+  // AKS managed parts (ama · Cilium/CNS · CSI · Defender · CoreDNS …): Microsoft's own CVE scan of each running image vs
+  // the newest tag it ships, and the AKS release this region runs (public AKS sources — services/aksManagedVulns.ts)
+  router.get("/api/kubernetes/policies/managed-components", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await collectAksManagedVulns(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      sendError(res, e, "aks_managed_failed", "kubernetes");
     }
   });
 

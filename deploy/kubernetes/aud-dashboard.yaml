@@ -257,6 +257,8 @@ spec:
         - matchName: www.php.net
         - matchName: cveawg.mitre.org                   # CVE.org (CVE Services) records
         - matchName: api.osv.dev                        # OSV — exact-version match of the package list
+        - matchName: cve-api.prod-aks.azure.com         # AKS 관리 부품 — Microsoft's CVE scan per AKS image / release
+        - matchName: releases.aks.azure.com             # AKS release tracker (the release each region runs)
       toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
 ---
 apiVersion: gateway.networking.k8s.io/v1

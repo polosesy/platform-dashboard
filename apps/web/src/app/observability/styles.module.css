@@ -862,3 +862,31 @@
 .mono { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
 .stackReady { font-size: 12px; overflow-wrap: anywhere; }
 .nmDetails th, .nmDetails td { text-align: left !important; vertical-align: top; }
+
+/* Workload table — the heatmap cells as rows (same glyph + status colour, no horizontal page scroll: the box scrolls) */
+.hmTableWrap { overflow: auto; max-height: 70vh; border-radius: var(--radius-md); margin-bottom: 10px; background: var(--panel-solid); }
+.hmTable { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hmTable thead th {
+  position: sticky; top: 0; z-index: 1; background: var(--panel-solid); text-align: left; font-weight: 600; white-space: nowrap;
+  border-bottom: 1px solid var(--border); padding: 0;
+}
+.hmTable thead th button {
+  all: unset; cursor: pointer; display: block; padding: 8px 10px; color: var(--muted);
+}
+.hmTable thead th[aria-sort="ascending"] button, .hmTable thead th[aria-sort="descending"] button, .hmTable thead th[data-active] button { color: var(--ink); }
+.hmTable thead th button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hmTable thead th:first-child { padding: 8px 10px; left: 0; z-index: 2; }
+.hmTable tbody th, .hmTable tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; text-align: left; font-weight: 400; }
+.hmTable tbody th { position: sticky; left: 0; background: var(--panel-solid); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.hmTable tbody tr[data-level="danger"] th { box-shadow: inset 3px 0 0 var(--danger); }
+.hmTable tbody tr[data-level="warn"] th { box-shadow: inset 3px 0 0 var(--warning); }
+.hmTable tbody tr[aria-selected="true"] th, .hmTable tbody tr[aria-selected="true"] td { background: linear-gradient(rgba(var(--accent-rgb), 0.08), rgba(var(--accent-rgb), 0.08)), var(--panel-solid); }
+.hmTable tbody tr:hover th { background: linear-gradient(var(--panel-sunken), var(--panel-sunken)), var(--panel-solid); }
+.hmTable tbody tr:hover td { background-color: var(--panel-sunken); }
+.hmTable td .hmGlyph { color: var(--status); }
+.hmTable td[data-level="warn"], .hmTable td[data-level="danger"] { background: rgba(var(--status-rgb), 0.10); font-weight: 600; }
+.hmTable td[data-level="danger"] { color: var(--danger); }
+.hmTable td[data-level="stopped"], .hmTable td[data-level="noTraffic"], .hmTable td[data-level="notInstrumented"], .hmTable td[data-level="notMeasured"] { color: var(--muted); }
+.hmRowName { all: unset; cursor: pointer; display: block; overflow: hidden; text-overflow: ellipsis; }
+.hmRowName:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hmRowNs, .hmRowKind { color: var(--muted); }

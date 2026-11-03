@@ -69,7 +69,8 @@ export function CoverageBar({ covered, total, label }: { covered: number; total:
   );
 }
 
-export function scoreClass(score: number): string {
+export function scoreClass(score: number | null): string {
+  if (score === null) return styles.muted;
   return score >= 80 ? styles.scoreGood : score >= 50 ? styles.scoreWarn : styles.scoreBad;
 }
 
