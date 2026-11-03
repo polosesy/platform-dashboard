@@ -34,6 +34,9 @@ q() { "$@" | tr -d '\r'; }                      # az on Windows ends tsv lines w
 open_port() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 wait_port() {
   for _ in $(seq 1 30); do open_port "$1" && return 0; ping -n 2 127.0.0.1 >/dev/null; done
+  # conditional access ends the az sign-in after a few hours — say so instead of "see the log"
+  grep -q "AADSTS70043\|AADSTS50173\|az login" "$WORK/$2" 2>/dev/null &&
+    { echo "the Azure sign-in expired — run 'az login', then connect again"; exit 1; }
   echo "port $1 did not open — see $WORK/$2"; exit 1
 }
 subscription() {
