@@ -67,14 +67,17 @@ tunnels() {   # $1 = connect | check
 
   pids=()
   trap close_all EXIT INT TERM
-  echo "1/3 Bastion → jumpbox"
-  az network bastion tunnel -n "$BAS" -g "$BAS_RG" --subscription "$SUB" --target-resource-id "$VM_ID" \
-    --resource-port 22 --port 2222 >"$WORK/bastion.log" 2>&1 & pids+=($!)
-  wait_port 2222 bastion.log
-  echo "2/3 jumpbox → API server (Entra SSH)"
-  az ssh vm --ip 127.0.0.1 --port 2222 -- -N -o StrictHostKeyChecking=accept-new \
-    -o UserKnownHostsFile="$WORK/known_hosts" -o ServerAliveInterval=30 -L "8443:$PEIP:443" >"$WORK/ssh.log" 2>&1 & pids+=($!)
-  wait_port 8443 ssh.log
+  legs() {
+    echo "1/3 Bastion → jumpbox"
+    az network bastion tunnel -n "$BAS" -g "$BAS_RG" --subscription "$SUB" --target-resource-id "$VM_ID" \
+      --resource-port 22 --port 2222 >"$WORK/bastion.log" 2>&1 & pids+=($!)
+    wait_port 2222 bastion.log
+    echo "2/3 jumpbox → API server (Entra SSH)"
+    az ssh vm --ip 127.0.0.1 --port 2222 -- -N -o StrictHostKeyChecking=accept-new \
+      -o UserKnownHostsFile="$WORK/known_hosts" -o ServerAliveInterval=30 -L "8443:$PEIP:443" >"$WORK/ssh.log" 2>&1 & pids+=($!)
+    wait_port 8443 ssh.log
+  }
+  legs
   export KUBECONFIG="$WORK/kubeconfig"
   az aks get-credentials -g "$RG" -n "$AKS" --subscription "$SUB" --file "$KUBECONFIG" --overwrite-existing >/dev/null
   kubelogin convert-kubeconfig -l azurecli --kubeconfig "$KUBECONFIG"
@@ -86,8 +89,20 @@ tunnels() {   # $1 = connect | check
     echo "3/3 /readyz: $(curl -fsS "http://127.0.0.1:$LOCAL_PORT/readyz")"
     return
   fi
-  echo "3/3 open http://localhost:$LOCAL_PORT  (Ctrl-C closes the tunnels)"
-  kubectl -n "$NS" port-forward svc/aud-dashboard "$LOCAL_PORT:80"
+  # Bastion resets the SSH session now and then (ssh.log "client_loop: send disconnect: Connection reset") and every
+  # leg after it falls with it ("lost connection to pod") → reopen the whole chain; stop after 5 quick failures in a row
+  local fails=0 t0
+  while :; do
+    echo "3/3 open http://localhost:$LOCAL_PORT  (Ctrl-C closes the tunnels)"
+    t0=$SECONDS
+    kubectl -n "$NS" port-forward svc/aud-dashboard "$LOCAL_PORT:80" || true
+    [ $((SECONDS - t0)) -lt 60 ] && fails=$((fails + 1)) || fails=0
+    [ "$fails" -ge 5 ] && { echo "the tunnel keeps dropping — see $WORK/ssh.log, $WORK/bastion.log"; exit 1; }
+    echo "tunnel dropped ($(tail -1 "$WORK/ssh.log" | tr -d '\r')) — reopening"
+    close_all; pids=()
+    ping -n 4 127.0.0.1 >/dev/null
+    legs
+  done
 }
 
 cleanup() {   # order: cluster objects → role assignments → federated credential → identity → test image repository
