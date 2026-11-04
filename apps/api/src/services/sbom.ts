@@ -1,5 +1,6 @@
 // What we run, as package coordinates an advisory database understands (OSV ecosystems):
-//   platform — the npm packages actually deployed with this dashboard (node_modules of the API and the web bundle),
+//   platform — the npm packages actually deployed with this dashboard (node_modules of the API and the web bundle, and
+//              the Node.js runtime's own global packages such as npm),
 //              the OS packages of its image (dpkg / apk database)
 //   cluster  — the Kubernetes server version and well-known open-source images (tag → Go module + version)
 // Parsers are pure; reading the files happens once per process (the image does not change while it runs).
@@ -90,6 +91,19 @@ export function nodeModuleRoots(from: string): Array<{ dir: string; label: "API"
   return roots;
 }
 
+/**
+ * The Node.js runtime's own global packages (<prefix>/lib/node_modules next to <prefix>/bin/node — npm · corepack in a
+ * Docker Hub Node image). They never run here but are in the image, so image scanners report them: Defender found npm's
+ * minimatch / brace-expansion in this image (2026-11-04) while this SBOM read only the app's node_modules. The image
+ * removes them now; reading the root keeps both views equal if a base image brings them back. Windows: null.
+ */
+export function runtimeModuleRoot(execPath: string): string | null {
+  const bin = dirname(execPath);
+  if (!/[\\/]bin$/.test(bin)) return null;
+  const dir = join(dirname(bin), "lib", "node_modules");
+  return existsSync(dir) ? dir : null;
+}
+
 let platformCache: { entries: SbomEntry[]; os: string | null } | null = null;
 
 /** The platform's own SBOM (read once — the image doesn't change while it runs) */
@@ -97,6 +111,8 @@ export function platformSbom(): { entries: SbomEntry[]; os: string | null } {
   if (platformCache) return platformCache;
   const acc = new Map<string, SbomEntry>();
   for (const r of nodeModuleRoots(dirname(fileURLToPath(import.meta.url)))) scanNodeModules(r.dir, r.label, acc);
+  const runtime = runtimeModuleRoot(process.execPath);
+  if (runtime) scanNodeModules(runtime, "Node.js", acc);
   let os: string | null = null;
   try { os = osEcosystem(readFileSync("/etc/os-release", "utf8")); } catch { /* not Linux (local Windows dev) */ }
   if (os?.startsWith("Debian")) {

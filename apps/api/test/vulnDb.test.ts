@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DependencyFinding } from "@aud/types";
-import { clusterSbom, imageCoord, osEcosystem, parseApkInstalled, parseDpkgStatus, scanNodeModules } from "../src/services/sbom.js";
+import { clusterSbom, imageCoord, osEcosystem, parseApkInstalled, parseDpkgStatus, runtimeModuleRoot, scanNodeModules } from "../src/services/sbom.js";
 import { compareDebian, compareSemverish, fixedFor, parseCveRecord, parseOsvVuln } from "../src/services/vulnDb.js";
 import { fetchOfficial } from "../src/services/advisoryFeeds.js";
 import * as av from "../../web/src/lib/advisoryView.ts";
@@ -34,6 +34,20 @@ test("SBOM: deployed node_modules — scoped and nested packages, components mer
   scanNodeModules(root, "web", acc);
   assert.deepEqual([...acc.keys()].sort(), ["@azure/identity@4.14.0", "next@16.4.2", "qs@6.15.4"]);
   assert.deepEqual(acc.get("next@16.4.2")!.components, ["API", "web"]);
+});
+
+test("SBOM: the Node.js runtime's global packages (npm inside a Node image) — <prefix>/lib/node_modules next to bin/node", () => {
+  const prefix = mkdtempSync(join(tmpdir(), "aud-node-"));
+  mkdirSync(join(prefix, "bin"));
+  assert.equal(runtimeModuleRoot(join(prefix, "bin", "node")), null, "no global packages (the image removed them)");
+  const npm = join(prefix, "lib", "node_modules", "npm");
+  mkdirSync(join(npm, "node_modules", "minimatch"), { recursive: true });
+  writeFileSync(join(npm, "package.json"), JSON.stringify({ name: "npm", version: "11.6.2" }));
+  writeFileSync(join(npm, "node_modules", "minimatch", "package.json"), JSON.stringify({ name: "minimatch", version: "10.2.5" }));
+  const root = runtimeModuleRoot(join(prefix, "bin", "node"))!;
+  assert.equal(root, join(prefix, "lib", "node_modules"));
+  assert.deepEqual([...scanNodeModules(root, "Node.js").keys()].sort(), ["minimatch@10.2.5", "npm@11.6.2"], "bundled dependencies are what scanners report");
+  assert.equal(runtimeModuleRoot(join(prefix, "node.exe")), null, "Windows layout — no bin/ parent");
 });
 
 test("cluster: known open-source images map to Go modules (/vN for N >= 2); app images are never guessed", () => {
