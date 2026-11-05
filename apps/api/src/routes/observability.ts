@@ -8,6 +8,7 @@ import {
 } from "../services/observabilityAggregator.js";
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
 import { getObservabilityStack } from "../services/observabilityStack.js";
+import { getWorkloadSlo } from "../services/workloadSlo.js";
 import { NODE_MAINT_MAX_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
@@ -137,6 +138,16 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_stack_failed", "observability");
+    }
+  });
+
+  // Service SLO / SLI from Micrometer HTTP metrics: error budget, burn-rate alerts, the URIs that spent it
+  router.get("/api/observability/slo", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getWorkloadSlo(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_slo_failed", "observability");
     }
   });
 

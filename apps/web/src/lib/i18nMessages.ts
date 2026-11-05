@@ -946,6 +946,7 @@ const CORE: Translations = {
   "hub.pickClusterHint": { ko: "AKS 클러스터를 선택하면 Hubble 네트워크 데이터를 조회합니다.", en: "Pick an AKS cluster to load Hubble network data." },
   "obs.pickClusterHint": { ko: "AKS 클러스터를 선택하면 워크로드와 노드 데이터를 불러옵니다.", en: "Pick an AKS cluster to load workloads and nodes." },
   "obs.tab.overview": { ko: "클러스터 · 워크로드", en: "Cluster · workloads" },
+  "obs.tab.slo": { ko: "SLO", en: "SLO" },
   "obs.tab.infra": { ko: "노드", en: "Nodes" },
   "obs.tab.logs": { ko: "로그", en: "Logs" },
   "obs.tab.hubble": { ko: "네트워크 (Hubble)", en: "Network (Hubble)" },

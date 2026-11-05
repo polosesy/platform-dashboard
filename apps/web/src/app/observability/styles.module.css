@@ -890,3 +890,52 @@
 .hmRowName { all: unset; cursor: pointer; display: block; overflow: hidden; text-overflow: ellipsis; }
 .hmRowName:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hmRowNs, .hmRowKind { color: var(--muted); }
+
+/* ── SLO (SloTab) — platform state grammar: left strip + glyph, ● ok · ▲ warn · ■ danger · ○ not judged · ? failed ── */
+.slo { display: grid; gap: 14px; min-width: 0; }
+.sloFilters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.sloGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; align-items: start; }
+.sloCard {
+  display: grid; gap: 10px; min-width: 0; padding: 12px 14px 12px 16px;
+  border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
+}
+.sloCard[data-level="danger"] { border-left-color: var(--danger); }
+.sloCard[data-level="warn"] { border-left-color: var(--warning); }
+.sloCard[data-level="ok"] { border-left-color: var(--success); }
+.sloCard[data-level="unknown"] { border-left-style: dashed; }
+.sloSli { display: grid; gap: 4px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.sloSliHead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
+.sloSliName { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sloSli[data-level="danger"] .sloSliName { color: var(--danger); }
+.sloSli[data-level="warn"] .sloSliName { color: var(--warning); }
+.sloVal { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sloTarget { font-size: 12px; }
+.sloBar { height: 8px; border-radius: 4px; background: rgba(var(--ink-rgb), 0.08); overflow: hidden; }
+.sloBar span { display: block; height: 100%; border-radius: 4px; background: var(--success); }
+.sloSli[data-level="warn"] .sloBar span { background: var(--warning); }
+.sloSli[data-level="danger"] .sloBar span, .sloBar span[data-over] { background: var(--danger); }
+.sloSli[data-level="neutral"] .sloBar span, .sloSli[data-level="unknown"] .sloBar span { background: var(--muted); }
+.sloFoot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; font-size: 12px; color: var(--muted); }
+.sloChips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sloChip {
+  padding: 1px 6px; border: 1px solid var(--border); border-radius: 10px; font-size: 11px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.sloChip[data-level="danger"] { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.5); background: rgba(var(--danger-rgb), 0.08); }
+.sloChip[data-level="warn"] { color: var(--warning); border-color: rgba(var(--warning-rgb), 0.5); background: rgba(var(--warning-rgb), 0.08); }
+.sloChip[data-level="unknown"] { border-style: dashed; }
+.sloAdvice { display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(var(--accent-rgb), 0.06); font-size: 12px; }
+.sloAdvice ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.sloAdviceTitle { font-weight: 700; }
+.sloDetails { font-size: 12px; min-width: 0; }
+.sloDetails summary { cursor: pointer; color: var(--accent); }
+.sloDetail { display: grid; gap: 6px; margin-top: 8px; min-width: 0; }
+.sloDetail h4 { margin: 4px 0 0; font-size: 13px; }
+.sloUri { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sloExpr { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.sloPre { margin: 6px 0 0; padding: 8px; border-radius: var(--radius-sm); background: rgba(var(--ink-rgb), 0.05); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sloExplain { font-size: 13px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.sloExplain summary { cursor: pointer; font-weight: 600; }
+.sloExplain dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 10px 0 0; }
+.sloExplain dt { font-weight: 700; }
+.sloExplain dd { margin: 0; }

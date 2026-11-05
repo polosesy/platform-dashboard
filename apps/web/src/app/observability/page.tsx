@@ -15,6 +15,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { HubbleTab } from "./components/HubbleTab";
 import { StackTab } from "./components/StackTab";
+import { SloTab } from "./components/SloTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
@@ -23,9 +24,9 @@ import { useTimeRange } from "@/lib/useTimeRange";
 
 // Five places, heatmap first (Datadog's Kubernetes overview): the cluster at a glance + every workload as a tile, then
 // nodes, logs, the network (Hubble) and whether the collection pipeline itself is healthy
-type Tab = "overview" | "infra" | "logs" | "hubble" | "stack";
+type Tab = "overview" | "slo" | "infra" | "logs" | "hubble" | "stack";
 
-const TABS: Tab[] = ["overview", "infra", "logs", "hubble", "stack"];
+const TABS: Tab[] = ["overview", "slo", "infra", "logs", "hubble", "stack"];
 
 export default function ObservabilityPage() {
   return (
@@ -134,7 +135,7 @@ function ObservabilityView() {
       )}
 
       {/* Tabs */}
-      {clusterId && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview") && (
+      {clusterId && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview" || tab === "slo") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 
@@ -145,6 +146,7 @@ function ObservabilityView() {
 
           {tab === "overview" && <WorkloadHeatmap clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
 
+          {tab === "slo" && <SloTab clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && <NodeMaintenancePanel clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && nodesResp && (
             <InfraTab nodes={nodesResp.nodes} past={time.range.to !== null} />

@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-05
-covers: [apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -137,6 +137,25 @@ Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`T
 - stg 실측: 10-09 17:00Z Kubernetes 1.36.2→1.36.4(클러스터 자동 창, 둘째 토요일), 10-23 17:00–17:49Z 노드 이미지 202609.15→202610.08(노드 OS 창, 넷째 토요일 02:00 KST) — 임시 노드 4, 재등록 5, 커널 6.8.0-1067→1070, 다음 창 11-28 02:00 KST.
 - 30일은 Activity Log가 길어(3,282건/17쪽) 기간을 조각내 동시에 읽고, 쪽 제한에 걸리면 '일부만 읽음'.
 
+## 3c. SLO · SLI (AKS 모니터링 › SLO)
+
+`GET /api/observability/slo?clusterId=[&at=<epoch 초>]` → `services/workloadSlo.ts`(순수 `aggregateSlo`) → 웹 `SloTab` + `lib/sloView.ts`
+
+| 무엇 | 어떻게 |
+|---|---|
+| SLI 출처 | Micrometer `http_server_requests_seconds`(Spring) — `/actuator` 제외. **spanmetrics는 안 씀**: 2026-11-05 다시 재 보니 `traces_spanmetrics_calls_total`이 10분에 1,270번 리셋(시계열 732개 — 같은 시계열에 쓰는 곳 둘), Micrometer는 1시간 리셋 0·30일 보관 |
+| 가용성 | 5xx로 답하지 않은 요청 / 전체 |
+| 지연 | 기준 이하 **버킷 경계** 안에 끝난 요청 / 전체(1xx 제외, 보간 없음 — 실제로 센 경계를 표시, 기준이 경계가 아니면 '경계 추가' 안내). stg는 `slo` 버킷 0.1·0.3·0.5·1·3초가 정확히 있음 |
+| 목표 | 연결 파일 `slo`(서비스별 > 위) 또는 기본값 99.9% / 99% ≤ 1초 — 기본값은 '기본값' 표시 + **빨강 없음(주황까지)**. '지난 기간이 지킨 단계'(90·95·99·99.5·99.9·99.95·99.99% 중 가장 높은 것)는 참고값 |
+| 오류 예산 | 허용 실패 = (1 − 목표) × 요청 — 화면은 '허용 실패 n건 중 m건 씀' |
+| 소진 경보 | SRE Workbook 5장 다중 창: 1시간·5분 ×14.4 / 6시간·30분 ×6 = 즉시 대응, 3일·6시간 ×1 = 티켓. 긴 창 요청 100건 미만 = 판단 안 함 |
+| 요청 적음 | (1 − 목표) × 요청 < 1(실패 1건이면 바닥) = 비율 SLO 판정 안 함, 합성 점검 권장 |
+| 원인 | 기간 중 실패(5xx·느림)가 많은 URI 상위 3 + 한 URI 비중 — 일부러 오래 걸리는 경로는 `excludeUris`(모든 창에 같이 적용) |
+| 데이터 기간 | 30일 중 데이터가 있는 시간(`[30d:1h]`) — 90% 미만이면 'n일치뿐' |
+| 질의 | 창마다(5m·30m·1h·6h·3d·30d) `(namespace, application, uri, method, status)`별 개수 1개 + 경계 버킷 1개 → TypeScript가 두 SLI·URI·제외를 한 번에. stg 14개 질의 12.5초(30일 9–12초, 질의마다 25초 한도·1회 재시도·실패 격리), 5분 캐시 |
+
+stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목표 안(gateway 99.956%·예산 44%), 지연은 7개가 기본 목표 미달. 원인이 한 URI에 몰림(workflow-service 웹훅 97%, http-app `POST /actions/make-request` 97%, gateway 웹훅 83%). 요청 적음 4(sap-app 2건, notification-app 0건 …), HTTP 지표 없는 워크로드 6(웹 프런트·fluentd·keycloak 등 — Spring 아님).
+
 ## 4. 연결 파일
 
 ```json
@@ -144,11 +163,13 @@ Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`T
   "grafana": { "endpoint": "https://<grafana>.<region>.grafana.azure.com", "datasources": { "prometheus": "<uid>", "loki": "<uid>", "tempo": "<uid>" } },
   "loki": { "url": "http://<loki-svc>.<namespace>:3100" },
   "hubbleUi": { "url": "http://hubble-ui.kube-system:80" },
-  "logErrors": { "metric": "<collector log-error counter>", "podLabel": "exported_pod" } } }
+  "logErrors": { "metric": "<collector log-error counter>", "podLabel": "exported_pod" },
+  "slo": { "windowDays": 30, "availability": 0.999, "latency": { "thresholdMs": 1000, "target": 0.99 },
+    "services": { "<namespace>/<application>": { "excludeUris": ["/public/*/webhooks/**"] } } } } }
 ```
 
-`loki.url`·`hubbleUi.url`은 클러스터 안 주소(`<svc>.<ns>[.svc]`)나 사설 IP만, `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다.
+`loki.url`·`hubbleUi.url`은 클러스터 안 주소(`<svc>.<ns>[.svc]`)나 사설 IP만, `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다. `slo` 목표는 0.5–0.99999, `windowDays`는 7·14·28·30, 서비스 키는 `<namespace>/<application>`(Micrometer `application` 태그), `exclude: true`면 그 서비스를 뺍니다.
 
 ## 5. 다음
 
-예외 분석 화면(서비스 × 예외 클래스 추이, 본문 검색) · VPA 권장과 JVM 헤드룸을 워크로드 상세에 · RED(spanmetrics) · 다른 클러스터의 Loki(Grafana 경유, opt-in).
+예외 분석 화면(서비스 × 예외 클래스 추이, 본문 검색) · VPA 권장과 JVM 헤드룸을 워크로드 상세에 · spanmetrics RED(고객 파이프라인의 카운터 리셋을 고친 뒤 `resets()` = 0 확인 — 요청 SLI는 Micrometer로 §3c) · 다른 클러스터의 Loki(Grafana 경유, opt-in).

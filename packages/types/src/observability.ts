@@ -679,3 +679,92 @@ export type NodeMaintenanceResponse = {
   /** Node NotReady spans outside every episode — not maintenance this page can name */
   unplanned: { node: string; start: string; end: string | null }[];
 };
+
+// ── Service SLO / SLI (services/workloadSlo.ts) ──
+// Request SLIs from Micrometer `http_server_requests_seconds` (Spring) in the cluster's Azure Monitor workspace —
+// availability = not 5xx, latency = finished within a histogram bucket boundary (never interpolated). Targets come
+// from the connection file (`aks.observability.slo`) or are the marked defaults; burn-rate alerts follow the Google
+// SRE Workbook's multiwindow table. The customer's spanmetrics are not used (their counter resets inflate rates).
+
+export type SloKind = "availability" | "latency";
+/**
+ * exhausted = the window's bad events used the whole budget · fastBurn = a page-level burn (1 h & 5 m over 14.4× or
+ * 6 h & 30 m over 6×) · slowBurn = a ticket-level burn (3 d & 6 h over 1×) · atRisk = 75 %+ of the budget used ·
+ * lowTraffic = one bad request would use the whole budget (a ratio SLO says little) · noData = no series
+ */
+export type SloState = "ok" | "atRisk" | "slowBurn" | "fastBurn" | "exhausted" | "lowTraffic" | "noData" | "queryFailed";
+export type SloBurnWindow = "5m" | "30m" | "1h" | "6h" | "3d";
+export type SloAlert = {
+  id: "page1h" | "page6h" | "ticket3d";
+  factor: number;
+  long: SloBurnWindow;
+  short: SloBurnWindow;
+  /** null = not judged (fewer than SLO_MIN_BURN_EVENTS requests in the long window, or a query failed) */
+  firing: boolean | null;
+};
+export type SloBadSource = { uri: string; method: string; bad: number; events: number };
+export type SloSli = {
+  kind: SloKind;
+  /** 0.999 = 99.9 % */
+  target: number;
+  targetSource: "config" | "default";
+  /** Latency: the asked threshold and the bucket boundary actually counted (≤ the asked one); null = no bucket at or under it */
+  thresholdMs?: number;
+  effectiveMs?: number | null;
+  /** Over the SLO window: requests counted, bad ones, SLI = good / events (null = not measured) */
+  events: number | null;
+  bad: number | null;
+  sli: number | null;
+  /** bad / ((1 − target) × events): 1 = the whole budget used (can exceed 1) */
+  budgetUsed: number | null;
+  /** Burn rate per window = (bad / events) / (1 − target); events = the window's requests */
+  burn: { window: SloBurnWindow; rate: number | null; events: number | null }[];
+  alerts: SloAlert[];
+  state: SloState;
+  /** The highest standard target (SLO_TIERS) the window met — a reference for setting one, not a verdict */
+  achievable: number | null;
+  /** The URIs with the most bad requests in the window (5xx or over the threshold), up to 3 */
+  topBad: SloBadSource[];
+  /** The PromQL of this value (one service, the SLO window) — to run in Grafana Explore */
+  expr: string;
+};
+export type SloAdvice = {
+  id: "exhausted" | "fastBurn" | "slowBurn" | "atRisk" | "partialData" | "lowTraffic" | "noHistogram"
+    | "thresholdNotBucket" | "topBad" | "noApplication";
+  sli?: SloKind;
+  params?: Record<string, string | number>;
+};
+export type SloService = {
+  namespace: string;
+  /** Micrometer's `application` tag ("" = series without it) */
+  application: string;
+  /** A Deployment / StatefulSet of that exact name in the namespace (null = none — the tag names something else) */
+  workload: string | null;
+  slis: SloSli[];
+  /** The worse SLI's state */
+  state: SloState;
+  /** Hours of the window with series (a service younger than the window is judged on fewer days) */
+  coverage: { hours: number; windowHours: number } | null;
+  advice: SloAdvice[];
+};
+export type WorkloadSloResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  message?: string;
+  cluster: string | null;
+  windowDays: number;
+  /** Whether the connection file sets targets (else every target is the marked default) */
+  configured: boolean;
+  defaults: { availability: number; latency: { thresholdMs: number; target: number } };
+  /** Bucket boundaries found (seconds) — the latency thresholds that can be counted exactly */
+  buckets: number[];
+  /** Whether Micrometer HTTP series exist at all in this cluster's scope */
+  instrumented: boolean;
+  services: SloService[];
+  /** Deployments / StatefulSets (replicas > 0) in namespaces with SLIs whose name no `application` tag matches */
+  uninstrumented: { namespace: string; name: string; kind: "Deployment" | "StatefulSet" }[];
+  gaps?: StackQueryGap[];
+  grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
+};

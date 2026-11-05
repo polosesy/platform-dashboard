@@ -22,6 +22,22 @@ import type { Env } from "../env.js";
 const GUID = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a GUID").transform((s) => s.toLowerCase());
 const ROLES = ["viewer", "operator", "admin"] as const;
 
+/** SLO targets (services/workloadSlo.ts) — 0.5 – 0.99999, a latency threshold in ms (counted at a bucket boundary) */
+const sloTarget = z.number().min(0.5).max(0.99999);
+const SloTargetsSchema = {
+  availability: sloTarget.optional(),
+  latency: z.object({ thresholdMs: z.number().int().min(1).max(120_000), target: sloTarget }).strict().optional(),
+  excludeUris: z.array(z.string().min(1).max(300)).max(50).optional(),
+};
+const SloSchema = z.object({
+  windowDays: z.union([z.literal(7), z.literal(14), z.literal(28), z.literal(30)]).optional(),
+  ...SloTargetsSchema,
+  services: z.record(
+    z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\/[\w.-]{1,128}$/, "\"<namespace>/<application>\""),
+    z.object({ ...SloTargetsSchema, exclude: z.boolean().optional() }).strict(),
+  ).optional(),
+}).strict();
+
 const ConnectionSchema = z.object({
   /** Multi-cloud seam (docs/architecture/multi-cloud.md): only Azure today — a file without it is Azure */
   provider: z.literal("azure").default("azure"),
@@ -76,6 +92,8 @@ const ConnectionSchema = z.object({
    *                      flows, network, security) needs no exec and no Secret — cluster-internal URL only
    *   observability.logErrors  the collector's log-ERROR counter in the workspace (site-specific name) and the
    *                      label that names the app pod (heatmap 'log ERROR')
+   *   observability.slo  the team's SLO targets (AKS 모니터링 › SLO): window days, availability, latency threshold +
+   *                      target, URI templates not counted (a webhook that waits on purpose), per "<ns>/<application>"
    */
   aks: z.object({
     allowLocalAccount: z.boolean().optional(),
@@ -105,6 +123,7 @@ const ConnectionSchema = z.object({
         metric: z.string().regex(/^[a-zA-Z_:][a-zA-Z0-9_:]{0,199}$/, "a Prometheus metric name"),
         podLabel: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/).optional(),
       }).strict().optional(),
+      slo: SloSchema.optional(),
     }).strict().optional(),
   }).strict().optional(),
 }).strict();

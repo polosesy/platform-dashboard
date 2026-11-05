@@ -1,0 +1,208 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  SLO_DEFAULTS, aggregateSlo, effectiveBucket, sliExpr, sloQueries, targetsFor, type SloConfig, type SloRaw,
+} from "../src/services/workloadSlo.js";
+
+// Shapes measured in a customer Azure Monitor workspace (Micrometer http_server_requests_seconds, 2026-11-05):
+// grouped by namespace, application, uri, method, status; bucket boundaries include exact 0.1 · 0.3 · 0.5 · 1.0 · 3.0.
+// Names are placeholders.
+const C = 'cluster="aks-a"';
+const WINDOWS = ["5m", "30m", "1h", "6h", "3d", "30d"];
+type Row = { app: string; uri: string; method?: string; status: string; n: number; fast?: number };
+
+/** Every window gets the same rows unless a window overrides them */
+function raw(rows: Row[], over: Record<string, Row[]> = {}, extra: SloRaw = {}): SloRaw {
+  const out: SloRaw = {};
+  for (const w of WINDOWS) {
+    const rs = over[w] ?? rows;
+    const m = (x: Row) => ({ namespace: "shop", application: x.app, uri: x.uri, method: x.method ?? "get", status: x.status });
+    out[`n:${w}`] = rs.map((x) => ({ metric: m(x), value: x.n }));
+    out[`g:${w}:1.0`] = rs.map((x) => ({ metric: { ...m(x), le: "1.0" }, value: x.fast ?? x.n }));
+  }
+  out.coverage = [...new Set(rows.map((x) => x.app))].map((app) => ({ metric: { namespace: "shop", application: app }, value: 720 }));
+  out.deployments = [{ metric: { namespace: "shop", deployment: "orders" }, value: 2 }, { metric: { namespace: "shop", deployment: "batch" }, value: 1 }];
+  out.statefulsets = [];
+  return { ...out, ...extra };
+}
+const agg = (r: SloRaw, cfg?: SloConfig, failed?: Set<string>) => aggregateSlo(r, { cfg, windowDays: 30, les: ["1.0"], C, failed });
+const svc = (res: ReturnType<typeof agg>, app: string) => res.services.find((s) => s.application === app)!;
+const sli = (res: ReturnType<typeof agg>, app: string, kind: "availability" | "latency") => svc(res, app).slis.find((s) => s.kind === kind)!;
+
+test("availability: not 5xx / all · budget used against the target · the default is marked", () => {
+  const res = agg(raw([{ app: "orders", uri: "/orders", status: "200", n: 99_950 }, { app: "orders", uri: "/orders", status: "500", n: 50 }]));
+  const a = sli(res, "orders", "availability");
+  assert.equal(a.events, 100_000);
+  assert.equal(a.bad, 50);
+  assert.ok(Math.abs(a.sli! - 0.9995) < 1e-9);
+  assert.equal(a.budgetUsed, 0.5); // 50 of (1 − 0.999) × 100 000 = 100
+  assert.equal(a.targetSource, "default");
+  assert.equal(a.target, SLO_DEFAULTS.availability);
+  assert.equal(a.state, "ok");
+  assert.equal(a.achievable, 0.9995);
+  assert.match(a.expr, /status=~"5\.\."/);
+  assert.equal(svc(res, "orders").workload, "orders");
+});
+
+test("latency: over the bucket boundary = bad, 1xx not counted · exhausted names the URI that spent it", () => {
+  const res = agg(raw([
+    { app: "gateway", uri: "/api/**", status: "200", n: 9_000, fast: 8_990 },
+    { app: "gateway", uri: "/public/*/webhooks/**", method: "post", status: "200", n: 1_000, fast: 100 },
+    { app: "gateway", uri: "/ws", status: "101", n: 500, fast: 0 }, // a websocket upgrade is not a slow request
+  ]));
+  const l = sli(res, "gateway", "latency");
+  assert.equal(l.events, 10_000);
+  assert.equal(l.bad, 910);
+  assert.equal(l.budgetUsed, 9.1); // 910 of 1 % × 10 000
+  assert.equal(l.effectiveMs, 1000);
+  assert.deepEqual(l.topBad[0], { uri: "/public/*/webhooks/**", method: "post", bad: 900, events: 1000 });
+  const s = svc(res, "gateway");
+  // every window has the same share here, so the page-level burn also fires: fastBurn outranks exhausted
+  assert.equal(l.state, "fastBurn");
+  assert.ok(s.advice.some((a) => a.id === "exhausted" && a.sli === "latency"));
+  assert.ok(s.advice.some((a) => a.id === "topBad" && a.params?.uri === "/public/*/webhooks/**" && a.params?.share === 99));
+  assert.equal(s.workload, null); // no Deployment named gateway
+});
+
+test("a URI the team excludes (a webhook that waits on purpose) counts nowhere", () => {
+  const rows: Row[] = [
+    { app: "gateway", uri: "/api/**", status: "200", n: 9_000, fast: 8_990 },
+    { app: "gateway", uri: "/public/*/webhooks/**", method: "post", status: "200", n: 1_000, fast: 100 },
+  ];
+  const res = agg(raw(rows), { services: { "shop/gateway": { excludeUris: ["/public/*/webhooks/**"] } } });
+  const l = sli(res, "gateway", "latency");
+  assert.equal(l.events, 9_000);
+  assert.equal(l.bad, 10);
+  assert.equal(l.state, "ok");
+  assert.equal(sli(res, "gateway", "availability").events, 9_000);
+});
+
+test("burn rate: page when 1 h and 5 m both burn over 14.4× · a burn that stopped does not page", () => {
+  const steady: Row[] = [{ app: "orders", uri: "/o", status: "200", n: 1_000_000 }];
+  const burning = agg(raw(steady, {
+    "1h": [{ app: "orders", uri: "/o", status: "200", n: 900 }, { app: "orders", uri: "/o", status: "503", n: 100 }],
+    "5m": [{ app: "orders", uri: "/o", status: "200", n: 90 }, { app: "orders", uri: "/o", status: "503", n: 10 }],
+  }));
+  const a = sli(burning, "orders", "availability");
+  assert.equal(a.burn.find((b) => b.window === "1h")!.rate, 100); // 10 % bad / 0.1 % allowed
+  assert.equal(a.alerts.find((x) => x.id === "page1h")!.firing, true);
+  assert.equal(a.state, "fastBurn");
+  assert.ok(svc(burning, "orders").advice.some((x) => x.id === "fastBurn" && x.params?.alerts === "page1h"));
+
+  const stopped = agg(raw(steady, {
+    "1h": [{ app: "orders", uri: "/o", status: "200", n: 900 }, { app: "orders", uri: "/o", status: "503", n: 100 }],
+    "5m": [{ app: "orders", uri: "/o", status: "200", n: 100 }],
+  }));
+  assert.equal(sli(stopped, "orders", "availability").alerts.find((x) => x.id === "page1h")!.firing, false);
+});
+
+test("too few requests in the long window: the alert is not judged (one failure is not a 100× burn)", () => {
+  const res = agg(raw([{ app: "orders", uri: "/o", status: "200", n: 1_000_000 }], {
+    "1h": [{ app: "orders", uri: "/o", status: "200", n: 40 }, { app: "orders", uri: "/o", status: "500", n: 1 }],
+    "5m": [{ app: "orders", uri: "/o", status: "500", n: 1 }],
+  }));
+  const a = sli(res, "orders", "availability");
+  assert.equal(a.alerts.find((x) => x.id === "page1h")!.firing, null);
+  assert.equal(a.state, "ok");
+});
+
+test("low traffic: one bad request would use the whole budget — shown, not judged", () => {
+  const res = agg(raw([{ app: "rare", uri: "/x", status: "200", n: 30 }]));
+  const a = sli(res, "rare", "availability");
+  assert.equal(a.state, "lowTraffic");
+  assert.equal(a.achievable, null);
+  assert.ok(svc(res, "rare").advice.some((x) => x.id === "lowTraffic"));
+});
+
+test("bucket boundary: the largest at or under the threshold — a threshold between boundaries says so", () => {
+  const les = ["0.1", "0.3", "1.0", "3.0", "+Inf"];
+  assert.deepEqual(effectiveBucket(les, 1000), { le: "1.0", ms: 1000 });
+  assert.equal(effectiveBucket(les, 500)!.le, "0.3");
+  assert.equal(effectiveBucket(les, 50), null);
+  const r = raw([{ app: "orders", uri: "/o", status: "200", n: 10_000 }]);
+  r["g:30d:0.3"] = r["g:30d:1.0"]!.map((x) => ({ ...x, metric: { ...x.metric, le: "0.3" } }));
+  const res = aggregateSlo(r, { cfg: { latency: { thresholdMs: 500, target: 0.99 } }, windowDays: 30, les: ["0.3"], C });
+  const l = sli(res, "orders", "latency");
+  assert.equal(l.effectiveMs, 300);
+  assert.equal(l.targetSource, "config");
+  assert.ok(svc(res, "orders").advice.some((x) => x.id === "thresholdNotBucket" && x.params?.counted === 300));
+});
+
+test("no histogram: latency is noData with the setting to turn on — availability still stands", () => {
+  const r = raw([{ app: "orders", uri: "/o", status: "200", n: 10_000 }]);
+  for (const k of Object.keys(r)) if (k.startsWith("g:")) delete r[k];
+  const res = agg(r);
+  assert.equal(sli(res, "orders", "latency").state, "noData");
+  assert.equal(sli(res, "orders", "latency").bad, null);
+  assert.equal(sli(res, "orders", "availability").state, "ok");
+  assert.ok(svc(res, "orders").advice.some((x) => x.id === "noHistogram"));
+});
+
+test("a failed query: only the values that need it say queryFailed", () => {
+  const res = agg(raw([{ app: "orders", uri: "/o", status: "200", n: 10_000 }]), undefined, new Set(["g:30d:1.0", "n:1h"]));
+  assert.equal(sli(res, "orders", "latency").state, "queryFailed");
+  assert.equal(sli(res, "orders", "latency").sli, null);
+  const a = sli(res, "orders", "availability");
+  assert.equal(a.state, "ok");
+  assert.equal(a.burn.find((b) => b.window === "1h")!.rate, null);
+  assert.equal(a.alerts.find((x) => x.id === "page1h")!.firing, null);
+});
+
+test("coverage, untagged series, uninstrumented workloads, order (worst first), excluded services", () => {
+  const r = raw([
+    { app: "orders", uri: "/o", status: "200", n: 100_000 },
+    { app: "gateway", uri: "/g", status: "500", n: 1_000 }, { app: "gateway", uri: "/g", status: "200", n: 99_000 },
+    { app: "", uri: "/u", status: "200", n: 5_000 },
+  ]);
+  r.coverage = [{ metric: { namespace: "shop", application: "orders" }, value: 240 }];
+  const res = agg(r, { services: { "shop/skipme": { exclude: true } } });
+  assert.equal(res.services[0]!.application, "gateway");
+  assert.ok(svc(res, "orders").advice.some((x) => x.id === "partialData" && x.params?.days === 10));
+  assert.ok(svc(res, "").advice.some((x) => x.id === "noApplication"));
+  assert.deepEqual(res.uninstrumented, [{ namespace: "shop", name: "batch", kind: "Deployment" }]);
+  assert.equal(targetsFor({ services: { "shop/skipme": { exclude: true } } }, "shop", "skipme").skip, true);
+});
+
+test("queries: one grouping for both SLIs, /actuator never counted, the SLO window and every burn window", () => {
+  const q = sloQueries(C, 'cluster="aks-a"', 30, ["1.0"]);
+  for (const w of WINDOWS) {
+    assert.match(q[`n:${w}`]!, new RegExp(`sum by \\(namespace, application, uri, method, status\\).*\\[${w}\\]`));
+    assert.match(q[`g:${w}:1.0`]!, /le="1\.0"/);
+  }
+  assert.ok(Object.values(q).filter((x) => x.includes("http_server")).every((x) => x.includes('uri!~"/actuator.*"')));
+  assert.match(q.coverage!, /\[30d:1h\]/);
+  assert.match(sliExpr(C, "latency", "shop", "orders", 30, "1.0"), /status!~"1\.\."/);
+});
+
+// ── web lib/sloView.ts (pure) ──
+import * as svm from "../../web/src/lib/sloView.ts";
+const sv = ((svm as { default?: typeof svm }).default ?? svm) as typeof svm;
+
+test("view: percent digits, target text, budget in requests, burn text, alert levels", () => {
+  assert.equal(sv.pctText(0.999561), "99.956%");
+  assert.equal(sv.pctText(0.95712), "95.7%");
+  assert.equal(sv.pctText(null), "—");
+  assert.equal(sv.targetText(0.999), "99.9%");
+  assert.equal(sv.targetText(0.9995), "99.95%");
+  const res = agg(raw([{ app: "orders", uri: "/o", status: "200", n: 265_000 }, { app: "orders", uri: "/o", status: "500", n: 116 }]));
+  const a = sli(res, "orders", "availability");
+  assert.deepEqual(sv.budgetOf(a), { allowed: 265, used: 116, left: 149, usedPct: 44 });
+  assert.equal(sv.burnText(14.4), "×14.4");
+  assert.equal(sv.burnText(0.44), "×0.44");
+  assert.equal(sv.burnText(140), "×140");
+  assert.equal(sv.alertLevel({ id: "ticket3d", factor: 1, long: "3d", short: "6h", firing: true }), "warn");
+  assert.equal(sv.alertLevel({ id: "page1h", factor: 14.4, long: "1h", short: "5m", firing: null }), "unknown");
+  assert.deepEqual(sv.sliLabelParams(sli(res, "orders", "latency")), { ms: "1s" });
+  const counts = sv.sloCounts(res.services);
+  assert.equal(counts.ok + counts.warn + counts.danger + counts.neutral + counts.unknown, res.services.length);
+  assert.equal(sv.filterServices(res.services, "problems", "").length, counts.danger + counts.warn);
+});
+
+test("view: a missed default target is orange (watch), a missed team target is red", () => {
+  const rows: Row[] = [{ app: "gw", uri: "/a", status: "200", n: 10_000, fast: 9_000 }];
+  const byDefault = agg(raw(rows)).services[0]!;
+  const byTeam = agg(raw(rows), { latency: { thresholdMs: 1000, target: 0.99 } }).services[0]!;
+  assert.equal(byDefault.state, byTeam.state); // the API's verdict is the same — only the colour differs
+  assert.equal(sv.serviceLevel(byDefault), "warn");
+  assert.equal(sv.serviceLevel(byTeam), "danger");
+});
