@@ -385,19 +385,25 @@ export type HeatCell = {
    * Why the cell has this level: noLimit / noRequest (no ratio) · noNodes / scaledToZero / noPods (nothing to run) ·
    * jvmHeadroom configDeficit (a full heap crosses the limit by more than the band) / imminent (short, and memory,
    * Old Gen or an OOM in the window says it is happening) / marginal (inside the band) · cpu belowFloor (over the
-   * request but under 100m — no verdict) / warmingUp (only started containers in the window) · http5xx lowTraffic
+   * request but under 100m — no verdict) / warmingUp (only started containers in the window) · http5xx lowTraffic ·
+   * queryFailed (a query this signal needs did not answer this time — `gaps`; not "not measured", not OK)
    */
-  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods" | "configDeficit" | "imminent" | "marginal" | "belowFloor" | "warmingUp" | "lowTraffic";
+  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods" | "configDeficit" | "imminent" | "marginal" | "belowFloor" | "warmingUp" | "lowTraffic" | "queryFailed";
   /** Memory: working-set bytes · CPU: p95 cores — of the pod that set the value (or the busiest pod when there is no ratio) */
   abs?: number;
   /**
    * jvmHeadroom (value = limit − (heapMax + nonheapCommitted + direct + native), bytes) — what is left when the heap
    * grows to its max beside the memory outside the heap. native = RSS − heap committed − non-heap committed − direct
-   * (thread stacks, malloc arenas, JIT, GC tables), never below 0; null fields = no series (`partial`)
+   * (thread stacks, malloc arenas, JIT, GC tables), never below 0; null fields = no series (`partial`). The value
+   * uses the larger of native now and `nativePeak` (glibc hands arenas back, so "now" can sit below what the pod reached)
    */
   jvm?: {
     limit: number; heapMax: number; nonheapUsed: number | null;
     heapCommitted: number | null; nonheapCommitted: number | null; direct: number | null; rss: number | null; native: number | null;
+    /** The pod's highest native memory over the last 24 h (5-minute steps) — null = no series */
+    nativePeak?: number | null;
+    /** Hours of history behind nativePeak (the pod's age, at most 24) — a pod deployed minutes ago has not peaked yet */
+    observedHours?: number | null;
     /** max(100Mi, 10% of the limit) — the margin native memory grows into under load */
     band: number;
     partial?: boolean;
@@ -410,6 +416,8 @@ export type HeatCell = {
   cpu?: { now: number | null; p95: number | null; avg: number | null; max: number | null; request: number | null; psi: number | null; throttle: number | null };
   /** http5xx: requests in the window (the share is not judged under the minimum) */
   requests?: number;
+  /** memory: the worst pod's highest working set over the window (ratio to the limit, bytes) — the level stays on now */
+  peak?: { ratio: number | null; bytes: number };
 };
 
 export type HeatWorkload = {
@@ -421,6 +429,12 @@ export type HeatWorkload = {
   /** Worst level over the measured cells */
   worst: HeatLevel;
   cells: Record<HeatMetric, HeatCell>;
+  /**
+   * AKS runs it (workload label kubernetes.azure.com/managedby=aks or addonmanager.kubernetes.io/mode — never the image
+   * registry: our own hubble-ui is an mcr.microsoft.com image). Its CPU / memory are shown but leave the flag strip:
+   * nothing to change on our side. Absent = not AKS-managed or not known (`managedState`)
+   */
+  managed?: true;
   pods: {
     pod: string; ready: boolean | null; restarts: number | null; memory: number | null; cpu: number | null; oom: boolean;
     /** Working-set bytes / CPU cores (null = no series) — shown when there is no limit / request ratio */
@@ -440,6 +454,10 @@ export type WorkloadHeatmapResponse = {
   flags: { metric: HeatMetric; count: number | null }[];
   workloads: HeatWorkload[];
   missing: HeatMetric[];
+  /** Queries that did not answer this time (timeout, throttled, failed) — the signals that need them say queryFailed */
+  gaps?: StackQueryGap[];
+  /** Whether `managed` could be read (Kubernetes workload list, best effort): unknown = not in time / no access */
+  managedState?: "ok" | "unknown";
   grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
 };
 

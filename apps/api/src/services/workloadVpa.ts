@@ -3,6 +3,7 @@
 // moment: the VerticalPodAutoscaler objects (status.recommendation) and the workload's pod template. Only VPA's own
 // semantics are flagged — the target above the limit, the request outside VPA's lower–upper bound — nothing invented.
 // Reads use the existing list grants (k8sReadSurface: verticalpodautoscalers · deployments · statefulsets · daemonsets).
+// The same workload lists say which workloads AKS runs (labels) — the heatmap reads that set, best effort.
 
 import * as k8s from "@kubernetes/client-node";
 import type { Env } from "../env.js";
@@ -11,6 +12,7 @@ import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { HttpError } from "../infra/requestParams.js";
 import { loadKubeConfig } from "./kubernetes.js";
 import { k8sError } from "./aksAccess.js";
+import { isAksManaged } from "./policyInsights.js";
 
 const NAME = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
 const SUFFIX: Record<string, number> = {
@@ -74,7 +76,7 @@ export function vpaForWorkload(vpas: VpaObject[], target: { namespace: string; k
     });
 }
 
-type Snapshot = { vpas: VpaObject[] | null; templates: Map<string, TemplateContainer[]> };
+type Snapshot = { vpas: VpaObject[] | null; templates: Map<string, TemplateContainer[]>; managed: Set<string> };
 const cache = new CacheManager<Snapshot>(20, 60_000);
 const inflight = new Map<string, Promise<Snapshot>>();
 const KINDS = ["Deployment", "StatefulSet", "DaemonSet"] as const;
@@ -102,17 +104,37 @@ async function snapshot(env: Env, bearerToken: string | undefined, clusterId: st
       apps.listDaemonSetForAllNamespaces().catch((e: unknown) => { throw k8sError(e); }),
     ]);
     const templates = new Map<string, TemplateContainer[]>();
+    const managed = new Set<string>();
     for (const [kind, list] of [["Deployment", deps], ["StatefulSet", sts], ["DaemonSet", dss]] as const) {
       for (const o of list.items) {
-        templates.set(`${kind}/${o.metadata?.namespace}/${o.metadata?.name}`, (o.spec?.template?.spec?.containers ?? []) as TemplateContainer[]);
+        const key = `${kind}/${o.metadata?.namespace}/${o.metadata?.name}`;
+        templates.set(key, (o.spec?.template?.spec?.containers ?? []) as TemplateContainer[]);
+        if (isAksManaged(o.metadata?.labels)) managed.add(key);
       }
     }
-    const snap = { vpas, templates };
+    const snap = { vpas, templates, managed };
     cache.set(key, snap);
     return snap;
   })().finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
+}
+
+/**
+ * AKS-managed workloads as "Kind/namespace/name" — from their own labels (stg: konnectivity-agent, coredns, ama-*,
+ * cilium carry kubernetes.azure.com/managedby=aks; our hubble-ui in kube-system does not). null = not read within
+ * `waitMs` (the list keeps loading into the cache for the next refresh) or not allowed — never a guess
+ */
+export async function aksManagedWorkloads(env: Env, bearerToken: string | undefined, clusterId: string, waitMs: number): Promise<Set<string> | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((res) => { timer = setTimeout(() => res(null), waitMs); });
+  try {
+    return await Promise.race([snapshot(env, bearerToken, clusterId).then((s) => s.managed), late]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getWorkloadVpa(

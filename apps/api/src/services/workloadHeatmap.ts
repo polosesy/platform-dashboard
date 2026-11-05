@@ -9,16 +9,21 @@
 // ("noBaseline": AKS-managed cilium and acns-security-agent set none). A DaemonSet no node matches (Windows-only on a
 // Linux cluster, retina-agent beside Cilium) and a Deployment scaled to 0 are "stopped" with the reason in `code`,
 // and every other cell says "no pods" — not "not measured". Never 0 for "no series".
+// A query that does not answer (timeout, throttling) is a gap: only the signals that need it say "queryFailed", the
+// rest stand; the workload list itself (owners, replicas) failing fails the map. AKS-managed workloads (their own
+// labels, from the Kubernetes list the VPA panel reads — best effort) keep their CPU / memory but leave the strip.
 
 import type { Env } from "../env.js";
-import type { HeatCell, HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } from "@aud/types";
+import type { HeatCell, HeatLevel, HeatMetric, HeatWorkload, StackQueryGap, WorkloadHeatmapResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { clusterConnection, getPrometheusFetcherAuto, type PrometheusFetcher } from "../infra/azureClientFactory.js";
+import { clusterConnection, getPrometheusFetcherAuto } from "../infra/azureClientFactory.js";
 import { HttpError } from "../infra/requestParams.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
 import { pickScope, promString, scopeMatchers } from "./promScope.js";
 import { ownerIndex, resolveWorkload, type OwnerRow } from "./workloadOwners.js";
+import { runAll as runIsolated } from "./observabilityStack.js";
+import { aksManagedWorkloads } from "./workloadVpa.js";
 
 export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 
@@ -52,12 +57,32 @@ export const HTTP_MIN_REQUESTS = 20;
 const Mi = 1024 * 1024;
 /** Room native memory grows into under load (signal-service malloc arenas +73Mi in one burst, 2026-11-04) */
 export const jvmBand = (limit: number) => Math.max(100 * Mi, 0.1 * limit);
+/**
+ * Native memory looks back a day whatever the window: glibc hands malloc arenas back, so "now" can sit below what the
+ * pod already reached (stg 2026-11-05, three Spring apps: 322 → 394Mi, 365 → 430Mi, 92 → 125Mi)
+ */
+export const NATIVE_PEAK_MINUTES = 1440;
+/** How long the Kubernetes workload list (AKS-managed labels) may hold the map up — after that it fills the cache */
+export const MANAGED_WAIT_MS = 1500;
+/** Signals AKS runs for us: shown, but nothing to change on our side → not in the flag strip */
+const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "memory"];
 
 /** The red-flag strip: which level counts (their strip: memory 90%+, any restart, pool 80%+ …) */
 const FLAG_AT: Record<HeatMetric, HeatLevel[]> = {
   ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["danger"],
   http5xx: ["danger"], logErrors: ["warn", "danger"], poolUsage: ["danger"], poolPending: ["danger"],
 };
+
+/** The workload list: without these there is no map (an error, not a map of gaps) */
+export const CORE_QUERIES = ["active", "podOwners", "rsOwners", "deployReady", "deployDesired", "stsReady", "stsDesired", "dsReady", "dsDesired"];
+/** The queries a signal cannot be judged without — one of them missing = queryFailed (the others only thin the panel) */
+export const SIGNAL_NEEDS: Partial<Record<HeatMetric, string[]>> = {
+  memory: ["memRatio", "memWs"], cpu: ["cpuUsage", "cpuP95", "cpuRequest", "cpuPsi"], restarts: ["restarts"], oldGen: ["oldGen"],
+  jvmHeadroom: ["jvmHeapMax", "podMemLimit", "jvmHeapCommitted", "jvmNonheapCommitted", "memRss"],
+  http5xx: ["http5xx", "httpAll"], logErrors: ["logErrors"], poolUsage: ["poolUsage"], poolPending: ["poolPending"],
+};
+/** The query whose rows say which workloads have a Java/Spring signal at all */
+const PRESENCE: Partial<Record<HeatMetric, string>> = { oldGen: "oldGen", jvmHeadroom: "jvmHeapMax", http5xx: "httpAll", poolUsage: "poolUsage", poolPending: "poolPending" };
 
 /** Families whose absence makes a metric "notMeasured" for everyone (cAdvisor/KSM ones are always expected) */
 const FAMILY: Partial<Record<HeatMetric, string>> = {
@@ -90,6 +115,8 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     memWs: `max by (namespace, pod, container) (${sel("container_memory_working_set_bytes", 'container!="",container!="POD"')})`,
     memRatio: `max by (namespace, pod, container) (${sel("container_memory_working_set_bytes", 'container!="",container!="POD"')}) / on (namespace, pod, container) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_limits", 'resource="memory"')}) > 0)`,
     memRss: `max by (namespace, pod) (${sel("container_memory_rss", ctr)})`,
+    // The window's highest working set per container (shown beside the level, which stays on now)
+    memPeak: `max by (namespace, pod, container) (max_over_time(${sel("container_memory_working_set_bytes", ctr)}${w}))`,
     // CPU over the window: the 5-minute rate's p95 / max across it and the plain average; the ratio is taken in
     // TypeScript (one heavy subquery, not two). cpuUsage = the last 5 minutes, warm-up included
     cpuUsage: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}[5m]))`,
@@ -115,11 +142,15 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     // JVM headroom: heap max = the pools with a defined maximum (G1 eden/survivor report -1), the pod's largest
     // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …,
     // direct = NIO buffers (mapped ones are file pages); `max by … id` where two collectors could double a pool
-    jvmHeapMax: `sum by (namespace, pod) (${sel("jvm_memory_max_bytes", 'area="heap"')} > 0)`,
-    jvmNonheap: `sum by (namespace, pod) (${sel("jvm_memory_used_bytes", 'area="nonheap"')})`,
+    jvmHeapMax: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_max_bytes", 'area="heap"')}) > 0)`,
+    jvmNonheap: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_used_bytes", 'area="nonheap"')}))`,
     jvmHeapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="heap"')}))`,
     jvmNonheapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="nonheap"')}))`,
     jvmDirect: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_buffer_memory_used_bytes", 'id="direct"')}))`,
+    // Native over the last day = RSS − (heap + non-heap committed + direct) at each 5-minute step, highest; pool ids
+    // differ between the two families, so `or` is a plain union here. JVM pods only (the right side exists only there)
+    jvmNativePeak: `max_over_time((clamp_min(max by (namespace, pod) (${sel("container_memory_rss", ctr)}) - on (namespace, pod) (sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area=~"heap|nonheap"')}) or max by (namespace, pod, id) (${sel("jvm_buffer_memory_used_bytes", 'id="direct"')}))), 0))[${NATIVE_PEAK_MINUTES}m:5m])`,
+    podAge: `time() - max by (namespace, pod) (${sel("kube_pod_start_time")})`,
     podMemLimit: `max by (namespace, pod) (${sel("kube_pod_container_resource_limits", 'resource="memory"')})`,
     // Requests over the window (not a 5-minute rate: the window chosen applies, and the count sets the minimum)
     http5xx: `sum by (namespace, pod) (increase(${sel("http_server_requests_seconds_count", 'status=~"5..",uri!~"/actuator.*"')}${w}))`,
@@ -178,7 +209,7 @@ const RANK: Record<HeatLevel, number> = { danger: 4, warn: 3, ok: 2, noBaseline:
 export type HeatRaw = Record<string, PromRow[]>;
 
 /** Pure: per-pod rows → one tile per workload with every signal, worst pod first */
-export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConfig } = {}):
+export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConfig; managed?: Set<string> | null; failed?: Set<string> } = {}):
   Pick<WorkloadHeatmapResponse, "workloads" | "flags" | "missing"> {
   const families = new Set(Object.keys(raw).filter((k) => k.startsWith("family:") && (raw[k]?.length ?? 0) > 0).map((k) => k.slice(7)));
   // Completed / failed pods (Jobs, `az aks command invoke` runs) are not part of a workload's readiness
@@ -253,6 +284,18 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     const k = `${r.metric.namespace}/${r.metric.pod}`;
     memBytes.set(k, (memBytes.get(k) ?? 0) + r.value);
   }
+  // The window's peak: the pod's highest container ratio (or bytes without a limit)
+  const limitByCtr = new Map((raw.memRatio ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}/${r.metric.container}`, r.value]));
+  const wsByCtr = new Map((raw.memWs ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}/${r.metric.container}`, r.value]));
+  const peakByPod = new Map<string, { ratio: number | null; bytes: number }>();
+  for (const r of raw.memPeak ?? []) {
+    const k = `${r.metric.namespace}/${r.metric.pod}`, c = `${k}/${r.metric.container}`;
+    // the container's limit = its working set now / its ratio now; without a limit the peak is bytes only
+    const ratioNow = limitByCtr.get(c), wsNow = wsByCtr.get(c);
+    const ratio = ratioNow && wsNow ? r.value / (wsNow / ratioNow) : null;
+    const cur = peakByPod.get(k);
+    if (!cur || (ratio ?? -1) > (cur.ratio ?? -1) || (ratio === null && cur.ratio === null && r.value > cur.bytes)) peakByPod.set(k, { ratio, bytes: r.value });
+  }
   for (const k of new Set([...memBytes.keys(), ...memByPod.keys()])) {
     const [ns, pod] = k.split("/");
     const x = podOf(ns, pod);
@@ -295,6 +338,8 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   const limitByPod = byPod(raw.podMemLimit);
   const jvmSeries = { nonheapUsed: byPod(raw.jvmNonheap), heapCommitted: byPod(raw.jvmHeapCommitted), nonheapCommitted: byPod(raw.jvmNonheapCommitted),
     direct: byPod(raw.jvmDirect), rss: byPod(raw.memRss) };
+  const nativePeakByPod = byPod(raw.jvmNativePeak);
+  const ageByPod = byPod(raw.podAge);
   const oldGenByPod = byPod(raw.oldGen);
   // RSS missing (a collector without it): the largest container's working set (file pages make it a little high)
   const wsMax = new Map<string, number>();
@@ -315,14 +360,17 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     const rss = get("rss") ?? wsMax.get(key) ?? null;
     const outside = (nonheapCommitted ?? nonheapUsed ?? 0) + (direct ?? 0);
     const native = rss !== null && heapCommitted !== null ? Math.max(0, rss - heapCommitted - outside) : null;
-    const headroom = limit - (r.value + outside + (native ?? 0));
+    const nativePeak = nativePeakByPod.get(key) ?? null;
+    const age = ageByPod.get(key);
+    const observedHours = age === undefined ? null : Math.min(NATIVE_PEAK_MINUTES / 60, Math.max(0, age / 3600));
+    const headroom = limit - (r.value + outside + Math.max(native ?? 0, nativePeak ?? 0));
     const band = jvmBand(limit);
     const imminent = (memByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.memory.warn || (oldGenByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.oldGen.warn || x.p.oom;
     const { level, code } = jvmHeadroomLevel(headroom, band, imminent);
     const partial = [heapCommitted, nonheapCommitted, direct, get("rss")].some((v) => v === null);
     if (cell.value === null || RANK[level] > RANK[cell.level] || (RANK[level] === RANK[cell.level] && headroom < cell.value)) {
       x.w.cells.jvmHeadroom = { value: headroom, level, ...(code ? { code } : {}), worstPod: r.metric.pod!,
-        jvm: { limit, heapMax: r.value, nonheapUsed, heapCommitted, nonheapCommitted, direct, rss, native, band, ...(partial ? { partial } : {}) } };
+        jvm: { limit, heapMax: r.value, nonheapUsed, heapCommitted, nonheapCommitted, direct, rss, native, nativePeak, observedHours, band, ...(partial ? { partial } : {}) } };
     }
   }
 
@@ -385,8 +433,9 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     const oom = pods.some((p) => p.oom) ? { oom: true } : {};
     const m = worstPod((p) => p.memory);
     const mAbs = worstPod((p) => p.memBytes);
-    w.cells.memory = m ? { value: m.memory, level: levelOf("memory", m.memory!), worstPod: m.pod, ...(m.memBytes != null ? { abs: m.memBytes } : {}), ...oom }
-      : mAbs ? { value: null, level: "noBaseline", code: "noLimit", worstPod: mAbs.pod, abs: mAbs.memBytes!, ...oom }
+    const peakOf = (pod: string) => { const v = peakByPod.get(`${w.namespace}/${pod}`); return v ? { peak: v } : {}; };
+    w.cells.memory = m ? { value: m.memory, level: levelOf("memory", m.memory!), worstPod: m.pod, ...(m.memBytes != null ? { abs: m.memBytes } : {}), ...oom, ...peakOf(m.pod) }
+      : mAbs ? { value: null, level: "noBaseline", code: "noLimit", worstPod: mAbs.pod, abs: mAbs.memBytes!, ...oom, ...peakOf(mAbs.pod) }
       : w.cells.memory;
     // CPU: the pod with the worst verdict, then the highest p95 ratio (or p95 cores when there is no request)
     let cpuWorst: { cell: HeatCell; rank: number; key: number } | null = null;
@@ -411,6 +460,15 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
       if (w.cells[metric].value !== null || w.cells[metric].level === "noTraffic" || w.cells[metric].level === "noBaseline") continue;
       w.cells[metric] = { value: null, level: families.has(FAMILY[metric]!) ? "notInstrumented" : "notMeasured" };
     }
+    // A query the signal needs did not answer: neither its value nor "not measured" / OK is known. A Java signal of a
+    // workload without it stays "not instrumented" unless the failed query is the one that shows who has it
+    for (const metric of HEAT_METRICS) {
+      if (!SIGNAL_NEEDS[metric]?.some((q) => opts.failed?.has(q))) continue;
+      const presence = PRESENCE[metric];
+      if (w.cells[metric].level === "notInstrumented" && !(presence && opts.failed?.has(presence))) continue;
+      w.cells[metric] = { value: null, level: "notMeasured", code: "queryFailed" };
+    }
+    if (opts.managed && w.kind && opts.managed.has(`${w.kind}/${w.namespace}/${w.workload}`)) w.managed = true;
     // Nothing to run (0 desired, no pods): say why on readiness, "no pods" on the rest — not "not measured", not OK
     if (w.replicas.desired === 0 && pods.length === 0) {
       for (const k of HEAT_METRICS) w.cells[k] = { value: null, level: "stopped", code: "noPods" };
@@ -427,9 +485,11 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   workloads.sort((a, b) => (a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : RANK[b.worst] - RANK[a.worst] || (a.workload < b.workload ? -1 : 1)));
 
   const missing = HEAT_METRICS.filter((m) => (FAMILY[m] && !families.has(FAMILY[m]!)) || (m === "logErrors" && !opts.logErrors));
+  const unknown = (m: HeatMetric) => missing.includes(m) || !!SIGNAL_NEEDS[m]?.some((q) => opts.failed?.has(q));
   const flags = HEAT_METRICS.map((metric) => ({
     metric,
-    count: missing.includes(metric) ? null : workloads.filter((w) => FLAG_AT[metric].includes(w.cells[metric].level)).length,
+    count: unknown(metric) ? null
+      : workloads.filter((w) => FLAG_AT[metric].includes(w.cells[metric].level) && !(w.managed && MANAGED_EXEMPT.includes(metric))).length,
   }));
   return { workloads, flags, missing };
 }
@@ -443,21 +503,10 @@ const rowsOf = (resp: unknown): PromRow[] => {
   return (r?.data?.result ?? []).map((x) => ({ metric: x.metric ?? {}, value: Number(x.value?.[1] ?? 0) })).filter((x) => Number.isFinite(x.value));
 };
 
-async function runAll(fetcher: PrometheusFetcher, endpoint: string, queries: Record<string, string>, limit = 4): Promise<HeatRaw> {
-  const names = Object.keys(queries);
-  const out: HeatRaw = {};
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, names.length) }, async () => {
-    while (next < names.length) {
-      const n = names[next++]!;
-      out[n] = rowsOf(await fetcher.query(endpoint, queries[n]!));
-    }
-  }));
-  return out;
-}
-
 export const HEAT_WINDOWS = [60, 360, 1440] as const;
 const cache = new CacheManager<WorkloadHeatmapResponse>(20, 30_000);
+/** A map with gaps is kept briefly: the next refresh may answer in full */
+const PARTIAL_TTL_MS = 15_000;
 const inflight = new Map<string, Promise<WorkloadHeatmapResponse>>();
 
 export async function getWorkloadHeatmap(env: Env, bearerToken: string | undefined, clusterId: string, windowMinutes: number): Promise<WorkloadHeatmapResponse> {
@@ -467,7 +516,10 @@ export async function getWorkloadHeatmap(env: Env, bearerToken: string | undefin
   if (hit) return hit;
   const running = inflight.get(key);
   if (running) return running;
-  const job = collect(env, bearerToken, clusterId, windowMinutes).then((r) => { if (r.metricsState === "ok") cache.set(key, r); return r; }).finally(() => inflight.delete(key));
+  const job = collect(env, bearerToken, clusterId, windowMinutes).then((r) => {
+    if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length ? PARTIAL_TTL_MS : undefined);
+    return r;
+  }).finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
 }
@@ -488,8 +540,17 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     if (scope === null) return { ...base, metricsState: "noHubbleMetrics" };
     if (scope === "ambiguous") return { ...base, metricsState: "ambiguousCluster" };
     if (logErrors) promString(logErrors.metric); // validated by the schema; control characters refused here too
-    const raw = await runAll(fetcher, target.endpoint, heatmapQueries(scopeMatchers(scope, false), windowMinutes, logErrors));
-    return { ...base, cluster: scope.cluster, ...aggregateHeatmap(raw, { logErrors }) };
+    // The AKS-managed set comes from the Kubernetes API beside the queries — at most MANAGED_WAIT_MS of waiting
+    const managedJob = aksManagedWorkloads(env, bearerToken, clusterId, MANAGED_WAIT_MS);
+    const run = await runIsolated(fetcher, target.endpoint, heatmapQueries(scopeMatchers(scope, false), windowMinutes, logErrors));
+    const failed = new Set(run.gaps.map((g) => g.query));
+    if (CORE_QUERIES.some((q) => failed.has(q))) throw run.firstError;
+    const managed = await managedJob;
+    const gaps: StackQueryGap[] = run.gaps;
+    return {
+      ...base, cluster: scope.cluster, ...aggregateHeatmap(run.rows, { logErrors, managed, failed }),
+      ...(gaps.length ? { gaps } : {}), managedState: managed ? "ok" : "unknown",
+    };
   } catch (e) {
     if (e instanceof HttpError && e.code === "signin_required") throw e;
     const { state, message } = metricsStateOf(e);

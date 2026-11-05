@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aggregateHeatmap, cpuLevel, heatmapQueries, jvmBand, levelOf, type CpuFacts, type HeatRaw } from "../src/services/workloadHeatmap.js";
+import { CORE_QUERIES, SIGNAL_NEEDS, aggregateHeatmap, cpuLevel, heatmapQueries, jvmBand, levelOf, type CpuFacts, type HeatRaw } from "../src/services/workloadHeatmap.js";
 import { eventBelongs, mapEvents } from "../src/services/kubeEvents.js";
 import { redactLogLine, redactLogText } from "../src/services/logRedaction.js";
 import { ERROR_FILTER, logQueries, lokiStateOf, parseLogLine, re2, summarizeLokiDrops, workloadSelector } from "../src/services/lokiLogs.js";
@@ -160,7 +160,67 @@ test("heatmap: JVM headroom without committed / RSS series falls back to non-hea
   const nolimit = aggregateHeatmap(raw({ jvmHeapMax: [r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 100 * Mi)], podMemLimit: [], active: base.active }), {});
   const dns = nolimit.workloads.find((w) => w.workload === "coredns")!.cells.jvmHeadroom;
   assert.deepEqual([dns.level, dns.code], ["noBaseline", "noLimit"], "a JVM without a memory limit has nothing to subtract from");
-  assert.match(heatmapQueries('cluster="a"', 60).jvmHeapMax!, /sum by \(namespace, pod\) \(jvm_memory_max_bytes\{cluster="a",area="heap"\} > 0\)/, "G1 pools report -1");
+  assert.match(heatmapQueries('cluster="a"', 60).jvmHeapMax!, /sum by \(namespace, pod\) \(max by \(namespace, pod, id\) \(jvm_memory_max_bytes\{cluster="a",area="heap"\}\) > 0\)/, "G1 pools report -1; one series per pool");
+});
+
+test("heatmap: native memory is the larger of now and the pod's 24-hour peak (glibc hands arenas back)", () => {
+  const Mi = 1024 * 1024;
+  // 11-05 stg: a Spring app at native 322Mi now, 394Mi at its peak — a full heap is 72Mi further over the limit than "now" says
+  const s = aggregateHeatmap(jvmRaw({
+    jvmNativePeak: [r({ namespace: "app", pod: "sched-9df66d6fc-dcbnk" }, 352 * Mi), r({ namespace: "app", pod: "gw-9468bf7b7-4j4qd" }, 100 * Mi)],
+    podAge: [r({ namespace: "app", pod: "sched-9df66d6fc-dcbnk" }, 140 * 3600), r({ namespace: "app", pod: "gw-9468bf7b7-4j4qd" }, 1800)],
+  }), {});
+  const cell = (w: string) => s.workloads.find((x) => x.workload === w)!.cells.jvmHeadroom;
+  const sched = cell("sched");
+  // native now = 761 − 193 − (271 + 17) = 280, peak 352 → 1075 − (520 + 288 + 352) = −85 (band 107.5 — still marginal)
+  assert.deepEqual([Math.round(sched.value! / Mi), sched.level, Math.round(sched.jvm!.native! / Mi), Math.round(sched.jvm!.nativePeak! / Mi), sched.jvm!.observedHours], [-85, "warn", 280, 352, 24]);
+  const gw = cell("gw");
+  assert.deepEqual([Math.round(gw.value! / Mi), gw.jvm!.observedHours], [260, 0.5], "a lower peak never lowers the estimate; a young pod says how little it has seen");
+  const q = heatmapQueries('cluster="a"', 60);
+  assert.match(q.jvmNativePeak!, /^max_over_time\(\(clamp_min\(.*, 0\)\)\[1440m:5m\]\)$/, "a day whatever the window");
+  assert.match(q.jvmNativePeak!, /area=~"heap\|nonheap"\}\) or max by \(namespace, pod, id\) \(jvm_buffer_memory_used_bytes/);
+});
+
+test("heatmap: memory shows the window's peak beside the level, which stays on now", () => {
+  const s = aggregateHeatmap(raw({ memPeak: [r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm", container: "api" }, 1.9), r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg", container: "api" }, 1.05)] }), {});
+  const mem = s.workloads.find((w) => w.workload === "api")!.cells.memory;
+  // bcdfg: ws 1 at 92% → limit 1/0.92; its peak 1.05 → 96.6%
+  assert.deepEqual([mem.level, mem.worstPod, Math.round(mem.peak!.ratio! * 1000)], ["danger", "api-7d9f8c6b5-bcdfg", 966]);
+  const dns = aggregateHeatmap(raw({ memPeak: [r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq", container: "coredns" }, 3)] }), {});
+  assert.deepEqual(dns.workloads.find((w) => w.workload === "coredns")!.cells.memory.peak, { ratio: null, bytes: 3 }, "no limit: bytes only");
+  assert.match(heatmapQueries('cluster="a"', 360).memPeak!, /max_over_time\(container_memory_working_set_bytes\{cluster="a",container!="",container!="POD"\}\[360m\]\)/);
+});
+
+test("heatmap: AKS-managed workloads keep their CPU / memory but leave the flag strip", () => {
+  const over = { memRatio: [...raw().memRatio!, r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq", container: "coredns" }, 0.95)] };
+  const plain = aggregateHeatmap(raw(over), {});
+  assert.equal(plain.flags.find((f) => f.metric === "memory")!.count, 2);
+  const s = aggregateHeatmap(raw(over), { managed: new Set(["Deployment/kube-system/coredns"]) });
+  const dns = s.workloads.find((w) => w.workload === "coredns")!;
+  assert.deepEqual([dns.managed, dns.cells.memory.level], [true, "danger"], "the value stands");
+  assert.equal(s.flags.find((f) => f.metric === "memory")!.count, 1, "only the app's memory is in the strip");
+  assert.equal(s.flags.find((f) => f.metric === "restarts")!.count, 1, "restarts of an AKS add-on still count");
+  assert.equal(s.workloads.find((w) => w.workload === "api")!.managed, undefined);
+  assert.equal(aggregateHeatmap(raw(over), { managed: new Set(["DaemonSet/kube-system/coredns"]) }).workloads.find((w) => w.workload === "coredns")!.managed, undefined, "kind must match");
+});
+
+test("heatmap: a query that did not answer makes its signals queryFailed — not OK, not 'not measured'", () => {
+  const s = aggregateHeatmap(raw(), { logErrors: LE, failed: new Set(["cpuPsi"]) });
+  const api = s.workloads.find((w) => w.workload === "api")!;
+  assert.deepEqual([api.cells.cpu.level, api.cells.cpu.code], ["notMeasured", "queryFailed"], "no PSI = no danger verdict possible");
+  assert.equal(s.flags.find((f) => f.metric === "cpu")!.count, null);
+  assert.equal(api.cells.memory.level, "danger", "the other signals stand");
+  const j = aggregateHeatmap(jvmRaw(), { failed: new Set(["jvmHeapCommitted"]) });
+  assert.equal(j.workloads.find((w) => w.workload === "pg")!.cells.jvmHeadroom.code, "queryFailed");
+  const dns = aggregateHeatmap(raw(), { failed: new Set(["jvmHeapCommitted"]) }).workloads.find((w) => w.workload === "coredns")!;
+  assert.equal(dns.cells.jvmHeadroom.level, "notInstrumented", "not a Java workload — its rows say so");
+  const blind = aggregateHeatmap(raw(), { failed: new Set(["jvmHeapMax"]) }).workloads.find((w) => w.workload === "coredns")!;
+  assert.equal(blind.cells.jvmHeadroom.code, "queryFailed", "the query that shows who is Java failed — unknown for everyone");
+  const idle = aggregateHeatmap(raw(), { failed: new Set(["memRatio"]) }).workloads.find((w) => w.workload === "batch")!;
+  assert.equal(idle.cells.memory.code, "noPods", "nothing to run stays nothing to run");
+  // every name the failure rules use is a real query (a rename must not silently disable them)
+  const q = heatmapQueries('cluster="a"', 60, LE);
+  assert.deepEqual([...CORE_QUERIES, ...Object.values(SIGNAL_NEEDS).flat()].filter((n) => !(n in q)), []);
 });
 
 test("heatmap CPU: danger is pressure (PSI / throttling), not the ratio; over the request under 100m is no verdict", () => {

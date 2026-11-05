@@ -14,9 +14,9 @@ import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } fro
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
+import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
 import {
-  GLYPH, SIGNAL_GROUPS, attentionRows, clusterGlance, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
+  GLYPH, SIGNAL_GROUPS, attentionRows, clusterGlance, failedSignals, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
   legendLevels, levelIn, mosaicColumns, packMosaic, problemSignals, shortName, signalSummary, tableColumns, tableRows, tileText,
   type HeatView, type TableSort,
 } from "@/lib/workloadHeatView";
@@ -228,6 +228,15 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: st
         </ul>
       </div>
       {threshold && <p className={styles.hmThreshold}>{threshold}</p>}
+      {/* A query that did not answer: say which signals are unknown this time (not OK, not "not measured") */}
+      {d.gaps && d.gaps.length > 0 && (
+        <Notice tone="warning" title={t("ob.hm.gaps", { n: d.gaps.length })}>
+          <span title={d.gaps.map((g) => `${g.query} · ${t(`obs.stack.gap.${g.reason}`)}`).join("\n")}>
+            {t("ob.hm.gapsHint", { list: names(failedSignals(ws)) || "—" })}
+          </span>
+        </Notice>
+      )}
+      {d.managedState === "unknown" && <p className={styles.hmThreshold} title={t("ob.hm.managedUnknownHint")}>{t("ob.hm.managedUnknown")} ⓘ</p>}
 
       {/* Needs attention: only when something does — what and why, worst first */}
       {attn.length > 0 && (
@@ -238,7 +247,8 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: st
               <li key={heatKey(r.w)}>
                 <button type="button" className={styles.hmAttnRow} data-level={r.level} aria-pressed={selected === heatKey(r.w)} onClick={(e) => open(r.w, e.currentTarget)}>
                   <span aria-hidden="true" className={styles.hmGlyph}>{GLYPH[r.level]}</span>
-                  <span className={styles.hmAttnName} title={heatKey(r.w)}>{r.w.namespace} / <strong>{r.w.workload}</strong></span>
+                  <span className={styles.hmAttnName} title={heatKey(r.w)}>{r.w.namespace} / <strong>{r.w.workload}</strong>
+                    {r.w.managed ? <> <Badge tone="neutral">{t("ob.hm.managed")}</Badge></> : null}</span>
                   <span className={styles.hmAttnWhy}>{reason(r.w, r.signals)}</span>
                 </button>
               </li>
@@ -332,7 +342,7 @@ ${t("ob.hm.tileHint")}`}>
                       const tt = tileText(w, view, t);
                       const probs = problemSignals(w).slice(0, 3);
                       const tip = [
-                        k, `${w.kind ?? t("hb.m.kindUnknown")} · ${t(`ob.hm.level.${lv}`)}`,
+                        k, `${w.kind ?? t("hb.m.kindUnknown")} · ${t(`ob.hm.level.${lv}`)}${w.managed ? ` · ${t("ob.hm.managed")}` : ""}`,
                         ...(probs.length ? [reason(w, probs)] : []), t("ob.hm.tileHint"),
                       ].join("\n");
                       return (
@@ -365,7 +375,7 @@ ${t("ob.hm.tileHint")}`}>
         </div>
         {sel && (
           <div ref={panelRef} className={styles.hmPanelWrap}>
-            <WorkloadHeatPanel clusterId={clusterId} w={sel} grafana={d.grafana} onClose={close} />
+            <WorkloadHeatPanel clusterId={clusterId} w={sel} grafana={d.grafana} windowMinutes={d.windowMinutes} onClose={close} />
           </div>
         )}
       </div>

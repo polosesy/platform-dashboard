@@ -20,6 +20,11 @@ export const GLYPH: Record<HeatLevel, string> = { danger: "■", warn: "▲", ok
 export const LEVEL_RANK: Record<HeatLevel, number> = { danger: 0, warn: 1, ok: 2, noBaseline: 3, stopped: 4, noTraffic: 5, notInstrumented: 6, notMeasured: 7 };
 
 export const isProblem = (lv: HeatLevel): lv is "danger" | "warn" => lv === "danger" || lv === "warn";
+/** AKS runs it: its CPU / memory are shown, but there is nothing to change on our side (API: MANAGED_EXEMPT) */
+export const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "memory"];
+export const isActionable = (w: HeatWorkload, m: HeatMetric) => !(w.managed && MANAGED_EXEMPT.includes(m));
+/** Signals a query did not answer for this time (cells say queryFailed) */
+export const failedSignals = (ws: HeatWorkload[]): HeatMetric[] => HEAT_METRICS.filter((m) => ws.some((w) => w.cells[m].code === "queryFailed"));
 export const levelIn = (w: HeatWorkload, view: HeatView): HeatLevel => (view === "worst" ? w.worst : w.cells[view].level);
 export const heatKey = (w: HeatWorkload) => `${w.namespace}/${w.workload}`;
 /** A DaemonSet no node matches (Windows-only on a Linux cluster …) — hidden by default, nothing there to look at */
@@ -141,7 +146,10 @@ export function tableRows(ws: HeatWorkload[], view: HeatView, sort: TableSort, o
 
 export type AttentionRow = { w: HeatWorkload; level: "danger" | "warn"; signals: HeatMetric[] };
 
-/** "주의 필요" list: danger first, then more problem signals, then (one signal) the higher value, then ns/name */
+/**
+ * "주의 필요" list: danger first, then more problem signals, then (one signal) the higher value, then ns/name. A row
+ * whose problems are all AKS-managed CPU / memory goes after ours at the same level (shown — nothing to change here)
+ */
 export function attentionRows(ws: HeatWorkload[], view: HeatView): AttentionRow[] {
   const rows: AttentionRow[] = [];
   for (const w of ws) {
@@ -149,8 +157,9 @@ export function attentionRows(ws: HeatWorkload[], view: HeatView): AttentionRow[
     if (!isProblem(lv)) continue;
     rows.push({ w, level: lv, signals: view === "worst" ? problemSignals(w) : [view] });
   }
+  const ours = (r: AttentionRow) => (r.signals.some((m) => isActionable(r.w, m)) ? 0 : 1);
   return rows.sort((a, b) =>
-    LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || b.signals.length - a.signals.length ||
+    LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || ours(a) - ours(b) || b.signals.length - a.signals.length ||
     // one signal: the worse value first (higher, except headroom where lower is worse)
     (view !== "worst" ? ((b.w.cells[view].value ?? 0) - (a.w.cells[view].value ?? 0)) * (view === "jvmHeadroom" ? -1 : 1) : 0) ||
     cmp(heatKey(a.w), heatKey(b.w)));
@@ -164,7 +173,7 @@ export function signalSummary(flags: WorkloadHeatmapResponse["flags"], ws: HeatW
   for (const f of flags) {
     if (f.count === null) notMeasured.push(f.metric);
     else if (f.count === 0) clear.push(f.metric);
-    else active.push({ metric: f.metric, count: f.count, tone: ws.some((w) => w.cells[f.metric].level === "danger") ? "danger" : "warn" });
+    else active.push({ metric: f.metric, count: f.count, tone: ws.some((w) => w.cells[f.metric].level === "danger" && isActionable(w, f.metric)) ? "danger" : "warn" });
   }
   active.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === "danger" ? -1 : 1) || b.count - a.count);
   return { active, clear, notMeasured };

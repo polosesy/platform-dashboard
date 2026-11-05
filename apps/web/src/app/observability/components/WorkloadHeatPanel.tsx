@@ -12,7 +12,7 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button, LoadingState, Notice } from "@/components/ui";
-import { GLYPH, HEAT_METRICS, formatBytes, formatCell, formatCores } from "@/lib/workloadHeatView";
+import { GLYPH, HEAT_METRICS, MANAGED_EXEMPT, formatBytes, formatCell, formatCores, isProblem } from "@/lib/workloadHeatView";
 import { WorkloadLogStream } from "./WorkloadLogStream";
 import { WorkloadVpaSection } from "./WorkloadVpaSection";
 import styles from "../styles.module.css";
@@ -23,7 +23,7 @@ const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (app
   toPorts: [{ ports: [{ port: "3100", protocol: TCP }] }]`;
 
 // Why a cell has its level, said under the value (the idle codes have their own notice)
-const CELL_NOTE_CODES = new Set(["noLimit", "noRequest", "configDeficit", "imminent", "marginal", "belowFloor", "warmingUp", "lowTraffic"]);
+const CELL_NOTE_CODES = new Set(["noLimit", "noRequest", "configDeficit", "imminent", "marginal", "belowFloor", "warmingUp", "lowTraffic", "queryFailed"]);
 const bytesOrDash = (v: number | null) => (v === null ? "—" : formatBytes(v));
 const coresOrDash = (v: number | null) => (v === null ? "—" : formatCores(v));
 const pctOrDash = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
@@ -33,7 +33,9 @@ function explore(endpoint: string, uid: string, query: Record<string, unknown>):
   return `${endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
 }
 
-export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterId: string; w: HeatWorkload; grafana: WorkloadHeatmapResponse["grafana"]; onClose: () => void }) {
+export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, onClose }: {
+  clusterId: string; w: HeatWorkload; grafana: WorkloadHeatmapResponse["grafana"]; windowMinutes: number; onClose: () => void;
+}) {
   const { t, locale } = useI18n();
   const [errorsOnly, setErrorsOnly] = useState(true);
   const when = (iso: string) => new Date(iso).toLocaleString(dateLocale(locale));
@@ -60,6 +62,7 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
           <div className={styles.stackMuted}>
             <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[w.worst]}</span> {t(`ob.hm.level.${w.worst}`)}
             {" · "}{w.namespace} · {w.kind ?? t("hb.m.kindUnknown")}{w.basis === "pattern" ? ` · ${t("hb.m.byPattern")}` : ""}
+            {w.managed ? <> · <Badge tone="neutral" title={t("ob.hm.managedHint")}>{t("ob.hm.managed")}</Badge></> : null}
           </div>
         </div>
         <Button size="sm" onClick={onClose}>{t("ob.hm.close")}</Button>
@@ -79,6 +82,12 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
                     <span className={styles.hmCellValue}>{formatCell(m, w, t)}{abs ? ` · ${abs}` : ""}</span>
                     {c.oom ? <Badge tone="high">OOMKilled</Badge> : null}
                     {c.code && CELL_NOTE_CODES.has(c.code) ? <span className={styles.hmCellNote}>{t(`ob.hm.code.${c.code}`)}</span> : null}
+                    {w.managed && MANAGED_EXEMPT.includes(m) && isProblem(c.level) ? <span className={styles.hmCellNote} title={t("ob.hm.managedHint")}>{t("ob.hm.managedCell")}</span> : null}
+                    {c.peak ? (
+                      <span className={styles.hmCellNote}>
+                        {t("ob.hm.memPeak", { w: t(`ob.hm.window.${windowMinutes}`), v: c.peak.ratio !== null ? `${Math.round(c.peak.ratio * 100)}%` : formatBytes(c.peak.bytes), bytes: formatBytes(c.peak.bytes) })}
+                      </span>
+                    ) : null}
                     {c.jvm ? (
                       <span className={styles.hmCellNote} title={t("ob.hm.jvmHint")}>
                         {t("ob.hm.jvmBreakdown", {
@@ -86,6 +95,11 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
                           nonheap: bytesOrDash(c.jvm.nonheapCommitted ?? c.jvm.nonheapUsed), direct: bytesOrDash(c.jvm.direct), native: bytesOrDash(c.jvm.native),
                         })}
                         {c.jvm.partial ? ` · ${t("ob.hm.jvmPartial")}` : ""}
+                      </span>
+                    ) : null}
+                    {c.jvm && (c.jvm.nativePeak != null || c.jvm.observedHours != null) ? (
+                      <span className={styles.hmCellNote} title={t("ob.hm.jvmNativePeakHint")}>
+                        {t("ob.hm.jvmNativePeak", { peak: bytesOrDash(c.jvm.nativePeak ?? null), h: c.jvm.observedHours == null ? "—" : c.jvm.observedHours < 1 ? "<1" : String(Math.floor(c.jvm.observedHours)) })}
                       </span>
                     ) : null}
                     {c.cpu ? (

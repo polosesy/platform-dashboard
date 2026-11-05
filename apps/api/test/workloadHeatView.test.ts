@@ -231,3 +231,16 @@ test("table: the heatmap's cells as rows — measured columns only, sorted by a 
   const jv = [wl("a", "x", { jvmHeadroom: { value: 300e6, level: "warn" } }), wl("a", "y", { jvmHeadroom: { value: 100e6, level: "warn" } })];
   assert.deepEqual(v.tableRows(jv, "worst", { by: "jvmHeadroom", dir: "worse" }).map((w) => w.workload), ["y", "x"]);
 });
+
+test("heat view: AKS-managed CPU / memory problems go after ours at the same level; the strip tone ignores them", () => {
+  const dns = { ...wl("kube-system", "coredns", { cpu: { value: 2, level: "warn" } }, "warn"), managed: true as const };
+  const app = wl("app", "zeta", { restarts: { value: 1, level: "warn" } }, "warn");
+  const busy = { ...wl("kube-system", "konnectivity-agent", { cpu: { value: 3, level: "warn" }, restarts: { value: 2, level: "warn" } }, "warn"), managed: true as const };
+  assert.deepEqual(v.attentionRows([dns, app, busy], "worst").map((r) => r.w.workload), ["konnectivity-agent", "zeta", "coredns"],
+    "a managed workload with a restart is still ours to look at; CPU-only goes last");
+  const hot = { ...wl("kube-system", "ama-logs", { memory: { value: 0.95, level: "danger" } }, "danger"), managed: true as const };
+  const s = v.signalSummary([{ metric: "memory", count: 0 }, { metric: "cpu", count: 1 }], [hot, wl("app", "api", { cpu: { value: 2, level: "warn" } }, "warn")]);
+  assert.deepEqual(s.clear, ["memory"], "the API already left it out of the count");
+  assert.equal(s.active[0]!.tone, "warn");
+  assert.deepEqual(v.failedSignals([wl("app", "a", { cpu: { value: null, level: "notMeasured", code: "queryFailed" } })]), ["cpu"]);
+});
