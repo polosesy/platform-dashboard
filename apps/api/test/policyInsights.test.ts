@@ -5,6 +5,7 @@ import { analyzePolicies, type InvWorkload, type PolicyInventory } from "../src/
 import {
   buildPolicyInsights,
   combosOf,
+  imageOwner,
   parseImage,
   pickAzureEndpoint,
   rbacRiskKeys,
@@ -538,4 +539,19 @@ test("security graph — subscription reach: Azure resources it talks to (exposu
   assert.match(raised[0]!.href, /tab=explore&cluster=.*&q=paasDefenderHigh/);
   assert.equal(raised[0]!.evidence, "cfg");
   assert.equal(queue.notDetected, 1, "the gone match of the watched question — not the unwatched one's state");
+});
+
+test("image owner: AKS labels › known project › public registry › MCR outside AKS › private registry (never by the name's look)", () => {
+  const o = (managed: boolean, image: string) => { const p = parseImage(image); return imageOwner({ managed, repo: p.repo, registry: p.registry }); };
+  assert.deepEqual(o(true, "mcr.microsoft.com/oss/kubernetes/coredns:v1.12.1"), { owner: "aks", ownerBasis: "aksLabels" });
+  assert.deepEqual(o(false, "myacr.azurecr.io/mirror/cilium/cilium:v1.17.2"), { owner: "vendor", ownerBasis: "knownProject" }, "a mirror of a known project");
+  assert.deepEqual(o(false, "quay.io/prometheus/node-exporter:v1.9.0"), { owner: "vendor", ownerBasis: "publicRegistry" });
+  assert.deepEqual(o(false, "nginx:1.27"), { owner: "vendor", ownerBasis: "publicRegistry" }, "docker.io");
+  assert.deepEqual(o(false, "mcr.microsoft.com/oss/cilium/hubble-ui:v0.13.2"), { owner: "vendor", ownerBasis: "microsoftRegistry" });
+  assert.deepEqual(o(false, "myacr.azurecr.io/shop/orders:1.4.2"), { owner: "team", ownerBasis: "privateRegistry" });
+  // a flattened hardened-image mirror (no upstream org in the path) is the team's only by default — declared, it is upstream's
+  const p = parseImage("myacr.azurecr.io/hardened/alloy:1.20.1-debian13");
+  assert.equal(imageOwner({ managed: false, repo: p.repo, registry: p.registry }).owner, "team");
+  assert.deepEqual(imageOwner({ managed: false, repo: p.repo, registry: p.registry }, ["MyAcr.azurecr.io/hardened/"]), { owner: "vendor", ownerBasis: "mirror" });
+  assert.equal(imageOwner({ managed: false, repo: "myacr.azurecr.io/hardened-x/y", registry: "myacr.azurecr.io" }, ["myacr.azurecr.io/hardened"]).owner, "team", "a prefix is a path, not a string start");
 });

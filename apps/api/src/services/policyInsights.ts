@@ -10,6 +10,8 @@ import type {
   HubbleFlow,
   HubbleFlowSet,
   ImageVuln,
+  ImageOwner,
+  ImageOwnerBasis,
   Kbom,
   KbomItem,
   KubernetesPolicyResponse,
@@ -38,6 +40,7 @@ import { fixAtText, sourceOf } from "./gitopsSource.js";
 import { selectorMatches, type InvRbacRule, type InvWorkload, type PolicyInventory } from "./policyAnalyzer.js";
 import { isPrivateV4, lookupServiceTag, type ServiceTagIndex } from "./azureServiceTags.js";
 import { cnpIsolates } from "./netpolModel.js";
+import { KNOWN_IMAGES } from "./sbom.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights (pure)
@@ -82,6 +85,8 @@ export type InsightsInput = {
   gaps: string[];
   /** Image vulnerabilities (Defender · SBOM) — absent/null = not collected: the entry stays "unknown" */
   vulns?: { byImage: ImageVuln[]; coverage: VulnCoverage } | null;
+  /** Registry path prefixes the team mirrors upstream images into (connection file `aks.imageMirrors`) */
+  imageMirrors?: string[];
   now?: Date;
 };
 
@@ -478,6 +483,22 @@ const kbomCategory = (repo: string): string => {
 };
 const PUBLIC_REGISTRIES = new Set(["docker.io", "quay.io", "registry.k8s.io", "ghcr.io", "gcr.io", "public.ecr.aws"]);
 
+/**
+ * Pure: who ships the fix for a repo's CVEs — the workload's AKS labels, the team's mirror paths (connection file),
+ * the known-project list the SBOM path uses, the registry. Never the image name's look (a private mirror the team did
+ * not declare and the list does not know = team, basis privateRegistry)
+ */
+export function imageOwner(it: { managed: boolean; repo: string; registry: string }, mirrors: string[] = []): { owner: ImageOwner; ownerBasis: ImageOwnerBasis } {
+  if (it.managed) return { owner: "aks", ownerBasis: "aksLabels" };
+  const path = it.repo.toLowerCase();
+  // The team's own declaration: images under these paths are mirrors of upstream images (DHI, flattened names)
+  if (mirrors.some((m) => path.startsWith(m.toLowerCase().replace(/\/*$/, "/")))) return { owner: "vendor", ownerBasis: "mirror" };
+  if (KNOWN_IMAGES.some((k) => k.re.test(path))) return { owner: "vendor", ownerBasis: "knownProject" };
+  if (PUBLIC_REGISTRIES.has(it.registry)) return { owner: "vendor", ownerBasis: "publicRegistry" };
+  if (it.registry === "mcr.microsoft.com") return { owner: "vendor", ownerBasis: "microsoftRegistry" };
+  return { owner: "team", ownerBasis: "privateRegistry" };
+}
+
 export function parseImage(image: string): { repo: string; registry: string; tag: string; digest: boolean } {
   const [noDigest, digestPart] = image.split("@");
   const last = noDigest!.lastIndexOf(":");
@@ -488,8 +509,10 @@ export function parseImage(image: string): { repo: string; registry: string; tag
   return { repo, registry, tag: hasTag ? noDigest!.slice(last + 1) : digestPart ? "(digest)" : "latest", digest: !!digestPart };
 }
 
+const isVulnerable = (i: KbomItem) => !!i.vuln && !!(i.vuln.counts.critical || i.vuln.counts.high || i.vuln.exploited === "kev" || i.vuln.exploited === "active");
+
 export function buildKbom(workloads: InvWorkload[], input: InsightsInput): Kbom {
-  const items = new Map<string, KbomItem & { tagSet: Set<string>; digestAll: boolean; images: Set<string> }>();
+  const items = new Map<string, Omit<KbomItem, "owner" | "ownerBasis"> & { tagSet: Set<string>; digestAll: boolean; images: Set<string> }>();
   const byImage = new Map((input.vulns?.byImage ?? []).map((v) => [v.image, v]));
   const gitopsApps = input.inventory.gitops?.apps ?? [];
   for (const w of workloads) {
@@ -518,7 +541,7 @@ export function buildKbom(workloads: InvWorkload[], input: InsightsInput): Kbom 
     if (PUBLIC_REGISTRIES.has(it.registry)) flags.push({ key: "public", label: L("공개 레지스트리 직접 pull", "Pulled directly from a public registry") });
     void digestAll;
     const v = worstVuln([...images], byImage);
-    return { ...it, versions, flags, ...(v ? { vuln: { counts: v.counts, exploited: v.exploited, source: v.source } } : {}) };
+    return { ...it, versions, flags, ...imageOwner(it, input.imageMirrors), ...(v ? { vuln: { counts: v.counts, exploited: v.exploited, source: v.source } } : {}) };
   }).sort((a, b) => a.category.localeCompare(b.category) || Number(a.managed) - Number(b.managed) || a.tech.localeCompare(b.tech));
   const pinned = [...items.values()].filter((i) => i.digestAll).length;
   const nodes = input.inventory.nodes ?? [];
@@ -544,7 +567,11 @@ export function buildKbom(workloads: InvWorkload[], input: InsightsInput): Kbom 
       drift: list.filter((i) => i.flags.some((f) => f.key === "drift")).length,
       snapshot: list.filter((i) => i.flags.some((f) => f.key === "snapshot")).length,
       publicPull: list.filter((i) => i.flags.some((f) => f.key === "public")).length,
-      vulnerable: input.vulns ? list.filter((i) => i.vuln && (i.vuln.counts.critical || i.vuln.counts.high || i.vuln.exploited === "kev" || i.vuln.exploited === "active")).length : null,
+      vulnerable: input.vulns ? list.filter(isVulnerable).length : null,
+      owners: Object.fromEntries((["aks", "vendor", "team"] as const).map((o) => {
+        const mine = list.filter((i) => i.owner === o);
+        return [o, { repos: mine.length, vulnerable: input.vulns ? mine.filter(isVulnerable).length : null }];
+      })) as Record<ImageOwner, { repos: number; vulnerable: number | null }>,
       scanned: list.filter((i) => i.vuln).length,
       digestPinned: pinned,
     },

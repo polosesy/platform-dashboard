@@ -251,6 +251,15 @@ export type ClusterContainment = {
 
 // ── KBOM ──
 
+/**
+ * Who ships the fix for an image's CVEs: aks = AKS-managed workloads (Microsoft — an AKS release / node image) ·
+ * vendor = a known open-source project, a public registry or Microsoft's registry outside AKS (upstream builds it; the
+ * team moves to the fixed version) · team = a private registry not identified as an upstream image (the team rebuilds
+ * it — a mirror of an upstream image the rules do not know lands here too, said by its basis)
+ */
+export type ImageOwner = "aks" | "vendor" | "team";
+export type ImageOwnerBasis = "aksLabels" | "mirror" | "knownProject" | "publicRegistry" | "microsoftRegistry" | "privateRegistry";
+
 export type KbomItem = {
   tech: string;
   repo: string;
@@ -264,6 +273,8 @@ export type KbomItem = {
   vuln?: { counts: ImageVuln["counts"]; exploited: ImageVuln["exploited"]; source: ImageVuln["source"] };
   /** Argo CD Applications that deploy the workloads running this image */
   sources?: WorkloadSource[];
+  owner: ImageOwner;
+  ownerBasis: ImageOwnerBasis;
 };
 
 export type Kbom = {
@@ -275,6 +286,8 @@ export type Kbom = {
     vulnerable?: number | null;
     /** Repos with any scan result */
     scanned?: number;
+    /** Per owner: repos, and those with a critical / high / exploited finding (null = no vulnerability source read) */
+    owners?: Record<ImageOwner, { repos: number; vulnerable: number | null }>;
   };
 };
 

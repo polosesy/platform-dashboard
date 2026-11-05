@@ -1,13 +1,14 @@
 "use client";
 
 import { Fragment, useState, type ReactNode } from "react";
-import type { KbomItem, PolicyInsightsResponse } from "@aud/types";
+import type { ImageOwner, KbomItem, PolicyInsightsResponse } from "@aud/types";
 import { Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { Pill } from "./Inspector";
 import styles from "./insights.module.css";
 
 const FLAG_TONE = { drift: "warn", snapshot: "warn", public: "unk" } as const;
+const OWNERS: ImageOwner[] = ["aks", "vendor", "team"];
 
 type Vuln = NonNullable<KbomItem["vuln"]>;
 const exploitedHard = (v: Vuln) => v.exploited === "kev" || v.exploited === "active";
@@ -40,6 +41,7 @@ function vulnStat(data: PolicyInsightsResponse, t: (k: string, v?: Record<string
 export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
   const { t } = useI18n();
   const [showManaged, setShowManaged] = useState(false);
+  const [owner, setOwner] = useState<ImageOwner | null>(null);
   const k = data.kbom;
   const cats = [...new Set(k.items.map((i) => i.category))];
   const managed = k.items.filter((i) => i.managed).length;
@@ -73,6 +75,21 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
         {data.gitops && data.gitops.state !== "ok" && data.gitops.state !== "notInstalled" ? (
           <div className={styles.muted} style={{ fontSize: 12 }}>{t(`ins.kbom.gitops.${data.gitops.state}`)}</div>
         ) : null}
+        {k.summary.owners && (
+          <div className={styles.kbSum} role="group" aria-label={t("ins.kbom.owner.aria")}>
+            {OWNERS.map((o) => {
+              const x = k.summary.owners![o];
+              return (
+                <button key={o} type="button" className={styles.fchip} aria-pressed={owner === o} onClick={() => { setOwner(owner === o ? null : o); if (o === "aks") setShowManaged(true); }}
+                  title={t(`ins.kbom.owner.fix.${o}`)} style={{ display: "grid", gap: 2, textAlign: "left", padding: "8px 10px" }}>
+                  <b>{t(`ins.kbom.owner.${o}`)} · {x.repos}</b>
+                  <span>{x.vulnerable === null ? t("ins.kbom.notConnected") : t("ins.kbom.owner.vulnerable", { n: x.vulnerable })}</span>
+                  <span className={styles.muted} style={{ fontSize: 11 }}>{t(`ins.kbom.owner.fix.${o}`)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className={styles.kbPlat}>
           {k.platform.map((p) => (
             <div key={p.label}>
@@ -88,7 +105,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
             <tbody>
               {cats.map((cat) => {
                 const all = k.items.filter((i) => i.category === cat);
-                const items = all.filter((i) => showManaged || !i.managed);
+                const items = all.filter((i) => (showManaged || !i.managed) && (owner === null || i.owner === owner));
                 if (!items.length) return null;
                 return (
                   <Fragment key={cat}>
@@ -105,9 +122,9 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
                           </div>
                         )) : <span className={styles.muted}>-</span>}</td>
                         <td>
+                          <Pill tone="unk" title={t(`ins.kbom.owner.basis.${x.ownerBasis}`)}>{t(`ins.kbom.owner.${x.owner}`)}</Pill>
                           {x.vuln && <VulnPill v={x.vuln} />}
                           {x.flags.map((f) => <Pill key={f.key} tone={FLAG_TONE[f.key]}>{f.label}</Pill>)}
-                          {!x.flags.length && !x.vuln && <span className={styles.muted}>-</span>}
                         </td>
                       </tr>
                     ))}

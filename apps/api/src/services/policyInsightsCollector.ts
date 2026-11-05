@@ -11,6 +11,7 @@ import { buildPolicyInsights } from "./policyInsights.js";
 import { getServiceTagIndex, type ServiceTagIndex } from "./azureServiceTags.js";
 import { collectImageVulns } from "./imageVulns.js";
 import { attachPaasDefender } from "./paasDefender.js";
+import { clusterConnection } from "../infra/azureClientFactory.js";
 
 // ──────────────────────────────────────────────────────────────
 // Policy insights collector
@@ -103,7 +104,7 @@ export async function collectPolicyInsights(env: Env, bearerToken: string | unde
   const result = withLang(lang, () => buildPolicyInsights({
     clusterId, inventory, policy, flows, flowsError,
     azure: { ...azure, apiServerIps: ctx.apiServerIps, serviceTags },
-    containment: ctx.containment, gaps, vulns,
+    containment: ctx.containment, gaps, vulns, imageMirrors: clusterConnection(env, clusterId).connection.aks?.imageMirrors,
   }));
   // Defender recommendations on the exact Azure resources the cluster talks to (the graph explorer's subscription reach)
   if (azure.available) {

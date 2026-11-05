@@ -99,6 +99,8 @@ const ConnectionSchema = z.object({
     allowLocalAccount: z.boolean().optional(),
     hubbleExec: z.boolean().optional(),
     podLogNamespaces: z.array(z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/, "a namespace name")).optional(),
+    // Registry path prefixes the team mirrors upstream images into (<registry>/<path>) — their CVEs are the upstream's
+    imageMirrors: z.array(z.string().regex(/^[a-z0-9.-]+(:\d+)?\/[\w./-]+$/i, "<registry>/<path>")).max(20).optional(),
     observability: z.object({
       grafana: z.object({
         endpoint: z.string().regex(/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.grafana\.azure\.com\/?$/i, "an https://<name>.<region>.grafana.azure.com endpoint"),
