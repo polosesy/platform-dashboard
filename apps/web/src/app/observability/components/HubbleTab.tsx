@@ -10,10 +10,16 @@ import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
 import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle } from "@/components/ui";
-import { EnableFlowLogsPanel, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
+import { EnableFlowLogsPanel, METRICS_WINDOWS, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
+import { fitWindow, type TimeRange } from "@/lib/timeRange";
 
-type Props = { clusterId: string };
+/**
+ * `control` = the AKS 모니터링 page's time picker: its 새로 고침 / auto refresh take a new sample (the views' own
+ * 실시간 · 새 표본 hide), the metrics view's window follows the range. Samples (exec, Hubble UI, flow logs) are the
+ * agents' buffers now — a past range says so. The /hubble page renders without it (its own controls).
+ */
+type Props = { clusterId: string; control?: { range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void } };
 
 type SubTab = "service-map" | "flows" | "network" | "security";
 
@@ -25,33 +31,41 @@ const SUB_TABS: SubTab[] = ["service-map", "flows", "network", "security"];
  * sample — the same flow views) · Hubble metrics
  * (counts only: workload grid, network, security — no edges, no flow list) · none (why, and how to enable).
  */
-export function HubbleTab({ clusterId }: Props) {
+export function HubbleTab({ clusterId, control }: Props) {
   const { t } = useI18n();
   const [subTab, setSubTab] = useState<SubTab>("service-map");
   // One refresh rule for all four views: a sample when a view opens, "새 표본" on demand, "실시간" = every 30 s.
   // Off by default — every poll used to redraw the map and the tables (a Hubble UI sample takes seconds).
-  const [live, setLive] = useState(false);
-  const [nonce, setNonce] = useState(0);
+  const [ownLive, setLive] = useState(false);
+  const [ownNonce, setNonce] = useState(0);
+  const live = control ? false : ownLive;
+  const nonce = control ? control.nonce : ownNonce;
+  const fit = control ? fitWindow(control.range, METRICS_WINDOWS) : null;
+  const metricsControl = control && fit ? { window: fit.value, differs: fit.differs !== null, nonce: control.nonce, report: control.report } : undefined;
   const sources = useHubbleSource(clusterId);
   const src = sources.data?.clusterId === clusterId ? sources.data : null;
 
   const tabs = (
     <div className={styles.subTabs}>
       <Segmented label={t("hub.views")} value={subTab} onChange={setSubTab} items={SUB_TABS.map((id) => ({ id, label: t(`hub.view.${id}`) }))} />
-      <span className={styles.refreshCtl}>
-        <Toggle checked={live} onChange={setLive} title={t("hb.nm.liveHint")}>{t("hb.nm.live")}</Toggle>
-        <Button size="sm" onClick={() => setNonce((n) => n + 1)}>{t("hb.nm.sample")}</Button>
-      </span>
+      {control ? null : (
+        <span className={styles.refreshCtl}>
+          <Toggle checked={live} onChange={setLive} title={t("hb.nm.liveHint")}>{t("hb.nm.live")}</Toggle>
+          <Button size="sm" onClick={() => setNonce((n) => n + 1)}>{t("hb.nm.sample")}</Button>
+        </span>
+      )}
     </div>
   );
   const view = { clusterId, live, nonce };
+  const pastNote = control?.range.to != null ? <Notice tone="info" title={t("hb.past.title")}>{t("hb.past.hint")}</Notice> : null;
 
   if (sources.error) return <ErrorNotice error={sources.error} />;
   if (!src) return <LoadingState label={t("hb.src.checking")} />;
-  if (src.selected === "exec") return <ExecHubble view={view} subTab={subTab} tabs={tabs} badge={<SourceBadge sources={src} />} />;
+  if (src.selected === "exec") return <>{pastNote}<ExecHubble view={view} subTab={subTab} tabs={tabs} badge={<SourceBadge sources={src} />} /></>;
 
   return (
     <div>
+      {pastNote}
       <div className={styles.statusBadges}>
         <SourceBadge sources={src} />
         <Button size="sm" onClick={sources.reload} disabled={!clusterId}>{t("hub.checkStatus")}</Button>
@@ -80,7 +94,7 @@ export function HubbleTab({ clusterId }: Props) {
               <EnableFlowLogsPanel />
             </>
           ) : (
-            <MetricsView clusterId={clusterId} view={subTab} />
+            <MetricsView clusterId={clusterId} view={subTab} control={metricsControl} />
           )}
         </>
       )}

@@ -4,13 +4,14 @@
 // PageHeader takes its title and description from the menu (navConfig), so a page
 // title always equals its menu label.
 
-import { useId, useRef, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { activeNavItem } from "@/lib/navConfig";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { authStateOfCode } from "@/lib/api";
 import {
-  RANGE_PRESETS, REFRESH_INTERVALS, canShiftBack, canZoomOut, shiftRange, spanMs, zoomOut, type RangePreset, type RefreshInterval,
+  PRESET_MINUTES, RANGE_PRESETS, REFRESH_INTERVALS, canShiftBack, canZoomOut, customRange, fromLocalInput, presetOf, shiftRange, spanMs, toLocalInput,
+  zoomOut, type CustomRangeError, type RangePreset, type RefreshInterval,
 } from "@/lib/timeRange";
 import type { TimeRangeState } from "@/lib/useTimeRange";
 import s from "./ui.module.css";
@@ -193,27 +194,52 @@ export function Toggle({ checked, onChange, children, title, disabled }: { check
 
 /* ── Time range + refresh (Grafana's time picker and refresh picker) ── */
 
+/** A span in words: 90분 · 36시간 · 3일 (the locale's units) */
+export function spanText(t: (k: string, v?: Record<string, string | number>) => string, minutes: number): string {
+  return minutes % 1440 === 0 ? t("tr.unit.d", { n: minutes / 1440 }) : minutes % 60 === 0 ? t("tr.unit.h", { n: minutes / 60 }) : t("tr.unit.m", { n: minutes });
+}
+
 /**
- * One bar for a page's time range and refresh: ‹‹ (back half a range) · the range (quick ranges = ending now; after a
- * shift it reads from ~ to) · ›› (forward, up to now) · ⊖ (twice as wide) | ↻ 새로 고침 (spins while any panel loads) ·
- * the auto-refresh interval (waits while the range is in the past). State: lib/useTimeRange; math: lib/timeRange.
+ * One bar for a page's time range and refresh: « (back half a range) · the range (quick ranges = ending now; after a
+ * shift or a typed from–to it reads from ~ to; 직접 입력… opens the two times) · » (forward, up to now) · ⊖ (the next
+ * quick range) | ↻ 새로 고침 (spins while any panel loads) · the auto-refresh interval (waits while the range is in the
+ * past). Keys t ← · t → · t z (lib/useTimeRange). State: lib/useTimeRange; math: lib/timeRange.
  */
 export function TimeRangeBar({ state }: { state: TimeRangeState }) {
   const { t, locale } = useI18n();
   const { range, setRange, interval, setInterval, paused, refresh, busy, mountedAt } = state;
+  const [form, setForm] = useState<{ from: string; to: string; error: CustomRangeError | null } | null>(null);
   const fmt = (ms: number) => new Date(ms).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const custom = range.to !== null ? t("tr.custom", { from: fmt(range.to - spanMs(range)), to: fmt(range.to) }) : null;
+  const preset = presetOf(range);
+  const label = preset ? null : range.to !== null
+    ? t("tr.custom", { from: fmt(range.to - spanMs(range)), to: fmt(range.to) })
+    : t("tr.lastCustom", { d: spanText(t, range.span) });
+  const openForm = () => {
+    const end = range.to ?? Date.now();
+    setForm({ from: toLocalInput(end - spanMs(range)), to: toLocalInput(end), error: null });
+  };
+  const apply = () => {
+    if (!form) return;
+    const r = customRange(fromLocalInput(form.from), fromLocalInput(form.to), Date.now());
+    if ("error" in r) setForm({ ...form, error: r.error });
+    else { setRange(r); setForm(null); }
+  };
   return (
     <div className={s.timeBar} role="group" aria-label={t("tr.label")}>
       <div className={s.timeGroup}>
         <button type="button" className={s.timeBtn} title={t("tr.back")} aria-label={t("tr.back")}
           disabled={!canShiftBack(range, mountedAt)} onClick={() => setRange(shiftRange(range, -1, Date.now()))}>«</button>
-        <label className={s.timeRange} title={custom ? t("tr.customHint") : t("tr.label")}>
+        <label className={s.timeRange} title={label && range.to !== null ? t("tr.customHint") : t("tr.label")}>
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-          <select className={s.timeSelect} aria-label={t("tr.label")} value={custom ? "" : range.preset}
-            onChange={(e) => e.target.value && setRange({ preset: e.target.value as RangePreset, to: null })}>
-            {custom ? <option value="">{custom}</option> : null}
+          <select className={s.timeSelect} aria-label={t("tr.label")} value={preset ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__custom") openForm();
+              else if (v) setRange({ span: PRESET_MINUTES[v as RangePreset], to: null });
+            }}>
+            {label ? <option value="">{label}</option> : null}
             {RANGE_PRESETS.map((p) => <option key={p} value={p}>{t(`tr.preset.${p}`)}</option>)}
+            <option value="__custom">{t("tr.customOpen")}</option>
           </select>
         </label>
         <button type="button" className={s.timeBtn} title={range.to === null ? t("tr.forwardNow") : t("tr.forward")} aria-label={t("tr.forward")}
@@ -235,6 +261,26 @@ export function TimeRangeBar({ state }: { state: TimeRangeState }) {
         </select>
         {paused ? <span className={s.timePaused} title={t("tr.paused")}>{t("tr.pausedShort")}</span> : null}
       </div>
+      {form ? (
+        // Two local times → a span ending at `to` (customRange: 5 min – 30 days, not the future, not past 30 days back)
+        <div className={s.timeForm} role="dialog" aria-label={t("tr.customTitle")}
+          onKeyDown={(e) => { if (e.key === "Escape") setForm(null); if (e.key === "Enter") apply(); }}>
+          <strong className={s.timeFormTitle}>{t("tr.customTitle")}</strong>
+          <label className={s.field}>
+            <span className={s.fieldLabel}>{t("tr.from")}</span>
+            <input className={s.input} type="datetime-local" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value, error: null })} autoFocus />
+          </label>
+          <label className={s.field}>
+            <span className={s.fieldLabel}>{t("tr.to")}</span>
+            <input className={s.input} type="datetime-local" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value, error: null })} />
+          </label>
+          {form.error ? <span className={s.timeFormError} role="alert">{t(`tr.err.${form.error}`)}</span> : <span className={s.timeFormHint}>{t("tr.customLimits")}</span>}
+          <span className={s.timeFormActions}>
+            <Button size="sm" onClick={() => setForm(null)}>{t("tr.cancel")}</Button>
+            <Button size="sm" variant="primary" onClick={apply}>{t("tr.apply")}</Button>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

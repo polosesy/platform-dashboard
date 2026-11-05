@@ -6,21 +6,30 @@ import type { PodLogEntry, PodLogAttempt, PodLogSource, ObservabilityLogsRespons
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
-import { startPolling } from "@/lib/usePolling";
-import { Notice } from "@/components/ui";
+import { Badge, Notice } from "@/components/ui";
+import { atParam, podLogMinutesFor, type TimeRange } from "@/lib/timeRange";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 
+// One pod's logs over the page's time range (lib/timeRange podLogMinutesFor — up to a day, ending now or at the
+// range's end): Loki and Container Insights read a past range, kubelet only tails now (skipped, said). Refreshed by
+// the page's 새로 고침 / auto refresh (the tab used to poll every 15 s on its own).
 type Props = {
   clusterId: string;
+  range: TimeRange;
+  nonce: number;
+  report?: (id: string, loading: boolean) => void;
 };
 
-export function LogsTab({ clusterId }: Props) {
+export function LogsTab({ clusterId, range, nonce, report }: Props) {
   const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   const [namespace, setNamespace] = useState("");
   const [podName, setPodName] = useState("");
   const [containerName, setContainerName] = useState("");
-  const [sinceMinutes, setSinceMinutes] = useState(30);
+  const span = podLogMinutesFor(range);
+  const sinceMinutes = span.value;
+  const at = atParam(range);
   const [search, setSearch] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [streamFilter, setStreamFilter] = useState<"all" | "stdout" | "stderr">("all");
@@ -53,10 +62,10 @@ export function LogsTab({ clusterId }: Props) {
     }
   }, [clusterId, getApiToken]);
 
-  // Poll namespaces every 30s
+  // The namespace / pod list: on open, and again with the page's refresh (below)
   useEffect(() => {
     if (!clusterId) return;
-    return startPolling(fetchNamespaces, 30_000); // visible tab only, no overlap
+    void fetchNamespaces();
   }, [fetchNamespaces, clusterId]);
 
   // Build namespace list (모든 네임스페이스, Pod 유무 관계없이)
@@ -131,7 +140,7 @@ export function LogsTab({ clusterId }: Props) {
     try {
       const token = await getApiToken();
       const data = await fetchJsonWithBearer<ObservabilityLogsResponse>(
-        apiUrl("/api/observability/logs", { clusterId, namespace, podName, limit: 300, sinceMinutes, container: safeContainer }),
+        apiUrl("/api/observability/logs", { clusterId, namespace, podName, limit: 300, sinceMinutes, at, container: safeContainer }),
         token,
       );
       setLogs(data.logs);
@@ -142,13 +151,15 @@ export function LogsTab({ clusterId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [clusterId, namespace, podName, containerName, sinceMinutes, getApiToken, nsPodItems]);
+  }, [clusterId, namespace, podName, containerName, sinceMinutes, at, getApiToken, nsPodItems]);
 
-  // Initial fetch + polling
+  // A new pod / range reads at once; the page's refresh reads again
   useEffect(() => {
     if (!namespace || !podName) return;
-    return startPolling(fetchLogs, 15_000); // visible tab only, no overlap
+    void fetchLogs();
   }, [fetchLogs, namespace, podName]);
+  const refreshAll = useCallback(() => { void fetchNamespaces(); void fetchLogs(); }, [fetchNamespaces, fetchLogs]);
+  useRangeRefresh("logs", nonce, loading, refreshAll, report);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -215,9 +226,8 @@ export function LogsTab({ clusterId }: Props) {
           </select>
         )}
 
-        <select value={sinceMinutes} onChange={(e) => setSinceMinutes(Number(e.target.value))}>
-          {[5, 15, 30, 60, 360, 1440].map((m) => <option key={m} value={m}>{m < 60 ? t("ob.logs.lastMin", { n: m }) : t("ob.logs.lastHour", { n: m / 60 })}</option>)}
-        </select>
+        {span.differs ? <Badge tone="info" title={t("ob.logs.rangeMaxHint")}>{t("ob.logs.rangeMax")}</Badge> : null}
+        {at ? <Badge tone="medium" title={t("ob.logs.pastHint")}>{t("ob.logs.past", { at: new Date(Number(at) * 1000).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</Badge> : null}
 
         {hasStreamInfo && (
           <select value={streamFilter} onChange={(e) => setStreamFilter(e.target.value as "all" | "stdout" | "stderr")}>

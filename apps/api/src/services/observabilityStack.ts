@@ -383,6 +383,8 @@ const lastGood = new CacheManager<ObservabilityStackResponse>(20, 15 * 60_000);
 const scopeCache = new CacheManager<NonNullable<ReturnType<typeof pickScope>>>(20, 10 * 60_000);
 const inflight = new Map<string, Promise<ObservabilityStackResponse>>();
 const PARTIAL_TTL_MS = 15_000;
+/** A past window does not change */
+const PAST_TTL_MS = 10 * 60_000;
 
 /** Pure: what to answer after a refresh — a whole failure falls back to the last complete answer, marked stale */
 export function withFallback(fresh: ObservabilityStackResponse, last: ObservabilityStackResponse | undefined): ObservabilityStackResponse {
@@ -390,13 +392,22 @@ export function withFallback(fresh: ObservabilityStackResponse, last: Observabil
   return { ...last, stale: { failedAt: fresh.generatedAt, state: fresh.metricsState, ...(fresh.message ? { message: fresh.message } : {}) } };
 }
 
-export async function getObservabilityStack(env: Env, bearerToken: string | undefined, clusterId: string): Promise<ObservabilityStackResponse> {
-  const key = `${cachePrefix(bearerToken)}:obs-stack:${clusterId.toLowerCase()}`;
+/**
+ * `at` = the 10-minute window's end (epoch seconds, infra queryPastTime) — "was the pipeline healthy then": every
+ * query at that time, Pyroscope readiness by its pods' kube_pod_status_ready (the Service's endpoints are today's,
+ * not read); no last-good fallback (that is a now answer)
+ */
+export async function getObservabilityStack(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<ObservabilityStackResponse> {
+  const key = `${cachePrefix(bearerToken)}:obs-stack:${clusterId.toLowerCase()}${at === undefined ? "" : `:${at}`}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const running = inflight.get(key);
   if (running) return running;
-  const job = collect(env, bearerToken, clusterId).then((r) => {
+  const job = collect(env, bearerToken, clusterId, at).then((r) => {
+    if (at !== undefined) {
+      if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length ? PARTIAL_TTL_MS : PAST_TTL_MS);
+      return r;
+    }
     if (r.metricsState !== "ok") return withFallback(r, lastGood.get(key));
     // A partial answer is retried soon; a complete one is also the fallback for a later failed refresh
     if (r.gaps?.length) cache.set(key, r, PARTIAL_TTL_MS);
@@ -426,10 +437,12 @@ async function serviceEndpoints(env: Env, bearerToken: string | undefined, clust
   }
 }
 
-async function collect(env: Env, bearerToken: string | undefined, clusterId: string): Promise<ObservabilityStackResponse> {
+async function collect(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<ObservabilityStackResponse> {
   const grafanaCfg = clusterConnection(env, clusterId).connection.aks?.observability?.grafana;
+  const time = at === undefined ? undefined : String(at);
   const base = {
-    clusterId, generatedAt: new Date().toISOString(), windowMinutes: STACK_WINDOW_MINUTES, cluster: null as string | null,
+    clusterId, generatedAt: new Date().toISOString(), windowMinutes: STACK_WINDOW_MINUTES, ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
+    cluster: null as string | null,
     components: [], targets: [], downTargets: [],
     grafana: grafanaCfg ? { endpoint: grafanaCfg.endpoint.replace(/\/+$/, ""), datasources: grafanaCfg.datasources ?? {} } : null,
   };
@@ -450,19 +463,19 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     if (scope === "ambiguous") return { ...base, metricsState: "ambiguousCluster" };
     const C = scopeMatchers(scope, false);
     const queries = stackQueries(C);
-    const run = await runAll(fetcher, target.endpoint, queries);
+    const run = await runAll(fetcher, target.endpoint, queries, undefined, time);
     // Nothing answered: that is the workspace failing, not a partial picture
     if (run.gaps.length === Object.keys(queries).length) throw run.firstError;
     const raw = run.rows as StackRaw;
     const failed = new Set(run.gaps.map((g) => g.query));
     const pyro = pyroscopeTarget(raw.profilesTarget ?? []);
-    const endpointPods = pyro ? await serviceEndpoints(env, bearerToken, clusterId, pyro.namespace, pyro.service) : null;
+    const endpointPods = pyro && at === undefined ? await serviceEndpoints(env, bearerToken, clusterId, pyro.namespace, pyro.service) : null;
     const agg = aggregateStack(raw, C, { endpointPods, failed });
     // Since when the not-Ready pods are not Ready — a few queries, only when some pod is not Ready
     const pending = agg.components.flatMap((c) => (c.readiness?.notReady ?? []).map((n) => ({ n, ns: c.namespace }))).filter((x) => x.ns).slice(0, 10);
     await Promise.all(pending.map(async ({ n, ns }) => {
       try {
-        const last = rowsOf(await fetcher.query(target.endpoint, notReadySinceQuery(C, ns!, n.pod), undefined, { timeoutMs: STACK_QUERY_TIMEOUT_MS }))[0]?.value;
+        const last = rowsOf(await fetcher.query(target.endpoint, notReadySinceQuery(C, ns!, n.pod), time, { timeoutMs: STACK_QUERY_TIMEOUT_MS }))[0]?.value;
         n.since = last ? new Date((last + 60) * 1000).toISOString() : null;
       } catch { /* since stays unknown */ }
     }));

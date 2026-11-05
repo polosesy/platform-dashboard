@@ -536,6 +536,8 @@ export async function collectPodLogs(
   podName: string,
   limit: number = 200,
   sinceMinutes: number = 30,
+  /** The window's end (epoch seconds) for a range in the past; none = now */
+  at?: number,
 ): Promise<{ logs: PodLogEntry[]; containerInsightsAvailable: boolean }> {
   const workspaceId = await resolveWorkspaceId(env, bearerToken, clusterId);
   if (!workspaceId) {
@@ -543,7 +545,10 @@ export async function collectPodLogs(
   }
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
-  const cacheKey = `${prefix}:obs:logs:${workspaceId}:${namespace}:${podName}:${limit}:${sinceMinutes}`;
+  const cacheKey = `${prefix}:obs:logs:${workspaceId}:${namespace}:${podName}:${limit}:${sinceMinutes}:${at ?? "now"}`;
+  // The last N minutes, ending now or at `at` (a number we made — no user text in the KQL)
+  const within = (minutes: number) => (at === undefined ? `TimeGenerated > ago(${minutes}m)`
+    : `TimeGenerated between (datetime(${new Date(at * 1000).toISOString()}) - ${minutes}m .. datetime(${new Date(at * 1000).toISOString()}))`);
   const cached = logsCache.get(cacheKey);
   if (cached) return { logs: cached, containerInsightsAvailable: true };
 
@@ -554,7 +559,7 @@ export async function collectPodLogs(
     // column_ifexists()로 AMA / OMS / Basic 티어 스키마 차이 흡수
     const logV2Kql = `
 ContainerLogV2
-| where TimeGenerated > ago(${sinceMinutes}m)
+| where ${within(sinceMinutes)}
 | extend _PodNs = coalesce(column_ifexists("PodNamespace", ""), column_ifexists("Namespace", ""))
 | extend _PodName = coalesce(column_ifexists("PodName", ""), column_ifexists("Name", ""))
 | extend _Container = coalesce(column_ifexists("ContainerName", ""), column_ifexists("Container", ""), "")
@@ -569,14 +574,14 @@ ContainerLogV2
     // ContainerLog has no pod/namespace columns — resolve the pod's container IDs via KubePodInventory
     const logV1Kql = `
 let _containers = KubePodInventory
-| where TimeGenerated > ago(${sinceMinutes + 60}m)
+| where ${within(sinceMinutes + 60)}
 ${clusterFilterKql(clusterId)}
 | where Namespace =~ ${kqlString(namespace)}
 | where coalesce(column_ifexists("PodName", ""), column_ifexists("Name", "")) =~ ${kqlString(podName)}
 | where isnotempty(ContainerID)
 | distinct ContainerID, ContainerName;
 ContainerLog
-| where TimeGenerated > ago(${sinceMinutes}m)
+| where ${within(sinceMinutes)}
 | join kind=inner (_containers) on ContainerID
 | project TimeGenerated, PodName = ${kqlString(podName)}, ContainerName = tostring(split(ContainerName, "/")[-1]), LogMessage = LogEntry, LogSource = LogEntrySource
 | order by TimeGenerated desc

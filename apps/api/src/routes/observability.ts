@@ -102,6 +102,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       const pods = (queryString(req, "pods") ?? "").split(",").filter(Boolean).slice(0, 20);
       res.json(await getWorkloadLogs(env, req.auth?.bearerToken, clusterId, {
         namespace: namespace!, workload: workload!, pods, errorsOnly: queryString(req, "errorsOnly") !== "false", minutes: queryInt(req, "minutes", 60, 1, 1440),
+        at: queryPastTime(req, "at"),
       }));
     } catch (e: unknown) {
       sendError(res, e, "workload_logs_failed", "observability");
@@ -133,7 +134,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
   router.get("/api/observability/stack", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId));
+      res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_stack_failed", "observability");
     }
@@ -248,6 +249,9 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     const container = queryString(req, "container");
     const limit = queryInt(req, "limit", 200, 10, 500);
     const sinceMinutes = queryInt(req, "sinceMinutes", 30, 1, 1440);
+    // A range in the past (the page's time picker): Loki and Container Insights read it; kubelet only tails now
+    let at: number | undefined;
+    try { at = queryPastTime(req, "at"); } catch (e: unknown) { return sendError(res, e, "logs_failed"); }
     const allowed = podLogNamespaceAllowed(env, clusterId, namespace);
     const attempts: PodLogAttempt[] = [];
     let picked: { source: PodLogSource; logs: PodLogEntry[]; redactions: number } | null = null;
@@ -256,7 +260,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       // 1. Loki — every namespace the collector ships, with a time window
       if (!allowed) attempts.push({ source: "loki", state: "denied" });
       else {
-        const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, { namespace, pod: podName, container, minutes: sinceMinutes, limit });
+        const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, { namespace, pod: podName, container, minutes: sinceMinutes, limit, at });
         if (r.state === "ok") {
           attempts.push({ source: "loki", state: r.lines.length ? "ok" : "empty" });
           if (r.lines.length) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
@@ -265,6 +269,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       // 2. kubelet — needs a pods/log Role in that namespace (k8sReadSurface: never cluster-wide)
       if (!picked) {
         if (!allowed) attempts.push({ source: "kubelet", state: "denied" });
+        else if (at !== undefined) attempts.push({ source: "kubelet", state: "pastRange" });
         else {
           try {
             const raw = await readPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, { container, tailLines: limit });
@@ -280,7 +285,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       // 3. Container Insights — ContainerLogV2 / ContainerLog, when the cluster's DCR collects them
       if (!picked) {
         try {
-          const { logs, containerInsightsAvailable } = await collectPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes);
+          const { logs, containerInsightsAvailable } = await collectPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes, at);
           if (!containerInsightsAvailable) attempts.push({ source: "containerInsights", state: "notConfigured" });
           else {
             let redactions = 0;
@@ -299,6 +304,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     const data: ObservabilityLogsResponse = {
       clusterId,
       generatedAt: new Date().toISOString(),
+      ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
       logs: picked?.logs ?? [],
       podName,
       namespace,

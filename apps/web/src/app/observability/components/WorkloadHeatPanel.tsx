@@ -15,6 +15,8 @@ import { Badge, Button, LoadingState, Notice } from "@/components/ui";
 import { GLYPH, HEAT_METRICS, MANAGED_EXEMPT, formatBytes, formatCell, formatCores, isProblem } from "@/lib/workloadHeatView";
 import { WorkloadLogStream } from "./WorkloadLogStream";
 import { WorkloadVpaSection } from "./WorkloadVpaSection";
+import { WORKLOAD_LOG_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
 
 const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (applied by the cluster owner through GitOps)
@@ -33,8 +35,12 @@ function explore(endpoint: string, uid: string, query: Record<string, unknown>):
   return `${endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
 }
 
-export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, onClose }: {
-  clusterId: string; w: HeatWorkload; grafana: WorkloadHeatmapResponse["grafana"]; windowMinutes: number; onClose: () => void;
+/**
+ * `range` = the page's time range: the log stream reads it (≤ 6 h — WORKLOAD_LOG_WINDOWS, ending at the range's end);
+ * events (Kubernetes keeps ~1 h) and VPA (today's recommendation) are now — a past range says so beside them
+ */
+export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range, nonce, onClose }: {
+  clusterId: string; w: HeatWorkload; grafana: WorkloadHeatmapResponse["grafana"]; windowMinutes: number; range: TimeRange; nonce: number; onClose: () => void;
 }) {
   const { t, locale } = useI18n();
   const [errorsOnly, setErrorsOnly] = useState(true);
@@ -45,11 +51,17 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, onClos
     fetchJsonWithBearer<KubeEventsResponse>(apiUrl("/api/observability/events", { clusterId, namespace: w.namespace, workload: w.workload }), token),
   );
   const pods = w.pods.map((p) => p.pod).slice(0, 20).join(",");
-  const logs = useApiQuery(idle ? null : `wlogs:${clusterId}:${w.namespace}:${w.workload}:${errorsOnly}`, (token) =>
+  const logWin = fitWindow(range, WORKLOAD_LOG_WINDOWS);
+  const at = atParam(range);
+  const past = at !== undefined;
+  const pastAt = range.to === null ? "" : new Date(range.to).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const logs = useApiQuery(idle ? null : `wlogs:${clusterId}:${w.namespace}:${w.workload}:${errorsOnly}:${logWin.value}:${at ?? "now"}`, (token) =>
     fetchJsonWithBearer<WorkloadLogsResponse>(apiUrl("/api/observability/workload-logs", {
-      clusterId, namespace: w.namespace, workload: w.workload, pods, errorsOnly: String(errorsOnly), minutes: "60",
+      clusterId, namespace: w.namespace, workload: w.workload, pods, errorsOnly: String(errorsOnly), minutes: String(logWin.value), at,
     }), token),
   );
+  useRangeRefresh("panelEvents", nonce, false, events.reload);
+  useRangeRefresh("panelLogs", nonce, false, logs.reload);
   const lokiUid = grafana?.datasources.loki;
   const tempoUid = grafana?.datasources.tempo;
   const noBaseline = w.pods.some((p) => (p.memory === null && p.memBytes != null) || (p.cpu === null && p.cpuCores != null));
@@ -140,8 +152,10 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, onClos
           )}
 
           <WorkloadVpaSection clusterId={clusterId} namespace={w.namespace} workload={w.workload} kind={w.kind} />
+          {past ? <p className={styles.stackMuted}>{t("ob.hm.vpaNow")}</p> : null}
 
           <h4 className={styles.stackTitle}>{t("ob.hm.events")}</h4>
+          {past ? <Notice tone="info">{t("ob.hm.eventsNow", { at: pastAt })}</Notice> : null}
           {events.error ? <Notice tone="warning">{events.error}</Notice> : !events.data ? <LoadingState /> : events.data.events.length === 0 ? (
             <p className={styles.stackMuted}>{t("ob.hm.noEvents")}</p>
           ) : (
@@ -163,6 +177,10 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, onClos
           <p className={styles.stackMuted}>{t(events.data?.messages ? "ob.hm.eventsHint" : "ob.hm.eventsHintViewer")}</p>
 
           <h4 className={styles.stackTitle}>{t("ob.hm.logs")}</h4>
+          <p className={styles.stackMuted}>
+            {past ? t("ob.hm.logsRangeAt", { w: t(`ob.hm.window.${logWin.value}`), at: pastAt }) : t("ob.hm.logsRange", { w: t(`ob.hm.window.${logWin.value}`) })}
+            {logWin.differs === "max" ? ` · ${t("ob.hm.logsMax")}` : logWin.differs === "round" ? ` · ${t("ob.hm.logsRound")}` : ""}
+          </p>
           {logs.error ? <Notice tone="warning">{logs.error}</Notice> : !logs.data ? <LoadingState /> : logs.data.state !== "ok" ? (
             <Notice tone={logs.data.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${logs.data.state}`)}>
               {t(`ob.hm.lokiHint.${logs.data.state}`)}

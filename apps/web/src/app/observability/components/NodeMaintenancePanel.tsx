@@ -38,7 +38,8 @@ export function NodeMaintenancePanel({ clusterId, range, nonce, report }: {
     <Panel
       title={t("nm.title")}
       sub={atText ? t("nm.subAt", { n: days, at: atText }) : t("nm.sub", { n: days })}
-      actions={span.differs ? <Badge tone="info" title={t("nm.minDayHint")}>{t("nm.minDay")}</Badge> : undefined}
+      actions={span.differs === "min" ? <Badge tone="info" title={t("nm.minDayHint")}>{t("nm.minDay")}</Badge>
+        : span.differs === "round" ? <Badge tone="info" title={t("nm.roundDayHint")}>{t("nm.roundDay", { n: days })}</Badge> : undefined}
     >
       <ErrorNotice error={q.error} />
       {!d ? (q.loading ? <LoadingState /> : null) : <Body d={d} />}

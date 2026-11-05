@@ -167,13 +167,16 @@ export type PodLogEntry = {
 
 /** Where pod logs can come from, in the order the API tries them (services/podLogSources.ts) */
 export type PodLogSource = "loki" | "kubelet" | "containerInsights";
-export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "failed";
+/** pastRange = the source reads only up to now (kubelet tails the live log) — skipped for a range in the past */
+export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "failed" | "pastRange";
 /** One source the API tried for these logs — the page says which answered and why the others did not */
 export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string };
 
 export type ObservabilityLogsResponse = {
   clusterId: string;
   generatedAt: string;
+  /** The window's end when it is not now (the time picker moved back) */
+  at?: string;
   logs: PodLogEntry[];
   podName: string;
   namespace: string;
@@ -327,6 +330,8 @@ export type ObservabilityStackResponse = {
   clusterId: string;
   generatedAt: string;
   windowMinutes: number;
+  /** The window's end when it is not now (the time picker moved back) */
+  at?: string;
   /** Same states as the Hubble metrics view (workspace / permission / scope) */
   metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
   message?: string;
@@ -504,6 +509,8 @@ export type LogLine = {
 export type WorkloadLogsResponse = {
   clusterId: string;
   generatedAt: string;
+  /** The window's end when it is not now (the time picker moved back) */
+  at?: string;
   state: LokiState;
   message?: string;
   lines: LogLine[];

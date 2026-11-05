@@ -210,7 +210,8 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
         <Toggle checked={problemsOnly} onChange={setProblemsOnly}>{t("ob.hm.problemsOnly")}</Toggle>
         <span className={styles.hmMeta}>
           {/* The picker's range differs from what the heatmap reads — said, never a silent other range */}
-          {span.differs ? <Badge tone="info" title={t("ob.hm.windowMaxHint")}>{t("ob.hm.windowMax")}</Badge> : null}
+          {span.differs === "max" ? <Badge tone="info" title={t("ob.hm.windowMaxHint")}>{t("ob.hm.windowMax")}</Badge> : null}
+          {span.differs === "round" ? <Badge tone="info" title={t("ob.hm.windowRoundHint")}>{t("ob.hm.windowRound", { w: t(`ob.hm.window.${win}`) })}</Badge> : null}
           {d.at ? <Badge tone="medium" title={t("ob.hm.atHint")}>{t("ob.hm.at", { at: new Date(d.at).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</Badge> : null}
           <span title={t("ob.hm.basis", { n: ws.length, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}>
             {t("ob.hm.meta", { n: ws.length, ns: nsCount, at: new Date(d.generatedAt).toLocaleTimeString(dateLocale(locale)) })} ⓘ
@@ -385,7 +386,7 @@ ${t("ob.hm.tileHint")}`}>
         </div>
         {sel && (
           <div ref={panelRef} className={styles.hmPanelWrap}>
-            <WorkloadHeatPanel clusterId={clusterId} w={sel} grafana={d.grafana} windowMinutes={d.windowMinutes} onClose={close} />
+            <WorkloadHeatPanel clusterId={clusterId} w={sel} grafana={d.grafana} windowMinutes={d.windowMinutes} range={range} nonce={nonce} onClose={close} />
           </div>
         )}
       </div>

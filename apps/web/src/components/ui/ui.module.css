@@ -506,9 +506,46 @@
 
 /* ── Time range bar (Grafana's time picker + refresh picker): two joined button groups ── */
 .timeBar {
+  position: relative;
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 8px;
+}
+
+/* 직접 입력: two local times under the bar */
+.timeForm {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  gap: 10px;
+  width: 280px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-md);
+}
+
+.timeFormTitle {
+  font-size: 13px;
+}
+
+.timeFormHint,
+.timeFormError {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.timeFormError {
+  color: var(--danger);
+}
+
+.timeFormActions {
+  display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 

@@ -19,7 +19,8 @@ const NAME = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
 const MAX_LINES = 500;
 const MAX_LINE_BYTES = 4096;
 const MAX_BODY = 2 * 1024 * 1024;
-export const LOG_WINDOWS = [15, 60, 360] as const;
+/** A workload's stream (every pod of it): up to 6 h — the time picker's quick ranges below that (web WORKLOAD_LOG_WINDOWS) */
+export const LOG_WINDOWS = [5, 15, 30, 60, 180, 360] as const;
 export const DROP_WINDOWS = [60, 360, 1440] as const;
 
 /** Escape for a LogQL label regex (RE2) inside a double-quoted string */
@@ -91,26 +92,31 @@ async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, p
 }
 
 const nowNs = () => BigInt(Date.now()) * 1_000_000n;
-const range = (minutes: number) => ({ start: String(nowNs() - BigInt(minutes) * 60_000_000_000n), end: String(nowNs()) });
+/** The last `minutes`, ending now or at `at` (epoch seconds — a range in the past, infra queryPastTime) */
+const range = (minutes: number, at?: number) => {
+  const end = at === undefined ? nowNs() : BigInt(at) * 1_000_000_000n;
+  return { start: String(end - BigInt(minutes) * 60_000_000_000n), end: String(end) };
+};
 
 const logCache = new CacheManager<WorkloadLogsResponse>(50, 15_000);
 
 export async function getWorkloadLogs(
   env: Env, bearerToken: string | undefined, clusterId: string,
-  opts: { namespace: string; workload: string; pods?: string[]; errorsOnly: boolean; minutes: number },
+  opts: { namespace: string; workload: string; pods?: string[]; errorsOnly: boolean; minutes: number; at?: number },
 ): Promise<WorkloadLogsResponse> {
   if (!(LOG_WINDOWS as readonly number[]).includes(opts.minutes)) throw new HttpError(400, "invalid_window", `minutes must be one of ${LOG_WINDOWS.join(", ")}`);
   const selector = workloadSelector(opts.namespace, opts.workload, opts.pods);
-  const base: WorkloadLogsResponse = { clusterId, generatedAt: new Date().toISOString(), state: "ok", lines: [], exceptions: [], truncated: false, redactions: 0, windowMinutes: opts.minutes };
+  const base: WorkloadLogsResponse = { clusterId, generatedAt: new Date().toISOString(), state: "ok", lines: [], exceptions: [], truncated: false, redactions: 0, windowMinutes: opts.minutes,
+    ...(opts.at !== undefined ? { at: new Date(opts.at * 1000).toISOString() } : {}) };
   const cfg = lokiConfig(env, clusterId);
   if (!cfg) return { ...base, state: "notConfigured" };
-  const key = `${cachePrefix(bearerToken)}:loki-logs:${clusterId.toLowerCase()}:${selector}:${opts.errorsOnly}:${opts.minutes}`;
+  const key = `${cachePrefix(bearerToken)}:loki-logs:${clusterId.toLowerCase()}:${selector}:${opts.errorsOnly}:${opts.minutes}:${opts.at ?? "now"}`;
   const hit = logCache.get(key);
   if (hit) return hit;
   const q = logQueries(selector, opts.errorsOnly, opts.minutes);
   try {
     const [lines, exc] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: q.lines, ...range(opts.minutes), limit: String(MAX_LINES), direction: "backward" }),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: q.lines, ...range(opts.minutes, opts.at), limit: String(MAX_LINES), direction: "backward" }),
       lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: q.exceptions, time: String(nowNs()) }).catch(() => null),
     ]);
     let redactions = 0;
@@ -145,7 +151,7 @@ const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines
  */
 export async function getPodLogsFromLoki(
   env: Env, bearerToken: string | undefined, clusterId: string,
-  opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number },
+  opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number; at?: number },
 ): Promise<{ state: LokiState | "notConfigured"; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
   const cfg = lokiConfig(env, clusterId);
   if (!cfg) return { state: "notConfigured", lines: [], redactions: 0, truncated: false };
@@ -154,11 +160,11 @@ export async function getPodLogsFromLoki(
   }
   const selector = `{namespace="${opts.namespace}", pod="${opts.pod}"${opts.container ? `, container="${opts.container}"` : ""}}`;
   const limit = Math.min(Math.max(opts.limit, 1), MAX_LINES);
-  const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${limit}`;
+  const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${limit}:${opts.at ?? "now"}`;
   const hit = podLogCache.get(key);
   if (hit) return hit;
   try {
-    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes), limit: String(limit), direction: "backward" });
+    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes, opts.at), limit: String(limit), direction: "backward" });
     let redactions = 0;
     const lines: PodLogEntry[] = [];
     for (const st of res.body.data?.result ?? []) {

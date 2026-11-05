@@ -4,13 +4,17 @@
 // link opens the same view (Grafana's from / to / refresh). `nonce` goes up on 새로 고침 and on every auto tick; panels
 // reload when it changes and report while they load (`report`), so the button spins until the last one answers and
 // a tick never stacks on a slow one. Auto refresh runs only in a visible tab (startPolling) and waits while the range
-// is in the past (its data does not change). Callers sit under a <Suspense> (useSearchParams).
+// is in the past (its data does not change). Grafana's keys move the range: t ← · t → · t z (timeKey).
+// Callers sit under a <Suspense> (useSearchParams).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { withParam } from "./queryParam";
 import { startPolling } from "./usePolling";
-import { DEFAULT_PRESET, INTERVAL_MS, isAbsolute, parseInterval, parseRange, type RefreshInterval, type TimeRange } from "./timeRange";
+import {
+  DEFAULT_RANGE, INTERVAL_MS, canShiftBack, canZoomOut, formatSpan, isAbsolute, parseInterval, parseRange, shiftRange, timeKey, zoomOut,
+  type RefreshInterval, type TimeRange,
+} from "./timeRange";
 
 export type TimeRangeState = {
   range: TimeRange;
@@ -42,7 +46,7 @@ export function useTimeRange(): TimeRangeState {
     for (const [name, [value, fallback]] of Object.entries(set)) search = withParam(search, name, value, fallback);
     window.history.replaceState(null, "", `${pathname}${search}${window.location.hash}`);
   }, [pathname]);
-  const setRange = useCallback((r: TimeRange) => write({ range: [r.preset, DEFAULT_PRESET], to: [r.to === null ? "" : String(r.to), ""] }), [write]);
+  const setRange = useCallback((r: TimeRange) => write({ range: [formatSpan(r.span), formatSpan(DEFAULT_RANGE.span)], to: [r.to === null ? "" : String(r.to), ""] }), [write]);
   const setInterval = useCallback((v: RefreshInterval) => write({ refresh: [v, "off"] }), [write]);
 
   const [nonce, setNonce] = useState(0);
@@ -52,6 +56,25 @@ export function useTimeRange(): TimeRangeState {
   useEffect(() => { busyRef.current = busy; }, [busy]);
   const report = useCallback((id: string, v: boolean) => setLoading((s) => (!!s[id] === v ? s : { ...s, [id]: v })), []);
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
+
+  // t ← / t → / t z — the range read through a ref so one listener serves the page
+  const rangeRef = useRef(range);
+  useEffect(() => { rangeRef.current = range; });
+  useEffect(() => {
+    let armed: number | null = null;
+    const onKey = (e: KeyboardEvent) => {
+      const now = Date.now();
+      const a = timeKey(e, armed, now);
+      const r = rangeRef.current;
+      armed = a === "arm" ? now : null;
+      if (a === "back" && canShiftBack(r, now)) setRange(shiftRange(r, -1, now));
+      else if (a === "forward" && r.to !== null) setRange(shiftRange(r, 1, now));
+      else if (a === "zoomOut" && canZoomOut(r)) setRange(zoomOut(r, now));
+      if (a && a !== "arm") e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setRange]);
 
   const ms = paused ? 0 : INTERVAL_MS[interval];
   useEffect(() => {

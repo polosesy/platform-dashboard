@@ -17,7 +17,7 @@ import { HubbleTab } from "./components/HubbleTab";
 import { StackTab } from "./components/StackTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
-import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
+import { EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useTimeRange } from "@/lib/useTimeRange";
 
@@ -26,9 +26,6 @@ import { useTimeRange } from "@/lib/useTimeRange";
 type Tab = "overview" | "infra" | "logs" | "hubble" | "stack";
 
 const TABS: Tab[] = ["overview", "infra", "logs", "hubble", "stack"];
-/** Tabs read by the page's time picker (Grafana's dashboard time): the rest keep their own controls (logs' window,
- * Hubble's sample / live, the stack's 10-minute read) */
-const RANGED: Tab[] = ["overview", "infra"];
 
 export default function ObservabilityPage() {
   return (
@@ -41,9 +38,9 @@ export default function ObservabilityPage() {
 function ObservabilityView() {
   const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("overview");
-  // ?range · ?to · ?refresh — one range and one refresh for the cluster · workload and node tabs
+  // ?range · ?to · ?refresh — one range and one refresh for every tab (Grafana's dashboard time); each tab says
+  // when it reads another span (heatmap ≤ 24 h, maintenance ≥ 1 day, logs ≤ 24 h, the stack's 10 minutes, Hubble now)
   const time = useTimeRange();
-  const ranged = RANGED.includes(tab);
   const { clusters, clusterId, setClusterId, loading: clustersLoading } = useAksClusters();
   // Free-text cluster ID (used when the cluster list is unavailable) — committed on blur / Enter
   const [clusterDraft, setClusterDraft] = useState<string | null>(null);
@@ -76,7 +73,9 @@ function ObservabilityView() {
   const { reload } = query;
   const { nonce, report } = time;
   const nodesTab = tab === "infra";
+  const reloadSources = sourcesQ.reload;
   useEffect(() => { if (nonce && nodesTab) reload(); }, [nonce, nodesTab, reload]);
+  useEffect(() => { if (nonce) reloadSources(); }, [nonce, reloadSources]);
   useEffect(() => report("nodes", nodesTab && loading), [nodesTab, loading, report]);
 
   const commitClusterDraft = () => {
@@ -117,13 +116,7 @@ function ObservabilityView() {
                 />
               </label>
             )}
-            {ranged ? (
-              <TimeRangeBar state={time} />
-            ) : (
-              <Button onClick={() => { query.reload(); sourcesQ.reload(); }} disabled={loading || !clusterId}>
-                {loading ? t("common.loading") : t("common.refresh")}
-              </Button>
-            )}
+            <TimeRangeBar state={time} />
           </>
         }
       />
@@ -158,16 +151,14 @@ function ObservabilityView() {
           )}
 
           {tab === "logs" && (
-            <LogsTab
-              clusterId={clusterId}
-            />
+            <LogsTab clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />
           )}
 
           {tab === "hubble" && (
-            <HubbleTab clusterId={clusterId} />
+            <HubbleTab clusterId={clusterId} control={{ range: time.range, nonce: time.nonce, report: time.report }} />
           )}
 
-          {tab === "stack" && <StackTab clusterId={clusterId} />}
+          {tab === "stack" && <StackTab clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
         </>
       )}
     </div>

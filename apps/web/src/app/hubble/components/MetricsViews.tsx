@@ -11,9 +11,13 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button, ErrorNotice, LoadingState, Notice, Segmented, Select, Stat } from "@/components/ui";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
 
-const WINDOWS = [5, 15, 60, 360] as const;
+export const METRICS_WINDOWS = [5, 15, 60, 360] as const;
+const WINDOWS = METRICS_WINDOWS;
+/** A page with a time picker (AKS 모니터링) sets the window and refresh; alone (/hubble) the view keeps its own */
+export type MetricsControl = { window: number; differs: boolean; nonce: number; report?: (id: string, loading: boolean) => void };
 type View = "service-map" | "network" | "security";
 
 export function useHubbleSource(clusterId: string) {
@@ -42,20 +46,28 @@ function MetricsState({ state, message }: { state: HubbleMetricsState; message?:
 
 const n = (v: number | null, locale: Parameters<typeof dateLocale>[0]) => (v === null ? null : v.toLocaleString(dateLocale(locale)));
 
-export function MetricsView({ clusterId, view }: { clusterId: string; view: View }) {
+export function MetricsView({ clusterId, view, control }: { clusterId: string; view: View; control?: MetricsControl }) {
   const { t, locale } = useI18n();
-  const [win, setWin] = useState<number>(15);
+  const [ownWin, setWin] = useState<number>(15);
+  const win = control?.window ?? ownWin;
   const q = useApiQuery(clusterId ? `hubble-metrics:${clusterId}:${win}` : null, (token) =>
     fetchJsonWithBearer<HubbleMetricsSummary>(apiUrl("/api/hubble/metrics-summary", { clusterId, window: String(win) }), token),
   );
+  useRangeRefresh("hubbleMetrics", control?.nonce ?? 0, q.loading, q.reload, control?.report);
   const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win ? q.data : null;
   const fmt = (v: number | null) => n(v, locale) ?? t("hb.m.notMeasured");
 
   return (
     <div>
       <div className={styles.subTabs}>
-        <Segmented label={t("hb.m.window")} value={win} onChange={setWin} items={WINDOWS.map((w) => ({ id: w, label: t("hb.m.minutes", { n: w }) }))} />
-        <Button size="sm" onClick={q.reload}>{t("hb.m.refresh")}</Button>
+        {control ? (
+          control.differs ? <Badge tone="info" title={t("hb.m.windowFitHint")}>{t("hb.m.windowFit", { n: win })}</Badge> : null
+        ) : (
+          <>
+            <Segmented label={t("hb.m.window")} value={win} onChange={setWin} items={WINDOWS.map((w) => ({ id: w, label: t("hb.m.minutes", { n: w }) }))} />
+            <Button size="sm" onClick={q.reload}>{t("hb.m.refresh")}</Button>
+          </>
+        )}
       </div>
       <ErrorNotice error={q.error} />
       {!d && !q.error && <LoadingState />}

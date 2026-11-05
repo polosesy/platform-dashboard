@@ -3,14 +3,17 @@
 // AKS 모니터링 › 관측 스택 — the customer's collection pipeline (Alloy, alloy-traces, Loki, Tempo, Pyroscope,
 // kube-state-metrics, node-exporter, Hubble, ama-metrics) from metrics in the cluster's Azure Monitor workspace
 // (API services/observabilityStack.ts). Every value comes with its query; no series = "not measured", never 0.
-// Grafana (the customer's Azure Managed Grafana) is linked, never read.
+// Grafana (the customer's Azure Managed Grafana) is linked, never read. The 10-minute window ends at the page's
+// time range end (a past range = "was the pipeline healthy then"); its length stays 10 minutes (said beside it).
 
 import type { ObservabilityStackResponse, StackCheck, StackComponent, StackState } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { durationText, spanMs } from "@/lib/nodeMaintView";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Stat, type BadgeTone } from "@/components/ui";
+import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Stat, type BadgeTone } from "@/components/ui";
+import { atParam, type TimeRange } from "@/lib/timeRange";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
 
 const TONE: Record<StackState, BadgeTone> = { ok: "success", degraded: "medium", stale: "medium", down: "high", unknown: "neutral", notDetected: "neutral" };
@@ -20,12 +23,15 @@ function grafanaUrl(endpoint: string, uid: string, expr: string): string {
   return `${endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
 }
 
-export function StackTab({ clusterId }: { clusterId: string }) {
+export function StackTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
   const { t, locale } = useI18n();
-  const q = useApiQuery(clusterId ? `obs-stack:${clusterId}` : null, (token) =>
-    fetchJsonWithBearer<ObservabilityStackResponse>(apiUrl("/api/observability/stack", { clusterId }), token),
+  const atQ = atParam(range);
+  const q = useApiQuery(clusterId ? `obs-stack:${clusterId}:${atQ ?? "now"}` : null, (token) =>
+    fetchJsonWithBearer<ObservabilityStackResponse>(apiUrl("/api/observability/stack", { clusterId, at: atQ }), token),
   );
-  const d = q.data?.clusterId === clusterId ? q.data : null;
+  useRangeRefresh("stack", nonce, q.loading, q.reload, report);
+  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
+  const d = q.data?.clusterId === clusterId && dAt === atQ ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
   if (!d) return <LoadingState />;
@@ -35,7 +41,6 @@ export function StackTab({ clusterId }: { clusterId: string }) {
         <Notice tone={d.metricsState === "noWorkspace" ? "info" : "warning"} title={t(`hb.m.state.${d.metricsState}`)}>
           {t(`hb.m.stateHint.${d.metricsState}`)}{d.message ? ` (${d.message})` : ""}
         </Notice>
-        <Button size="sm" onClick={q.reload}>{t("hb.m.refresh")}</Button>
       </div>
     );
   }
@@ -56,9 +61,11 @@ export function StackTab({ clusterId }: { clusterId: string }) {
     <div className={styles.stack}>
       <div className={styles.stackHead}>
         <Notice tone="info">
-          {t("obs.stack.basis", { n: d.windowMinutes, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}
+          {d.at
+            ? t("obs.stack.basisAt", { n: d.windowMinutes, at: new Date(d.at).toLocaleString(dateLocale(locale)) })
+            : t("obs.stack.basis", { n: d.windowMinutes, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}
         </Notice>
-        <Button size="sm" onClick={q.reload}>{t("hb.m.refresh")}</Button>
+        <Badge tone="info" title={t("obs.stack.windowFixedHint")}>{t("obs.stack.windowFixed", { n: d.windowMinutes })}</Badge>
       </div>
       {d.stale && (
         <Notice tone="warning" title={t("obs.stack.staleTitle", { at: at(d.generatedAt) })}>
