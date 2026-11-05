@@ -446,6 +446,8 @@ export type WorkloadHeatmapResponse = {
   clusterId: string;
   generatedAt: string;
   windowMinutes: number;
+  /** The window's end when it is not now (the time picker moved back) — every query was evaluated at this time */
+  at?: string;
   metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
   message?: string;
   cluster: string | null;
@@ -630,6 +632,8 @@ export type NodeMaintenanceResponse = {
   clusterId: string;
   generatedAt: string;
   days: number;
+  /** The range's end when it is not now (the time picker moved back) */
+  at?: string;
   /** Node facts' resolution (the range step), minutes */
   stepMinutes: number;
   sources: { config: NodeMaintSourceState; activityLog: NodeMaintSourceState; metrics: NodeMaintSourceState };

@@ -21,7 +21,8 @@ import { HttpError } from "../infra/requestParams.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { pickScope, scopeMatchers } from "./promScope.js";
 
-export const NODE_MAINT_DAYS = [1, 7, 14, 30] as const;
+/** Whole days the time picker maps a range to: 1 – 30 (web lib/timeRange.ts maintDaysFor) */
+export const NODE_MAINT_MAX_DAYS = 30;
 const ARM = "https://management.azure.com";
 const AKS_API = "2025-05-01";
 const MIN = 60_000;
@@ -349,20 +350,24 @@ export const stepFor = (days: number) => Math.max(60, Math.ceil((days * 86_400) 
 const cache = new CacheManager<NodeMaintenanceResponse>(30, 5 * 60_000);
 const inflight = new Map<string, Promise<NodeMaintenanceResponse>>();
 
-export async function getNodeMaintenance(env: Env, bearerToken: string | undefined, clusterId: string, days: number): Promise<NodeMaintenanceResponse> {
-  const key = `${cachePrefix(bearerToken)}:node-maint:${lower(clusterId)}:${days}`;
+/** `at` = the range's end (epoch seconds, infra queryPastTime) for a view of the past; none = now */
+export async function getNodeMaintenance(env: Env, bearerToken: string | undefined, clusterId: string, days: number, at?: number): Promise<NodeMaintenanceResponse> {
+  const key = `${cachePrefix(bearerToken)}:node-maint:${lower(clusterId)}:${days}:${at ?? "now"}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const running = inflight.get(key);
   if (running) return running;
-  const job = collect(env, bearerToken, clusterId, days).then((r) => { cache.set(key, r); return r; }).finally(() => inflight.delete(key));
+  const job = collect(env, bearerToken, clusterId, days, at).then((r) => { cache.set(key, r); return r; }).finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
 }
 
-async function collect(env: Env, bearerToken: string | undefined, clusterId: string, days: number): Promise<NodeMaintenanceResponse> {
+async function collect(env: Env, bearerToken: string | undefined, clusterId: string, days: number, at?: number): Promise<NodeMaintenanceResponse> {
   const arm = await getArmFetcherAuto(env, bearerToken); // anonymous without the dev switch → signin_required
-  const now = Date.now();
+  const realNow = Date.now();
+  // The range ends at `at` for a view of the past: episodes, NotReady and "in progress" are read as of then; the
+  // planned windows (and their next start) are today's configuration
+  const now = at === undefined ? realNow : at * 1000;
   const step = stepFor(days);
   const rangeEnd = Math.floor(now / 1000 / step) * step;
   const rangeStart = rangeEnd - days * 86_400;
@@ -381,7 +386,7 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
   }
   if (cluster) {
     try {
-      windows = parseWindows((await arm.fetchJson<{ value?: RawMaintConfig[] }>(`${ARM}${clusterId}/maintenanceConfigurations?api-version=${AKS_API}`)).value ?? [], now);
+      windows = parseWindows((await arm.fetchJson<{ value?: RawMaintConfig[] }>(`${ARM}${clusterId}/maintenanceConfigurations?api-version=${AKS_API}`)).value ?? [], realNow);
     } catch { windows = null; }
   }
   const nodeRg = cluster?.properties?.nodeResourceGroup && RG_NAME.test(cluster.properties.nodeResourceGroup) ? cluster.properties.nodeResourceGroup : null;
@@ -463,8 +468,8 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
         tracks = [...byNode.values()];
         if (!tracks.length) sources.metrics = "empty";
         podsAt = async (s, e) => {
-          const at = Math.min(e + 30 * 60, Math.floor(now / 1000));
-          const r = (await fetcher.query(target.endpoint, `count(kube_pod_start_time{${C}} > ${s} < ${e})`, String(at))) as { data?: { result?: { value?: [number, string] }[] } };
+          const until = Math.min(e + 30 * 60, Math.floor(realNow / 1000));
+          const r = (await fetcher.query(target.endpoint, `count(kube_pod_start_time{${C}} > ${s} < ${e})`, String(until))) as { data?: { result?: { value?: [number, string] }[] } };
           const v = r.data?.result?.[0]?.value?.[1];
           return v === undefined ? 0 : Number(v);
         };
@@ -483,7 +488,7 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
   }
   const p = cluster?.properties;
   return {
-    clusterId, generatedAt: new Date(now).toISOString(), days, stepMinutes: step / 60, sources,
+    clusterId, generatedAt: new Date(realNow).toISOString(), days, ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}), stepMinutes: step / 60, sources,
     ...(activityPartial ? { activityLogPartial: true } : {}),
     config: p ? {
       upgradeChannel: p.autoUpgradeProfile?.upgradeChannel ?? null,

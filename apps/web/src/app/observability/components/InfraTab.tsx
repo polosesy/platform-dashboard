@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { formatBytes } from "@/lib/format";
 import { rgba } from "@/lib/palette";
+import { Notice } from "@/components/ui";
 
 function GaugeBar({ pct }: { pct: number | null }) {
   if (pct === null) return <span style={{ fontSize: 11, color: rgba("ink", 0.35) }}>N/A</span>;
@@ -51,7 +52,8 @@ function PressureIndicators({ conditions }: { conditions: NodeResourceSummary["c
   );
 }
 
-export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
+/** Node cards: today's state whatever the time range (`past` = the picker shows a past range — say so louder) */
+export function InfraTab({ nodes, past = false }: { nodes: NodeResourceSummary[]; past?: boolean }) {
   const { t } = useI18n();
   if (nodes.length === 0) {
     return (
@@ -71,7 +73,9 @@ export function InfraTab({ nodes }: { nodes: NodeResourceSummary[] }) {
         <span>{t("ob.allNodes")} <strong style={{ color: "var(--fg)" }}>{nodes.length}</strong></span>
         <span style={{ color: rgba("success", 0.85) }}>Ready: <strong>{ready}</strong></span>
         {notReady > 0 && <span style={{ color: rgba("danger", 0.85) }}>NotReady: <strong>{notReady}</strong></span>}
+        {!past && <span>{t("ob.nodesNow")}</span>}
       </div>
+      {past && <div style={{ marginBottom: 16 }}><Notice tone="info">{t("ob.nodesNowPast")}</Notice></div>}
 
       <div className={styles.nodeGrid}>
         {nodes.map((node) => (

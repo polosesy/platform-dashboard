@@ -345,13 +345,14 @@ export function isTransient(e: unknown): boolean {
 }
 
 /** Run queries (at most `limit` in flight); a query that fails twice is a gap with empty rows, the others stand */
-export async function runAll(fetcher: PrometheusFetcher, endpoint: string, queries: Record<string, string>, limit = 4): Promise<{ rows: Record<string, PromRow[]>; gaps: StackQueryGap[]; firstError: unknown }> {
+/** `time` = the evaluation time (epoch seconds) for a view of the past; none = now */
+export async function runAll(fetcher: PrometheusFetcher, endpoint: string, queries: Record<string, string>, limit = 4, time?: string): Promise<{ rows: Record<string, PromRow[]>; gaps: StackQueryGap[]; firstError: unknown }> {
   const names = Object.keys(queries);
   const rows: Record<string, PromRow[]> = {};
   const gaps: StackQueryGap[] = [];
   let firstError: unknown = null;
   let next = 0;
-  const once = async (n: string) => rowsOf(await fetcher.query(endpoint, queries[n]!, undefined, { timeoutMs: STACK_QUERY_TIMEOUT_MS }));
+  const once = async (n: string) => rowsOf(await fetcher.query(endpoint, queries[n]!, time, { timeoutMs: STACK_QUERY_TIMEOUT_MS }));
   await Promise.all(Array.from({ length: Math.min(limit, names.length) }, async () => {
     while (next < names.length) {
       const n = names[next++]!;

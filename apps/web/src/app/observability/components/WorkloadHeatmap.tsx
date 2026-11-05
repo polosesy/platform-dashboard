@@ -8,13 +8,17 @@
 // Levels come from the API (services/workloadHeatmap.ts, the customer's Grafana container-map thresholds); the view
 // model is lib/workloadHeatView.ts. Clicking a tile opens its pods, Warning events and log stream beside it.
 // layout "table" = the same cells as sortable rows (one request — replaced the Container Insights list).
+// The window and its end come from the page's time picker (lib/timeRange heatWindowFor — over a day reads the range's
+// last 24 h, said beside the meta); 새로 고침 / auto refresh reload it through useRangeRefresh.
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
+import { atParam, heatWindowFor, type TimeRange } from "@/lib/timeRange";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Segmented, Select, Toggle } from "@/components/ui";
+import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Select, Toggle } from "@/components/ui";
 import {
   GLYPH, SIGNAL_GROUPS, attentionRows, clusterGlance, failedSignals, formatCell, formatThreshold, groupByNamespace, heatKey, isIdle, isProblem,
   legendLevels, levelIn, mosaicColumns, packMosaic, problemSignals, shortName, signalSummary, tableColumns, tableRows, tileText,
@@ -23,7 +27,6 @@ import {
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
 import styles from "../styles.module.css";
 
-const WINDOWS = [60, 360, 1440] as const;
 const ATTN_SHOWN = 8;
 
 /** Arrow keys move between tiles of one namespace card (visual rows by position), Home/End to the ends */
@@ -70,9 +73,13 @@ function useMosaicColumns() {
   return { ref, cols };
 }
 
-export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: string; layout?: "tiles" | "table" }) {
+export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, report }: {
+  clusterId: string; layout?: "tiles" | "table"; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void;
+}) {
   const { t, locale } = useI18n();
-  const [win, setWin] = useState<number>(60);
+  const span = heatWindowFor(range);
+  const win = span.value;
+  const at = atParam(range);
   const [view, setView] = useState<HeatView>("worst");
   const [ns, setNs] = useState("");
   const [problemsOnly, setProblemsOnly] = useState(false);
@@ -83,10 +90,12 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: st
   const lastTile = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const mosaic = useMosaicColumns();
-  const q = useApiQuery(clusterId ? `heatmap:${clusterId}:${win}` : null, (token) =>
-    fetchJsonWithBearer<WorkloadHeatmapResponse>(apiUrl("/api/observability/heatmap", { clusterId, window: String(win) }), token),
+  const q = useApiQuery(clusterId ? `heatmap:${clusterId}:${win}:${at ?? "now"}` : null, (token) =>
+    fetchJsonWithBearer<WorkloadHeatmapResponse>(apiUrl("/api/observability/heatmap", { clusterId, window: String(win), at }), token),
   );
-  const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win ? q.data : null;
+  useRangeRefresh("heatmap", nonce, q.loading, q.reload, report);
+  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
+  const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win && dAt === at ? q.data : null;
 
   const ws = d?.workloads ?? [];
   const idleCount = useMemo(() => ws.filter((w) => isIdle(w) && (!ns || w.namespace === ns)).length, [ws, ns]);
@@ -198,13 +207,14 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles" }: { clusterId: st
           ]} />
         <Select label={t("hb.m.namespace")} value={ns} onChange={setNs}
           options={[{ value: "", label: t("hb.m.allNamespaces") }, ...allGroups.map((g) => ({ value: g.namespace, label: `${g.namespace} (${g.workloads.length})` }))]} />
-        <Segmented label={t("ob.hm.window")} value={win} onChange={setWin} items={WINDOWS.map((w) => ({ id: w, label: t(`ob.hm.window.${w}`) }))} />
         <Toggle checked={problemsOnly} onChange={setProblemsOnly}>{t("ob.hm.problemsOnly")}</Toggle>
         <span className={styles.hmMeta}>
+          {/* The picker's range differs from what the heatmap reads — said, never a silent other range */}
+          {span.differs ? <Badge tone="info" title={t("ob.hm.windowMaxHint")}>{t("ob.hm.windowMax")}</Badge> : null}
+          {d.at ? <Badge tone="medium" title={t("ob.hm.atHint")}>{t("ob.hm.at", { at: new Date(d.at).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</Badge> : null}
           <span title={t("ob.hm.basis", { n: ws.length, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}>
             {t("ob.hm.meta", { n: ws.length, ns: nsCount, at: new Date(d.generatedAt).toLocaleTimeString(dateLocale(locale)) })} ⓘ
           </span>
-          <Button size="sm" variant="ghost" ariaLabel={t("hb.m.refresh")} title={t("hb.m.refresh")} onClick={q.reload}>↻</Button>
         </span>
       </div>
 

@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-05
-covers: [apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -71,6 +71,18 @@ Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 �
 
 **로그 스트림**(패널, `WorkloadLogStream` + 순수 `apps/web/src/lib/logView.ts`): 같은 메시지(수·ID만 다른 것 포함 — `logSignature`)는 한 줄 '×n'(처음~마지막 시각·파드 수), 줄 = 로거가 되풀이한 앞 시각을 뺀 메시지(logback `… LEVEL … - 메시지`는 메시지만), 2줄 말줄임, 누르면 첫 줄 전체·앱 코드 스택(`▸ 클래스.메서드 (파일:줄)`, 패키지는 툴팁, 라이브러리 프레임은 'n개 더 보기')·Caused by·원문 복사·trace. 예외 클래스 칩 = 거르기. 스크롤은 패널 하나(목록 자체 스크롤 없음). 가리기는 MDC `[TOKEN-ID:…]`·세션 ID도(`logRedaction.ts`). 메트릭 묶음 존재는 묶음마다 따로 셉니다(`a or b`는 이름을 무시하고 라벨이 같은 시계열을 지움 — Hubble 메트릭 쪽에도 있던 버그).
 
+### 시간 범위 · 새로 고침 (페이지 머리 — 클러스터 · 워크로드, 노드 탭)
+
+Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`TimeRangeBar` — 공용 UI 키트, 순수 계산 `apps/web/src/lib/timeRange.ts`, 상태 `useTimeRange`): **«** 범위의 절반만큼 뒤로 · **범위**(최근 5분~30일, 빠른 범위는 '지금까지') · **»** 절반만큼 앞으로(지금에서 멈춤) · **⊖** 다음 단계로 넓힘(가운데 유지) | **↻ 새로 고침**(모든 패널이 답할 때까지 돎) · **자동 새로 고침**(끔·30초·1분·5분·15분). 상태는 URL `?range=1h&to=<epoch ms>&refresh=30s` — 링크로 같은 화면.
+
+| 패널 | 범위를 읽는 방법 | 범위와 다를 때 |
+|---|---|---|
+| 히트맵·한눈에 보기 | 창 = 범위(5·15·30분, 1·3·6·12·24시간), 끝 = 범위 끝 — 모든 PromQL을 그 시각에 평가(`time` 매개변수: `[W]`·`time()`·`offset`이 그 구간을 읽음, '지금 값' 신호도 그 시각의 값) | 24시간 넘는 범위 = 범위의 마지막 24시간 + 'ⓘ 히트맵은 최대 24시간' 칩. 지난 구간 = '<시각> 기준 — 지난 구간' 칩(AKS 관리형 표시·옆 패널의 VPA·이벤트·로그는 지금 값) |
+| 노드 유지 보수 | 날 수 = 범위를 올림한 일(1–30), 끝 = 범위 끝(Activity Log·노드 이력·'진행 중' 판정 모두 그 시각 기준) | 1일보다 짧은 범위 = 1일 + '유지 보수 기록은 최소 1일' 칩(업그레이드는 몇 시간에 걸침). 유지 보수 창(다음 시작)은 지금 구성 |
+| 노드 카드 | 지금 상태(Container Insights·Kubernetes API) — 범위 미적용, 줄에 그렇게 씀 | 지난 구간이면 안내 상자 |
+
+**자동 새로 고침 규칙**: 보이는 탭에서만(`startPolling`), 앞 새로 고침이 끝나기 전엔 다음을 건너뜀, **지난 구간을 볼 때는 멈춤**(값이 바뀌지 않음 — '멈춤' 표시, 지금까지로 돌아오면 다시 시작). 최소 30초 = 히트맵 서버 캐시(더 빠르면 같은 답). 지난 구간 응답은 10분 캐시(‹‹ ››가 같은 끝을 오감). API: `heatmap?window=5|15|30|60|180|360|720|1440&at=<epoch 초>`, `node-maintenance?days=1..30&at=` — `at`은 분 단위로 내림, 1분 안 = 지금, 미래·31일 넘게 과거·숫자 아님 = 400 `invalid_time`(`queryPastTime`). 로그·네트워크(Hubble)·수집 상태 탭은 각자의 제어(로그 기간·새 표본/실시간·10분 창)를 그대로 씀.
+
 ### 데이터 소스 칩 (페이지 머리)
 
 `GET /api/observability/sources?clusterId=`(`services/observabilitySources.ts`): Prometheus·Container Insights는 항상, Loki·Tempo·Pyroscope·Grafana는 설정됐거나 작업 영역 지표에 송신 흔적이 있을 때만 칩(나머지는 '+n 설정 안 됨' 하나). 상태는 사실만 — ✓ 읽음(대시보드가 지금 읽음: Loki는 연결 파일 `aks.observability.loki` + `/ready` 2xx, 클러스터별 60초 캐시) · ↗ 링크만(Grafana Explore — Tempo·Pyroscope·Grafana는 절대 '읽음'이 아님) · ✕ 막힘(연결 거부·시간 초과 — 보통 고객 monitor 네임스페이스 정책) · ! 오류(HTTP 상태만) · – 설정 안 됨. 툴팁 둘째 줄 '수집'은 관측 스택 지표(Alloy `logsSent`·`spansAccepted`, 구성 요소 존재)에서 옴.
@@ -105,7 +117,7 @@ Java/Spring 지표가 없는 워크로드는 '계측 없음', 작업 영역에 �
 
 ## 3b. 노드 유지 보수 (AKS 모니터링 › 노드, 라이브 다이어그램 AKS 카드·패널)
 
-`GET /api/observability/node-maintenance?clusterId=&days=1|7|14|30` → `services/nodeMaintenance.ts`
+`GET /api/observability/node-maintenance?clusterId=&days=1..30[&at=<epoch 초>]` → `services/nodeMaintenance.ts` (날 수·끝은 페이지의 시간 범위 — §2 '시간 범위')
 
 | 출처 | 읽는 것 | 왜 |
 |---|---|---|

@@ -3,34 +3,42 @@
 // AKS 모니터링 › 노드 — node maintenance: what Azure did to the nodes (Activity Log), when and by whom, inside which
 // planned window (maintenanceConfigurations), and what the nodes went through (kube-state-metrics: surge, cordon,
 // NotReady, re-registration, kernel / kubelet). API services/nodeMaintenance.ts. Facts only — an episode with no
-// Azure operation says "no record of who", never a guess.
+// Azure operation says "no record of who", never a guess. The days and their end come from the page's time picker
+// (lib/timeRange maintDaysFor — whole days, at least one, said when the range is shorter).
 
-import { useState } from "react";
 import type { NodeMaintEpisode, NodeMaintSourceState, NodeMaintWindow, NodeMaintenanceResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
+import { atParam, maintDaysFor, type TimeRange } from "@/lib/timeRange";
+import { useRangeRefresh } from "@/lib/useTimeRange";
 import { durationText, nodeCounts, spanMs, versionChange } from "@/lib/nodeMaintView";
-import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Segmented, type BadgeTone } from "@/components/ui";
+import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, type BadgeTone } from "@/components/ui";
 import styles from "../styles.module.css";
 
-const DAYS = [7, 14, 30] as const;
 type T = (k: string, v?: Record<string, string | number>) => string;
 const STATUS_TONE: Record<NodeMaintEpisode["status"], BadgeTone> = { succeeded: "success", failed: "high", inProgress: "info", unknown: "neutral" };
 const SOURCE_TONE: Record<NodeMaintSourceState, BadgeTone> = { ok: "success", empty: "neutral", forbidden: "medium", failed: "medium", notConfigured: "neutral" };
 
-export function NodeMaintenancePanel({ clusterId }: { clusterId: string }) {
-  const { t } = useI18n();
-  const [days, setDays] = useState<(typeof DAYS)[number]>(14);
-  const q = useApiQuery(clusterId ? `node-maint:${clusterId}:${days}` : null, (token) =>
-    fetchJsonWithBearer<NodeMaintenanceResponse>(apiUrl("/api/observability/node-maintenance", { clusterId, days }), token),
+export function NodeMaintenancePanel({ clusterId, range, nonce, report }: {
+  clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void;
+}) {
+  const { t, locale } = useI18n();
+  const span = maintDaysFor(range);
+  const days = span.value;
+  const at = atParam(range);
+  const q = useApiQuery(clusterId ? `node-maint:${clusterId}:${days}:${at ?? "now"}` : null, (token) =>
+    fetchJsonWithBearer<NodeMaintenanceResponse>(apiUrl("/api/observability/node-maintenance", { clusterId, days, at }), token),
   );
-  const d = q.data?.clusterId === clusterId && q.data.days === days ? q.data : null;
+  useRangeRefresh("nodeMaintenance", nonce, q.loading, q.reload, report);
+  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
+  const d = q.data?.clusterId === clusterId && q.data.days === days && dAt === at ? q.data : null;
+  const atText = range.to === null ? null : new Date(range.to).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   return (
     <Panel
       title={t("nm.title")}
-      sub={t("nm.sub", { n: days })}
-      actions={<Segmented label={t("nm.range")} items={DAYS.map((n) => ({ id: n, label: t("nm.days", { n }) }))} value={days} onChange={setDays} />}
+      sub={atText ? t("nm.subAt", { n: days, at: atText }) : t("nm.sub", { n: days })}
+      actions={span.differs ? <Badge tone="info" title={t("nm.minDayHint")}>{t("nm.minDay")}</Badge> : undefined}
     >
       <ErrorNotice error={q.error} />
       {!d ? (q.loading ? <LoadingState /> : null) : <Body d={d} />}

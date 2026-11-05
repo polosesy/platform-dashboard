@@ -7,8 +7,12 @@
 import { useId, useRef, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { activeNavItem } from "@/lib/navConfig";
-import { useI18n } from "@/lib/i18n";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { authStateOfCode } from "@/lib/api";
+import {
+  RANGE_PRESETS, REFRESH_INTERVALS, canShiftBack, canZoomOut, shiftRange, spanMs, zoomOut, type RangePreset, type RefreshInterval,
+} from "@/lib/timeRange";
+import type { TimeRangeState } from "@/lib/useTimeRange";
 import s from "./ui.module.css";
 
 const cx = (...c: Array<string | false | null | undefined>) => c.filter(Boolean).join(" ");
@@ -184,6 +188,54 @@ export function Toggle({ checked, onChange, children, title, disabled }: { check
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {children}
     </label>
+  );
+}
+
+/* ── Time range + refresh (Grafana's time picker and refresh picker) ── */
+
+/**
+ * One bar for a page's time range and refresh: ‹‹ (back half a range) · the range (quick ranges = ending now; after a
+ * shift it reads from ~ to) · ›› (forward, up to now) · ⊖ (twice as wide) | ↻ 새로 고침 (spins while any panel loads) ·
+ * the auto-refresh interval (waits while the range is in the past). State: lib/useTimeRange; math: lib/timeRange.
+ */
+export function TimeRangeBar({ state }: { state: TimeRangeState }) {
+  const { t, locale } = useI18n();
+  const { range, setRange, interval, setInterval, paused, refresh, busy, mountedAt } = state;
+  const fmt = (ms: number) => new Date(ms).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const custom = range.to !== null ? t("tr.custom", { from: fmt(range.to - spanMs(range)), to: fmt(range.to) }) : null;
+  return (
+    <div className={s.timeBar} role="group" aria-label={t("tr.label")}>
+      <div className={s.timeGroup}>
+        <button type="button" className={s.timeBtn} title={t("tr.back")} aria-label={t("tr.back")}
+          disabled={!canShiftBack(range, mountedAt)} onClick={() => setRange(shiftRange(range, -1, Date.now()))}>«</button>
+        <label className={s.timeRange} title={custom ? t("tr.customHint") : t("tr.label")}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+          <select className={s.timeSelect} aria-label={t("tr.label")} value={custom ? "" : range.preset}
+            onChange={(e) => e.target.value && setRange({ preset: e.target.value as RangePreset, to: null })}>
+            {custom ? <option value="">{custom}</option> : null}
+            {RANGE_PRESETS.map((p) => <option key={p} value={p}>{t(`tr.preset.${p}`)}</option>)}
+          </select>
+        </label>
+        <button type="button" className={s.timeBtn} title={range.to === null ? t("tr.forwardNow") : t("tr.forward")} aria-label={t("tr.forward")}
+          disabled={range.to === null} onClick={() => setRange(shiftRange(range, 1, Date.now()))}>»</button>
+        <button type="button" className={s.timeBtn} title={t("tr.zoomOut")} aria-label={t("tr.zoomOut")}
+          disabled={!canZoomOut(range)} onClick={() => setRange(zoomOut(range, Date.now()))}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M8 11h6M16.5 16.5 21 21" /></svg>
+        </button>
+      </div>
+      <div className={s.timeGroup} data-paused={paused || undefined}>
+        <button type="button" className={s.timeBtn} data-busy={busy || undefined} onClick={refresh} aria-label={t("tr.refresh")}
+          title={busy ? t("tr.refreshing") : t("tr.refresh")}>
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
+          {t("tr.refresh")}
+        </button>
+        <select className={s.timeSelect} aria-label={t("tr.interval")} value={interval} onChange={(e) => setInterval(e.target.value as RefreshInterval)}
+          title={paused ? t("tr.paused") : t("tr.intervalHint")}>
+          {REFRESH_INTERVALS.map((v) => <option key={v} value={v}>{t(`tr.interval.${v}`)}</option>)}
+        </select>
+        {paused ? <span className={s.timePaused} title={t("tr.paused")}>{t("tr.pausedShort")}</span> : null}
+      </div>
+    </div>
   );
 }
 

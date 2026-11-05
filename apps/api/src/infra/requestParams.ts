@@ -115,6 +115,25 @@ export function queryInt(req: Request, name: string, fallback: number, min: numb
   return Math.min(max, Math.max(min, Number.isFinite(n) ? n : fallback));
 }
 
+/** How far back a view of the past may end (the time picker's ‹‹ — the Activity Log keeps 90 days) */
+export const MAX_PAST_SECONDS = 31 * 86_400;
+
+/**
+ * An end time in the past (epoch seconds) for a "what was it then" view: on its minute; none when missing or within a
+ * minute of now (= now, cached and refreshed as usual); 400 when not a time, in the future or older than
+ * MAX_PAST_SECONDS.
+ */
+export function queryPastTime(req: Request, name: string, now = Date.now()): number | undefined {
+  const raw = req.query[name];
+  if (raw === undefined || raw === "") return undefined;
+  const s = typeof raw === "string" && /^\d{9,11}$/.test(raw) ? Number(raw) : NaN;
+  const nowS = Math.floor(now / 1000);
+  if (!Number.isFinite(s) || s > nowS + 60 || s < nowS - MAX_PAST_SECONDS) {
+    throw new HttpError(400, "invalid_time", `${name} must be epoch seconds within the last ${MAX_PAST_SECONDS / 86_400} days`);
+  }
+  return s >= nowS - 60 ? undefined : Math.floor(s / 60) * 60;
+}
+
 /**
  * Managed subscriptions (the allow-list): every subscription of the tenant registry — the home tenant's
  * every subscription of the Azure connections (infra/connectionRegistry.ts).

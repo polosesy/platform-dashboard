@@ -8,7 +8,7 @@ import {
 } from "../services/observabilityAggregator.js";
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
 import { getObservabilityStack } from "../services/observabilityStack.js";
-import { NODE_MAINT_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
+import { NODE_MAINT_MAX_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
@@ -31,6 +31,7 @@ import {
   assertArmResourceId,
   queryArmResourceId,
   queryInt,
+  queryPastTime,
   queryString,
   safeMessage,
   sendError,
@@ -60,7 +61,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
   router.get("/api/observability/heatmap", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      res.json(await getWorkloadHeatmap(env, req.auth?.bearerToken, clusterId, queryInt(req, "window", 60, 1, 1440)));
+      res.json(await getWorkloadHeatmap(env, req.auth?.bearerToken, clusterId, queryInt(req, "window", 60, 1, 1440), queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "heatmap_failed", "observability");
     }
@@ -117,13 +118,13 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     }
   });
 
-  // Node maintenance: Azure operations (Activity Log) + planned windows (ARM) + node facts (kube-state-metrics)
+  // Node maintenance: Azure operations (Activity Log) + planned windows (ARM) + node facts (kube-state-metrics) — whole
+  // days 1–30 ending now or at `at` (the page's time picker)
   router.get("/api/observability/node-maintenance", async (req: Request, res: Response) => {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
-      const d = queryInt(req, "days", 14, 1, 30);
-      const days = (NODE_MAINT_DAYS as readonly number[]).includes(d) ? d : 14;
-      res.json(await getNodeMaintenance(env, req.auth?.bearerToken, clusterId, days));
+      const days = queryInt(req, "days", 14, 1, NODE_MAINT_MAX_DAYS);
+      res.json(await getNodeMaintenance(env, req.auth?.bearerToken, clusterId, days, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "node_maintenance_failed", "observability");
     }

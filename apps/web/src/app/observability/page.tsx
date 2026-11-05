@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type {
   ObservabilityOverview,
   ObservabilitySourcesResponse,
@@ -17,18 +17,33 @@ import { HubbleTab } from "./components/HubbleTab";
 import { StackTab } from "./components/StackTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
-import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
+import { useTimeRange } from "@/lib/useTimeRange";
 
 // Five places, heatmap first (Datadog's Kubernetes overview): the cluster at a glance + every workload as a tile, then
 // nodes, logs, the network (Hubble) and whether the collection pipeline itself is healthy
 type Tab = "overview" | "infra" | "logs" | "hubble" | "stack";
 
 const TABS: Tab[] = ["overview", "infra", "logs", "hubble", "stack"];
+/** Tabs read by the page's time picker (Grafana's dashboard time): the rest keep their own controls (logs' window,
+ * Hubble's sample / live, the stack's 10-minute read) */
+const RANGED: Tab[] = ["overview", "infra"];
 
 export default function ObservabilityPage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <ObservabilityView />
+    </Suspense>
+  );
+}
+
+function ObservabilityView() {
   const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("overview");
+  // ?range · ?to · ?refresh — one range and one refresh for the cluster · workload and node tabs
+  const time = useTimeRange();
+  const ranged = RANGED.includes(tab);
   const { clusters, clusterId, setClusterId, loading: clustersLoading } = useAksClusters();
   // Free-text cluster ID (used when the cluster list is unavailable) — committed on blur / Enter
   const [clusterDraft, setClusterDraft] = useState<string | null>(null);
@@ -57,6 +72,12 @@ export default function ObservabilityPage() {
   const loading = query.loading;
   const error = query.error;
   const lastRefresh = current?.fetchedAt ?? null;
+  // The node tab's cards are this query: refresh it with the picker there (the heatmap and maintenance reload themselves)
+  const { reload } = query;
+  const { nonce, report } = time;
+  const nodesTab = tab === "infra";
+  useEffect(() => { if (nonce && nodesTab) reload(); }, [nonce, nodesTab, reload]);
+  useEffect(() => report("nodes", nodesTab && loading), [nodesTab, loading, report]);
 
   const commitClusterDraft = () => {
     if (clusterDraft !== null) setClusterId(clusterDraft.trim());
@@ -96,9 +117,13 @@ export default function ObservabilityPage() {
                 />
               </label>
             )}
-            <Button onClick={() => { query.reload(); sourcesQ.reload(); }} disabled={loading || !clusterId}>
-              {loading ? t("common.loading") : t("common.refresh")}
-            </Button>
+            {ranged ? (
+              <TimeRangeBar state={time} />
+            ) : (
+              <Button onClick={() => { query.reload(); sourcesQ.reload(); }} disabled={loading || !clusterId}>
+                {loading ? t("common.loading") : t("common.refresh")}
+              </Button>
+            )}
           </>
         }
       />
@@ -125,11 +150,11 @@ export default function ObservabilityPage() {
               items={[{ id: "tiles", label: t("ob.hm.view.heatmap") }, { id: "table", label: t("ob.hm.view.table") }]} />
           )}
 
-          {tab === "overview" && <WorkloadHeatmap clusterId={clusterId} layout={wlView} />}
+          {tab === "overview" && <WorkloadHeatmap clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
 
-          {tab === "infra" && <NodeMaintenancePanel clusterId={clusterId} />}
+          {tab === "infra" && <NodeMaintenancePanel clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && nodesResp && (
-            <InfraTab nodes={nodesResp.nodes} />
+            <InfraTab nodes={nodesResp.nodes} past={time.range.to !== null} />
           )}
 
           {tab === "logs" && (

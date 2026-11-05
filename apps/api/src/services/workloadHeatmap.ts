@@ -92,7 +92,7 @@ const FAMILY: Partial<Record<HeatMetric, string>> = {
 
 export type LogErrorsConfig = { metric: string; podLabel: string };
 
-/** Subquery step: 60 points for an hour, 5 minutes (the rate's own width) for 6h / 24h */
+/** Subquery step: 1 minute up to an hour (5 – 60 points), 5 minutes (the rate's own width) beyond (36 – 288) */
 export const cpuStep = (windowMinutes: number) => (windowMinutes <= 60 ? "1m" : "5m");
 
 export function heatmapQueries(C: string, windowMinutes: number, logErrors?: LogErrorsConfig): Record<string, string> {
@@ -514,32 +514,37 @@ const rowsOf = (resp: unknown): PromRow[] => {
   return (r?.data?.result ?? []).map((x) => ({ metric: x.metric ?? {}, value: Number(x.value?.[1] ?? 0) })).filter((x) => Number.isFinite(x.value));
 };
 
-export const HEAT_WINDOWS = [60, 360, 1440] as const;
-const cache = new CacheManager<WorkloadHeatmapResponse>(20, 30_000);
+/** The time picker's quick ranges up to a day (web lib/timeRange.ts HEAT_WINDOWS — a test keeps them equal) */
+export const HEAT_WINDOWS = [5, 15, 30, 60, 180, 360, 720, 1440] as const;
+const cache = new CacheManager<WorkloadHeatmapResponse>(40, 30_000);
 /** A map with gaps is kept briefly: the next refresh may answer in full */
 const PARTIAL_TTL_MS = 15_000;
+/** A map of the past does not change: kept longer (‹‹ / ›› go back and forth over the same ends) */
+const PAST_TTL_MS = 10 * 60_000;
 const inflight = new Map<string, Promise<WorkloadHeatmapResponse>>();
 
-export async function getWorkloadHeatmap(env: Env, bearerToken: string | undefined, clusterId: string, windowMinutes: number): Promise<WorkloadHeatmapResponse> {
+/** `at` = the window's end (epoch seconds, on a minute — infra queryPastTime) for a view of the past; none = now */
+export async function getWorkloadHeatmap(env: Env, bearerToken: string | undefined, clusterId: string, windowMinutes: number, at?: number): Promise<WorkloadHeatmapResponse> {
   if (!(HEAT_WINDOWS as readonly number[]).includes(windowMinutes)) throw new HttpError(400, "invalid_window", `window must be one of ${HEAT_WINDOWS.join(", ")} minutes`);
-  const key = `${cachePrefix(bearerToken)}:heatmap:${clusterId.toLowerCase()}:${windowMinutes}`;
+  const key = `${cachePrefix(bearerToken)}:heatmap:${clusterId.toLowerCase()}:${windowMinutes}:${at ?? "now"}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const running = inflight.get(key);
   if (running) return running;
-  const job = collect(env, bearerToken, clusterId, windowMinutes).then((r) => {
-    if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length ? PARTIAL_TTL_MS : undefined);
+  const job = collect(env, bearerToken, clusterId, windowMinutes, at).then((r) => {
+    if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length ? PARTIAL_TTL_MS : at !== undefined ? PAST_TTL_MS : undefined);
     return r;
   }).finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
 }
 
-async function collect(env: Env, bearerToken: string | undefined, clusterId: string, windowMinutes: number): Promise<WorkloadHeatmapResponse> {
+async function collect(env: Env, bearerToken: string | undefined, clusterId: string, windowMinutes: number, at?: number): Promise<WorkloadHeatmapResponse> {
   const obs = clusterConnection(env, clusterId).connection.aks?.observability;
   const logErrors = obs?.logErrors ? { metric: obs.logErrors.metric, podLabel: obs.logErrors.podLabel ?? "exported_pod" } : undefined;
   const base: WorkloadHeatmapResponse = {
-    clusterId, generatedAt: new Date().toISOString(), windowMinutes, metricsState: "ok", cluster: null, thresholds: HEAT_THRESHOLDS,
+    clusterId, generatedAt: new Date().toISOString(), windowMinutes, ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
+    metricsState: "ok", cluster: null, thresholds: HEAT_THRESHOLDS,
     flags: [], workloads: [], missing: [],
     grafana: obs?.grafana ? { endpoint: obs.grafana.endpoint.replace(/\/+$/, ""), datasources: obs.grafana.datasources ?? {} } : null,
   };
@@ -547,13 +552,16 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
   if (target.state !== "ok") return { ...base, metricsState: target.state, ...(target.message ? { message: target.message } : {}) };
   try {
     const fetcher = await getPrometheusFetcherAuto(env, bearerToken, clusterId);
-    const scope = pickScope(rowsOf(await fetcher.query(target.endpoint, "group by (cluster) (kube_pod_owner)")).map((r) => ({ cluster: r.metric.cluster })), clusterId.split("/").pop() ?? "");
+    // Every query at the window's end: `[W]`, offsets and time() then read the past window (the AKS-managed set below is
+    // today's labels — they do not move)
+    const time = at === undefined ? undefined : String(at);
+    const scope = pickScope(rowsOf(await fetcher.query(target.endpoint, "group by (cluster) (kube_pod_owner)", time)).map((r) => ({ cluster: r.metric.cluster })), clusterId.split("/").pop() ?? "");
     if (scope === null) return { ...base, metricsState: "noHubbleMetrics" };
     if (scope === "ambiguous") return { ...base, metricsState: "ambiguousCluster" };
     if (logErrors) promString(logErrors.metric); // validated by the schema; control characters refused here too
     // The AKS-managed set comes from the Kubernetes API beside the queries — at most MANAGED_WAIT_MS of waiting
     const managedJob = aksManagedWorkloads(env, bearerToken, clusterId, MANAGED_WAIT_MS);
-    const run = await runIsolated(fetcher, target.endpoint, heatmapQueries(scopeMatchers(scope, false), windowMinutes, logErrors));
+    const run = await runIsolated(fetcher, target.endpoint, heatmapQueries(scopeMatchers(scope, false), windowMinutes, logErrors), undefined, time);
     const failed = new Set(run.gaps.map((g) => g.query));
     if (CORE_QUERIES.some((q) => failed.has(q))) throw run.firstError;
     const managed = await managedJob;
