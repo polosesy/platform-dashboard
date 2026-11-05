@@ -227,3 +227,11 @@ test("cards all linked from the left (an LB's backends): the user's 2 columns sp
   assert.equal(xsOf(back, ["a1", "a2", "a3"]).size, 1);
   assert.equal(two.arrange.cols.get("app")!.cols, 2);
 });
+
+test("team layout document: the subscription most of the diagram's resources are in", () => {
+  const sub = (s: string, rest = "/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v") => ({ azureResourceId: `/subscriptions/${s}${rest}` });
+  const S1 = "11111111-1111-1111-1111-111111111111", S2 = "22222222-2222-2222-2222-222222222222";
+  assert.equal(A.diagramSubscription([sub(S1), sub(S2), sub(S2.toUpperCase()), {}]), S2);
+  assert.equal(A.diagramSubscription([sub(S2), sub(S1)]), S1, "a tie: the first by text (stable)");
+  assert.equal(A.diagramSubscription([{}, { azureResourceId: "internet" }]), null);
+});

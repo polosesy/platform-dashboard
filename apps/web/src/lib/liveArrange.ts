@@ -18,6 +18,21 @@ export type ARect = { x: number; y: number; w: number; h: number };
 export const liveKey = (n: Pick<DiagramNodeSpec, "id" | "azureResourceId">): string =>
   n.azureResourceId ? n.azureResourceId.toLowerCase() : `spec:${n.id}`;
 
+/**
+ * Pure: the subscription most of the diagram's resources are in — the team layout's document (one per subscription;
+ * its keys are ARM IDs, so a diagram that reaches into another subscription still finds its cards). null = no ARM IDs
+ */
+export function diagramSubscription(nodes: readonly Pick<DiagramNodeSpec, "azureResourceId">[]): string | null {
+  const counts = new Map<string, number>();
+  for (const n of nodes) {
+    const m = /^\/subscriptions\/([0-9a-f-]{36})\//i.exec(n.azureResourceId ?? "");
+    if (m) counts.set(m[1]!.toLowerCase(), (counts.get(m[1]!.toLowerCase()) ?? 0) + 1);
+  }
+  let best: [string, number] | null = null;
+  for (const e of counts) if (!best || e[1] > best[1] || (e[1] === best[1] && e[0] < best[0])) best = e;
+  return best?.[0] ?? null;
+}
+
 /** Items in the user's sequence take the places listed items had, in that order; the rest keep their places */
 export function applySequence<T>(items: readonly T[], seq: readonly string[] | undefined, keyOf: (t: T) => string): T[] {
   if (!seq?.length) return [...items];

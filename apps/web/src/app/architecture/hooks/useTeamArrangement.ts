@@ -9,11 +9,12 @@ export type TeamInfo = { version: number; updatedAt: string; updatedBy?: string;
 type Doc = { v: 1 | 2; version: number; updatedAt: string; updatedBy?: string; order: Array<[string, string[]]>; grid?: unknown[]; lines: unknown[] };
 
 /**
- * The team layout of a subscription (API /api/architecture/arrangement): load it into this browser's edit, or
+ * The team layout of a subscription (API /api/architecture/arrangement, or the live diagram's /api/live/arrangement —
+ * `endpoint`): load it into this browser's edit, or
  * publish this browser's edit as the team layout (operators). A publish names the version it started from; when
  * someone published in between, the API answers 409 and the user chooses to load theirs or overwrite.
  */
-export function useTeamArrangement(subscriptionId: string) {
+export function useTeamArrangement(subscriptionId: string, endpoint = "/api/architecture/arrangement") {
   const getToken = useApiToken();
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,7 +26,7 @@ export function useTeamArrangement(subscriptionId: string) {
     setBusy(true);
     try {
       const token = await getToken().catch(() => null);
-      const r = await fetchJsonWithBearer<{ doc: Doc | null; durable: boolean }>(apiUrl("/api/architecture/arrangement", { subscriptionId: subscriptionId || undefined }), token);
+      const r = await fetchJsonWithBearer<{ doc: Doc | null; durable: boolean }>(apiUrl(endpoint, { subscriptionId: subscriptionId || undefined }), token);
       setConflict(false);
       if (!r.doc) { setTeam(null); return null; }
       setTeam({ version: r.doc.version, updatedAt: r.doc.updatedAt, ...(r.doc.updatedBy ? { updatedBy: r.doc.updatedBy } : {}), durable: r.durable });
@@ -33,7 +34,7 @@ export function useTeamArrangement(subscriptionId: string) {
     } finally {
       setBusy(false);
     }
-  }, [getToken, subscriptionId]);
+  }, [getToken, subscriptionId, endpoint]);
 
   /** Publish; returns "ok", "conflict" (someone else published since `team.version`), or throws */
   const publish = useCallback(async (a: Arrangement, force = false): Promise<"ok" | "conflict"> => {
@@ -42,7 +43,7 @@ export function useTeamArrangement(subscriptionId: string) {
       const token = await getToken().catch(() => null);
       const body = { ...JSON.parse(serializeArrangement(a)) as object, baseVersion: team?.version ?? null };
       const r = await fetchJsonWithBearer<{ doc: Doc; durable: boolean }>(
-        apiUrl("/api/architecture/arrangement", { subscriptionId: subscriptionId || undefined, ...(force ? { force: "1" } : {}) }),
+        apiUrl(endpoint, { subscriptionId: subscriptionId || undefined, ...(force ? { force: "1" } : {}) }),
         token,
         { method: "PUT", body: JSON.stringify(body) },
       );
@@ -55,7 +56,7 @@ export function useTeamArrangement(subscriptionId: string) {
     } finally {
       setBusy(false);
     }
-  }, [getToken, subscriptionId, team?.version]);
+  }, [getToken, subscriptionId, endpoint, team?.version]);
 
   return { team, busy, conflict, load, publish };
 }

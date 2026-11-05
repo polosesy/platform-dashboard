@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ArrangementBody, clearArrangementMemory, readArrangement, writeArrangement } from "../src/services/arrangementStore.js";
@@ -63,4 +63,14 @@ test("team layout: a document with grids is version 2 and reads back with them; 
   clearArrangementMemory();
   const w1 = await writeArrangement(undefined, SUB, body(2), { baseVersion: null, force: false });
   assert.ok(w1.ok && w1.doc.v === 1);
+});
+
+test("team layout: the live diagram's document (prefix live-) is separate from the infrastructure diagram's", async () => {
+  clearArrangementMemory();
+  await writeArrangement(undefined, SUB, body(1), { baseVersion: null, force: false });
+  const live = await writeArrangement(undefined, `live-${SUB}`, body(2), { baseVersion: null, force: false });
+  assert.ok(live.ok && live.doc.version === 1, "its own version line");
+  assert.notDeepEqual((await readArrangement(undefined, SUB))?.order, (await readArrangement(undefined, `live-${SUB}`))?.order);
+  const src = readFileSync(new URL("../src/routes/architecture.ts", import.meta.url), "utf8");
+  assert.match(src, /registerArrangementRoutes\(router, env, "\/api\/live\/arrangement", "live-"\)/);
 });

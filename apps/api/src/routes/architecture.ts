@@ -11,35 +11,9 @@ import { requireRole } from "../infra/platformAccess.js";
 import { ArrangementBody, readArrangement, writeArrangement } from "../services/arrangementStore.js";
 
 export function registerArchitectureRoutes(router: Router, env: Env) {
-  // Team layout of the diagram (slot order + manual lines) — layout only, nothing in Azure changes
-  const durable = !!env.AUD_ARRANGEMENT_DIR;
-  router.get("/api/architecture/arrangement", async (req: Request, res: Response) => {
-    try {
-      if (req.auth?.kind !== "user") return res.json({ doc: null, durable, signedIn: false });
-      const subscriptionId = querySubscriptionId(req, env);
-      if (!subscriptionId) return res.json({ doc: null, durable, signedIn: true });
-      res.json({ doc: await readArrangement(env.AUD_ARRANGEMENT_DIR, subscriptionId), durable, signedIn: true });
-    } catch (e: unknown) {
-      sendError(res, e, "arrangement_read_failed");
-    }
-  });
-  router.put("/api/architecture/arrangement", requireRole(env, "operator"), async (req: Request, res: Response) => {
-    try {
-      // requireRole lets anonymous callers through (they see sample data) — publishing needs a signed-in operator
-      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
-      const subscriptionId = querySubscriptionId(req, env);
-      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
-      // Only the document's own fields (baseVersion rides along in the body); grid is optional (v1 documents have none)
-      const body = ArrangementBody.safeParse({ order: req.body?.order, lines: req.body?.lines, ...(req.body?.grid !== undefined ? { grid: req.body.grid } : {}) });
-      if (!body.success) return res.status(400).json({ error: "arrangement_invalid" });
-      const baseVersion = typeof req.body?.baseVersion === "number" ? req.body.baseVersion : null;
-      const r = await writeArrangement(env.AUD_ARRANGEMENT_DIR, subscriptionId, body.data, { baseVersion, force: req.query.force === "1", by: req.auth.principal.name });
-      if (!r.ok) return res.status(409).json({ error: "arrangement_conflict", doc: r.conflict, durable });
-      res.json({ doc: r.doc, durable });
-    } catch (e: unknown) {
-      sendError(res, e, "arrangement_write_failed");
-    }
-  });
+  // Team layouts — the infrastructure diagram's and the live diagram's (same document shape, one per subscription each)
+  registerArrangementRoutes(router, env, "/api/architecture/arrangement", "");
+  registerArrangementRoutes(router, env, "/api/live/arrangement", "live-");
 
   router.get("/api/architecture/graph", async (req: Request, res: Response) => {
     try {
@@ -101,6 +75,43 @@ export function registerArchitectureRoutes(router: Router, env: Env) {
       res.json(resp);
     } catch (e: unknown) {
       sendError(res, e, "flow_overlay_failed", "architecture");
+    }
+  });
+}
+
+/**
+ * Team layout of a diagram (slot order + manual lines, web lib/archArrange) — layout only, nothing in Azure changes.
+ * One document per subscription and diagram kind (`prefix`: "" = the infrastructure diagram, "live-" = the live
+ * diagram — its keys are lowercase ARM IDs, so VNets of one subscription never collide). Read = signed in, publish =
+ * operator; the subscription passes the connection-access check like every other query.
+ */
+function registerArrangementRoutes(router: Router, env: Env, path: string, prefix: "" | "live-") {
+  const durable = !!env.AUD_ARRANGEMENT_DIR;
+  router.get(path, async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.json({ doc: null, durable, signedIn: false });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.json({ doc: null, durable, signedIn: true });
+      res.json({ doc: await readArrangement(env.AUD_ARRANGEMENT_DIR, `${prefix}${subscriptionId}`), durable, signedIn: true });
+    } catch (e: unknown) {
+      sendError(res, e, "arrangement_read_failed");
+    }
+  });
+  router.put(path, requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      // requireRole lets anonymous callers through (they see sample data) — publishing needs a signed-in operator
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      // Only the document's own fields (baseVersion rides along in the body); grid is optional (v1 documents have none)
+      const body = ArrangementBody.safeParse({ order: req.body?.order, lines: req.body?.lines, ...(req.body?.grid !== undefined ? { grid: req.body.grid } : {}) });
+      if (!body.success) return res.status(400).json({ error: "arrangement_invalid" });
+      const baseVersion = typeof req.body?.baseVersion === "number" ? req.body.baseVersion : null;
+      const r = await writeArrangement(env.AUD_ARRANGEMENT_DIR, `${prefix}${subscriptionId}`, body.data, { baseVersion, force: req.query.force === "1", by: req.auth.principal.name });
+      if (!r.ok) return res.status(409).json({ error: "arrangement_conflict", doc: r.conflict, durable });
+      res.json({ doc: r.doc, durable });
+    } catch (e: unknown) {
+      sendError(res, e, "arrangement_write_failed");
     }
   });
 }

@@ -22,8 +22,10 @@ import { peeringPairOf, siteOfEdge } from "@/lib/livePeering";
 import styles from "./styles.module.css";
 import { Button, EmptyState, Notice, PageHeader, Segmented, Select, Toggle } from "@/components/ui";
 import { useStoredArrangement } from "@/lib/useStoredArrangement";
+import { useTeamArrangement } from "../architecture/hooks/useTeamArrangement";
+import { useMe } from "@/lib/useMe";
 import { EMPTY_ARRANGEMENT } from "@/lib/archArrange";
-import { liveArrangementStatus, liveKey, resetContainer, setBoxCols, setGridCols, SUBNET_DEFAULT_KEY, type ArrangeContainer, type ColsTarget } from "@/lib/liveArrange";
+import { diagramSubscription, liveArrangementStatus, liveKey, resetContainer, setBoxCols, setGridCols, SUBNET_DEFAULT_KEY, type ArrangeContainer, type ColsTarget } from "@/lib/liveArrange";
 
 /** Built-in example diagram (sample resources and values) */
 const SAMPLE_DIAGRAM_ID = "prod-infra";
@@ -462,6 +464,14 @@ export default function LiveDiagramPage() {
   }, [specError, diagramId]);
 
   const isSample = diagramId === SAMPLE_DIAGRAM_ID || snapshot?.dataSource === "mock";
+  // Team layout (API /api/live/arrangement — one per subscription, keys = ARM IDs): load into this browser's edit, or
+  // publish it (operators). The example diagram has none
+  const liveSub = useMemo(() => diagramSubscription(spec?.nodes ?? []), [spec?.nodes]);
+  const teamLayout = useTeamArrangement(liveSub ?? "", "/api/live/arrangement");
+  const me = useMe();
+  const signedIn = !!me.data && !me.data.anonymous;
+  const canPublish = signedIn && (me.data?.role === "operator" || me.data?.role === "admin");
+  const [teamNote, setTeamNote] = useState("");
   const arrangeStatus = useMemo(
     () => liveArrangementStatus(arr.arrangement, new Set((spec?.nodes ?? []).map(liveKey))),
     [arr.arrangement, spec?.nodes],
@@ -926,7 +936,30 @@ export default function LiveDiagramPage() {
                 <Button size="sm" variant="ghost" onClick={() => arr.commit(resetContainer(arr.arrangement, editSel.parent!.storeKey))}>{t(editSel.parent.kind === "grid" ? "ld.edit.resetSubnet" : "ld.edit.resetOrder")}</Button>
               ) : null}
               <Button size="sm" variant="ghost" onClick={() => { if (window.confirm(t("ld.edit.resetAllConfirm"))) arr.commit(EMPTY_ARRANGEMENT); }} disabled={arrangeStatus.boxes === 0}>{t("ld.edit.resetAll")}</Button>
-              <span className={styles.arrangeHint} aria-live="polite">{arrangeNotice ? t(arrangeNotice) : t("ld.edit.liveOff")}</span>
+              {signedIn && !isSample && liveSub ? (
+                <>
+                  <Button size="sm" variant="ghost" disabled={teamLayout.busy}
+                    onClick={() => void teamLayout.load().then((a) => {
+                      if (a) { arr.commit(a); setTeamNote(t("arch.edit.team.loaded")); } else setTeamNote(t("arch.edit.team.none"));
+                    }).catch((e: unknown) => setTeamNote(e instanceof Error ? e.message : String(e)))}
+                  >{t("arch.edit.team.load")}</Button>
+                  <Button size="sm" variant="ghost" disabled={teamLayout.busy || !canPublish}
+                    title={canPublish ? t("ld.edit.team.publishHint") : t("arch.edit.team.needOperator")}
+                    onClick={() => void teamLayout.publish(arr.arrangement).then((r) => setTeamNote(t(r === "ok" ? "arch.edit.team.published" : "arch.edit.team.conflict")))
+                      .catch((e: unknown) => setTeamNote(e instanceof Error ? e.message : String(e)))}
+                  >{t("arch.edit.team.publish")}</Button>
+                  {teamLayout.conflict && canPublish ? (
+                    <Button size="sm" variant="ghost" onClick={() => void teamLayout.publish(arr.arrangement, true).then(() => setTeamNote(t("arch.edit.team.published"))).catch((e: unknown) => setTeamNote(e instanceof Error ? e.message : String(e)))}>{t("arch.edit.team.overwrite")}</Button>
+                  ) : null}
+                  {teamLayout.team ? (
+                    <span className={styles.arrangeHint}>
+                      {t("arch.edit.team.info", { v: teamLayout.team.version, by: teamLayout.team.updatedBy ?? "—", at: new Date(teamLayout.team.updatedAt).toLocaleString(dateLocale(locale)) })}
+                      {teamLayout.team.durable ? "" : ` · ${t("arch.edit.team.memory")}`}
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
+              <span className={styles.arrangeHint} aria-live="polite">{teamNote || (arrangeNotice ? t(arrangeNotice) : t("ld.edit.liveOff"))}</span>
             </>
           )}
         </div>

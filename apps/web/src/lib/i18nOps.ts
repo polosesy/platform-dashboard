@@ -1185,6 +1185,7 @@ export const OPS_T: Translations = {
   "ld.edit.resetSubnet": { ko: "이 서브넷 원래대로", en: "Reset this subnet" },
   "ld.edit.resetBox": { ko: "이 영역 순서 원래대로", en: "Reset this box's order" },
   "ld.edit.resetOrder": { ko: "순서 원래대로", en: "Reset the order" },
+  "ld.edit.team.publishHint": { ko: "이 배치를 팀 배치로 게시 — 이 구독의 라이브 다이어그램을 여는 모두가 '팀 배치 불러오기'로 받습니다(카드 키 = ARM ID라 다시 만든 다이어그램에도 맞음). Azure는 바뀌지 않음", en: "Publish this layout as the team's — everyone opening this subscription's live diagram can load it (cards are keyed by ARM ID, so a regenerated diagram still fits). Nothing in Azure changes" },
   "ld.edit.resetAll": { ko: "배치 초기화", en: "Reset layout" },
   "ld.edit.resetAllConfirm": { ko: "이 다이어그램의 수동 배치를 모두 지울까요?", en: "Clear every manual arrangement of this diagram?" },
   "ld.edit.liveOff": { ko: "편집 중에는 상세 패널·연결 강조·트래픽 코멧·장애 영향 흐림이 꺼집니다. 이 브라우저에만 저장 (Ctrl+Z 되돌리기)", en: "While arranging, panels, hover focus, traffic comets and fault-impact dimming are off. Saved in this browser only (Ctrl+Z to undo)" },
