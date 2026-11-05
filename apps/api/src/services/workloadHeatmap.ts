@@ -143,6 +143,10 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …,
     // direct = NIO buffers (mapped ones are file pages); `max by … id` where two collectors could double a pool
     jvmHeapMax: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_max_bytes", 'area="heap"')}) > 0)`,
+    // Serial / Parallel keep two survivor spaces but the pool reports one (-Xmx = eden + 2 × survivor + old): count it
+    // again. G1's survivor is region-based, reports max -1 and committed as a whole — the regex (anchored) leaves it out
+    jvmSurvivorMax: `max by (namespace, pod) (${sel("jvm_memory_max_bytes", 'area="heap",id=~"(?i)(ps )?survivor space"')}) > 0`,
+    jvmSurvivorCommitted: `max by (namespace, pod) (${sel("jvm_memory_committed_bytes", 'area="heap",id=~"(?i)(ps )?survivor space"')})`,
     jvmNonheap: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_used_bytes", 'area="nonheap"')}))`,
     jvmHeapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="heap"')}))`,
     jvmNonheapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="nonheap"')}))`,
@@ -339,6 +343,8 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   const jvmSeries = { nonheapUsed: byPod(raw.jvmNonheap), heapCommitted: byPod(raw.jvmHeapCommitted), nonheapCommitted: byPod(raw.jvmNonheapCommitted),
     direct: byPod(raw.jvmDirect), rss: byPod(raw.memRss) };
   const nativePeakByPod = byPod(raw.jvmNativePeak);
+  const survivorMaxByPod = byPod(raw.jvmSurvivorMax);
+  const survivorCommittedByPod = byPod(raw.jvmSurvivorCommitted);
   const ageByPod = byPod(raw.podAge);
   const oldGenByPod = byPod(raw.oldGen);
   // RSS missing (a collector without it): the largest container's working set (file pages make it a little high)
@@ -356,21 +362,26 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
       continue;
     }
     const get = (n: keyof typeof jvmSeries) => jvmSeries[n].get(key) ?? null;
-    const [nonheapUsed, heapCommitted, nonheapCommitted, direct] = [get("nonheapUsed"), get("heapCommitted"), get("nonheapCommitted"), get("direct")];
+    // The second survivor space (Serial / Parallel) — in -Xmx and, once touched, in RSS; 0 for G1
+    const survivorCommitted = survivorCommittedByPod.get(key) ?? 0;
+    const heapMax = r.value + (survivorMaxByPod.get(key) ?? 0);
+    const [nonheapUsed, nonheapCommitted, direct] = [get("nonheapUsed"), get("nonheapCommitted"), get("direct")];
+    const heapCommitted = get("heapCommitted") === null ? null : get("heapCommitted")! + survivorCommitted;
     const rss = get("rss") ?? wsMax.get(key) ?? null;
     const outside = (nonheapCommitted ?? nonheapUsed ?? 0) + (direct ?? 0);
     const native = rss !== null && heapCommitted !== null ? Math.max(0, rss - heapCommitted - outside) : null;
-    const nativePeak = nativePeakByPod.get(key) ?? null;
+    const peak = nativePeakByPod.get(key);
+    const nativePeak = peak === undefined ? null : Math.max(0, peak - survivorCommitted);
     const age = ageByPod.get(key);
     const observedHours = age === undefined ? null : Math.min(NATIVE_PEAK_MINUTES / 60, Math.max(0, age / 3600));
-    const headroom = limit - (r.value + outside + Math.max(native ?? 0, nativePeak ?? 0));
+    const headroom = limit - (heapMax + outside + Math.max(native ?? 0, nativePeak ?? 0));
     const band = jvmBand(limit);
     const imminent = (memByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.memory.warn || (oldGenByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.oldGen.warn || x.p.oom;
     const { level, code } = jvmHeadroomLevel(headroom, band, imminent);
-    const partial = [heapCommitted, nonheapCommitted, direct, get("rss")].some((v) => v === null);
+    const partial = [get("heapCommitted"), nonheapCommitted, direct, get("rss")].some((v) => v === null);
     if (cell.value === null || RANK[level] > RANK[cell.level] || (RANK[level] === RANK[cell.level] && headroom < cell.value)) {
       x.w.cells.jvmHeadroom = { value: headroom, level, ...(code ? { code } : {}), worstPod: r.metric.pod!,
-        jvm: { limit, heapMax: r.value, nonheapUsed, heapCommitted, nonheapCommitted, direct, rss, native, nativePeak, observedHours, band, ...(partial ? { partial } : {}) } };
+        jvm: { limit, heapMax, nonheapUsed, heapCommitted, nonheapCommitted, direct, rss, native, nativePeak, observedHours, band, ...(partial ? { partial } : {}) } };
     }
   }
 

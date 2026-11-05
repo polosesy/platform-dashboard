@@ -135,6 +135,20 @@ test("heatmap: JVM headroom = limit − (heap max + non-heap committed + direct 
   assert.equal(jvmBand(2560 * Mi), 256 * Mi, "10% of a large limit");
 });
 
+test("heatmap: Serial / Parallel heap max counts the second survivor space; G1 (no survivor series) unchanged", () => {
+  const Mi = 1024 * 1024;
+  const pg = "pg-5474f57d6-gbwbj";
+  // 11-05 stg: eden 150.5 + survivor 18.75 (×2) + tenured 376 = -Xmx 563.75 (750 × 75%); one survivor committed 5.2
+  const s = aggregateHeatmap(jvmRaw({ jvmSurvivorMax: [r({ namespace: "app", pod: pg }, 18.75 * Mi)], jvmSurvivorCommitted: [r({ namespace: "app", pod: pg }, 5.25 * Mi)] }), {});
+  const c = s.workloads.find((x) => x.workload === "pg")!.cells.jvmHeadroom;
+  // native = 537 − (151 + 5.25) − 220 = 160.75 → 750 − (563.75 + 220 + 160.75) = −194.5
+  assert.deepEqual([c.jvm!.heapMax / Mi, c.jvm!.heapCommitted! / Mi, c.jvm!.native! / Mi, c.value! / Mi, c.code], [563.75, 156.25, 160.75, -194.5, "configDeficit"]);
+  const g1 = aggregateHeatmap(jvmRaw(), {}).workloads.find((x) => x.workload === "pg")!.cells.jvmHeadroom;
+  assert.equal(g1.jvm!.heapMax / Mi, 545, "no survivor series (G1 reports max -1) — nothing added");
+  const q = heatmapQueries('cluster="a"', 60);
+  assert.match(q.jvmSurvivorMax!, /id=~"\(\?i\)\(ps \)\?survivor space"/, "anchored regex — G1 Survivor Space does not match");
+});
+
 test("heatmap: JVM headroom short while memory ≥ 80%, Old Gen ≥ 70% or OOMKilled in the window = danger (imminent)", () => {
   const p = "sched-9df66d6fc-dcbnk";
   const hot = aggregateHeatmap(jvmRaw({ memRatio: [r({ namespace: "app", pod: p, container: "app" }, 0.82)] }), {});
