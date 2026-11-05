@@ -1,6 +1,6 @@
 "use client";
 
-import type { NamespacePolicySummary, NetworkPolicyInfo } from "@aud/types";
+import type { NamespacePolicySummary, NetpolStage, NetworkPolicyInfo } from "@aud/types";
 import styles from "../styles.module.css";
 import { useI18n } from "@/lib/i18n";
 import { Badge, CoverageBar, Empty } from "./shared";
@@ -10,6 +10,21 @@ const SOURCE_LABEL: Record<NetworkPolicyInfo["source"], string> = {
   cilium: "CiliumNetworkPolicy",
   "cilium-clusterwide": "CiliumClusterwideNetworkPolicy",
 };
+
+/** The stage's tone — the NET rules' grades: no policy = high (NET-001), observe-only = medium, partial = low */
+const STAGE_TONE: Record<NetpolStage, "ok" | "neutral" | "high" | "medium" | "low"> = {
+  enforced: "ok", partial: "low", audit: "medium", none: "high", noPods: "neutral",
+};
+const STAGES: NetpolStage[] = ["enforced", "partial", "audit", "none"];
+
+function StageBadge({ stage, dir, audit }: { stage: NetpolStage; dir: "in" | "out"; audit: number }) {
+  const { t } = useI18n();
+  return (
+    <Badge tone={STAGE_TONE[stage]} title={t(`polc.net.stageHint.${stage}`, { n: audit })}>
+      {t(`polc.net.${dir}`)} · {t(`polc.net.stage.${stage}`)}
+    </Badge>
+  );
+}
 
 const DEFAULT_DENY_YAML = `apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -53,6 +68,9 @@ export function NetworkPolicyPanel({
   const totalPods = withPods.reduce((s, n) => s + n.networkPolicy.eligiblePods, 0);
   const ingress = withPods.reduce((s, n) => s + n.networkPolicy.ingressIsolatedPods, 0);
   const egress = withPods.reduce((s, n) => s + n.networkPolicy.egressIsolatedPods, 0);
+  // The stage per direction over the user namespaces (system ones are shown, not counted)
+  const user = withPods.filter((n) => !n.system);
+  const tally = (dir: "ingressStage" | "egressStage") => STAGES.map((s) => ({ s, n: user.filter((x) => x.networkPolicy[dir] === s).length }));
 
   return (
     <div className={styles.page}>
@@ -62,6 +80,20 @@ export function NetworkPolicyPanel({
             <div className={styles.panelTitle}>{t("polc.net.coverage")}</div>
             {ciliumInstalled && <Badge tone="neutral">{t("polc.net.cilium")}</Badge>}
           </div>
+          {user.length > 0 && (
+            <div className={styles.empty}>
+              <strong>{t("polc.net.stageTitle", { n: user.length })}</strong>
+              {(["ingressStage", "egressStage"] as const).map((dir) => (
+                <div key={dir} className={styles.chips}>
+                  <span>{t(dir === "ingressStage" ? "polc.net.in" : "polc.net.out")}</span>
+                  {tally(dir).filter((x) => x.n > 0).map((x) => (
+                    <Badge key={x.s} tone={STAGE_TONE[x.s]} title={t(`polc.net.stageHint.${x.s}`, { n: "" })}>{t(`polc.net.stage.${x.s}`)} {x.n}</Badge>
+                  ))}
+                </div>
+              ))}
+              <span>{t("polc.net.stageNext")}</span>
+            </div>
+          )}
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <tbody>
@@ -75,7 +107,13 @@ export function NetworkPolicyPanel({
                 </tr>
                 {withPods.map((n) => (
                   <tr key={n.name}>
-                    <td className={styles.mono}>{n.name}</td>
+                    <td className={styles.mono}>
+                      {n.name}
+                      <div className={styles.chips}>
+                        <StageBadge stage={n.networkPolicy.ingressStage} dir="in" audit={n.networkPolicy.ingressAuditPods} />
+                        <StageBadge stage={n.networkPolicy.egressStage} dir="out" audit={n.networkPolicy.egressAuditPods} />
+                      </div>
+                    </td>
                     <td>
                       <CoverageBar covered={n.networkPolicy.ingressIsolatedPods} total={n.networkPolicy.eligiblePods} label={t("polc.net.in")} />
                       <CoverageBar covered={n.networkPolicy.egressIsolatedPods} total={n.networkPolicy.eligiblePods} label={t("polc.net.out")} />

@@ -38,6 +38,13 @@ export type PsaLabels = {
   enforceVersion?: string;
 };
 
+/**
+ * A namespace's network policy stage per direction: enforced = every pod isolated · partial = some · audit = none
+ * isolated but Cilium policies with `enableDefaultDeny: false` select pods (rules that block nothing — the observe
+ * step before enforcing) · none = no policy selects a pod · noPods = nothing to isolate
+ */
+export type NetpolStage = "enforced" | "partial" | "audit" | "none" | "noPods";
+
 export type NamespacePolicySummary = {
   name: string;
   system: boolean;
@@ -55,6 +62,11 @@ export type NamespacePolicySummary = {
     eligiblePods: number;
     defaultDenyIngress: boolean;
     defaultDenyEgress: boolean;
+    ingressStage: NetpolStage;
+    egressStage: NetpolStage;
+    /** Pods only observe-only (enableDefaultDeny: false) policies select in that direction */
+    ingressAuditPods: number;
+    egressAuditPods: number;
   };
   rbac: { roles: number; roleBindings: number };
   autoscaling: { vpa: number; hpa: number; pdb: number };

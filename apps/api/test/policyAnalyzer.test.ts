@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   analyzePolicies,
   analyzeRbacRules,
+  netpolStage,
   selectorMatches,
   type PolicyInventory,
 } from "../src/services/policyAnalyzer.js";
@@ -317,4 +318,29 @@ test("AVL-001 single replica (or HPA floor 1); area score = share of healthy obj
   const empty = analyzePolicies(emptyInventory(), "c");
   assert.ok(empty.summary.categories.every((c) => c.score === null && c.evaluated === 0));
   assert.equal(empty.summary.score, null);
+});
+
+test("namespace policy stage: enforced · partial · audit (observe-only Cilium) · none · no pods", () => {
+  assert.equal(netpolStage(2, 0, 2), "enforced");
+  assert.equal(netpolStage(1, 1, 2), "partial");
+  assert.equal(netpolStage(0, 2, 2), "audit");
+  assert.equal(netpolStage(0, 0, 2), "none");
+  assert.equal(netpolStage(0, 0, 0), "noPods");
+
+  const inv = scenario();
+  // legacy: an observe-only Cilium policy — rules on both directions, enableDefaultDeny false = blocks nothing
+  inv.ciliumPolicies.push({ namespace: "legacy", name: "legacy-audit", specs: [{
+    endpointSelector: {}, ingress: [{ fromEndpoints: [{}] }], egress: [{ toEndpoints: [{}] }], enableDefaultDeny: { ingress: false, egress: false },
+  }] } as PolicyInventory["ciliumPolicies"][number]);
+  const r = analyzePolicies(inv, "c1");
+  const ns = (n: string) => r.namespaces.find((x) => x.name === n)!.networkPolicy;
+  assert.equal(ns("app").ingressStage, "partial"); // 1 of 2 isolated
+  assert.equal(ns("app").egressStage, "none");
+  assert.equal(ns("secure").ingressStage, "enforced");
+  assert.equal(ns("legacy").ingressStage, "audit");
+  assert.equal(ns("legacy").ingressAuditPods, 1);
+  assert.equal(ns("legacy").ingressIsolatedPods, 0, "an audit policy isolates nothing");
+  // the cluster-wide legacy-egress policy enforces egress: enforcement wins, the pod is not counted as audit-only
+  assert.equal(ns("legacy").egressStage, "enforced");
+  assert.equal(ns("legacy").egressAuditPods, 0);
 });

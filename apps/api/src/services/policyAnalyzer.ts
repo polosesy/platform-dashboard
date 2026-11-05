@@ -2,6 +2,7 @@ import type {
   HpaInfo,
   KubernetesPolicyResponse,
   NamespacePolicySummary,
+  NetpolStage,
   NetworkPolicyInfo,
   PdbInfo,
   PolicyCategory,
@@ -231,6 +232,18 @@ const SYSTEM_NAMESPACES = new Set([
   "azure-alb-system",
 ]);
 
+/**
+ * Pure: a namespace's network policy stage in one direction — every pod isolated = enforced, some = partial, none
+ * isolated but observe-only Cilium policies select pods = audit (the step before enforcing: rules that block nothing),
+ * else none; no pods = noPods
+ */
+export function netpolStage(isolated: number, audited: number, pods: number): NetpolStage {
+  if (pods === 0) return "noPods";
+  if (isolated >= pods) return "enforced";
+  if (isolated > 0) return "partial";
+  return audited > 0 ? "audit" : "none";
+}
+
 export function isSystemNamespace(ns: string | undefined): boolean {
   return !!ns && (SYSTEM_NAMESPACES.has(ns) || ns.startsWith("kube-"));
 }
@@ -414,6 +427,9 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
   const eligiblePods = inv.pods.filter((p) => !p.hostNetwork && p.phase !== "Succeeded" && p.phase !== "Failed");
   const ingressIsolated = new Set<string>();
   const egressIsolated = new Set<string>();
+  // Pods an observe-only Cilium policy (enableDefaultDeny: false) selects — the namespace's "audit" stage
+  const ingressAudited = new Set<string>();
+  const egressAudited = new Set<string>();
   const podKey = (p: { namespace: string; name: string }) => `${p.namespace}/${p.name}`;
   const networkPolicies: NetworkPolicyInfo[] = [];
 
@@ -463,6 +479,8 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
       for (const p of selected) {
         if (isolatesIngress) ingressIsolated.add(podKey(p));
         if (isolatesEgress) egressIsolated.add(podKey(p));
+        if (nonEnforcing.includes("Ingress")) ingressAudited.add(podKey(p));
+        if (nonEnforcing.includes("Egress")) egressAudited.add(podKey(p));
       }
       const allowsAll = (rules: unknown[] | undefined, entityKey: string) =>
         (rules ?? []).some((r) => {
@@ -889,6 +907,8 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
     const limitRanges = inv.limitRanges.filter((l) => l.namespace === n.name).length;
     const ingressIso = nsPods.filter((p) => ingressIsolated.has(podKey(p))).length;
     const egressIso = nsPods.filter((p) => egressIsolated.has(podKey(p))).length;
+    const ingressAud = nsPods.filter((p) => ingressAudited.has(podKey(p)) && !ingressIsolated.has(podKey(p))).length;
+    const egressAud = nsPods.filter((p) => egressAudited.has(podKey(p)) && !egressIsolated.has(podKey(p))).length;
     const resource: PolicyResourceRef = { kind: "Namespace", name: n.name };
     const base = { system, namespace: n.name, resource };
 
@@ -985,6 +1005,10 @@ export function analyzePolicies(inv: PolicyInventory, clusterId: string, now = n
         eligiblePods: nsPods.length,
         defaultDenyIngress: nsPolicies.some((p) => p.defaultDenyIngress),
         defaultDenyEgress: nsPolicies.some((p) => p.defaultDenyEgress),
+        ingressStage: netpolStage(ingressIso, ingressAud, nsPods.length),
+        egressStage: netpolStage(egressIso, egressAud, nsPods.length),
+        ingressAuditPods: ingressAud,
+        egressAuditPods: egressAud,
       },
       rbac: {
         roles: inv.roles.filter((r) => r.kind === "Role" && r.namespace === n.name).length,
