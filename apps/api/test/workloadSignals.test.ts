@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aggregateHeatmap, heatmapQueries, levelOf, type HeatRaw } from "../src/services/workloadHeatmap.js";
+import { aggregateHeatmap, cpuLevel, heatmapQueries, jvmBand, levelOf, type CpuFacts, type HeatRaw } from "../src/services/workloadHeatmap.js";
 import { eventBelongs, mapEvents } from "../src/services/kubeEvents.js";
 import { redactLogLine, redactLogText } from "../src/services/logRedaction.js";
 import { ERROR_FILTER, logQueries, lokiStateOf, parseLogLine, re2, summarizeLokiDrops, workloadSelector } from "../src/services/lokiLogs.js";
@@ -29,7 +29,8 @@ function raw(over: Partial<HeatRaw> = {}): HeatRaw {
       r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq", container: "coredns" }, 1)],
     memRatio: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg", container: "api" }, 0.92), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm", container: "api" }, 0.5)],
     cpuUsage: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.2)],
-    cpuRatio: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.4)],
+    cpuP95: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.2)],
+    cpuRequest: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.5)],
     restarts: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0), r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 3)],
     notReady: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0), r({ namespace: "aks-command", pod: "command-0a1b2c3d" }, 1)],
     oom: [],
@@ -69,6 +70,7 @@ test("heatmap: a DaemonSet no node matches and a Deployment at 0 are 'nothing to
     active: [...raw().active!, r({ namespace: "kube-system", pod: "agent-x7k2p" }, 1)],
     memWs: [...raw().memWs!, r({ namespace: "kube-system", pod: "agent-x7k2p", container: "a" }, 300), r({ namespace: "kube-system", pod: "agent-x7k2p", container: "b" }, 100)],
     cpuUsage: [...raw().cpuUsage!, r({ namespace: "kube-system", pod: "agent-x7k2p" }, 0.04)],
+    cpuP95: [...raw().cpuP95!, r({ namespace: "kube-system", pod: "agent-x7k2p" }, 0.04)],
   }), { logErrors: LE });
   const win = s.workloads.find((w) => w.workload === "agent-windows")!;
   assert.deepEqual([win.cells.ready.level, win.cells.ready.code, win.worst], ["stopped", "noNodes", "stopped"]);
@@ -96,28 +98,117 @@ test("heatmap: finished pods never make a tile or a pod row, but their log ERROR
   assert.equal(api.cells.logErrors.value, 20, "its ERRORs in the window still belong to the workload");
 });
 
-test("heatmap: JVM headroom = memory limit − max heap per running pod; tightest pod; < non-heap in use = danger, < 250Mi = warn", () => {
+// 2026-11-05 stg, MiB: limit · heap max · heap committed · non-heap committed · direct · RSS (integration namespace)
+const JVM_PODS: Record<string, [number, number, number, number, number, number]> = {
+  "pg-5474f57d6-gbwbj": [750, 545, 151, 202, 18, 537], // MaxRAMPercentage 75 — a full heap does not fit
+  "sched-9df66d6fc-dcbnk": [1075, 520, 193, 271, 17, 761], // 13Mi short — inside the estimate's error
+  "gw-9468bf7b7-4j4qd": [1536, 742, 268, 244, 35, 802],
+};
+function jvmRaw(over: Partial<HeatRaw> = {}): HeatRaw {
   const Mi = 1024 * 1024;
+  const pods = Object.keys(JVM_PODS);
+  const per = (i: number) => pods.map((pod) => r({ namespace: "app", pod }, JVM_PODS[pod]![i]! * Mi));
+  const rs = (pod: string) => pod.split("-").slice(0, 2).join("-");
+  return raw({
+    podOwners: pods.map((pod) => r({ namespace: "app", pod, owner_kind: "ReplicaSet", owner_name: rs(pod) }, 1)),
+    rsOwners: pods.map((pod) => r({ namespace: "app", replicaset: rs(pod), owner_kind: "Deployment", owner_name: pod.split("-")[0]! }, 1)),
+    active: pods.map((pod) => r({ namespace: "app", pod }, 1)),
+    deployReady: [], deployDesired: [], memWs: [], memRatio: [], oldGen: [], cpuUsage: [], cpuP95: [], cpuRequest: [], httpAll: [], poolUsage: [], poolPending: [], logErrors: [],
+    podMemLimit: per(0), jvmHeapMax: per(1), jvmHeapCommitted: per(2), jvmNonheapCommitted: per(3), jvmDirect: per(4), memRss: per(5),
+    jvmNonheap: per(3),
+    ...over,
+  });
+}
+
+test("heatmap: JVM headroom = limit − (heap max + non-heap committed + direct + native); band max(100Mi, 10%)", () => {
+  const Mi = 1024 * 1024;
+  const s = aggregateHeatmap(jvmRaw(), {});
+  const cell = (w: string) => s.workloads.find((x) => x.workload === w)!.cells.jvmHeadroom;
+  const pg = cell("pg");
+  // native = 537 − 151 − (202 + 18) = 166 → 750 − (545 + 220 + 166) = −181 < −band(100)
+  assert.deepEqual([Math.round(pg.value! / Mi), pg.level, pg.code, Math.round(pg.jvm!.native! / Mi), pg.jvm!.band / Mi], [-181, "danger", "configDeficit", 166, 100]);
+  const sched = cell("sched");
+  assert.deepEqual([Math.round(sched.value! / Mi), sched.level, sched.code], [-13, "warn", "marginal"], "short, but inside the estimate's error");
+  const gw = cell("gw");
+  assert.deepEqual([Math.round(gw.value! / Mi), gw.level, gw.code], [260, "ok", undefined]);
+  assert.equal(s.flags.find((f) => f.metric === "jvmHeadroom")!.count, 1, "the red strip counts danger only");
+  assert.equal(jvmBand(2560 * Mi), 256 * Mi, "10% of a large limit");
+});
+
+test("heatmap: JVM headroom short while memory ≥ 80%, Old Gen ≥ 70% or OOMKilled in the window = danger (imminent)", () => {
+  const p = "sched-9df66d6fc-dcbnk";
+  const hot = aggregateHeatmap(jvmRaw({ memRatio: [r({ namespace: "app", pod: p, container: "app" }, 0.82)] }), {});
+  const c = hot.workloads.find((x) => x.workload === "sched")!.cells.jvmHeadroom;
+  assert.deepEqual([c.level, c.code], ["danger", "imminent"]);
+  const old = aggregateHeatmap(jvmRaw({ oldGen: [r({ namespace: "app", pod: p }, 0.75)] }), {});
+  assert.equal(old.workloads.find((x) => x.workload === "sched")!.cells.jvmHeadroom.code, "imminent");
+  const oom = aggregateHeatmap(jvmRaw({ oom: [r({ namespace: "app", pod: p }, 1)] }), {});
+  assert.equal(oom.workloads.find((x) => x.workload === "sched")!.cells.jvmHeadroom.code, "imminent");
+  const gw = aggregateHeatmap(jvmRaw({ memRatio: [r({ namespace: "app", pod: "gw-9468bf7b7-4j4qd", container: "app" }, 0.85)] }), {});
+  assert.equal(gw.workloads.find((x) => x.workload === "gw")!.cells.jvmHeadroom.level, "ok", "busy but a full heap still fits");
+});
+
+test("heatmap: JVM headroom without committed / RSS series falls back to non-heap in use, marked partial", () => {
+  const Mi = 1024 * 1024;
+  const s = aggregateHeatmap(jvmRaw({ jvmHeapCommitted: [], jvmNonheapCommitted: [], jvmDirect: [], memRss: [] }), {});
+  const pg = s.workloads.find((x) => x.workload === "pg")!.cells.jvmHeadroom;
+  // 750 − (545 + 202) = 3 — no native estimate (no RSS, no working set)
+  assert.deepEqual([Math.round(pg.value! / Mi), pg.level, pg.jvm!.native, pg.jvm!.partial], [3, "warn", null, true]);
+  const ws = aggregateHeatmap(jvmRaw({ memRss: [], memWs: [r({ namespace: "app", pod: "pg-5474f57d6-gbwbj", container: "app" }, 544 * Mi), r({ namespace: "app", pod: "pg-5474f57d6-gbwbj", container: "fluentd" }, 60 * Mi)] }), {});
+  assert.equal(Math.round(ws.workloads.find((x) => x.workload === "pg")!.cells.jvmHeadroom.jvm!.rss! / Mi), 544, "the largest container's working set, not the pod's sum");
   const base = raw();
-  const pods = [...base.podOwners!, r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty", owner_kind: "ReplicaSet", owner_name: "pay-5f6d7c8b9" }, 1)];
-  const s = aggregateHeatmap(raw({
-    podOwners: pods,
-    rsOwners: [...base.rsOwners!, r({ namespace: "app", replicaset: "pay-5f6d7c8b9", owner_kind: "Deployment", owner_name: "pay" }, 1)],
-    active: [...base.active!, r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 1)],
-    jvmHeapMax: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 545 * Mi), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 412 * Mi),
-      r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 900 * Mi), r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 100 * Mi)],
-    jvmNonheap: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 193 * Mi), r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 190 * Mi)],
-    podMemLimit: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 750 * Mi), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 850 * Mi),
-      r({ namespace: "app", pod: "pay-5f6d7c8b9-qwrty" }, 1024 * Mi)],
-  }), { logErrors: LE });
-  const api = s.workloads.find((w) => w.workload === "api")!.cells.jvmHeadroom;
-  assert.deepEqual([api.value, api.level, api.worstPod, api.jvm], [205 * Mi, "warn", "api-7d9f8c6b5-bcdfg", { limit: 750 * Mi, heapMax: 545 * Mi, nonheapUsed: 193 * Mi }], "the tightest pod");
-  const pay = s.workloads.find((w) => w.workload === "pay")!.cells.jvmHeadroom;
-  assert.deepEqual([pay.value, pay.level], [124 * Mi, "danger"], "124Mi left but non-heap already uses 190Mi");
-  const dns = s.workloads.find((w) => w.workload === "coredns")!.cells.jvmHeadroom;
+  const nolimit = aggregateHeatmap(raw({ jvmHeapMax: [r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 100 * Mi)], podMemLimit: [], active: base.active }), {});
+  const dns = nolimit.workloads.find((w) => w.workload === "coredns")!.cells.jvmHeadroom;
   assert.deepEqual([dns.level, dns.code], ["noBaseline", "noLimit"], "a JVM without a memory limit has nothing to subtract from");
-  assert.equal(s.flags.find((f) => f.metric === "jvmHeadroom")!.count, 2);
   assert.match(heatmapQueries('cluster="a"', 60).jvmHeapMax!, /sum by \(namespace, pod\) \(jvm_memory_max_bytes\{cluster="a",area="heap"\} > 0\)/, "G1 pools report -1");
+});
+
+test("heatmap CPU: danger is pressure (PSI / throttling), not the ratio; over the request under 100m is no verdict", () => {
+  const f = (o: Partial<CpuFacts>): CpuFacts => ({ now: null, p95: null, avg: null, max: null, request: null, psi: null, throttle: null, ...o });
+  // 11-05 stg: data-transformation 429% at start-up — the window's p95 without the warm-up is 0.9 × request
+  assert.deepEqual(cpuLevel(f({ now: 4.29, p95: 0.9, request: 1 })), { level: "ok", value: 0.9 });
+  assert.deepEqual(cpuLevel(f({ p95: 0.0625, request: 0.03125 })), { level: "ok", value: 2, code: "belowFloor" }, "31m request at 63m — no load");
+  assert.deepEqual(cpuLevel(f({ p95: 0.125, request: 0.0625, psi: 0.01 })), { level: "warn", value: 2 }, "63m request at 125m — capacity planning");
+  assert.equal(cpuLevel(f({ p95: 0.3, request: 0.1, psi: 0.02 })).level, "warn", "300% without waiting is not danger");
+  assert.equal(cpuLevel(f({ p95: 0.05, request: 0.1, psi: 0.12 })).level, "danger", "starving under its request");
+  assert.equal(cpuLevel(f({ p95: 0.05, request: 0.1, psi: 0.06 })).level, "warn");
+  assert.equal(cpuLevel(f({ p95: 0.02, request: 0.02, throttle: 0.3 })).level, "danger", "an AKS add-on hitting its CPU limit");
+  assert.deepEqual(cpuLevel(f({ now: 0.5, request: 0.1 })), { level: "noBaseline", value: null, code: "warmingUp" }, "only a starting container in the window");
+  assert.deepEqual(cpuLevel(f({ p95: 0.04 })), { level: "noBaseline", value: null, code: "noRequest" });
+});
+
+test("heatmap CPU: the tile shows the worst verdict, its p95 cores and the window's breakdown", () => {
+  const s = aggregateHeatmap(raw({
+    cpuUsage: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.9), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 0.05)],
+    cpuP95: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.04), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 0.06)],
+    cpuAvg: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.03)],
+    cpuRequest: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 0.05), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 0.05)],
+    cpuPsi: [r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 0.11)],
+  }), { logErrors: LE });
+  const cpu = s.workloads.find((w) => w.workload === "api")!.cells.cpu;
+  assert.deepEqual([cpu.level, cpu.worstPod, cpu.abs, cpu.cpu!.psi], ["danger", "api-7d9f8c6b5-hjklm", 0.06, 0.11], "waiting beats a higher 5-minute value");
+  const api = s.workloads.find((w) => w.workload === "api")!;
+  assert.equal(Math.round(api.pods.find((p) => p.pod === "api-7d9f8c6b5-bcdfg")!.cpu! * 100), 80, "pod rows show p95 / request, not the last 5 minutes");
+});
+
+test("heatmap queries: CPU / 5xx follow the window, warm-up left out per container, OOM inside the window", () => {
+  const h = heatmapQueries('cluster="a"', 60);
+  const d = heatmapQueries('cluster="a"', 1440);
+  assert.match(h.cpuP95!, /^quantile_over_time\(0\.95, .*\[60m:1m\]\)$/);
+  assert.match(d.cpuP95!, /\[1440m:5m\]\)$/);
+  assert.match(h.cpuP95!, /unless on \(namespace, pod, container\) \(time\(\) - max by \(namespace, pod, container\) \(kube_pod_container_state_started\{cluster="a"\}\) < 600\)/);
+  assert.match(d.http5xx!, /increase\(http_server_requests_seconds_count\{cluster="a",status=~"5\.\.",uri!~"\/actuator\.\*"\}\[1440m\]\)/);
+  assert.match(d.oom!, /kube_pod_container_status_last_terminated_timestamp\{cluster="a"\} > time\(\) - 86400/);
+  assert.ok(!("cpuRatio" in h), "the ratio is taken in TypeScript");
+});
+
+test("heatmap 5xx: the share over the window; under 20 requests it is shown, not judged", () => {
+  const few = aggregateHeatmap(raw({ http5xx: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 1)], httpAll: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 10)] }), { logErrors: LE });
+  const c = few.workloads.find((w) => w.workload === "api")!.cells.http5xx;
+  assert.deepEqual([c.value, c.level, c.code, c.requests], [0.1, "noTraffic", "lowTraffic", 10]);
+  const many = aggregateHeatmap(raw({ http5xx: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 1)], httpAll: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 400)] }), { logErrors: LE });
+  const m = many.workloads.find((w) => w.workload === "api")!.cells.http5xx;
+  assert.deepEqual([m.value, m.level, m.requests], [0.0025, "ok", 400]);
 });
 
 test("heatmap: missing families are notMeasured with a null flag; flags count the strip's levels", () => {
@@ -137,7 +228,6 @@ test("heatmap queries: one count per family (never `a or b`), cluster-scoped, th
   assert.ok(Object.values(q).every((v) => v.includes('cluster="aks-a"')));
   assert.match(q.logErrors!, /sum by \(namespace, exported_pod\)/);
   assert.match(q.restarts!, /changes\(kube_pod_container_status_restarts_total\{cluster="aks-a"\}\[60m\]\)/);
-  assert.equal(levelOf("cpu", 1.5), "danger");
   assert.equal(levelOf("oldGen", 0.7), "warn");
 });
 

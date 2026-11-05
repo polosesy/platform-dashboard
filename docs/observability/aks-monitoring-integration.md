@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-03
+last-verified: 2026-11-05
 covers: [apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
@@ -49,11 +49,11 @@ covers: [apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintVie
 |---|---|---|
 | 가용 | KSM ready/desired (Deployment·StatefulSet·DaemonSet). 목표 0 = 실행 대상 없음 — DaemonSet은 '대상 노드 없음'(`noNodes`), 그 밖은 '0개로 줄임'(`scaledToZero`), 나머지 신호는 '파드 없음'(`noPods`) | <1 / 0 |
 | 메모리 | 컨테이너 WS / memory limit (+ 바이트 `abs`) + 마지막 종료 OOMKilled. limit 없음 = **측정됨·기준 없음**(`noBaseline` — 사용량 Mi만, 색 없음) | 80% / 90% |
-| CPU | 사용 / request (+ 코어 `abs`). request 없음 = 측정됨·기준 없음(m = 1/1000 코어) | 100% / 150% |
+| CPU | **선택한 기간**의 5분 사용량 p95 / request(+ p95 코어 `abs`) — `quantile_over_time(0.95, …[기간:1m|5m])`(1h = 1m, 6h·24h = 5m), 컨테이너 시작 10분은 단계마다 뺌(`kube_pod_container_state_started`, 재시작 포함). 풀이 = p95·평균·최대·지금(5분)·request·CPU 대기(PSI `container_pressure_cpu_waiting_seconds_total` p95)·스로틀(CPU limit 있을 때만). request 없음 = 측정됨·기준 없음. 2026-11-05: 순간값이던 예전 칸은 캡처마다 위험·정상이 뒤바뀜(alloy 282% → 다음 날 45%, 기동 순간 429%) | 주의 = 150%+ 이면서 p95 ≥100m, 또는 PSI 5%+·스로틀 10%+ / 위험 = PSI 10%+ 또는 스로틀 25%+ (limit 없으면 request 초과는 노드의 남는 CPU를 빌려 쓸 뿐) · 100m 미만 = `belowFloor` · 시작 10분뿐 = `warmingUp` |
 | 재시작 | `changes(restarts[기간])` 합 | 1 / 5 |
 | Old Gen | `jvm_memory_usage_after_gc` | 70% / 85% |
-| JVM 여유 | 파드의 컨테이너 메모리 limit − JVM 최대 heap(`jvm_memory_max_bytes{area="heap"} > 0` 합 — G1 eden/survivor는 −1이라 뺌) = metaspace·code cache·스레드·네이티브 메모리 자리, 패널에 limit·heap·지금 non-heap 사용(`jvm_memory_used_bytes{area="nonheap"}`) 풀이. 낮을수록 나쁨, limit 없음 = 기준 없음 | 250Mi 미만 / 지금 non-heap 사용보다 작음(heap이 차면 limit 초과 → OOMKilled) |
-| HTTP 5xx | 워크로드 전체 5xx / 전체 요청(`/actuator` 제외), 요청 0 = 트래픽 없음 | 0.5% / 1% |
+| JVM 여유 | heap이 **최대까지 찼을 때** limit에 남는 메모리 = limit − (heap 최대 + non-heap **committed** + direct 버퍼 + 네이티브). 네이티브 = max(0, RSS − heap committed − non-heap committed − direct) = 스레드 스택·malloc arena·JIT·GC 표(RSS 없으면 가장 큰 컨테이너 WS). SerialGC·ParallelGC는 키운 heap을 돌려주지 않아 바쁜 파드는 결국 최대에 감. committed·RSS가 없으면 있는 값만(`partial`). 2026-11-05: 예전 식(limit − heap 최대)은 non-heap·네이티브를 빠뜨려 workflow-postgresql-app 205Mi(주의)로 보였으나 새 식 −181Mi | 폭 = max(100Mi, limit 10%): 주의 = 폭 미만(`marginal`) / 위험 = −폭 미만(`configDeficit`), 또는 0 미만이면서 메모리 80%+·Old Gen 70%+·기간 중 OOMKilled(`imminent`) — 빨간 띠는 위험만 |
+| HTTP 5xx | **선택한 기간**의 워크로드 전체 5xx / 전체 요청(`increase`, `/actuator` 제외), 요청 0 = 트래픽 없음, 20건 미만 = 비율만 보이고 판정 안 함(`lowTraffic`) | 0.5% / 1% |
 | 로그 ERROR | 수집기가 만든 ERROR 카운터(연결 파일 `aks.observability.logErrors`)의 기간 증가 — 기간 중 생긴 시계열도 전부 셈 | 1 / 50 |
 | 커넥션 풀 | Hikari active/max (가장 나쁜 풀), pending | 70% / 90%, pending ≥1 |
 

@@ -26,20 +26,36 @@ export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts",
 export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number }> = {
   ready: { warn: 1, danger: 0 }, // special: ready/desired < 1 = warn, 0 = danger, 0/0 = stopped
   memory: { warn: 0.8, danger: 0.9 },
-  cpu: { warn: 1, danger: 1.5 },
+  // special: p95 / request ≥ 1.5 (and ≥ 100m) = warn only — danger is CPU pressure (CPU_PRESSURE), see cpuLevel
+  cpu: { warn: 1.5, danger: 1.5 },
   restarts: { warn: 1, danger: 5 },
   oldGen: { warn: 0.7, danger: 0.85 },
-  // special (lower is worse): headroom < 250Mi = warn (customer standard), < the non-heap in use now (or ≤ 0) = danger
-  jvmHeadroom: { warn: 250 * 1024 * 1024, danger: 0 },
+  // special (lower is worse): under the band max(100Mi, 10% of the limit) = warn, under −band (or < 0 while it is
+  // happening) = danger — see jvmHeadroomLevel
+  jvmHeadroom: { warn: 100 * 1024 * 1024, danger: 0 },
   http5xx: { warn: 0.005, danger: 0.01 },
   logErrors: { warn: 1, danger: 50 },
   poolUsage: { warn: 0.7, danger: 0.9 },
   poolPending: { warn: 1, danger: 1 },
 };
 
-/** The red-flag strip: which level counts (their strip: memory 90%+, CPU > 1.5×, any restart, pool 80%+ …) */
+/**
+ * CPU without a limit is never throttled: running over the request borrows idle node CPU — harm shows only as time
+ * spent waiting for a CPU (PSI) or, with a limit, CFS throttling. Over the request is a capacity-planning warn, and
+ * only from 100m up (a 50m request at 80m is no load). Measured on a stg cluster 2026-11-05: PSI p95 ≤ 3.4% everywhere.
+ */
+export const CPU_PRESSURE = { floorCores: 0.1, psiWarn: 0.05, psiDanger: 0.1, throttleWarn: 0.1, throttleDanger: 0.25 };
+/** A container's first 10 minutes (JIT warm-up, 5-minute rate catching up) do not count toward the window's p95 */
+export const WARMUP_SECONDS = 600;
+/** Fewer requests in the window than this: the 5xx share is shown, not judged (1 of 3 is not 33% errors) */
+export const HTTP_MIN_REQUESTS = 20;
+const Mi = 1024 * 1024;
+/** Room native memory grows into under load (signal-service malloc arenas +73Mi in one burst, 2026-11-04) */
+export const jvmBand = (limit: number) => Math.max(100 * Mi, 0.1 * limit);
+
+/** The red-flag strip: which level counts (their strip: memory 90%+, any restart, pool 80%+ …) */
 const FLAG_AT: Record<HeatMetric, HeatLevel[]> = {
-  ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["warn", "danger"],
+  ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["danger"],
   http5xx: ["danger"], logErrors: ["warn", "danger"], poolUsage: ["danger"], poolPending: ["danger"],
 };
 
@@ -51,9 +67,20 @@ const FAMILY: Partial<Record<HeatMetric, string>> = {
 
 export type LogErrorsConfig = { metric: string; podLabel: string };
 
+/** Subquery step: 60 points for an hour, 5 minutes (the rate's own width) for 6h / 24h */
+export const cpuStep = (windowMinutes: number) => (windowMinutes <= 60 ? "1m" : "5m");
+
 export function heatmapQueries(C: string, windowMinutes: number, logErrors?: LogErrorsConfig): Record<string, string> {
   const w = `[${windowMinutes}m]`;
   const sel = (m: string, extra = "") => `${m}{${[C, extra].filter(Boolean).join(",")}}`;
+  const ctr = 'container!="",container!="POD"';
+  // Containers started less than WARMUP_SECONDS before each step drop out of that step (a restarted container too)
+  const warm = `unless on (namespace, pod, container) (time() - max by (namespace, pod, container) (${sel("kube_pod_container_state_started")}) < ${WARMUP_SECONDS})`;
+  const sub = `[${windowMinutes}m:${cpuStep(windowMinutes)}]`;
+  const cpu5m = `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}[5m]) ${warm})`;
+  const psi5m = `max by (namespace, pod) (rate(${sel("container_pressure_cpu_waiting_seconds_total", ctr)}[5m]) ${warm})`;
+  const oomReason = sel("kube_pod_container_status_last_terminated_reason", 'reason="OOMKilled"');
+  const oomAt = sel("kube_pod_container_status_last_terminated_timestamp");
   const q: Record<string, string> = {
     // One count per family: `a or b` drops b's series whose labels equal a's (vector matching ignores the name)
     ...Object.fromEntries(Object.values(FAMILY).map((m) => [`family:${m}`, `count(${sel(m)})`])),
@@ -62,11 +89,22 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     rsOwners: `group by (namespace, replicaset, owner_kind, owner_name) (${sel("kube_replicaset_owner")})`,
     memWs: `max by (namespace, pod, container) (${sel("container_memory_working_set_bytes", 'container!="",container!="POD"')})`,
     memRatio: `max by (namespace, pod, container) (${sel("container_memory_working_set_bytes", 'container!="",container!="POD"')}) / on (namespace, pod, container) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_limits", 'resource="memory"')}) > 0)`,
-    cpuRatio: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", 'container!="",container!="POD"')}[5m])) / on (namespace, pod) (sum by (namespace, pod) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_requests", 'resource="cpu"')})) > 0)`,
-    cpuUsage: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", 'container!="",container!="POD"')}[5m]))`,
+    memRss: `max by (namespace, pod) (${sel("container_memory_rss", ctr)})`,
+    // CPU over the window: the 5-minute rate's p95 / max across it and the plain average; the ratio is taken in
+    // TypeScript (one heavy subquery, not two). cpuUsage = the last 5 minutes, warm-up included
+    cpuUsage: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}[5m]))`,
+    cpuP95: `quantile_over_time(0.95, (${cpu5m})${sub})`,
+    cpuMax: `max_over_time((${cpu5m})${sub})`,
+    cpuAvg: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}${w}))`,
+    cpuRequest: `sum by (namespace, pod) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_requests", 'resource="cpu"')})) > 0`,
+    cpuPsi: `quantile_over_time(0.95, (${psi5m})${sub})`,
+    // CFS series exist only for containers with a CPU limit
+    cpuThrottle: `sum by (namespace, pod) (rate(${sel("container_cpu_cfs_throttled_periods_total", ctr)}${w})) / on (namespace, pod) (sum by (namespace, pod) (rate(${sel("container_cpu_cfs_periods_total", ctr)}${w})) > 0)`,
     restarts: `sum by (namespace, pod) (max by (namespace, pod, container) (changes(${sel("kube_pod_container_status_restarts_total")}${w})))`,
     notReady: `max by (namespace, pod) (${sel("kube_pod_status_ready", 'condition="false"')})`,
-    oom: `max by (namespace, pod) (${sel("kube_pod_container_status_last_terminated_reason", 'reason="OOMKilled"')})`,
+    // OOMKilled inside the window (the reason stays until the next termination — days); a KSM without the
+    // timestamp keeps the old meaning
+    oom: `max by (namespace, pod) ((${oomReason} and on (namespace, pod, container) (${oomAt} > time() - ${windowMinutes * 60})) or (${oomReason} unless on (namespace, pod, container) ${oomAt}))`,
     deployReady: `max by (namespace, deployment) (${sel("kube_deployment_status_replicas_ready")})`,
     deployDesired: `max by (namespace, deployment) (${sel("kube_deployment_spec_replicas")})`,
     stsReady: `max by (namespace, statefulset) (${sel("kube_statefulset_status_replicas_ready")})`,
@@ -75,12 +113,17 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     dsDesired: `max by (namespace, daemonset) (${sel("kube_daemonset_status_desired_number_scheduled")})`,
     oldGen: `max by (namespace, pod) (${sel("jvm_memory_usage_after_gc")})`,
     // JVM headroom: heap max = the pools with a defined maximum (G1 eden/survivor report -1), the pod's largest
-    // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …
+    // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …,
+    // direct = NIO buffers (mapped ones are file pages); `max by … id` where two collectors could double a pool
     jvmHeapMax: `sum by (namespace, pod) (${sel("jvm_memory_max_bytes", 'area="heap"')} > 0)`,
     jvmNonheap: `sum by (namespace, pod) (${sel("jvm_memory_used_bytes", 'area="nonheap"')})`,
+    jvmHeapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="heap"')}))`,
+    jvmNonheapCommitted: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_memory_committed_bytes", 'area="nonheap"')}))`,
+    jvmDirect: `sum by (namespace, pod) (max by (namespace, pod, id) (${sel("jvm_buffer_memory_used_bytes", 'id="direct"')}))`,
     podMemLimit: `max by (namespace, pod) (${sel("kube_pod_container_resource_limits", 'resource="memory"')})`,
-    http5xx: `sum by (namespace, pod) (rate(${sel("http_server_requests_seconds_count", 'status=~"5..",uri!~"/actuator.*"')}[5m]))`,
-    httpAll: `sum by (namespace, pod) (rate(${sel("http_server_requests_seconds_count", 'uri!~"/actuator.*"')}[5m]))`,
+    // Requests over the window (not a 5-minute rate: the window chosen applies, and the count sets the minimum)
+    http5xx: `sum by (namespace, pod) (increase(${sel("http_server_requests_seconds_count", 'status=~"5..",uri!~"/actuator.*"')}${w}))`,
+    httpAll: `sum by (namespace, pod) (increase(${sel("http_server_requests_seconds_count", 'uri!~"/actuator.*"')}${w}))`,
     poolUsage: `max by (namespace, pod, pool) (${sel("hikaricp_connections_active")}) / on (namespace, pod, pool) (max by (namespace, pod, pool) (${sel("hikaricp_connections_max")}) > 0)`,
     poolPending: `max by (namespace, pod, pool) (${sel("hikaricp_connections_pending")})`,
   };
@@ -93,10 +136,36 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
   return q;
 }
 
-/** JVM headroom (lower is worse): ≤ 0 or below the non-heap in use now = danger, < 250Mi = warn */
-export function jvmHeadroomLevel(headroom: number, nonheapUsed: number | null): HeatLevel {
-  if (headroom <= 0 || (nonheapUsed !== null && headroom < nonheapUsed)) return "danger";
-  return headroom < HEAT_THRESHOLDS.jvmHeadroom.warn ? "warn" : "ok";
+/**
+ * JVM headroom (lower is worse) against the band: short by more than the band = danger (configDeficit — a full heap
+ * crosses the limit whatever the estimate's error) · short at all while memory ≥ 80%, Old Gen ≥ 70% or an OOM in the
+ * window = danger (imminent) · under the band = warn (marginal) — native memory grows into it under load
+ */
+export function jvmHeadroomLevel(headroom: number, band: number, imminent: boolean): { level: HeatLevel; code?: HeatCell["code"] } {
+  if (headroom < -band) return { level: "danger", code: "configDeficit" };
+  if (headroom < 0 && imminent) return { level: "danger", code: "imminent" };
+  if (headroom < band) return { level: "warn", code: "marginal" };
+  return { level: "ok" };
+}
+
+export type CpuFacts = NonNullable<HeatCell["cpu"]>;
+
+/**
+ * CPU: danger = pressure only (PSI p95 ≥ 10% or throttled ≥ 25% — whatever the ratio, starving under the request is
+ * worse) · warn = p95 ≥ 1.5 × request at ≥ 100m, or PSI 5–10%, or throttled 10–25% · over the request under 100m =
+ * belowFloor (ok) · no p95 (only warming-up containers in the window) = warmingUp · no request = noBaseline unless
+ * there is pressure
+ */
+export function cpuLevel(f: CpuFacts): { level: HeatLevel; value: number | null; code?: HeatCell["code"] } {
+  const P = CPU_PRESSURE;
+  const pressure: HeatLevel = (f.psi ?? 0) >= P.psiDanger || (f.throttle ?? 0) >= P.throttleDanger ? "danger"
+    : (f.psi ?? 0) >= P.psiWarn || (f.throttle ?? 0) >= P.throttleWarn ? "warn" : "ok";
+  if (f.p95 === null) return { level: pressure === "ok" ? "noBaseline" : pressure, value: null, code: "warmingUp" };
+  if (f.request === null) return pressure === "ok" ? { level: "noBaseline", value: null, code: "noRequest" } : { level: pressure, value: null };
+  const ratio = f.p95 / f.request;
+  if (pressure === "danger") return { level: "danger", value: ratio };
+  if (ratio >= HEAT_THRESHOLDS.cpu.warn) return f.p95 >= P.floorCores ? { level: "warn", value: ratio } : { level: pressure, value: ratio, code: "belowFloor" };
+  return { level: pressure, value: ratio };
 }
 
 export function levelOf(metric: HeatMetric, value: number): HeatLevel {
@@ -189,8 +258,20 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     const x = podOf(ns, pod);
     if (x) { x.p.memory = memByPod.get(k) ?? null; x.p.memBytes = memBytes.get(k) ?? null; }
   }
-  for (const r of raw.cpuRatio ?? []) { const x = podOf(r.metric.namespace, r.metric.pod); if (x) x.p.cpu = r.value; }
-  for (const r of raw.cpuUsage ?? []) { const x = podOf(r.metric.namespace, r.metric.pod); if (x) x.p.cpuCores = r.value; }
+  // CPU per pod over the window — the verdict (cpuLevel) reads all of it; the pod row shows p95 / request
+  const byPod = (rows: PromRow[] | undefined) => new Map((rows ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}`, r.value]));
+  const cpuSeries = { now: byPod(raw.cpuUsage), p95: byPod(raw.cpuP95), avg: byPod(raw.cpuAvg), max: byPod(raw.cpuMax),
+    request: byPod(raw.cpuRequest), psi: byPod(raw.cpuPsi), throttle: byPod(raw.cpuThrottle) };
+  const cpuByPod = new Map<string, CpuFacts>();
+  for (const k of new Set([...cpuSeries.now.keys(), ...cpuSeries.p95.keys()])) {
+    const [ns, pod] = k.split("/");
+    const x = podOf(ns, pod);
+    if (!x) continue;
+    const f = Object.fromEntries(Object.entries(cpuSeries).map(([n, m]) => [n, m.get(k) ?? null])) as CpuFacts;
+    cpuByPod.set(k, f);
+    x.p.cpu = f.p95 !== null && f.request ? f.p95 / f.request : null;
+    x.p.cpuCores = f.p95 ?? f.now;
+  }
 
   // Per-pod signals that only some workloads expose (worst pod / worst pool)
   const worstBy = (rows: PromRow[] | undefined, set: (w: Acc, v: number, pod: string, pool?: string) => void) => {
@@ -207,30 +288,46 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   worstBy(raw.poolUsage, raise("poolUsage"));
   worstBy(raw.poolPending, raise("poolPending"));
 
-  // JVM headroom per running pod: container memory limit − JVM max heap — what metaspace, code cache, threads and
-  // native buffers live in. The workload shows its tightest pod; a JVM pod without a limit has no headroom to judge
-  const byPod = (rows: PromRow[] | undefined) => new Map((rows ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}`, r.value]));
+  // JVM headroom per running pod: what is left of the container memory limit when the heap grows to its max beside
+  // the memory outside it — non-heap committed (metaspace, code cache), direct buffers and native memory (RSS minus
+  // what the JVM accounts for: thread stacks, malloc arenas, JIT, GC tables). SerialGC / ParallelGC keep a heap they
+  // grew, so the max is where a busy pod ends up. The workload shows its worst pod; no limit = nothing to judge
   const limitByPod = byPod(raw.podMemLimit);
-  const nonheapByPod = byPod(raw.jvmNonheap);
+  const jvmSeries = { nonheapUsed: byPod(raw.jvmNonheap), heapCommitted: byPod(raw.jvmHeapCommitted), nonheapCommitted: byPod(raw.jvmNonheapCommitted),
+    direct: byPod(raw.jvmDirect), rss: byPod(raw.memRss) };
+  const oldGenByPod = byPod(raw.oldGen);
+  // RSS missing (a collector without it): the largest container's working set (file pages make it a little high)
+  const wsMax = new Map<string, number>();
+  for (const r of raw.memWs ?? []) { const k = `${r.metric.namespace}/${r.metric.pod}`; wsMax.set(k, Math.max(wsMax.get(k) ?? 0, r.value)); }
   for (const r of raw.jvmHeapMax ?? []) {
     if (!isActive(r.metric.namespace, r.metric.pod)) continue;
     const x = podOf(r.metric.namespace, r.metric.pod);
     if (!x) continue;
     const key = `${r.metric.namespace}/${r.metric.pod}`;
     const limit = limitByPod.get(key);
-    const nonheapUsed = nonheapByPod.get(key) ?? null;
     const cell = x.w.cells.jvmHeadroom;
     if (limit === undefined || limit <= 0) {
       if (cell.value === null) x.w.cells.jvmHeadroom = { value: null, level: "noBaseline", code: "noLimit", worstPod: r.metric.pod! };
       continue;
     }
-    const headroom = limit - r.value;
-    if (cell.value === null || headroom < cell.value) {
-      x.w.cells.jvmHeadroom = { value: headroom, level: jvmHeadroomLevel(headroom, nonheapUsed), worstPod: r.metric.pod!, jvm: { limit, heapMax: r.value, nonheapUsed } };
+    const get = (n: keyof typeof jvmSeries) => jvmSeries[n].get(key) ?? null;
+    const [nonheapUsed, heapCommitted, nonheapCommitted, direct] = [get("nonheapUsed"), get("heapCommitted"), get("nonheapCommitted"), get("direct")];
+    const rss = get("rss") ?? wsMax.get(key) ?? null;
+    const outside = (nonheapCommitted ?? nonheapUsed ?? 0) + (direct ?? 0);
+    const native = rss !== null && heapCommitted !== null ? Math.max(0, rss - heapCommitted - outside) : null;
+    const headroom = limit - (r.value + outside + (native ?? 0));
+    const band = jvmBand(limit);
+    const imminent = (memByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.memory.warn || (oldGenByPod.get(key) ?? 0) >= HEAT_THRESHOLDS.oldGen.warn || x.p.oom;
+    const { level, code } = jvmHeadroomLevel(headroom, band, imminent);
+    const partial = [heapCommitted, nonheapCommitted, direct, get("rss")].some((v) => v === null);
+    if (cell.value === null || RANK[level] > RANK[cell.level] || (RANK[level] === RANK[cell.level] && headroom < cell.value)) {
+      x.w.cells.jvmHeadroom = { value: headroom, level, ...(code ? { code } : {}), worstPod: r.metric.pod!,
+        jvm: { limit, heapMax: r.value, nonheapUsed, heapCommitted, nonheapCommitted, direct, rss, native, band, ...(partial ? { partial } : {}) } };
     }
   }
 
-  // 5xx share per workload (all its pods' traffic, not the worst pod)
+  // 5xx share per workload over the window (all its pods' traffic, not the worst pod); under HTTP_MIN_REQUESTS the
+  // share is shown without a verdict
   const http = new Map<Acc, { err: number; all: number; worstPod?: string; worst: number }>();
   for (const r of raw.httpAll ?? []) {
     const x = podOf(r.metric.namespace, r.metric.pod);
@@ -243,9 +340,11 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     http.set(x.w, h);
   }
   for (const [w, h] of http) {
-    w.cells.http5xx = h.all > 0
-      ? { value: h.err / h.all, level: levelOf("http5xx", h.err / h.all), ...(h.err > 0 && h.worstPod ? { worstPod: h.worstPod } : {}) }
-      : { value: null, level: "noTraffic" };
+    const requests = Math.round(h.all);
+    const worst = h.err > 0 && h.worstPod ? { worstPod: h.worstPod } : {};
+    w.cells.http5xx = h.all <= 0 ? { value: null, level: "noTraffic" }
+      : h.all < HTTP_MIN_REQUESTS ? { value: h.err / h.all, level: "noTraffic", code: "lowTraffic", requests, ...worst }
+      : { value: h.err / h.all, level: levelOf("http5xx", h.err / h.all), requests, ...worst };
   }
 
   // Log ERROR events per workload (the Alloy counter names the app pod in its own label)
@@ -289,11 +388,19 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     w.cells.memory = m ? { value: m.memory, level: levelOf("memory", m.memory!), worstPod: m.pod, ...(m.memBytes != null ? { abs: m.memBytes } : {}), ...oom }
       : mAbs ? { value: null, level: "noBaseline", code: "noLimit", worstPod: mAbs.pod, abs: mAbs.memBytes!, ...oom }
       : w.cells.memory;
-    const c = worstPod((p) => p.cpu);
-    const cAbs = worstPod((p) => p.cpuCores);
-    w.cells.cpu = c ? { value: c.cpu, level: levelOf("cpu", c.cpu!), worstPod: c.pod, ...(c.cpuCores != null ? { abs: c.cpuCores } : {}) }
-      : cAbs ? { value: null, level: "noBaseline", code: "noRequest", worstPod: cAbs.pod, abs: cAbs.cpuCores! }
-      : w.cells.cpu;
+    // CPU: the pod with the worst verdict, then the highest p95 ratio (or p95 cores when there is no request)
+    let cpuWorst: { cell: HeatCell; rank: number; key: number } | null = null;
+    for (const p of pods) {
+      const f = cpuByPod.get(`${w.namespace}/${p.pod}`);
+      if (!f) continue;
+      const v = cpuLevel(f);
+      const abs = f.p95 ?? f.now;
+      const cell: HeatCell = { value: v.value, level: v.level, ...(v.code ? { code: v.code } : {}), worstPod: p.pod, ...(abs !== null ? { abs } : {}), cpu: f };
+      const rank = RANK[v.level];
+      const key = v.value ?? abs ?? 0;
+      if (!cpuWorst || rank > cpuWorst.rank || (rank === cpuWorst.rank && key > cpuWorst.key)) cpuWorst = { cell, rank, key };
+    }
+    if (cpuWorst) w.cells.cpu = cpuWorst.cell;
     const r = worstPod((p) => p.restarts);
     const totalRestarts = pods.reduce((a, p) => a + (p.restarts ?? 0), 0);
     if (pods.some((p) => p.restarts !== null)) {

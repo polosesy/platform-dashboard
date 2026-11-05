@@ -381,11 +381,35 @@ export type HeatCell = {
   pool?: string;
   /** Last container termination was OOMKilled */
   oom?: boolean;
-  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods";
-  /** Memory: working-set bytes · CPU: cores — of the pod that set the value (or the busiest pod when there is no ratio) */
+  /**
+   * Why the cell has this level: noLimit / noRequest (no ratio) · noNodes / scaledToZero / noPods (nothing to run) ·
+   * jvmHeadroom configDeficit (a full heap crosses the limit by more than the band) / imminent (short, and memory,
+   * Old Gen or an OOM in the window says it is happening) / marginal (inside the band) · cpu belowFloor (over the
+   * request but under 100m — no verdict) / warmingUp (only started containers in the window) · http5xx lowTraffic
+   */
+  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods" | "configDeficit" | "imminent" | "marginal" | "belowFloor" | "warmingUp" | "lowTraffic";
+  /** Memory: working-set bytes · CPU: p95 cores — of the pod that set the value (or the busiest pod when there is no ratio) */
   abs?: number;
-  /** jvmHeadroom (value = limit − heapMax, bytes): the pod's container memory limit, JVM max heap, non-heap in use */
-  jvm?: { limit: number; heapMax: number; nonheapUsed: number | null };
+  /**
+   * jvmHeadroom (value = limit − (heapMax + nonheapCommitted + direct + native), bytes) — what is left when the heap
+   * grows to its max beside the memory outside the heap. native = RSS − heap committed − non-heap committed − direct
+   * (thread stacks, malloc arenas, JIT, GC tables), never below 0; null fields = no series (`partial`)
+   */
+  jvm?: {
+    limit: number; heapMax: number; nonheapUsed: number | null;
+    heapCommitted: number | null; nonheapCommitted: number | null; direct: number | null; rss: number | null; native: number | null;
+    /** max(100Mi, 10% of the limit) — the margin native memory grows into under load */
+    band: number;
+    partial?: boolean;
+  };
+  /**
+   * cpu (value = p95 / request): the pod's CPU over the window in cores — now = the last 5 minutes, p95 / avg / max of
+   * the 5-minute rate across the window (containers in their first 10 minutes left out) · psi = p95 share of time
+   * runnable but waiting for a CPU · throttle = share of CFS periods throttled (CPU limit only) — null = no series
+   */
+  cpu?: { now: number | null; p95: number | null; avg: number | null; max: number | null; request: number | null; psi: number | null; throttle: number | null };
+  /** http5xx: requests in the window (the share is not judged under the minimum) */
+  requests?: number;
 };
 
 export type HeatWorkload = {

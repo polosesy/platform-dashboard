@@ -22,6 +22,12 @@ const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (app
     - matchLabels: { "k8s:io.kubernetes.pod.namespace": aud-dashboard }
   toPorts: [{ ports: [{ port: "3100", protocol: TCP }] }]`;
 
+// Why a cell has its level, said under the value (the idle codes have their own notice)
+const CELL_NOTE_CODES = new Set(["noLimit", "noRequest", "configDeficit", "imminent", "marginal", "belowFloor", "warmingUp", "lowTraffic"]);
+const bytesOrDash = (v: number | null) => (v === null ? "—" : formatBytes(v));
+const coresOrDash = (v: number | null) => (v === null ? "—" : formatCores(v));
+const pctOrDash = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
+
 function explore(endpoint: string, uid: string, query: Record<string, unknown>): string {
   const panes = { aud: { datasource: uid, queries: [{ refId: "A", datasource: { uid }, ...query }], range: { from: "now-1h", to: "now" } } };
   return `${endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
@@ -72,12 +78,25 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, onClose }: { clusterI
                     <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[c.level]}</span>
                     <span className={styles.hmCellValue}>{formatCell(m, w, t)}{abs ? ` · ${abs}` : ""}</span>
                     {c.oom ? <Badge tone="high">OOMKilled</Badge> : null}
-                    {c.code === "noLimit" || c.code === "noRequest" ? <span className={styles.hmCellNote}>{t(`ob.hm.code.${c.code}`)}</span> : null}
+                    {c.code && CELL_NOTE_CODES.has(c.code) ? <span className={styles.hmCellNote}>{t(`ob.hm.code.${c.code}`)}</span> : null}
                     {c.jvm ? (
                       <span className={styles.hmCellNote} title={t("ob.hm.jvmHint")}>
-                        {t("ob.hm.jvmBreakdown", { limit: formatBytes(c.jvm.limit), heap: formatBytes(c.jvm.heapMax), nonheap: c.jvm.nonheapUsed === null ? "—" : formatBytes(c.jvm.nonheapUsed) })}
+                        {t("ob.hm.jvmBreakdown", {
+                          limit: formatBytes(c.jvm.limit), heap: formatBytes(c.jvm.heapMax), band: formatBytes(c.jvm.band),
+                          nonheap: bytesOrDash(c.jvm.nonheapCommitted ?? c.jvm.nonheapUsed), direct: bytesOrDash(c.jvm.direct), native: bytesOrDash(c.jvm.native),
+                        })}
+                        {c.jvm.partial ? ` · ${t("ob.hm.jvmPartial")}` : ""}
                       </span>
                     ) : null}
+                    {c.cpu ? (
+                      <span className={styles.hmCellNote} title={t("ob.hm.cpuHint")}>
+                        {t("ob.hm.cpuBreakdown", {
+                          p95: coresOrDash(c.cpu.p95), avg: coresOrDash(c.cpu.avg), max: coresOrDash(c.cpu.max), now: coresOrDash(c.cpu.now), request: coresOrDash(c.cpu.request),
+                          psi: pctOrDash(c.cpu.psi), throttle: pctOrDash(c.cpu.throttle),
+                        })}
+                      </span>
+                    ) : null}
+                    {c.requests != null ? <span className={styles.hmCellNote}>{t("ob.hm.requests", { n: c.requests.toLocaleString() })}</span> : null}
                     {c.worstPod ? <span className={styles.hmCellNote} title={c.worstPod}>{c.pool ? `${c.pool} · ` : ""}{c.worstPod}</span> : null}
                   </dd>
                 </div>
