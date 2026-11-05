@@ -22,6 +22,12 @@
   --violet-rgb: 112, 48, 160;
   --subnet-rgb: 95, 75, 139;
   --warning-strong-rgb: 154, 97, 0;
+  --danger-strong-rgb: 176, 48, 0;
+  --success-strong-rgb: 11, 106, 48;
+  --integration-rgb: 14, 116, 144;
+  --workload-rgb: 37, 99, 235;
+  --secret-rgb: 8, 145, 178;
+  --slate-rgb: 51, 65, 85;
 
   --bg: #f6f4ef;
   --panel: rgba(var(--paper-rgb), 0.72);
@@ -45,6 +51,15 @@
   /* Darker variants for text on a tinted background (contrast) */
   --accent-strong: #005a9e;
   --warning-strong: rgb(var(--warning-strong-rgb));
+  /* Text on the soft tinted badges (the base colours are too light to read on their own tint) */
+  --danger-strong: rgb(var(--danger-strong-rgb));
+  --success-strong: rgb(var(--success-strong-rgb));
+  /* Log console — a dark code block on purpose (terminal look), the same in every theme */
+  --console-bg: #1e1e1e;
+  --console-fg: #d4d4d4;
+  --console-green: #6a9955;
+  --console-blue: #569cd6;
+  --console-red: #f44747;
 
   /* Severity scale (Defender / policy findings) */
   --sev-high: var(--danger);

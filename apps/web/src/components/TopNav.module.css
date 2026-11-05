@@ -308,7 +308,7 @@ li:not(:first-child) > .panelSection {
   max-width: 320px;
   font-size: 12px;
   font-weight: 600;
-  color: #b42318;
+  color: var(--danger-strong);
   line-height: 1.35;
 }
 

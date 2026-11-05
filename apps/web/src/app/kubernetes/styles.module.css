@@ -110,19 +110,19 @@
 .statusBadge[data-status="Active"],
 .statusBadge[data-status="Complete"] {
   background: rgba(var(--success-rgb), 0.12);
-  color: #10893e;
+  color: var(--success);
 }
 
 .statusBadge[data-status="Pending"],
 .statusBadge[data-status="Progressing"] {
   background: rgba(var(--warning-rgb), 0.12);
-  color: #ff8c00;
+  color: var(--warning);
 }
 
 .statusBadge[data-status="Failed"],
 .statusBadge[data-status="NotReady"] {
   background: rgba(var(--danger-rgb), 0.12);
-  color: #d83b01;
+  color: var(--danger);
 }
 
 .statusBadge[data-status="Suspended"] {

@@ -572,7 +572,7 @@
 
 .tile_internet {
   border-color: rgba(var(--danger-rgb), 0.45);
-  background: #fff7f3;
+  background: color-mix(in srgb, var(--danger) 4%, rgb(var(--paper-rgb)));
 }
 
 .tile_internet::before {

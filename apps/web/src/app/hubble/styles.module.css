@@ -142,7 +142,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.mapToolbarRefresh:hover { background: var(--surface-2, #f0f0f0); }
+.mapToolbarRefresh:hover { background: var(--panel-sunken); }
 .mapToolbarStats {
   font-size: 11px;
   color: rgba(var(--ink-rgb), 0.4);
@@ -874,9 +874,9 @@
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.viewToggleBtn:hover { background: var(--surface-2, #f0f0f0); color: var(--fg); }
+.viewToggleBtn:hover { background: var(--panel-sunken); color: var(--fg); }
 .viewToggleActive {
-  background: var(--accent, #0078d4) !important;
+  background: var(--accent) !important;
   color: #fff !important;
 }
 

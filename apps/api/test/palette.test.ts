@@ -15,7 +15,7 @@ test("JS palette channels equal the --*-rgb tokens in globals.css", () => {
   const kebab = (k: string) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   for (const [k, v] of Object.entries(p.UI)) assert.deepEqual(tokens[k], [...v], `UI ${k}`);
   const vizInCss = Object.keys(tokens).filter((k) => !(k in p.UI));
-  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "peering", "private-link", "subnet", "violet"], "CSS visualization channels");
+  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "integration", "peering", "private-link", "secret", "slate", "subnet", "violet", "workload"], "CSS visualization channels");
   for (const k of vizInCss) {
     const key = Object.keys(p.VIZ).find((x) => kebab(x) === k) as keyof typeof p.VIZ;
     assert.ok(key, `palette VIZ has ${k}`);
@@ -53,4 +53,29 @@ test("TSX and CSS modules have no numeric rgb()/rgba() colours — CSS rgba(var(
   };
   walk(root);
   assert.deepEqual(hits, []);
+});
+
+test("no hex colours outside globals.css — tokens only (white text is the one kept literal, its reason beside it)", () => {
+  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../web/src");
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const f = resolve(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (/\.(tsx|module\.css)$/.test(e.name)) files.push(f);
+    }
+  };
+  walk(root);
+  const bad: string[] = [];
+  for (const f of files) {
+    const text = readFileSync(f, "utf8");
+    for (const m of text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+      if (/^#(fff|ffffff)$/i.test(m[0])) continue;
+      // `#` in a URL fragment / id selector is not a colour: only colour-shaped lengths, after ':', ',', '(', quote or space
+      const before = text.slice(Math.max(0, m.index! - 1), m.index!);
+      if (![3, 4, 6, 8].includes(m[0].length - 1) || !/[\s:,("'`]/.test(before)) continue;
+      bad.push(`${f.slice(root.length + 1)}: ${m[0]}`);
+    }
+  }
+  assert.deepEqual(bad, [], "use a token from app/globals.css (or lib/palette for canvas / SVG attributes)");
 });

@@ -19,6 +19,8 @@ export const UI = {
   danger: [216, 59, 1],
   warning: [209, 132, 0],
   "warning-strong": [154, 97, 0], // warning text on light backgrounds
+  "danger-strong": [176, 48, 0], // danger text on its soft tint
+  "success-strong": [11, 106, 48], // success text on its soft tint
   success: [16, 124, 16],
   ok: [16, 124, 16], // healthy / running — same green as success
 } as const satisfies Record<string, Rgb>;
@@ -35,7 +37,10 @@ export const VIZ = {
   subnet: [95, 75, 139], // subnet boundary (plum)
   fault: [239, 68, 68], // fault impact (red)
   canvas: [247, 248, 250], // diagram canvas background
-  integration: [14, 116, 144], // VNet integration (teal)
+  integration: [14, 116, 144], // VNet integration (teal) · network nodes of the attack path
+  workload: [37, 99, 235], // workload nodes of the attack path (blue)
+  secret: [8, 145, 178], // secret nodes of the attack path (cyan)
+  slate: [51, 65, 85], // node (machine) nodes of the attack path
   violet: [112, 48, 160], // security advisories, user-defined routes
 } as const satisfies Record<string, Rgb>;
 
