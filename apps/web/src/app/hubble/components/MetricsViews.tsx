@@ -225,7 +225,9 @@ function LokiDrops({ clusterId, fmt }: { clusterId: string; fmt: Fmt }) {
       {q.error ? <Notice tone="warning">{q.error}</Notice> : !d ? <LoadingState /> : d.state !== "ok" ? (
         <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${d.state}`)}>
           {t(`ob.hm.lokiHint.${d.state}`)}
+          {d.retryAt ? ` ${t("ob.hm.lokiRetry", { at: new Date(d.retryAt).toLocaleTimeString(dateLocale(locale)) })}` : ""}
           {d.state === "unreachable" ? <pre className={styles.flowMono}>{LOKI_RULE}</pre> : null}
+          {d.message ? <div className={styles.flowMono}>{t("ob.hm.lokiCause", { msg: d.message })}</div> : null}
         </Notice>
       ) : (
         <>

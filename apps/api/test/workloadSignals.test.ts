@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CORE_QUERIES, SIGNAL_NEEDS, aggregateHeatmap, cpuLevel, heatmapQueries, jvmBand, levelOf, type CpuFacts, type HeatRaw } from "../src/services/workloadHeatmap.js";
 import { eventBelongs, mapEvents } from "../src/services/kubeEvents.js";
 import { redactLogLine, redactLogText } from "../src/services/logRedaction.js";
-import { ERROR_FILTER, logQueries, lokiStateOf, parseLogLine, re2, summarizeLokiDrops, workloadSelector } from "../src/services/lokiLogs.js";
+import { BUSY_BACKOFF_MS, ERROR_FILTER, logQueries, lokiStateOf, parseLogLine, re2, summarizeLokiDrops, workloadSelector } from "../src/services/lokiLogs.js";
 
 // Shapes measured in a customer Azure Monitor workspace / cluster (2026-10-23) — names are placeholders.
 const r = (metric: Record<string, string>, value: number) => ({ metric, value });
@@ -378,4 +378,24 @@ test("Loki drops: exporter flow lines grouped; relay node_status lines skipped; 
   assert.deepEqual(s.drops.map((d) => [d.destination, d.port, d.reason, d.count]), [["world (203.0.113.10)", 443, "POLICY_DENIED", 2]]);
   assert.equal(lokiStateOf(Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED" } })).state, "unreachable");
   assert.equal(lokiStateOf(new Error("Loki 400: parse error")).state, "failed");
+});
+
+test("Loki: no connection = unreachable (policy hint); a reachable Loki that timed out / cut / 499 / 5xx = busy", () => {
+  // 2026-11-05 stg: /ready 200 in 104 ms from the dashboard pod while range reads took ~25 s (499 / 500) — every one
+  // of them used to say "a network policy blocks the dashboard"
+  const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  const cut = Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_SOCKET", message: "other side closed" } });
+  const refused = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+  const connectTimeout = Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_CONNECT_TIMEOUT" } });
+  const dns = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+  assert.equal(lokiStateOf(timeout, true).state, "busy", "timed out, /ready answers");
+  assert.equal(lokiStateOf(timeout, false).state, "unreachable", "timed out, /ready does not answer either");
+  assert.equal(lokiStateOf(cut, true).state, "busy", "Loki's 30 s write timeout cut the answer");
+  for (const e of [refused, connectTimeout, dns]) assert.equal(lokiStateOf(e, true).state, "unreachable", "no connection — /ready is not asked");
+  assert.equal(lokiStateOf(new Error("Loki 499: context canceled")).state, "busy");
+  assert.equal(lokiStateOf(new Error("Loki 504: gateway timeout")).state, "busy");
+  assert.equal(lokiStateOf(new Error("Loki 500: rpc error: code = Canceled desc = context canceled")).state, "busy");
+  assert.equal(lokiStateOf(new Error("Loki 500: failed to parse")).state, "failed", "a 500 that is not overload");
+  assert.equal(lokiStateOf(new Error("Loki 400: parse error at line 1")).state, "failed");
+  assert.equal(BUSY_BACKOFF_MS, 60_000);
 });

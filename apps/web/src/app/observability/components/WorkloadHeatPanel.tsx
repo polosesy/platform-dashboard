@@ -184,7 +184,9 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
           {logs.error ? <Notice tone="warning">{logs.error}</Notice> : !logs.data ? <LoadingState /> : logs.data.state !== "ok" ? (
             <Notice tone={logs.data.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${logs.data.state}`)}>
               {t(`ob.hm.lokiHint.${logs.data.state}`)}
+              {logs.data.retryAt ? ` ${t("ob.hm.lokiRetry", { at: new Date(logs.data.retryAt).toLocaleTimeString(dateLocale(locale)) })}` : ""}
               {logs.data.state === "unreachable" ? <pre className={styles.hmPre}>{LOKI_RULE}</pre> : null}
+              {logs.data.message ? <span className={styles.hmMsg}>{t("ob.hm.lokiCause", { msg: logs.data.message })}</span> : null}
             </Notice>
           ) : (
             <WorkloadLogStream data={logs.data} workload={w.workload} errorsOnly={errorsOnly} onErrorsOnly={setErrorsOnly} grafana={grafana}

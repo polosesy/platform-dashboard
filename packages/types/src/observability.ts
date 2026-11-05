@@ -168,7 +168,7 @@ export type PodLogEntry = {
 /** Where pod logs can come from, in the order the API tries them (services/podLogSources.ts) */
 export type PodLogSource = "loki" | "kubelet" | "containerInsights";
 /** pastRange = the source reads only up to now (kubelet tails the live log) — skipped for a range in the past */
-export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "failed" | "pastRange";
+export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "busy" | "failed" | "pastRange";
 /** One source the API tried for these logs — the page says which answered and why the others did not */
 export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string };
 
@@ -496,7 +496,12 @@ export type KubeEventsResponse = {
 
 // ── Workload logs (services/lokiLogs.ts) — the cluster's Loki, read in-cluster with the pod-log gate ──
 
-export type LokiState = "ok" | "notConfigured" | "unreachable" | "failed";
+/**
+ * unreachable = no connection (refused / no route / DNS / connect timeout — usually a network policy); busy = Loki
+ * answers (/ready) but the query ran out of time or came back 499 / 5xx — overloaded (2026-11-05: alert queries filled
+ * its querier and every timed-out read showed the network-policy fix)
+ */
+export type LokiState = "ok" | "notConfigured" | "unreachable" | "busy" | "failed";
 
 export type LogLine = {
   time: string;
@@ -507,6 +512,8 @@ export type LogLine = {
 };
 
 export type WorkloadLogsResponse = {
+  /** busy: the next read waits until then (the dashboard does not add load to an overloaded Loki) */
+  retryAt?: string;
   clusterId: string;
   generatedAt: string;
   /** The window's end when it is not now (the time picker moved back) */
@@ -528,6 +535,8 @@ export type LokiDropsResponse = {
   generatedAt: string;
   state: LokiState;
   message?: string;
+  /** busy: the next read waits until then (the dashboard does not add load to an overloaded Loki) */
+  retryAt?: string;
   windowMinutes: number;
   drops: { source: string; destination: string; port: number; protocol: string; reason: string; count: number; lastSeen: string }[];
   flowLines: number;

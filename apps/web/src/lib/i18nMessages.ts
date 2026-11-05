@@ -781,6 +781,7 @@ const CORE: Translations = {
   "ob.logs.state.forbidden": { ko: "권한 없음 (pods/log Role 필요)", en: "no permission (needs a pods/log Role)" },
   "ob.logs.state.unreachable": { ko: "연결 안 됨", en: "unreachable" },
   "ob.logs.state.failed": { ko: "실패", en: "failed" },
+  "ob.logs.state.busy": { ko: "Loki가 바쁨 (연결은 됨 — 25초 안에 못 끝냄·과부하 응답, 1분 뒤 다시)", en: "Loki busy (reachable — not done in 25 s or overloaded, again in a minute)" },
   "ob.logs.state.pastRange": { ko: "지난 구간은 못 읽음 (지금 로그만)", en: "cannot read a past range (live log only)" },
   "ob.logs.rangeMax": { ko: "로그는 최대 24시간 — 범위의 마지막 24시간", en: "Logs read up to 24 h — the range's last 24 h" },
   "ob.logs.rangeMaxHint": { ko: "파드 로그 API는 하루까지 읽습니다 (줄 수 제한 300)", en: "The pod log API reads up to a day (300 lines)" },

@@ -14,7 +14,7 @@ covers: [apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/a
 |---|---|---|---|
 | 워크로드 히트맵 | AMW: cAdvisor·kube-state-metrics·Micrometer(`jvm_*`·`hikaricp_*`·`http_server_requests_*`)·로그 ERROR 카운터 | 클러스터 연결 신원 — 작업 영역 Monitoring Data Reader | 상태(작업 영역 없음·권한 없음·실패) |
 | Warning 이벤트 | Kubernetes API core/v1 `events` (list, `type=Warning`) | `aud-dashboard-reader`에 `events` 추가(이 문서와 함께 생성 — [템플릿](../integrations/azure/templates/aks/aud-dashboard-reader.yaml)) | 403 `aks_rbac_forbidden` |
-| 로그 스트림 | 클러스터 안 Loki `query_range` (연결 파일 `aks.observability.loki`) | Pod 로그와 같은 문: 운영자 + `aks.podLogNamespaces` | `notConfigured` / `unreachable`(정책) / `failed` |
+| 로그 스트림 | 클러스터 안 Loki `query_range` (연결 파일 `aks.observability.loki`) | Pod 로그와 같은 문: 운영자 + `aks.podLogNamespaces` | `notConfigured` / `unreachable`(연결 안 됨 — 정책) / `busy`(연결됨·느림·과부하) / `failed` |
 | 로그 탭 (Pod 하나) | ① Loki `{namespace, pod[, container]}` → ② kubelet → ③ Container Insights — 응답 `attempts`에 출처마다 결과 | ①② 운영자 + `aks.podLogNamespaces`, ② `pods/log` Role(네임스페이스별), ③ Log Analytics Reader | 칩: 읽음·이 기간 줄 없음·설정 안 됨·허용 안 됨·권한 없음·연결 안 됨·실패 |
 | Hubble 드롭 | Loki `{job="hubble-flows"}` (hubble-flow-exporter — **DROPPED만** 보냄, 연결선 없음) | 보기 권한 | 위와 같음 |
 | Hubble 흐름·서비스 맵 (exec 꺼짐) | 클러스터의 Hubble UI 백엔드 `service-map-stream`(연결 파일 `aks.observability.hubbleUi`) — Relay '최근 10,000건' 표본, 응답(reply)은 Relay에서 제외 | 보기 권한, 네트워크만(파드 exec·Secret 없음) | `notConfigured`·`unreachable`·`unsupported`(0.13 미만)·`failed` |
@@ -22,7 +22,9 @@ covers: [apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/a
 
 **왜 Loki를 직접 읽나**: Managed Grafana `/api/ds/query`는 Viewer 역할이 인스턴스의 모든 데이터 원본(stg·prd 공용 인스턴스)에 미쳐 범위가 더 넓고, 네임스페이스 경계는 어차피 대시보드가 지켜야 합니다. 클러스터 안 Loki는 대시보드가 이미 kubelet으로 읽을 수 있는 Pod 로그와 같은 범위에 과거 기록만 더합니다. 질의(LogQL)는 서버가 검증된 이름으로만 만들고 브라우저 문자열은 받지 않습니다. 줄은 4 KB·500줄·응답 2 MB로 자르고, 토큰·키·비밀번호·SAS·PEM을 가립니다(`logRedaction.ts` — kubelet Pod 로그에도 적용).
 
-**Loki가 막혀 있을 때**: 고객의 `monitor` 네임스페이스 정책이 같은 네임스페이스와 Grafana 관리형 사설 엔드포인트만 Loki 3100에 들입니다(확인함). 그러면 화면은 `unreachable`과 함께 아래 규칙을 보여 줍니다 — 적용은 클러스터 관리자가 GitOps로 합니다(대시보드는 쓰지 않음).
+**Loki가 막혀 있을 때**: 고객의 `monitor` 네임스페이스 정책이 같은 네임스페이스와 Grafana 관리형 사설 엔드포인트만 Loki 3100에 들입니다(확인함). 그러면 화면은 `unreachable`과 함께 아래 규칙을 보여 줍니다 — 적용은 클러스터 관리자가 GitOps로 합니다(대시보드는 쓰지 않음). 지금 stg 정책(`monitor-baseline`)에는 `app.kubernetes.io/name: aud-dashboard` + 네임스페이스 `aud-dashboard` → 3100 허용이 이미 있습니다.
+
+**`unreachable`과 `busy`는 다릅니다**(2026-11-05 — Loki가 알림 조회로 포화된 동안 패널이 '닿지 않음'과 정책 규칙을 보였으나, 대시보드 파드에서 `/ready`는 104ms에 200이었고 Loki 지표에는 그 시각 `query_range` 499·500·p99 24.8초 — 15초에 끊은 읽기를 '연결 안 됨'으로 분류한 오진): 연결 전 단계 오류(`ECONNREFUSED`·`EHOSTUNREACH`·`ENOTFOUND`·`UND_ERR_CONNECT_TIMEOUT` …) = `unreachable`(정책 규칙 표시). 시간 초과·응답 중 끊김(Loki 쓰기 30초 EOF)·499/502/503/504/429·타임아웃류 500 = `/ready`를 한 번(3초) 물어 답하면 `busy`(규칙 없음, 원인 문장 + '다음 조회는 hh:mm 이후'), 답이 없으면 `unreachable`. `busy` 뒤 1분 동안 그 Loki로는 다시 묻지 않음(`BUSY_BACKOFF_MS` — 자동 새로 고침이 과부하에 조회를 더 쌓지 않게), 읽기 시간 한도 25초(Loki 쓰기 한도 30초 바로 아래 — 15초에 끊으면 Loki가 이미 한 일을 버림). 바쁜지 볼 곳: Grafana 'Loki 조회·수집 상태'(대기열·동시 처리).
 
 ```yaml
 # monitor 네임스페이스 정책의 ingress에 추가

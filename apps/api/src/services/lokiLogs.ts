@@ -4,8 +4,11 @@
 // Rules (docs/deployment/kubernetes.md): the API builds every LogQL itself from validated Kubernetes names — a query
 // string never comes from the browser; workload logs pass the same gate as kubelet pod logs (operator role +
 // `aks.podLogNamespaces`); lines are redacted (logRedaction.ts) and capped (500 lines · 4 KB a line · 2 MB a
-// response · 15 s). Loki often sits behind the customer's monitor-namespace policy: a refused / timed-out
-// connection is state "unreachable" with the rule to add — never sample lines.
+// response · 25 s). Two failures are told apart: no connection (refused, no route, DNS, connect timeout — the
+// customer's monitor-namespace policy) = "unreachable" with the rule to add; a connection that ran out of time or got
+// 499 / 5xx while /ready answers = "busy" (Loki overloaded — 2026-11-05 the alert queries filled its querier and the
+// panel showed the network-policy fix for a reachable Loki). After "busy" the next minute's reads wait (no added load).
+// Never sample lines.
 
 import type { Env } from "../env.js";
 import type { HubbleFlow, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
@@ -73,17 +76,68 @@ export function lokiConfig(env: Env, clusterId: string): { url: string; tenant?:
   return l ? { url: l.url.replace(/\/+$/, ""), ...(l.tenant ? { tenant: l.tenant } : {}) } : null;
 }
 
-const NET = /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT|aborted|timeout|fetch failed/i;
-export function lokiStateOf(e: unknown): { state: LokiState; message: string } {
+/** No connection at all: refused, no route, no name, the connect itself timed out (a policy drops the SYN) */
+const CONNECT = /ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT/i;
+/** Loki answered, overloaded: client gone (499), gateway / unavailable / too many, or a 500 that is a timeout */
+const BUSY_STATUS = /^Loki (429|499|502|503|504)\b|^Loki 500: .*(timeout|deadline|cancel|too many|queue|limit)/i;
+/** Our time limit or the connection cut mid-answer (Loki's 30 s write timeout = EOF) — reachable or not: ask /ready */
+const SLOW = /TimeoutError|aborted|timeout|other side closed|UND_ERR_SOCKET|ECONNRESET|EPIPE|terminated|fetch failed/i;
+
+/**
+ * Pure: a Loki read's error → state. `answers` = whether /ready answered right after (null = not asked): a slow /
+ * cut read on a Loki that answers is busy, on one that does not is unreachable
+ */
+export function lokiStateOf(e: unknown, answers: boolean | null = null): { state: LokiState; message: string } {
   const message = safeMessage(e);
   const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
-  return { state: NET.test(`${message} ${cause?.code ?? ""} ${cause?.message ?? ""}`) ? "unreachable" : "failed", message };
+  const text = `${(e as { name?: string })?.name ?? ""} ${message} ${cause?.code ?? ""} ${cause?.message ?? ""}`;
+  if (CONNECT.test(text)) return { state: "unreachable", message };
+  if (BUSY_STATUS.test(message)) return { state: "busy", message };
+  if (SLOW.test(text)) return { state: answers === true ? "busy" : "unreachable", message };
+  return { state: "failed", message };
+}
+/** Whether this read's error needs the /ready question to be told apart */
+const needsProbe = (e: unknown) => {
+  const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
+  const text = `${(e as { name?: string })?.name ?? ""} ${safeMessage(e)} ${cause?.code ?? ""} ${cause?.message ?? ""}`;
+  return !CONNECT.test(text) && !BUSY_STATUS.test(safeMessage(e)) && SLOW.test(text);
+};
+
+/** Loki's /ready answered at all (any status — even "not ready" is a reachable Loki); reads no log data */
+async function lokiAnswers(cfg: { url: string; tenant?: string }): Promise<boolean> {
+  try {
+    const res = await fetch(`${cfg.url}/ready`, { headers: cfg.tenant ? { "X-Scope-OrgID": cfg.tenant } : {}, signal: AbortSignal.timeout(3000) });
+    await res.body?.cancel().catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, params: Record<string, string>): Promise<{ body: T; truncated: boolean }> {
+/** After "busy", reads of that Loki wait this long — every refresh would otherwise queue more work on it */
+export const BUSY_BACKOFF_MS = 60_000;
+const busyUntil = new Map<string, { until: number; message: string }>();
+/** A read's failure → state, asking /ready when needed; "busy" starts the backoff for that Loki */
+async function classify(cfg: { url: string; tenant?: string }, e: unknown): Promise<{ state: LokiState; message: string; retryAt?: string }> {
+  const s = lokiStateOf(e, needsProbe(e) ? await lokiAnswers(cfg) : null);
+  if (s.state !== "busy") return s;
+  const until = Date.now() + BUSY_BACKOFF_MS;
+  busyUntil.set(cfg.url, { until, message: s.message });
+  return { ...s, retryAt: new Date(until).toISOString() };
+}
+/** Still backing off: the last "busy" answer instead of a new read */
+function backingOff(cfg: { url: string }): { state: "busy"; message: string; retryAt: string } | null {
+  const b = busyUntil.get(cfg.url);
+  if (!b || b.until <= Date.now()) return null;
+  return { state: "busy", message: b.message, retryAt: new Date(b.until).toISOString() };
+}
+
+/** 25 s: just under Loki's 30 s server write timeout — cutting earlier throws away work Loki already did (499) */
+const READ_TIMEOUT_MS = 25_000;
+async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, params: Record<string, string>, timeoutMs = READ_TIMEOUT_MS): Promise<{ body: T; truncated: boolean }> {
   const res = await fetch(`${cfg.url}${path}?${new URLSearchParams(params)}`, {
     headers: { Accept: "application/json", ...(cfg.tenant ? { "X-Scope-OrgID": cfg.tenant } : {}) },
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`Loki ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const text = await res.text();
@@ -113,11 +167,15 @@ export async function getWorkloadLogs(
   const key = `${cachePrefix(bearerToken)}:loki-logs:${clusterId.toLowerCase()}:${selector}:${opts.errorsOnly}:${opts.minutes}:${opts.at ?? "now"}`;
   const hit = logCache.get(key);
   if (hit) return hit;
+  const wait = backingOff(cfg);
+  if (wait) return { ...base, ...wait };
   const q = logQueries(selector, opts.errorsOnly, opts.minutes);
+  // The exception count is evaluated at the window's end too (a past range counted "now" before)
+  const evalAt = opts.at === undefined ? nowNs() : BigInt(opts.at) * 1_000_000_000n;
   try {
     const [lines, exc] = await Promise.all([
       lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: q.lines, ...range(opts.minutes, opts.at), limit: String(MAX_LINES), direction: "backward" }),
-      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: q.exceptions, time: String(nowNs()) }).catch(() => null),
+      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: q.exceptions, time: String(evalAt) }, 15_000).catch(() => null),
     ]);
     let redactions = 0;
     const out: LogLine[] = [];
@@ -136,7 +194,7 @@ export async function getWorkloadLogs(
     logCache.set(key, result);
     return result;
   } catch (e) {
-    return { ...base, ...lokiStateOf(e) };
+    return { ...base, ...(await classify(cfg, e)) };
   }
 }
 
@@ -152,7 +210,7 @@ const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines
 export async function getPodLogsFromLoki(
   env: Env, bearerToken: string | undefined, clusterId: string,
   opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number; at?: number },
-): Promise<{ state: LokiState | "notConfigured"; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
+): Promise<{ state: LokiState | "notConfigured"; message?: string; retryAt?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
   const cfg = lokiConfig(env, clusterId);
   if (!cfg) return { state: "notConfigured", lines: [], redactions: 0, truncated: false };
   for (const v of [opts.namespace, opts.pod, ...(opts.container ? [opts.container] : [])]) {
@@ -163,6 +221,8 @@ export async function getPodLogsFromLoki(
   const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${limit}:${opts.at ?? "now"}`;
   const hit = podLogCache.get(key);
   if (hit) return hit;
+  const wait = backingOff(cfg);
+  if (wait) return { ...wait, lines: [], redactions: 0, truncated: false };
   try {
     const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes, opts.at), limit: String(limit), direction: "backward" });
     let redactions = 0;
@@ -180,7 +240,7 @@ export async function getPodLogsFromLoki(
     podLogCache.set(key, out);
     return out;
   } catch (e) {
-    return { ...lokiStateOf(e), lines: [], redactions: 0, truncated: false };
+    return { ...(await classify(cfg, e)), lines: [], redactions: 0, truncated: false };
   }
 }
 
@@ -220,6 +280,8 @@ export async function getLokiDrops(
   const key = `${cachePrefix(bearerToken)}:loki-drops:${clusterId.toLowerCase()}:${minutes}`;
   const hit = dropCache.get(key);
   if (hit) return hit;
+  const wait = backingOff(cfg);
+  if (wait) return { ...base, ...wait };
   try {
     const [lines, relay, amw] = await Promise.all([
       lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes), limit: "2000", direction: "backward" }),
@@ -237,6 +299,6 @@ export async function getLokiDrops(
     dropCache.set(key, result);
     return result;
   } catch (e) {
-    return { ...base, ...lokiStateOf(e) };
+    return { ...base, ...(await classify(cfg, e)) };
   }
 }
