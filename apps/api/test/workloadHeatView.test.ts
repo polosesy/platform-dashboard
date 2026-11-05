@@ -9,7 +9,7 @@ const v = ((hv as { default?: typeof hv }).default ?? hv) as typeof hv;
 const lg = ((lvm as { default?: typeof lvm }).default ?? lvm) as typeof lvm;
 const t = (k: string, p?: Record<string, string | number>) => (p ? `${k}:${JSON.stringify(p)}` : k);
 
-const METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
+const METRICS: HeatMetric[] = ["ready", "memory", "cpu", "cpuNow", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 function wl(namespace: string, workload: string, cells: Partial<Record<HeatMetric, Partial<HeatCell>>> = {}, worst?: HeatLevel): HeatWorkload {
   const full = Object.fromEntries(METRICS.map((m) => [m, { value: null, level: "notMeasured" as HeatLevel, ...(m === "ready" ? { level: "ok" as HeatLevel } : {}), ...cells[m] }])) as HeatWorkload["cells"];
   const lv = worst ?? (["danger", "warn", "ok"] as HeatLevel[]).find((x) => METRICS.some((m) => full[m].level === x)) ?? "ok";
@@ -87,7 +87,9 @@ test("tile text and names", () => {
 
 test("dynamic heatmap i18n keys exist in both languages", () => {
   const src = readFileSync(new URL("../../web/src/lib/i18nOps.ts", import.meta.url), "utf8");
-  const keys = [...METRICS.map((m) => `ob.hm.short.${m}`), ...v.SIGNAL_GROUPS.map((g) => `ob.hm.group.${g.id}`), ...METRICS.map((m) => `ob.hm.flag.${m}`)];
+  // Flags (the red strip) are verdict signals only — a lens has no flag word
+  const keys = [...METRICS.map((m) => `ob.hm.short.${m}`), ...METRICS.map((m) => `ob.hm.metric.${m}`), ...v.SIGNAL_GROUPS.map((g) => `ob.hm.group.${g.id}`),
+    ...METRICS.filter((m) => !v.LENS_METRICS.includes(m)).map((m) => `ob.hm.flag.${m}`)];
   for (const k of keys) assert.match(src, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
 });
 
@@ -243,4 +245,15 @@ test("heat view: AKS-managed CPU / memory problems go after ours at the same lev
   assert.deepEqual(s.clear, ["memory"], "the API already left it out of the count");
   assert.equal(s.active[0]!.tone, "warn");
   assert.deepEqual(v.failedSignals([wl("app", "a", { cpu: { value: null, level: "notMeasured", code: "queryFailed" } })]), ["cpu"]);
+});
+
+test("CPU 지금 is a lens: its own view and the table colour it, never a tile's reason in the overall view", () => {
+  const busy = wl("app", "api", { cpu: { value: 0.4, level: "ok" }, cpuNow: { value: 1.7, level: "danger", abs: 0.17 } }, "ok");
+  assert.deepEqual(v.problemSignals(busy), [], "not a problem of the workload");
+  assert.equal(v.tileMetric(busy, "worst"), "ready");
+  assert.equal(v.levelIn(busy, "cpuNow"), "danger", "coloured on its own view");
+  assert.equal(v.formatCell("cpuNow", busy, t), "170%");
+  assert.ok(v.tableColumns([busy]).includes("cpuNow"));
+  assert.ok(v.SIGNAL_GROUPS[0]!.metrics.indexOf("cpuNow") === v.SIGNAL_GROUPS[0]!.metrics.indexOf("cpu") + 1, "beside CPU in the selector");
+  assert.equal(v.formatThreshold("cpuNow", 1.5), "150%");
 });

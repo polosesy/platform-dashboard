@@ -25,7 +25,13 @@ import { ownerIndex, resolveWorkload, type OwnerRow } from "./workloadOwners.js"
 import { runAll as runIsolated } from "./observabilityStack.js";
 import { aksManagedWorkloads } from "./workloadVpa.js";
 
-export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
+export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "cpuNow", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
+/** Lenses: shown and coloured on their own view, not in the workload's level or the flag strip (cpuNow repeats CPU) */
+export const LENS_METRICS: HeatMetric[] = ["cpuNow"];
+/** The signals a workload's overall level and the red-flag strip are made of */
+export const VERDICT_METRICS: HeatMetric[] = HEAT_METRICS.filter((m) => !LENS_METRICS.includes(m));
+/** CPU 지금 = the customer's Grafana container map tile: 15-minute average, judged from 100m of use */
+export const CPU_NOW_MINUTES = 15;
 
 /** The customer's map thresholds (Grafana container map; JVM / alert standards) — warn at ≥ warn, danger at ≥ danger */
 export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number }> = {
@@ -33,6 +39,8 @@ export const HEAT_THRESHOLDS: Record<HeatMetric, { warn: number; danger: number 
   memory: { warn: 0.8, danger: 0.9 },
   // special: p95 / request ≥ 1.5 (and ≥ 100m) = warn only — danger is CPU pressure (CPU_PRESSURE), see cpuLevel
   cpu: { warn: 1.5, danger: 1.5 },
+  // the Grafana container map's CPU tile: < 100% green · 100–150% yellow · ≥ 150% red (a lens — see LENS_METRICS)
+  cpuNow: { warn: 1, danger: 1.5 },
   restarts: { warn: 1, danger: 5 },
   oldGen: { warn: 0.7, danger: 0.85 },
   // special (lower is worse): under the band max(100Mi, 10% of the limit) = warn, under −band (or < 0 while it is
@@ -65,11 +73,11 @@ export const NATIVE_PEAK_MINUTES = 1440;
 /** How long the Kubernetes workload list (AKS-managed labels) may hold the map up — after that it fills the cache */
 export const MANAGED_WAIT_MS = 1500;
 /** Signals AKS runs for us: shown, but nothing to change on our side → not in the flag strip */
-const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "memory"];
+const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "cpuNow", "memory"];
 
 /** The red-flag strip: which level counts (their strip: memory 90%+, any restart, pool 80%+ …) */
 const FLAG_AT: Record<HeatMetric, HeatLevel[]> = {
-  ready: ["danger"], memory: ["danger"], cpu: ["danger"], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["danger"],
+  ready: ["danger"], memory: ["danger"], cpu: ["danger"], cpuNow: [], restarts: ["warn", "danger"], oldGen: ["danger"], jvmHeadroom: ["danger"],
   http5xx: ["danger"], logErrors: ["warn", "danger"], poolUsage: ["danger"], poolPending: ["danger"],
 };
 
@@ -77,7 +85,7 @@ const FLAG_AT: Record<HeatMetric, HeatLevel[]> = {
 export const CORE_QUERIES = ["active", "podOwners", "rsOwners", "deployReady", "deployDesired", "stsReady", "stsDesired", "dsReady", "dsDesired"];
 /** The queries a signal cannot be judged without — one of them missing = queryFailed (the others only thin the panel) */
 export const SIGNAL_NEEDS: Partial<Record<HeatMetric, string[]>> = {
-  memory: ["memRatio", "memWs"], cpu: ["cpuUsage", "cpuP95", "cpuRequest", "cpuPsi"], restarts: ["restarts"], oldGen: ["oldGen"],
+  memory: ["memRatio", "memWs"], cpu: ["cpuUsage", "cpuP95", "cpuRequest", "cpuPsi"], cpuNow: ["cpuNow15", "cpuRequest"], restarts: ["restarts"], oldGen: ["oldGen"],
   jvmHeadroom: ["jvmHeapMax", "podMemLimit", "jvmHeapCommitted", "jvmNonheapCommitted", "memRss"],
   http5xx: ["http5xx", "httpAll"], logErrors: ["logErrors"], poolUsage: ["poolUsage"], poolPending: ["poolPending"],
 };
@@ -124,6 +132,10 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     cpuMax: `max_over_time((${cpu5m})${sub})`,
     cpuAvg: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}${w}))`,
     cpuRequest: `sum by (namespace, pod) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_requests", 'resource="cpu"')})) > 0`,
+    // CPU 지금: the last 15 minutes' average (the Grafana container map tile), and the window's steps where the 5-minute
+    // rate stayed over the request (× the step = minutes) — warm-up included: this is what the pod used
+    cpuNow15: `sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}[${CPU_NOW_MINUTES}m]))`,
+    cpuOverSteps: `count_over_time((sum by (namespace, pod) (rate(${sel("container_cpu_usage_seconds_total", ctr)}[5m])) > on (namespace, pod) (sum by (namespace, pod) (max by (namespace, pod, container) (${sel("kube_pod_container_resource_requests", 'resource="cpu"')})) > 0))${sub})`,
     cpuPsi: `quantile_over_time(0.95, (${psi5m})${sub})`,
     // CFS series exist only for containers with a CPU limit
     cpuThrottle: `sum by (namespace, pod) (rate(${sel("container_cpu_cfs_throttled_periods_total", ctr)}${w})) / on (namespace, pod) (sum by (namespace, pod) (rate(${sel("container_cpu_cfs_periods_total", ctr)}${w})) > 0)`,
@@ -213,7 +225,7 @@ const RANK: Record<HeatLevel, number> = { danger: 4, warn: 3, ok: 2, noBaseline:
 export type HeatRaw = Record<string, PromRow[]>;
 
 /** Pure: per-pod rows → one tile per workload with every signal, worst pod first */
-export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConfig; managed?: Set<string> | null; failed?: Set<string> } = {}):
+export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConfig; managed?: Set<string> | null; failed?: Set<string>; windowMinutes?: number } = {}):
   Pick<WorkloadHeatmapResponse, "workloads" | "flags" | "missing"> {
   const families = new Set(Object.keys(raw).filter((k) => k.startsWith("family:") && (raw[k]?.length ?? 0) > 0).map((k) => k.slice(7)));
   // Completed / failed pods (Jobs, `az aks command invoke` runs) are not part of a workload's readiness
@@ -309,6 +321,10 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
   const byPod = (rows: PromRow[] | undefined) => new Map((rows ?? []).map((r) => [`${r.metric.namespace}/${r.metric.pod}`, r.value]));
   const cpuSeries = { now: byPod(raw.cpuUsage), p95: byPod(raw.cpuP95), avg: byPod(raw.cpuAvg), max: byPod(raw.cpuMax),
     request: byPod(raw.cpuRequest), psi: byPod(raw.cpuPsi), throttle: byPod(raw.cpuThrottle) };
+  const now15ByPod = byPod(raw.cpuNow15);
+  // The over-request steps came in the window's subquery step (1 min up to an hour, else 5) — minutes = steps × step
+  const stepMin = opts.windowMinutes !== undefined && opts.windowMinutes > 60 ? 5 : 1;
+  const overByPod = byPod(raw.cpuOverSteps);
   const cpuByPod = new Map<string, CpuFacts>();
   for (const k of new Set([...cpuSeries.now.keys(), ...cpuSeries.p95.keys()])) {
     const [ns, pod] = k.split("/");
@@ -318,6 +334,13 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     cpuByPod.set(k, f);
     x.p.cpu = f.p95 !== null && f.request ? f.p95 / f.request : null;
     x.p.cpuCores = f.p95 ?? f.now;
+  }
+  for (const [k, avg15] of now15ByPod) {
+    const [ns, pod] = k.split("/");
+    const x = podOf(ns, pod);
+    if (!x) continue;
+    const request = cpuSeries.request.get(k) ?? null;
+    x.p.cpuNow = request ? avg15 / request : null;
   }
 
   // Per-pod signals that only some workloads expose (worst pod / worst pool)
@@ -461,6 +484,26 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
       if (!cpuWorst || rank > cpuWorst.rank || (rank === cpuWorst.rank && key > cpuWorst.key)) cpuWorst = { cell, rank, key };
     }
     if (cpuWorst) w.cells.cpu = cpuWorst.cell;
+    // CPU 지금 (lens): the highest 15-minute average / request; over the request under 100m of use = shown uncoloured
+    // (belowFloor — a 50m request at 0.1 core reads 200%, no load), under the request = OK whatever the cores (an idle
+    // service is green, not grey); no request = cores only
+    let nowWorst: { cell: HeatCell; rank: number; key: number } | null = null;
+    for (const p of pods) {
+      const k = `${w.namespace}/${p.pod}`;
+      const avg15 = now15ByPod.get(k);
+      if (avg15 === undefined) continue;
+      const request = cpuSeries.request.get(k) ?? null;
+      const over = overByPod.get(k);
+      const facts = { avg15, now5: cpuSeries.now.get(k) ?? null, request, overMinutes: over === undefined ? (raw.cpuOverSteps ? 0 : null) : over * stepMin, windowMinutes: opts.windowMinutes ?? 0 };
+      const ratio = request ? avg15 / request : null;
+      const cell: HeatCell = ratio === null ? { value: null, level: "noBaseline", code: "noRequest", worstPod: p.pod, abs: avg15, cpuNow: facts }
+        : ratio >= HEAT_THRESHOLDS.cpuNow.warn && avg15 < CPU_PRESSURE.floorCores ? { value: ratio, level: "noBaseline", code: "belowFloor", worstPod: p.pod, abs: avg15, cpuNow: facts }
+        : { value: ratio, level: levelOf("cpuNow", ratio), worstPod: p.pod, abs: avg15, cpuNow: facts };
+      const rank = cell.code ? 0 : RANK[cell.level];
+      const key = ratio ?? avg15;
+      if (!nowWorst || rank > nowWorst.rank || (rank === nowWorst.rank && key > nowWorst.key)) nowWorst = { cell, rank, key };
+    }
+    if (nowWorst) w.cells.cpuNow = nowWorst.cell;
     const r = worstPod((p) => p.restarts);
     const totalRestarts = pods.reduce((a, p) => a + (p.restarts ?? 0), 0);
     if (pods.some((p) => p.restarts !== null)) {
@@ -485,7 +528,7 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
       for (const k of HEAT_METRICS) w.cells[k] = { value: null, level: "stopped", code: "noPods" };
       w.cells.ready = { value: null, level: "stopped", code: w.kind === "DaemonSet" ? "noNodes" : "scaledToZero" };
     }
-    const measured = HEAT_METRICS.map((k) => w.cells[k].level);
+    const measured = VERDICT_METRICS.map((k) => w.cells[k].level);
     w.worst = measured.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "notMeasured" as HeatLevel);
     if (w.worst === "notMeasured" && w.cells.ready.level === "stopped") w.worst = "stopped";
     pods.sort((a, b) => (b.memory ?? -1) - (a.memory ?? -1) || (a.pod < b.pod ? -1 : 1));
@@ -497,7 +540,7 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
 
   const missing = HEAT_METRICS.filter((m) => (FAMILY[m] && !families.has(FAMILY[m]!)) || (m === "logErrors" && !opts.logErrors));
   const unknown = (m: HeatMetric) => missing.includes(m) || !!SIGNAL_NEEDS[m]?.some((q) => opts.failed?.has(q));
-  const flags = HEAT_METRICS.map((metric) => ({
+  const flags = VERDICT_METRICS.map((metric) => ({
     metric,
     count: unknown(metric) ? null
       : workloads.filter((w) => FLAG_AT[metric].includes(w.cells[metric].level) && !(w.managed && MANAGED_EXEMPT.includes(metric))).length,
@@ -567,7 +610,7 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     const managed = await managedJob;
     const gaps: StackQueryGap[] = run.gaps;
     return {
-      ...base, cluster: scope.cluster, ...aggregateHeatmap(run.rows, { logErrors, managed, failed }),
+      ...base, cluster: scope.cluster, ...aggregateHeatmap(run.rows, { logErrors, managed, failed, windowMinutes }),
       ...(gaps.length ? { gaps } : {}), managedState: managed ? "ok" : "unknown",
     };
   } catch (e) {

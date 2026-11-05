@@ -85,7 +85,7 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
           <dl className={styles.hmCells}>
             {HEAT_METRICS.map((m) => {
               const c = w.cells[m];
-              const abs = c.value !== null && c.abs != null ? (m === "memory" ? formatBytes(c.abs) : m === "cpu" ? formatCores(c.abs) : null) : null;
+              const abs = c.value !== null && c.abs != null ? (m === "memory" ? formatBytes(c.abs) : m === "cpu" || m === "cpuNow" ? formatCores(c.abs) : null) : null;
               return (
                 <div key={m} className={styles.hmCell}>
                   <dt>{t(`ob.hm.metric.${m}`)}</dt>
@@ -122,6 +122,13 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
                         })}
                       </span>
                     ) : null}
+                    {c.cpuNow ? (
+                      <span className={styles.hmCellNote} title={t("ob.hm.cpuNowHint")}>
+                        {t("ob.hm.cpuNowBreakdown", { avg: formatCores(c.cpuNow.avg15), now: coresOrDash(c.cpuNow.now5), request: coresOrDash(c.cpuNow.request) })}
+                        {c.cpuNow.overMinutes !== null && c.cpuNow.windowMinutes > 0
+                          ? ` · ${t("ob.hm.cpuNowOver", { n: c.cpuNow.overMinutes, w: t(`ob.hm.window.${c.cpuNow.windowMinutes}`) })}` : ""}
+                      </span>
+                    ) : null}
                     {c.requests != null ? <span className={styles.hmCellNote}>{t("ob.hm.requests", { n: c.requests.toLocaleString() })}</span> : null}
                     {c.worstPod ? <span className={styles.hmCellNote} title={c.worstPod}>{c.pool ? `${c.pool} · ` : ""}{c.worstPod}</span> : null}
                   </dd>
@@ -134,7 +141,7 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
             <>
               <h4 className={styles.stackTitle}>{t("ob.hm.pods", { n: w.pods.length })}</h4>
               <table className={styles.stackTable}>
-                <thead><tr><th>{t("ob.hm.pod")}</th><th>{t("ob.hm.short.ready")}</th><th>{t("ob.hm.short.memory")}</th><th>{t("ob.hm.short.cpu")}</th><th>{t("ob.hm.short.restarts")}</th></tr></thead>
+                <thead><tr><th>{t("ob.hm.pod")}</th><th>{t("ob.hm.short.ready")}</th><th>{t("ob.hm.short.memory")}</th><th>{t("ob.hm.short.cpu")}</th><th>{t("ob.hm.short.cpuNow")}</th><th>{t("ob.hm.short.restarts")}</th></tr></thead>
                 <tbody>
                   {w.pods.map((p) => (
                     <tr key={p.pod}>
@@ -142,6 +149,7 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
                       <td>{p.ready === null ? "—" : p.ready ? "✓" : "✕"}</td>
                       <td>{p.memory !== null ? `${Math.round(p.memory * 100)}%` : p.memBytes != null ? formatBytes(p.memBytes) : "—"}</td>
                       <td>{p.cpu !== null ? `${Math.round(p.cpu * 100)}%` : p.cpuCores != null ? formatCores(p.cpuCores) : "—"}</td>
+                      <td>{p.cpuNow != null ? `${Math.round(p.cpuNow * 100)}%` : "—"}</td>
                       <td>{p.restarts ?? "—"}</td>
                     </tr>
                   ))}

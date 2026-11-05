@@ -368,7 +368,12 @@ export type ObservabilitySourcesResponse = { clusterId: string; generatedAt: str
 
 // ── Workload heatmap (services/workloadHeatmap.ts) — the customer's Grafana "container map" as one map ──
 
-export type HeatMetric = "ready" | "memory" | "cpu" | "restarts" | "oldGen" | "jvmHeadroom" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
+/**
+ * cpuNow = a lens, not a verdict: the last 15 minutes' average CPU / request (the customer's Grafana container map
+ * tile) — coloured on its own view and in the table, never in the overall level or the red-flag strip (the CPU verdict
+ * stays `cpu`: window p95 + pressure)
+ */
+export type HeatMetric = "ready" | "memory" | "cpu" | "cpuNow" | "restarts" | "oldGen" | "jvmHeadroom" | "http5xx" | "logErrors" | "poolUsage" | "poolPending";
 
 /**
  * stopped = nothing to run (code: scaledToZero 0/0 replicas · noNodes a DaemonSet no node matches · noPods its other
@@ -419,6 +424,12 @@ export type HeatCell = {
    * runnable but waiting for a CPU · throttle = share of CFS periods throttled (CPU limit only) — null = no series
    */
   cpu?: { now: number | null; p95: number | null; avg: number | null; max: number | null; request: number | null; psi: number | null; throttle: number | null };
+  /**
+   * CPU 지금 (cores): the 15-minute average (the cell's value / request), the 5-minute rate, the request, and how many
+   * minutes of the window the 5-minute rate stayed over the request (null = not measured) — repeated bursts a "now"
+   * value alone hides
+   */
+  cpuNow?: { avg15: number; now5: number | null; request: number | null; overMinutes: number | null; windowMinutes: number };
   /** http5xx: requests in the window (the share is not judged under the minimum) */
   requests?: number;
   /** memory: the worst pod's highest working set over the window (ratio to the limit, bytes) — the level stays on now */
@@ -444,6 +455,8 @@ export type HeatWorkload = {
     pod: string; ready: boolean | null; restarts: number | null; memory: number | null; cpu: number | null; oom: boolean;
     /** Working-set bytes / CPU cores (null = no series) — shown when there is no limit / request ratio */
     memBytes?: number | null; cpuCores?: number | null;
+    /** CPU 지금: the last 15 minutes' average / request (null = no request) */
+    cpuNow?: number | null;
   }[];
 };
 

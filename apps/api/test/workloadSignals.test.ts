@@ -399,3 +399,32 @@ test("Loki: no connection = unreachable (policy hint); a reachable Loki that tim
   assert.equal(lokiStateOf(new Error("Loki 400: parse error at line 1")).state, "failed");
   assert.equal(BUSY_BACKOFF_MS, 60_000);
 });
+
+test("heatmap: CPU 지금 = 15-min average / request (Grafana container map tile) — a lens, floor only over the request", () => {
+  const P = { namespace: "app", pod: "api-7d9f8c6b5-bcdfg" };
+  const run = (now15: number, request: number | null, over?: number) => aggregateHeatmap(raw({
+    cpuNow15: [r(P, now15)], cpuRequest: request === null ? [] : [r(P, request)], cpuUsage: [r(P, 0.3)],
+    ...(over === undefined ? {} : { cpuOverSteps: [r(P, over)] }),
+  }), { windowMinutes: 360 }).workloads.find((w) => w.workload === "api")!;
+  const hot = run(0.11, 0.075, 10);
+  assert.deepEqual([hot.cells.cpuNow.level, Math.round(hot.cells.cpuNow.value! * 100)], ["warn", 147], "0.11 core / 75m = 147% — yellow (red from 150%)");
+  const red = run(0.16, 0.1, 10);
+  assert.equal(red.cells.cpuNow.level, "danger", "160% at 0.16 core");
+  assert.deepEqual(red.cells.cpuNow.cpuNow, { avg15: 0.16, now5: 0.3, request: 0.1, overMinutes: 50, windowMinutes: 360 }, "6 h window: 5-min steps");
+  const plain = aggregateHeatmap(raw({ memRatio: [], cpuRequest: [r(P, 0.1)], cpuUsage: [r(P, 0.3)] }), {}).workloads.find((w) => w.workload === "api")!;
+  const lensed = aggregateHeatmap(raw({ memRatio: [], cpuRequest: [r(P, 0.1)], cpuUsage: [r(P, 0.3)], cpuNow15: [r(P, 0.16)] }), {}).workloads.find((w) => w.workload === "api")!;
+  assert.equal(lensed.cells.cpuNow.level, "danger");
+  assert.equal(lensed.worst, plain.worst, "a lens never changes the workload's level");
+  assert.equal(run(0.12, 0.1).cells.cpuNow.level, "warn", "120%");
+  const tiny = run(0.08, 0.05);
+  assert.deepEqual([tiny.cells.cpuNow.level, tiny.cells.cpuNow.code], ["noBaseline", "belowFloor"], "over the request under 100m: uncoloured");
+  assert.deepEqual([run(0.002, 0.05).cells.cpuNow.level, run(0.002, 0.05).cells.cpuNow.code], ["ok", undefined], "idle under the request: green, not grey");
+  const noReq = run(0.2, null).cells.cpuNow;
+  assert.deepEqual([noReq.level, noReq.code, noReq.abs], ["noBaseline", "noRequest", 0.2]);
+  assert.equal(run(0.16, 0.1).cells.cpuNow.cpuNow!.overMinutes, null, "over-request query missing = not measured");
+  const agg = aggregateHeatmap(raw({ cpuNow15: [r(P, 0.16)], cpuRequest: [r(P, 0.1)] }), {});
+  assert.ok(!agg.flags.some((f) => f.metric === "cpuNow"), "not in the red strip");
+  const q = heatmapQueries('cluster="a"', 60);
+  assert.match(q.cpuNow15!, /\[15m\]\)\)$/);
+  assert.match(q.cpuOverSteps!, /\[60m:1m\]\)$/);
+});

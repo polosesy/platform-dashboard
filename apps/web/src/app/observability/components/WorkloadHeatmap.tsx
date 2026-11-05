@@ -141,7 +141,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
 
   const names = (ms: HeatMetric[]) => ms.map((m) => t(`ob.hm.short.${m}`)).join(" · ");
   const threshold = view !== "worst"
-    ? view === "ready" ? t("ob.hm.thresholdReady") : view === "jvmHeadroom" ? t("ob.hm.thresholdJvm") : view === "cpu" ? t("ob.hm.thresholdCpu")
+    ? view === "ready" ? t("ob.hm.thresholdReady") : view === "jvmHeadroom" ? t("ob.hm.thresholdJvm") : view === "cpu" ? t("ob.hm.thresholdCpu") : view === "cpuNow" ? t("ob.hm.thresholdCpuNow")
       : t("ob.hm.threshold", { warn: formatThreshold(view, d.thresholds[view].warn) ?? "", danger: formatThreshold(view, d.thresholds[view].danger) ?? "" })
     : null;
   const nsCount = new Set(ws.map((w) => w.namespace)).size;

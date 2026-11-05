@@ -8,9 +8,14 @@ import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } fro
 export type HeatView = "worst" | HeatMetric;
 type T = (k: string, v?: Record<string, string | number>) => string;
 
-export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
+export const HEAT_METRICS: HeatMetric[] = ["ready", "memory", "cpu", "cpuNow", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
+/**
+ * Lenses (API LENS_METRICS): coloured on their own view and in the table, not a workload's problem — CPU 지금 repeats
+ * CPU (the verdict is the window p95 + pressure); in the overall view a tile never shows them as its reason
+ */
+export const LENS_METRICS: HeatMetric[] = ["cpuNow"];
 export const SIGNAL_GROUPS: { id: "k8s" | "app" | "logs"; metrics: HeatMetric[] }[] = [
-  { id: "k8s", metrics: ["ready", "memory", "cpu", "restarts"] },
+  { id: "k8s", metrics: ["ready", "memory", "cpu", "cpuNow", "restarts"] },
   { id: "app", metrics: ["oldGen", "jvmHeadroom", "http5xx", "poolUsage", "poolPending"] },
   { id: "logs", metrics: ["logErrors"] },
 ];
@@ -21,7 +26,7 @@ export const LEVEL_RANK: Record<HeatLevel, number> = { danger: 0, warn: 1, ok: 2
 
 export const isProblem = (lv: HeatLevel): lv is "danger" | "warn" => lv === "danger" || lv === "warn";
 /** AKS runs it: its CPU / memory are shown, but there is nothing to change on our side (API: MANAGED_EXEMPT) */
-export const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "memory"];
+export const MANAGED_EXEMPT: HeatMetric[] = ["cpu", "cpuNow", "memory"];
 export const isActionable = (w: HeatWorkload, m: HeatMetric) => !(w.managed && MANAGED_EXEMPT.includes(m));
 /** Signals a query did not answer for this time (cells say queryFailed) */
 export const failedSignals = (ws: HeatWorkload[]): HeatMetric[] => HEAT_METRICS.filter((m) => ws.some((w) => w.cells[m].code === "queryFailed"));
@@ -43,7 +48,7 @@ const formatAbs = (metric: HeatMetric, v: number) => (metric === "memory" ? form
 
 /** The workload's warn/danger signals — danger first, then the signal order */
 export function problemSignals(w: HeatWorkload): HeatMetric[] {
-  return HEAT_METRICS.filter((m) => isProblem(w.cells[m].level)).sort((a, b) => LEVEL_RANK[w.cells[a].level] - LEVEL_RANK[w.cells[b].level]);
+  return HEAT_METRICS.filter((m) => !LENS_METRICS.includes(m) && isProblem(w.cells[m].level)).sort((a, b) => LEVEL_RANK[w.cells[a].level] - LEVEL_RANK[w.cells[b].level]);
 }
 
 /** Which signal a tile shows: the chosen one, or (overall) its worst problem, else readiness */
@@ -56,10 +61,10 @@ export function formatCell(metric: HeatMetric, w: HeatWorkload, t: T): string {
   const c = w.cells[metric];
   if (c.code === "noNodes" || c.code === "noPods") return t(`ob.hm.code.${c.code}`);
   if (metric === "ready") return w.replicas.desired === null ? t(`ob.hm.level.${c.level}`) : `${w.replicas.ready ?? 0}/${w.replicas.desired}`;
-  if (c.value === null && c.abs != null && (metric === "memory" || metric === "cpu")) return formatAbs(metric, c.abs);
+  if (c.value === null && c.abs != null && (metric === "memory" || metric === "cpu" || metric === "cpuNow")) return formatAbs(metric, c.abs);
   if (c.value === null) return t(`ob.hm.level.${c.level}`);
   switch (metric) {
-    case "memory": case "cpu": case "oldGen": case "poolUsage": return `${Math.round(c.value * 100)}%`;
+    case "memory": case "cpu": case "cpuNow": case "oldGen": case "poolUsage": return `${Math.round(c.value * 100)}%`;
     case "http5xx": return `${(c.value * 100).toFixed(2)}%`;
     case "jvmHeadroom": return c.value < 0 ? `-${formatBytes(-c.value)}` : formatBytes(c.value);
     default: return Math.round(c.value).toLocaleString();
@@ -191,7 +196,7 @@ export function formatThreshold(metric: HeatMetric, v: number): string | null {
   if (metric === "ready") return null;
   if (metric === "jvmHeadroom") return formatBytes(v);
   if (metric === "http5xx") return `${(v * 100).toFixed(1)}%`;
-  if (["memory", "cpu", "oldGen", "poolUsage"].includes(metric)) return `${Math.round(v * 100)}%`;
+  if (["memory", "cpu", "cpuNow", "oldGen", "poolUsage"].includes(metric)) return `${Math.round(v * 100)}%`;
   return String(v);
 }
 
