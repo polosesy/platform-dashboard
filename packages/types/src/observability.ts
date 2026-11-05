@@ -546,6 +546,8 @@ export type WorkloadLogsResponse = {
 export type LokiDropsResponse = {
   clusterId: string;
   generatedAt: string;
+  /** The window's end when it is a past range (the drops of that span — Loki keeps days, the agents minutes) */
+  at?: string;
   state: LokiState;
   message?: string;
   /** busy: the next read waits until then (the dashboard does not add load to an overloaded Loki) */

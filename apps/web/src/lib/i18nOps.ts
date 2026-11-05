@@ -191,6 +191,8 @@ export const OPS_T: Translations = {
   "hb.m.refresh": { ko: "새로 고침", en: "Refresh" },
   "hb.m.windowFit": { ko: "Hubble 지표는 {n}분 창으로 읽음", en: "Hubble metrics read a {n}-minute window" },
   "hb.m.windowFitHint": { ko: "Hubble 지표 창은 5·15·60·360분 — 범위를 덮는 가장 가까운 창, 끝은 지금", en: "Hubble metric windows are 5, 15, 60, 360 min — the nearest covering the range, ending now" },
+  "hb.past.hintLoki": { ko: "흐름 표본·지표는 지금 것만 읽습니다(노드 버퍼는 몇 분, Hubble UI는 최근 표본). 대신 Loki(hubble-flow-exporter)가 며칠 보관하는 드롭 흐름은 아래에서 그 구간 그대로 봅니다 — 드롭만, 허용된 흐름은 없음.", en: "Flow samples and metrics are read now only (node buffers keep minutes, the Hubble UI a recent sample). The dropped flows Loki keeps for days (hubble-flow-exporter) are shown below for that span — drops only, no allowed flows." },
+  "hb.past.window": { ko: "드롭 창은 {w}(가장 가까운 창).", en: "Drop window: {w} (the nearest)." },
   "hb.past.title": { ko: "Hubble은 지금 것만", en: "Hubble shows now only" },
   "hb.past.hint": { ko: "Hubble 흐름 표본은 각 노드 버퍼(최근 몇 분)에서, 지표는 지금을 끝으로 읽습니다 — 지난 구간의 흐름은 Loki(hubble-flows)·VNet 흐름 로그에서 보세요", en: "Hubble flow samples come from each node's buffer (the last few minutes) and metrics end now — past flows are in Loki (hubble-flows) and VNet flow logs" },
   "hb.m.basis": { ko: "최근 {n}분 동안 Hubble 메트릭이 센 값입니다(조회 {at}). Prometheus increase()는 보간하므로 근삿값입니다.", en: "Counted by Hubble metrics over the last {n} minutes (read {at}). Prometheus increase() extrapolates, so values are approximate." },

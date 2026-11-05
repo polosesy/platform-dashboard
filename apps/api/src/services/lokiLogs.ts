@@ -24,7 +24,8 @@ const MAX_LINE_BYTES = 4096;
 const MAX_BODY = 2 * 1024 * 1024;
 /** A workload's stream (every pod of it): up to 6 h — the time picker's quick ranges below that (web WORKLOAD_LOG_WINDOWS) */
 export const LOG_WINDOWS = [5, 15, 30, 60, 180, 360] as const;
-export const DROP_WINDOWS = [60, 360, 1440] as const;
+/** Drop windows — 15 m for a short past range (the time range bar: the drops of that span, from Loki's 30 days) */
+export const DROP_WINDOWS = [15, 60, 360, 1440] as const;
 
 /** Escape for a LogQL label regex (RE2) inside a double-quoted string */
 export const re2 = (s: string) => s.replace(/[\\.+*?()|[\]{}^$]/g, (c) => `\\\\${c}`).replace(/"/g, '\\"');
@@ -269,24 +270,31 @@ export function summarizeLokiDrops(lines: string[]): { drops: LokiDropsResponse[
 
 const dropCache = new CacheManager<LokiDropsResponse>(20, 30_000);
 
+/**
+ * `at` = the window's end (epoch seconds) for a past range — Loki keeps the exporter's drops for days, unlike the
+ * agents' buffers and the Hubble UI sample (now only); the AMW cross-check is a "now" figure, so it is skipped then
+ */
 export async function getLokiDrops(
   env: Env, bearerToken: string | undefined, clusterId: string, minutes: number,
-  amwDrops: () => Promise<number | null>,
+  amwDrops: () => Promise<number | null>, at?: number,
 ): Promise<LokiDropsResponse> {
   if (!(DROP_WINDOWS as readonly number[]).includes(minutes)) throw new HttpError(400, "invalid_window", `window must be one of ${DROP_WINDOWS.join(", ")}`);
-  const base: LokiDropsResponse = { clusterId, generatedAt: new Date().toISOString(), state: "ok", windowMinutes: minutes, drops: [], flowLines: 0, relayErrors: 0, pipelineBroken: null };
+  const base: LokiDropsResponse = {
+    clusterId, generatedAt: new Date().toISOString(), state: "ok", windowMinutes: minutes, drops: [], flowLines: 0, relayErrors: 0, pipelineBroken: null,
+    ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
+  };
   const cfg = lokiConfig(env, clusterId);
   if (!cfg) return { ...base, state: "notConfigured" };
-  const key = `${cachePrefix(bearerToken)}:loki-drops:${clusterId.toLowerCase()}:${minutes}`;
+  const key = `${cachePrefix(bearerToken)}:loki-drops:${clusterId.toLowerCase()}:${minutes}:${at ?? "now"}`;
   const hit = dropCache.get(key);
   if (hit) return hit;
   const wait = backingOff(cfg);
   if (wait) return { ...base, ...wait };
   try {
     const [lines, relay, amw] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes), limit: "2000", direction: "backward" }),
-      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time({job="hubble-flows"} |= "NODE_ERROR" [${minutes}m]))`, time: String(nowNs()) }).catch(() => null),
-      amwDrops().catch(() => null),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes, at), limit: "2000", direction: "backward" }),
+      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time({job="hubble-flows"} |= "NODE_ERROR" [${minutes}m]))`, time: String(at === undefined ? nowNs() : BigInt(at) * 1_000_000_000n) }).catch(() => null),
+      at === undefined ? amwDrops().catch(() => null) : Promise.resolve(null),
     ]);
     const all = (lines.body.data?.result ?? []).flatMap((s) => (s.values ?? []).map((v) => v[1] ?? ""));
     const { drops, flowLines } = summarizeLokiDrops(all);

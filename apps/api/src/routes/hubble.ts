@@ -3,7 +3,7 @@ import type { Env } from "../env.js";
 import { getHubbleFlows, getHubbleStatus } from "../services/hubbleClient.js";
 import { collectServiceMap, collectNetworkSummary, collectSecuritySummary } from "../services/hubbleCollector.js";
 import type { HubbleStatusResponse, HubbleFlowsResponse } from "@aud/types";
-import { queryArmResourceId, queryInt, queryString, sendError } from "../infra/requestParams.js";
+import { queryArmResourceId, queryInt, queryPastTime, queryString, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 import { getHubbleSources } from "../services/hubbleSources.js";
 import { getHubbleMetricsSummary } from "../services/hubbleMetrics.js";
@@ -52,7 +52,7 @@ export function registerHubbleRoutes(router: Router, env: Env) {
         const m = await getHubbleMetricsSummary(env, req.auth?.bearerToken, clusterId, 60);
         return m.state === "ok" && !m.missing.includes("hubble_drop_total") ? m.dropsByReason.reduce((a, d) => a + d.count, 0) : null;
       };
-      res.json(await getLokiDrops(env, req.auth?.bearerToken, clusterId, minutes, amw));
+      res.json(await getLokiDrops(env, req.auth?.bearerToken, clusterId, minutes, amw, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "loki_drops_failed", "hubble");
     }

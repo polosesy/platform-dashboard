@@ -120,6 +120,8 @@ export const heatWindowFor = (r: TimeRange) => fitWindow(r, HEAT_WINDOWS);
  * customer's Loki is a single binary whose CPU the alert queries already saturate (2026-11-05)
  */
 export const WORKLOAD_LOG_WINDOWS = [5, 15, 30, 60, 180, 360] as const;
+/** Hubble drops from Loki (API lokiLogs DROP_WINDOWS) — a past range's drops, Loki keeps days */
+export const LOKI_DROP_WINDOWS = [15, 60, 360, 1440] as const;
 
 /** One pod's logs (the 로그 tab): any minutes up to a day (the API's limit) */
 export function podLogMinutesFor(r: TimeRange): PanelSpan {

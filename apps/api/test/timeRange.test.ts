@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Request } from "express";
 import * as trm from "../../web/src/lib/timeRange.ts";
 import { HEAT_WINDOWS, cpuStep, heatmapQueries } from "../src/services/workloadHeatmap.js";
-import { LOG_WINDOWS } from "../src/services/lokiLogs.js";
+import { DROP_WINDOWS, LOG_WINDOWS } from "../src/services/lokiLogs.js";
 import { runAll } from "../src/services/observabilityStack.js";
 import { MAX_PAST_SECONDS, queryPastTime } from "../src/infra/requestParams.js";
 import type { PrometheusFetcher } from "../src/infra/azureClientFactory.js";
@@ -86,6 +86,8 @@ test("time range: each panel says when it reads another span — heatmap ≤ 24 
   assert.deepEqual(tr.podLogMinutesFor({ span: 90, to: null }), { value: 90, differs: null });
   assert.deepEqual([...tr.HEAT_WINDOWS], [...HEAT_WINDOWS], "web and API heatmap windows are one list");
   assert.deepEqual([...tr.WORKLOAD_LOG_WINDOWS], [...LOG_WINDOWS], "web and API log-stream windows are one list");
+  assert.deepEqual([...tr.LOKI_DROP_WINDOWS], [...DROP_WINDOWS], "web and API Loki drop windows are one list");
+  assert.deepEqual(tr.fitWindow({ span: 180, to: Date.UTC(2026, 10, 4, 3, 0) }, tr.LOKI_DROP_WINDOWS).value, 360, "a past 3 h → the 6 h drop window");
   assert.equal(tr.atParam({ span: 60, to: null }), undefined);
   assert.equal(tr.atParam({ span: 60, to: NOW - 60 * MIN }), String((NOW - 60 * MIN) / 1000));
 });

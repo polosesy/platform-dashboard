@@ -91,7 +91,7 @@ export function MetricsView({ clusterId, view, control }: { clusterId: string; v
   );
 }
 
-type Fmt = (v: number | null) => string;
+export type Fmt = (v: number | null) => string;
 
 function WorkloadGrid({ d, fmt }: { d: HubbleMetricsSummary; fmt: Fmt }) {
   const { t } = useI18n();
@@ -210,18 +210,28 @@ const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (app
     - matchLabels: { "k8s:io.kubernetes.pod.namespace": aud-dashboard }
   toPorts: [{ ports: [{ port: "3100", protocol: TCP }] }]`;
 
-/** Drops shipped by hubble-flow-exporter to Loki — flow by flow (source → destination), plus the exporter's own health */
-function LokiDrops({ clusterId, fmt }: { clusterId: string; fmt: Fmt }) {
+/** The page's time range for the drops: the window fitted to LOKI_DROP_WINDOWS and its end (a past range) */
+export type LokiDropsControl = { window: number; at: string | undefined; nonce: number; report?: (id: string, loading: boolean) => void };
+
+/**
+ * Drops shipped by hubble-flow-exporter to Loki — flow by flow (source → destination), plus the exporter's own health.
+ * With `control` (AKS 모니터링's time range) it reads that span — Loki keeps days, so a past range has its drops too.
+ */
+export function LokiDrops({ clusterId, fmt, control }: { clusterId: string; fmt: Fmt; control?: LokiDropsControl }) {
   const { t, locale } = useI18n();
-  const [win, setWin] = useState<number>(60);
-  const q = useApiQuery(`loki-drops:${clusterId}:${win}`, (token) =>
-    fetchJsonWithBearer<LokiDropsResponse>(apiUrl("/api/hubble/loki-drops", { clusterId, window: String(win) }), token),
+  const [own, setWin] = useState<number>(60);
+  const win = control?.window ?? own;
+  const at = control?.at;
+  const q = useApiQuery(`loki-drops:${clusterId}:${win}:${at ?? "now"}`, (token) =>
+    fetchJsonWithBearer<LokiDropsResponse>(apiUrl("/api/hubble/loki-drops", { clusterId, window: String(win), at }), token),
   );
-  const d = q.data?.windowMinutes === win ? q.data : null;
+  useRangeRefresh("loki-drops", control?.nonce ?? 0, q.loading, q.reload, control?.report);
+  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
+  const d = q.data?.windowMinutes === win && dAt === at ? q.data : null;
   return (
     <section aria-labelledby="hb-loki-drops">
       <h3 id="hb-loki-drops" className={styles.sectionTitle}>{t("hb.ld.title")}</h3>
-      <Segmented label={t("hb.m.window")} value={win} onChange={setWin} items={[60, 360, 1440].map((w) => ({ id: w, label: t(`ob.hm.window.${w}`) }))} />
+      {control ? null : <Segmented label={t("hb.m.window")} value={own} onChange={setWin} items={[60, 360, 1440].map((w) => ({ id: w, label: t(`ob.hm.window.${w}`) }))} />}
       {q.error ? <Notice tone="warning">{q.error}</Notice> : !d ? <LoadingState /> : d.state !== "ok" ? (
         <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${d.state}`)}>
           {t(`ob.hm.lokiHint.${d.state}`)}

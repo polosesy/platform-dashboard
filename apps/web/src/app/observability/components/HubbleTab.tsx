@@ -10,9 +10,9 @@ import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
 import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle } from "@/components/ui";
-import { EnableFlowLogsPanel, METRICS_WINDOWS, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
+import { EnableFlowLogsPanel, LokiDrops, METRICS_WINDOWS, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
-import { fitWindow, type TimeRange } from "@/lib/timeRange";
+import { LOKI_DROP_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 
 /**
  * `control` = the AKS 모니터링 page's time picker: its 새로 고침 / auto refresh take a new sample (the views' own
@@ -57,7 +57,15 @@ export function HubbleTab({ clusterId, control }: Props) {
     </div>
   );
   const view = { clusterId, live, nonce };
-  const pastNote = control?.range.to != null ? <Notice tone="info" title={t("hb.past.title")}>{t("hb.past.hint")}</Notice> : null;
+  // A past range: the agents' buffers and the Hubble UI sample are "now" only — the exporter's drops in Loki are kept
+  // for days, so that span's dropped flows are shown (the views below stay now, said in the note)
+  const dropFit = control && control.range.to != null ? fitWindow(control.range, LOKI_DROP_WINDOWS) : null;
+  const pastNote = control && dropFit ? (
+    <>
+      <Notice tone="info" title={t("hb.past.title")}>{t("hb.past.hintLoki")}{dropFit.differs ? ` ${t("hb.past.window", { w: t(`ob.hm.window.${dropFit.value}`) })}` : ""}</Notice>
+      <LokiDrops clusterId={clusterId} fmt={(v) => (v === null ? "—" : v.toLocaleString())} control={{ window: dropFit.value, at: atParam(control.range), nonce: control.nonce, report: control.report }} />
+    </>
+  ) : null;
 
   if (sources.error) return <ErrorNotice error={sources.error} />;
   if (!src) return <LoadingState label={t("hb.src.checking")} />;
