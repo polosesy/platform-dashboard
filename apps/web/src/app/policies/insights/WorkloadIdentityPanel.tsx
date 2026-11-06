@@ -17,6 +17,12 @@ import { chainOf, ficGauge, layoutWi, namespaceCoverage, nodeSeverity, poolOfNod
 import styles from "./insights.module.css";
 
 type View = "graph" | "table";
+/** Connection file (admin): Graph reads for service principals — after granting Application.Read.All (admin consent) */
+const GRAPH_ENABLE = `{ "key": "<connection>", "...": "...",
+  "entra": { "readApplications": true } }
+# the connection's app (or the platform identity): Microsoft Graph application permission
+#   Application.Read.All — admin consent in that tenant (read only: names, types, credential dates, federated credentials)`;
+
 const SEV_TONE: Record<WiSeverity, "crit" | "warn" | "ok" | "unk"> = { crit: "crit", warn: "warn", low: "unk", info: "unk" };
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
@@ -109,7 +115,8 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
   const counts = (["crit", "warn", "low", "info"] as WiSeverity[]).map((s) => [s, data.findings.filter((f) => f.sev === s).length] as const);
   const findings = data.findings.filter((f) => showSystem || !f.refs.some((r) => data.serviceAccounts.find((s) => s.id === r)?.managed));
 
-  const label = (id: string): { kind: WiKind; title: string; sub: string; extra?: string } | null => {
+  // "sp" = an identity node that is a service principal (same column, its own facts)
+  const label = (id: string): { kind: WiKind | "sp"; title: string; sub: string; extra?: string } | null => {
     const w = data.workloads.find((x) => x.id === id);
     if (w) return { kind: "workload", title: w.name, sub: `${w.namespace} · ${w.kind} · ${t("wi.pods", { n: w.pods })}`, extra: !w.useLabel ? t("wi.useLabel.missing") : w.injected === "no" ? t("wi.injected.no") : undefined };
     const s = data.serviceAccounts.find((x) => x.id === id);
@@ -123,7 +130,23 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
     const f = data.fics.find((x) => x.id === id);
     if (f) return { kind: "fic", title: f.name, sub: f.dangling ? t("wi.dangling") : f.subject.replace("system:serviceaccount:", "sa:"), extra: f.issuerMatch !== "exact" ? t(`wi.match.${f.issuerMatch}`) : f.subjectMatch && f.subjectMatch !== "exact" && f.subjectMatch !== "other" ? t(`wi.match.${f.subjectMatch}`) : !f.audienceOk ? t("wi.audience.off") : undefined };
     const i = data.identities.find((x) => x.id === id);
-    if (i) return { kind: "identity", title: i.kind === "unresolved" ? t("wi.unresolved") : i.name ?? i.clientIdTail, sub: i.kind === "unresolved" ? `client-id ${i.clientIdTail}` : `${i.resourceGroup} · ${i.location}` };
+    if (i) {
+      if (i.kind === "unresolved") return { kind: "identity", title: t("wi.unresolved"), sub: `client-id ${i.clientIdTail}`, extra: i.unresolvedReason ? t(`wi.unresolvedReason.${i.unresolvedReason}`) : undefined };
+      if (i.kind === "servicePrincipal") {
+        const c = i.sp?.credentials;
+        const perms = i.sp?.apiPermissions;
+        return {
+          kind: "sp", title: i.name ?? i.clientIdTail,
+          sub: `${t("wi.sp.tag")} · client-id ${i.clientIdTail}${i.sp?.owner === "otherTenant" ? ` · ${t("wi.sp.otherTenant")}` : ""}`,
+          extra: [
+            c ? t("wi.sp.credShort", { s: c.secrets, c: c.certificates }) : null,
+            perms ? t("wi.sp.permsShort", { n: perms.length }) : null,
+            i.sp?.enabled === false ? t("wi.sp.disabled") : null,
+          ].filter(Boolean).join(" · ") || undefined,
+        };
+      }
+      return { kind: "identity", title: i.name ?? i.clientIdTail, sub: i.outsideConnections ? `${i.resourceGroup ?? "-"} · ${t("wi.outside")}` : `${i.resourceGroup} · ${i.location}` };
+    }
     for (const idn of data.identities) {
       const ra = idn.roles.find((x) => x.id === id);
       if (ra) return { kind: "role", title: ra.roleName, sub: `${t(`wi.scope.${ra.scope.level}`)} · ${ra.scope.label}`, extra: ra.usage?.state === "unused" ? t("wi.usage.unusedShort", { days: ra.usage.days }) : ra.privileged ? t("wi.privileged") : undefined };
@@ -172,15 +195,38 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
         { k: "audience", v: f.audiences.join(", ") || "-", mono: true, ev: "cfg" },
         { k: t("wi.f.sa"), v: f.dangling === null ? t("wi.unknown") : f.dangling ? t("wi.dangling") : f.saId?.replace("sa:", "") ?? "-", ev: f.dangling === null ? "unk" : "cfg" });
       sections.push({ h: t("wi.sec.facts"), rows }, { h: t("wi.sec.rule"), body: <p className={styles.wiNote}>{t("wi.matchRule")}</p> });
+    } else if (lb.kind === "sp") {
+      const i = data.identities.find((x) => x.id === id)!;
+      const sp = i.sp;
+      const g = ficGauge(i.fic.count, i.fic.limit);
+      const c = sp?.credentials;
+      rows.push({ k: t("wi.f.kind"), v: t("wi.sp.kind"), ev: "cfg" },
+        { k: t("wi.sp.owner"), v: sp ? t(`wi.sp.owner.${sp.owner}`) : t("wi.unknown") },
+        { k: t("wi.sp.enabled"), v: sp?.enabled == null ? t("wi.unknown") : sp.enabled ? t("wi.yes") : t("wi.no") },
+        { k: "client-id", v: i.clientIdTail, mono: true },
+        { k: t("wi.gauge.label"), v: i.fic.status === "ok" ? g.text : t(sp?.owner === "otherTenant" ? "wi.sp.ficOther" : `wi.ficStatus.${i.fic.status}`), ev: i.fic.status === "ok" ? "cfg" : "unk" },
+        { k: t("wi.sp.credentials"), v: c ? t("wi.sp.credLong", { s: c.secrets, c: c.certificates, x: c.expired, next: c.nextExpiry ? new Date(c.nextExpiry).toLocaleDateString(dateLocale(locale)) : "-" }) : t(sp?.owner === "otherTenant" ? "wi.sp.credOther" : "wi.sp.credUnread"), ev: c ? "cfg" : "unk" },
+        { k: t("wi.sp.azureRoles"), v: i.rolesStatus === "ok" ? String(i.roles.length) : t("wi.unknown"), ev: i.rolesStatus === "ok" ? "perm" : "unk" });
+      sections.push({ h: t("wi.sec.facts"), rows });
+      sections.push({
+        h: t("wi.sp.apiPermissions"),
+        rows: sp?.apiPermissions == null ? [{ k: "", v: t("wi.sp.permsUnread"), ev: "unk" as const }]
+          : sp.apiPermissions.length ? sp.apiPermissions.map((x) => ({ k: x.api, v: `${x.permission}${x.privileged ? ` — ${t("wi.privileged")}` : ""}`, ev: "perm" as const }))
+          : [{ k: "", v: t("wi.sp.permsNone") }],
+      });
+      if (i.rolesStatus === "ok" && !i.roles.length && sp?.apiPermissions?.length === 0) sections.push({ h: t("wi.sec.note"), body: <p className={styles.wiNote}>{t("wi.sp.noPermsNote")}</p> });
+      sections.push({ h: t("wi.sec.check"), body: <CopyCode code={"az ad sp show --id <app-id> --query \"{name:displayName, type:servicePrincipalType}\"\naz ad app credential list --id <app-id>\naz ad app federated-credential list --id <app-id>"} /> });
     } else if (lb.kind === "identity") {
       const i = data.identities.find((x) => x.id === id)!;
       if (i.kind === "unresolved") {
         sections.push({ h: t("wi.sec.facts"), rows: [{ k: "client-id", v: i.clientIdTail, mono: true, ev: "unk" }] },
-          { h: t("wi.sec.why"), body: <p className={styles.wiNote}>{t("wi.unresolved.why")} {t("wi.systemAssigned")}</p> });
+          { h: t("wi.sec.why"), body: <p className={styles.wiNote}>{i.unresolvedReason ? `${t(`wi.unresolvedReason.${i.unresolvedReason}`)} ` : ""}{i.unresolvedReason === "graphOff" || i.unresolvedReason === "graphFailed" ? t("wi.sp.enableHint") : t("wi.unresolved.why")} {t("wi.systemAssigned")}</p> });
+        if (i.unresolvedReason === "graphOff") sections.push({ h: t("wi.sp.enableTitle"), body: <CopyCode code={GRAPH_ENABLE} /> });
       } else {
         const g = ficGauge(i.fic.count, i.fic.limit);
         rows.push({ k: t("wi.f.rg"), v: i.resourceGroup ?? "-" }, { k: t("wi.f.subscription"), v: i.subscription ?? t("wi.unknown") }, { k: t("wi.f.location"), v: i.location ?? "-" },
           { k: "client-id", v: i.clientIdTail, mono: true }, { k: t("wi.gauge.label"), v: g.text, ev: i.fic.status === "ok" ? "cfg" : "unk" });
+        if (i.outsideConnections) rows.push({ k: t("wi.f.subscription"), v: t("wi.outsideHint"), ev: "unk" });
         if (i.fic.otherIssuers) rows.push({ k: t("wi.f.otherIssuers"), v: String(i.fic.otherIssuers) });
         if (i.pools?.length) rows.push({ k: t("wi.f.pools"), v: i.pools.map((p) => p.slice("pool:".length)).join(", "), ev: "cfg" });
         if (i.fic.status !== "ok") rows.push({ k: t("wi.f.ficStatus"), v: t(`wi.ficStatus.${i.fic.status}`), ev: "unk" });
@@ -279,7 +325,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                         <td>{data.workloads.filter((w) => w.saId === s.id).map((w) => w.name).join(", ") || "-"}</td>
                         <td><button type="button" className={styles.linkish} onClick={() => pick(s.id)}>{s.namespace}/{s.name}</button></td>
                         <td>{s.ficIds.length ? s.ficIds.map((f) => data.fics.find((x) => x.id === f)?.name).join(", ") : <span className={styles.wiMuted}>{s.identityId ? t("wi.noFic") : "-"}</span>}</td>
-                        <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.kind === "unresolved" ? t("wi.unresolved") : idn.name} {idn.kind === "userAssigned" ? `(${ficGauge(idn.fic.count).text})` : ""}</button> : "-"}</td>
+                        <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.kind === "unresolved" ? t("wi.unresolved") : idn.name}{idn.kind === "servicePrincipal" ? ` · ${t("wi.sp.tag")}` : ""} {idn.kind !== "unresolved" && idn.fic.status === "ok" ? `(${ficGauge(idn.fic.count).text})` : ""}</button> : "-"}</td>
                         <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}${r.usage?.state === "unused" ? ` (${t("wi.usage.unusedShort", { days: r.usage.days })})` : ""}`).join(" · ") || "-"}</td>
                       </tr>
                     );
@@ -311,7 +357,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                   const p = layout.nodes.get(n.id)!;
                   const lb = label(n.id)!;
                   const idn = n.kind === "identity" ? data.identities.find((x) => x.id === n.id) : undefined;
-                  const g = idn && idn.kind === "userAssigned" ? ficGauge(idn.fic.count, idn.fic.limit) : null;
+                  const g = idn && idn.kind !== "unresolved" && idn.fic.status === "ok" ? ficGauge(idn.fic.count, idn.fic.limit) : null;
                   const s = sev.get(n.id);
                   return (
                     <div key={n.id} role="button" tabIndex={0} aria-pressed={sel === n.id}

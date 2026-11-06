@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import type {
-  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiImds, WiK8sBinding, WiMatch, WiNodePool, WiOtherWorkload, WiRoleAssignment, WiRoleUsage,
+  RbacRiskKey, WiFic, WiFinding, WiIdentity, WiImds, WiServicePrincipal, WiK8sBinding, WiMatch, WiNodePool, WiOtherWorkload, WiRoleAssignment, WiRoleUsage,
   WiRuleId, WiScope, WiScopeLevel, WiServiceAccount, WiSeverity, WiWorkload, WorkloadIdentityResponse, EvidenceKind,
 } from "@aud/types";
 import type { PolicyInventory } from "./policyAnalyzer.js";
@@ -70,6 +70,7 @@ export const WI_RULE_DOCS: Record<WiRuleId, { url: string; quote: string }> = {
   "WI-16": { url: DOC.aksOverview, quote: "If you update the service account annotations, you must restart the pod for the changes to take effect." },
   "WI-17": { url: DOC.imds, quote: "The IMDS REST API is available at a well-known, nonroutable IP address (169.254.169.254) that is by default accessible from all pods running in an AKS cluster." },
   "WI-18": { url: DOC.rbacBest, quote: "By limiting roles and scopes, you limit what resources are at risk if the security principal is ever compromised." },
+  "WI-19": { url: DOC.federation, quote: "These credentials pose a security risk and have to be stored securely and rotated regularly. You also run the risk of service downtime if the credentials expire." },
 };
 
 // ── Granted vs used (WI-18): data-plane roles whose use the resource's own access log records ──
@@ -154,7 +155,17 @@ export type InvServiceAccount = { namespace: string; name: string; annotations: 
 export type InvIdentity = {
   armId: string; name: string; resourceGroup: string; subscriptionId: string; location: string;
   clientId: string; principalId: string; tenantId: string; scanned: "annotated" | "subscriptionScan" | "nodePool";
+  /**
+   * servicePrincipal = an app registration found through Graph (armId = "sp:<client id>", a key only) — absent =
+   * a user-assigned managed identity
+   */
+  kind?: "servicePrincipal";
+  sp?: WiServicePrincipal;
+  /** A managed identity found only through Graph (its subscription is not read by any connection) */
+  outsideConnections?: boolean;
 };
+/** The Graph lookup of client IDs no visible managed identity has; `notFound` = asked, no service principal in the tenant */
+export type InvGraph = { state: "ok" | "off" | "forbidden" | "error" | "delegated" | "notNeeded"; notFound: Set<string> };
 export type InvFicList = { status: "ok" | "forbidden" | "throttled" | "error"; items: Array<{ name: string; issuer: string; subject: string; audiences: string[] }> };
 /** A node pool's scale set (Resource Graph): the pool name (tag aks-managed-poolName) and its user-assigned identity ARM IDs */
 export type InvNodePool = { pool: string; identityArmIds: string[] };
@@ -182,6 +193,8 @@ export type WiInput = {
   imds?: { podAccess: WiImds["podAccess"]; restrictionBlockedBy: string[]; pools: WiImds["pools"]; nodeResourceGroup: string | null };
   /** Granted vs used per role assignment (usageKey); absent/null = not checked */
   roleUsage?: Map<string, WiRoleUsage> | null;
+  /** Absent = not asked (older callers): unresolved client IDs keep the old reasons */
+  graph?: InvGraph;
   now?: Date;
 };
 
@@ -444,11 +457,16 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       ficLinks.push({ fic, saKey: dangling ? null : saKey });
       if (saKey && !dangling) saKeys.add(saKey);
     }
+    const isSp = i.kind === "servicePrincipal";
     identityNodes.set(id, {
-      id, kind: "userAssigned", name: maskGuids(i.name), resourceGroup: i.resourceGroup,
+      id, kind: isSp ? "servicePrincipal" : "userAssigned", name: maskGuids(i.name),
+      ...(i.resourceGroup ? { resourceGroup: i.resourceGroup } : {}),
       ...(input.subNames.get(i.subscriptionId.toLowerCase()) ? { subscription: input.subNames.get(i.subscriptionId.toLowerCase())! } : {}),
-      location: i.location, clientIdTail: tail(i.clientId), ...(isGuid(i.tenantId) ? { tenantIdTail: tail(i.tenantId) } : {}),
-      fic: { status, count: status === "ok" ? items.length : null, limit: FIC_LIMIT, ids, otherIssuers, regionUnsupported: FIC_UNSUPPORTED_REGIONS.includes(i.location.toLowerCase()) },
+      ...(i.location ? { location: i.location } : {}),
+      clientIdTail: tail(i.clientId), ...(isGuid(i.tenantId) ? { tenantIdTail: tail(i.tenantId) } : {}),
+      ...(i.sp ? { sp: i.sp } : {}), ...(i.outsideConnections ? { outsideConnections: true } : {}),
+      // Region support is a managed-identity limit; an app registration's credentials are global
+      fic: { status, count: status === "ok" ? items.length : null, limit: FIC_LIMIT, ids, otherIssuers, regionUnsupported: !isSp && FIC_UNSUPPORTED_REGIONS.includes(i.location.toLowerCase()) },
       roles: [], rolesStatus: input.roleAssignments ? "ok" : "notListed", scanned: i.scanned,
       ...(poolsByIdentity.get(i.armId.toLowerCase())?.length ? { pools: poolsByIdentity.get(i.armId.toLowerCase())! } : {}),
     });
@@ -463,12 +481,18 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
     const ident = client ? idByClient.get(client.id) : undefined;
     let identityId: string | null = ident ? identityIdOf(ident) : null;
     if (client && !ident) {
-      // Not a managed identity we can see: an app registration, or one in an unconnected subscription — not told apart
+      // Not a managed identity we can see and Graph didn't name it: an app registration, or one in an unconnected
+      // subscription — not told apart
       identityId = opaqueId("mu", client.id);
       if (!identityNodes.has(identityId)) {
+        const g = input.graph;
         identityNodes.set(identityId, {
           id: identityId, kind: "unresolved", clientIdTail: tail(client.id),
-          unresolvedReason: input.identityLookup === "failed" ? "lookupFailed" : "notFoundInConnectedSubscriptions",
+          unresolvedReason: input.identityLookup === "failed" ? "lookupFailed"
+            : !g || g.state === "notNeeded" ? "notFoundInConnectedSubscriptions"
+            : g.state === "off" ? "graphOff"
+            : g.state === "ok" ? (g.notFound.has(client.id) ? "notInTenant" : "notFoundInConnectedSubscriptions")
+            : "graphFailed",
           fic: { status: "notListed", count: null, limit: FIC_LIMIT, ids: [], otherIssuers: 0, regionUnsupported: false },
           roles: [], rolesStatus: "notListed", scanned: "annotated",
         });
@@ -536,14 +560,15 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
           L("필요한 Actions·DataActions를 명시하세요.", "List the Actions and DataActions explicitly."));
       }
     }
-    if (idn.kind !== "userAssigned") continue;
+    if (idn.kind === "unresolved") continue;
+    const what = idn.kind === "servicePrincipal" ? L("SP", "Service principal") : L("관리 ID", "Managed identity");
     const n = idn.fic.count;
     if (n !== null && n >= FIC_LIMIT) {
-      add("WI-01", "warn", "cfg", idn.id, [idn.id], L(`관리 ID ${idn.name}의 페더레이션 자격 증명 ${n}/${FIC_LIMIT} — 한도`, `Managed identity ${idn.name} has ${n}/${FIC_LIMIT} federated credentials — at the limit`),
+      add("WI-01", "warn", "cfg", idn.id, [idn.id], L(`${what} ${idn.name}의 페더레이션 자격 증명 ${n}/${FIC_LIMIT} — 한도`, `${what} ${idn.name} has ${n}/${FIC_LIMIT} federated credentials — at the limit`),
         L("더 이상 클러스터·서비스 계정을 추가할 수 없습니다.", "No more clusters or service accounts can be added."),
         L("쓰지 않는 자격 증명(SA 없음)을 지우거나 워크로드별로 관리 ID를 나누세요 (또는 AKS identity binding).", "Delete unused credentials (no SA) or split identities per workload (or AKS identity bindings)."));
     } else if (n !== null && n >= FIC_NEAR) {
-      add("WI-02", "info", "cfg", idn.id, [idn.id], L(`관리 ID ${idn.name}의 페더레이션 자격 증명 ${n}/${FIC_LIMIT} — 한도에 가까움 (대시보드 기준 ${FIC_NEAR})`, `Managed identity ${idn.name} has ${n}/${FIC_LIMIT} federated credentials — near the limit (dashboard threshold ${FIC_NEAR})`),
+      add("WI-02", "info", "cfg", idn.id, [idn.id], L(`${what} ${idn.name}의 페더레이션 자격 증명 ${n}/${FIC_LIMIT} — 한도에 가까움 (대시보드 기준 ${FIC_NEAR})`, `${what} ${idn.name} has ${n}/${FIC_LIMIT} federated credentials — near the limit (dashboard threshold ${FIC_NEAR})`),
         L("한도 20개는 관리 ID마다 적용됩니다.", "The limit of 20 applies per managed identity."),
         L("새 클러스터를 붙이기 전에 정리 계획을 세우세요.", "Plan a clean-up before adding more clusters."));
     }
@@ -557,9 +582,27 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
     if (fedSas.length > 1 || idn.fic.otherIssuers > 0) {
       const priv = worstRole.get(idn.id);
       add("WI-10", priv === "crit" || priv === "warn" ? "warn" : "info", "cfg", `${idn.id}:shared`, [idn.id, ...fedSas.map((s) => s.id)],
-        L(`관리 ID ${idn.name}를 서비스 계정 ${fedSas.length}개(네임스페이스 ${nsCount}개)${idn.fic.otherIssuers ? `·다른 발급자 ${idn.fic.otherIssuers}개` : ""}가 함께 씀`, `Managed identity ${idn.name} is shared by ${fedSas.length} service accounts (${nsCount} namespaces)${idn.fic.otherIssuers ? ` and ${idn.fic.otherIssuers} other issuers` : ""}`),
+        L(`${what} ${idn.name}를 서비스 계정 ${fedSas.length}개(네임스페이스 ${nsCount}개)${idn.fic.otherIssuers ? `·다른 발급자 ${idn.fic.otherIssuers}개` : ""}가 함께 씀`, `${what} ${idn.name} is shared by ${fedSas.length} service accounts (${nsCount} namespaces)${idn.fic.otherIssuers ? ` and ${idn.fic.otherIssuers} other issuers` : ""}`),
         L("지원되는 구성(다대일)이지만, 이 ID에 주는 권한은 모두에게 함께 주어집니다.", "Supported (many-to-one), but any role given to this identity is given to all of them."),
         L("필요한 권한이 다르면 워크로드별 관리 ID로 나누세요.", "Split identities per workload when they need different permissions."));
+    }
+    // WI-19 — an app registration that workloads sign in to by federation (no secret needed) still holds secrets or
+    // certificates; expired ones are only clutter. Another tenant's app: its credentials can't be read (no finding)
+    const cred = idn.sp?.credentials;
+    if (idn.kind === "servicePrincipal" && cred) {
+      const live = cred.secrets + cred.certificates - cred.expired;
+      if (fedSas.length && live > 0) {
+        add("WI-19", "warn", "cfg", `${idn.id}:creds`, [idn.id, ...fedSas.map((s) => s.id)],
+          L(`SP ${idn.name} — 워크로드 ID로 로그인하는데 비밀 ${cred.secrets}·인증서 ${cred.certificates}개가 남아 있음`, `Service principal ${idn.name} — signs in by workload identity but still holds ${cred.secrets} secret(s) and ${cred.certificates} certificate(s)`),
+          L(`서비스 계정 ${fedSas.length}개가 페더레이션 자격 증명으로 로그인합니다 — 비밀은 필요 없습니다. 남은 비밀이 새어 나가면 클러스터 밖에서도 이 SP로 로그인됩니다${cred.nextExpiry ? ` (가장 가까운 만료 ${cred.nextExpiry.slice(0, 10)})` : ""}.`, `${fedSas.length} service account(s) sign in through federated credentials — no secret is needed. A leaked secret signs in as this service principal from anywhere${cred.nextExpiry ? ` (next expiry ${cred.nextExpiry.slice(0, 10)})` : ""}.`),
+          L("다른 곳(CI·스크립트)이 비밀을 쓰지 않는지 확인한 뒤 앱 등록에서 비밀·인증서를 지우세요.", "Check nothing else (CI, scripts) uses them, then remove the secrets and certificates from the app registration."),
+          "az ad app credential list --id <app-id>   # then: az ad app credential delete --id <app-id> --key-id <key-id>");
+      } else if (cred.expired > 0) {
+        add("WI-19", "info", "cfg", `${idn.id}:expired`, [idn.id],
+          L(`SP ${idn.name} — 만료된 비밀·인증서 ${cred.expired}개`, `Service principal ${idn.name} — ${cred.expired} expired secret(s) or certificate(s)`),
+          L("만료된 자격 증명은 로그인에 쓰이지 않지만 목록에 남아 무엇이 쓰이는지 헷갈리게 합니다.", "Expired credentials sign nothing in, but they stay listed and blur what is in use."),
+          L("만료된 항목을 지우세요.", "Remove the expired entries."), "az ad app credential list --id <app-id>");
+      }
     }
   }
 
@@ -569,7 +612,9 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       add("WI-05", "warn", "cfg", f.id, [f.id, idn.id], L(`${f.subject} — 이 클러스터를 신뢰하지만 서비스 계정이 없음`, `${f.subject} trusts this cluster but the service account doesn't exist`),
         L("그 이름의 SA를 만들 수 있는 주체는 이 Azure ID를 얻습니다 (누가 만들 수 있는지는 미확인).", "Whoever can create a service account with that name gets this Azure identity (who can is not checked)."),
         L("쓰지 않는 자격 증명이면 지우세요.", "Delete it if it is unused."),
-        `az identity federated-credential delete --identity-name ${idn.name ?? "<identity>"} --resource-group ${idn.resourceGroup ?? "<rg>"} --name ${f.name}`);
+        idn.kind === "servicePrincipal"
+          ? `az ad app federated-credential delete --id <app-id> --federated-credential-id ${f.name}`
+          : `az identity federated-credential delete --identity-name ${idn.name ?? "<identity>"} --resource-group ${idn.resourceGroup ?? "<rg>"} --name ${f.name}`);
     }
     if (near(f.issuerMatch) || (f.issuerMatch === "exact" && near(f.subjectMatch))) {
       const what = near(f.issuerMatch) ? f.issuerMatch : f.subjectMatch!;
@@ -588,13 +633,15 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
   for (const s of sas) {
     const idn = s.identityId ? identityNodes.get(s.identityId) : undefined;
     const annotated = s.clientIdSource === "annotation";
-    if (annotated && idn?.kind === "userAssigned" && idn.fic.status === "ok" && !s.ficIds.length) {
+    if (annotated && (idn?.kind === "userAssigned" || idn?.kind === "servicePrincipal") && idn.fic.status === "ok" && !s.ficIds.length) {
       const nearOne = ficsOut.some((f) => f.identityId === idn.id && (near(f.issuerMatch) || near(f.subjectMatch)));
       if (!nearOne && issuer) {
         add("WI-03", "warn", "cfg", s.id, [s.id, idn.id], L(`${s.namespace}/${s.name} — 관리 ID ${idn.name}에 이 클러스터·이 SA의 페더레이션 자격 증명이 없음`, `${s.namespace}/${s.name} — ${idn.name} has no federated credential for this cluster and service account`),
           L("파드가 토큰을 교환할 때 실패합니다 (AADSTS70021). identity binding을 쓰면 해당 없음(미수집).", "Token exchange fails for these pods (AADSTS70021). Not applicable with identity bindings (not collected)."),
           L("아래 명령으로 만드세요 (생성 후 몇 초~몇 분은 실패할 수 있음).", "Create it with the command below (it can fail for a few seconds to minutes after creation)."),
-          `az identity federated-credential create --name ${s.namespace}-${s.name} --identity-name ${idn.name} --resource-group ${idn.resourceGroup} --issuer "<cluster OIDC issuer>" --subject ${ficSubject(s.namespace, s.name)} --audience ${WI_AUDIENCE}`);
+          idn.kind === "servicePrincipal"
+            ? `az ad app federated-credential create --id <app-id> --parameters '{"name":"${s.namespace}-${s.name}","issuer":"<cluster OIDC issuer>","subject":"${ficSubject(s.namespace, s.name)}","audiences":["${WI_AUDIENCE}"]}'`
+            : `az identity federated-credential create --name ${s.namespace}-${s.name} --identity-name ${idn.name} --resource-group ${idn.resourceGroup} --issuer "<cluster OIDC issuer>" --subject ${ficSubject(s.namespace, s.name)} --audience ${WI_AUDIENCE}`);
       }
     }
     if (annotated && clusterOff) {
@@ -757,7 +804,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
   }
 
   findings.sort((a, b) => SEV_RANK[a.sev] - SEV_RANK[b.sev] || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.id < b.id ? -1 : 1));
-  const resolved = identities.filter((i) => i.kind === "userAssigned");
+  const resolved = identities.filter((i) => i.kind !== "unresolved");
   return {
     clusterId: input.clusterId,
     generatedAt: (input.now ?? new Date()).toISOString(),
@@ -780,6 +827,7 @@ export function buildWorkloadIdentityMap(input: WiInput): WorkloadIdentityRespon
       pimEligibleIncluded: false,
       identityBindings: "notCollected",
       subscriptionScan: input.scan,
+      graph: input.graph?.state ?? "notNeeded",
     },
     gaps: input.gaps,
   };

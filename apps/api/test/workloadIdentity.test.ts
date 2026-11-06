@@ -361,3 +361,80 @@ test("WI-18 in the map: usage on the role, a finding only for 'unused' data role
   assert.ok(none.identities.every((x) => x.roles.every((ra) => ra.usage === undefined)));
   assert.equal(none.findings.filter((x) => x.rule === "WI-18").length, 0);
 });
+
+// ── Service principals (Microsoft Graph, opt-in) ──
+import { PRIVILEGED_API_PERMISSION, credentialFacts, managedIdentityArmId } from "../src/services/workloadIdentityCollector.js";
+
+const PRINC_X = "ffffffff-0000-0000-0000-00000000000f";
+const spIdent = (sp: NonNullable<InvIdentity["sp"]>): InvIdentity => ({
+  armId: `sp:${CLIENT_X}`, name: "app-ops-sync", resourceGroup: "", subscriptionId: "", location: "", clientId: CLIENT_X, principalId: PRINC_X,
+  tenantId: TENANT, scanned: "annotated", kind: "servicePrincipal", sp,
+});
+const spFacts = (over: Partial<NonNullable<InvIdentity["sp"]>> = {}): NonNullable<InvIdentity["sp"]> => ({
+  owner: "thisTenant", enabled: true,
+  apiPermissions: [{ api: "Microsoft Graph", permission: "Directory.Read.All", privileged: true }],
+  credentials: { secrets: 1, certificates: 0, expired: 0, nextExpiry: "2027-06-10T00:00:00.000Z" }, ...over,
+});
+function spInput(sp = spFacts(), ficItems = [fic("ops", "system:serviceaccount:ops:ops-sa")]): WiInput {
+  const base = input();
+  base.identities.push(spIdent(sp));
+  base.fics.set(`sp:${CLIENT_X}`, { status: "ok", items: ficItems });
+  base.roleAssignments!.push({ principalId: PRINC_X, roleDefGuid: "acdd72a7-3385-48ef-bd42-f606fba81ae7", roleName: "Reader", roleType: "BuiltInRole", scope: `/subscriptions/${SUB}/resourceGroups/rg-ops`, hasCondition: false, actions: [] });
+  base.graph = { state: "ok", notFound: new Set() };
+  return base;
+}
+
+test("service principal: in the identity column with its Azure roles, API permissions, credentials and federated credential", () => {
+  const r = buildWorkloadIdentityMap(spInput());
+  const sp = r.identities.find((i) => i.kind === "servicePrincipal")!;
+  assert.equal(sp.name, "app-ops-sync");
+  assert.equal(sp.clientIdTail, `…${CLIENT_X.slice(-4)}`);
+  assert.equal(sp.roles.length, 1);
+  assert.equal(sp.roles[0]!.roleName, "Reader");
+  assert.equal(sp.sp?.apiPermissions?.[0]?.privileged, true);
+  assert.equal(sp.fic.status, "ok");
+  assert.equal(sp.fic.regionUnsupported, false, "an app registration has no region limit");
+  const opsSa = r.serviceAccounts.find((s) => s.name === "ops-sa")!;
+  assert.equal(opsSa.identityId, sp.id);
+  assert.equal(opsSa.ficIds.length, 1);
+  assert.equal(r.coverage.identitiesUnresolved, 0);
+  assert.equal(r.coverage.graph, "ok");
+  // WI-19: signs in by federation, yet a secret is still there
+  const f = r.findings.find((x) => x.rule === "WI-19")!;
+  assert.equal(f.sev, "warn");
+  assert.match(f.docQuote, /rotated regularly/);
+  // No object ID, no full client ID, no ARM-ish key in the response
+  const json = JSON.stringify(r);
+  assert.ok(!json.includes(PRINC_X) && !json.includes(CLIENT_X) && !json.includes(`sp:${CLIENT_X}`));
+});
+
+test("service principal: only expired credentials = informational · no federated credential = WI-03 with the app command", () => {
+  const expired = buildWorkloadIdentityMap(spInput(spFacts({ credentials: { secrets: 1, certificates: 0, expired: 1, nextExpiry: null } })));
+  assert.equal(expired.findings.find((x) => x.rule === "WI-19")?.sev, "info");
+  const noFic = buildWorkloadIdentityMap(spInput(spFacts(), []));
+  const w3 = noFic.findings.find((x) => x.rule === "WI-03" && x.refs.some((id) => id.includes("ops-sa")))!;
+  assert.match(w3.code ?? "", /az ad app federated-credential create --id <app-id>/);
+  // another tenant's app: its credentials aren't read → no WI-19
+  const other = buildWorkloadIdentityMap(spInput(spFacts({ owner: "otherTenant", credentials: null })));
+  assert.equal(other.findings.some((x) => x.rule === "WI-19"), false);
+});
+
+test("unresolved client IDs say why: Graph off · not in the tenant · Graph failed · not asked", () => {
+  const reason = (graph: WiInput["graph"]) => buildWorkloadIdentityMap(input({ graph })).identities.find((i) => i.kind === "unresolved")?.unresolvedReason;
+  assert.equal(reason({ state: "off", notFound: new Set() }), "graphOff");
+  assert.equal(reason({ state: "ok", notFound: new Set([CLIENT_X]) }), "notInTenant");
+  assert.equal(reason({ state: "forbidden", notFound: new Set() }), "graphFailed");
+  assert.equal(reason(undefined), "notFoundInConnectedSubscriptions");
+  assert.equal(buildWorkloadIdentityMap(input()).coverage.graph, "notNeeded");
+});
+
+test("Graph helpers: credential counts and expiry · a managed identity's ARM ID · privileged permissions", () => {
+  const now = new Date("2026-11-06T00:00:00Z");
+  assert.deepEqual(credentialFacts([{ endDateTime: "2027-06-10T00:00:00Z" }, { endDateTime: "2025-01-01T00:00:00Z" }], [{ endDateTime: "2026-12-01T00:00:00Z" }], now),
+    { secrets: 2, certificates: 1, expired: 1, nextExpiry: "2026-12-01T00:00:00.000Z" });
+  assert.equal(managedIdentityArmId(["isExplicit=True", UAMI_A]), UAMI_A);
+  assert.equal(managedIdentityArmId(["isExplicit=False"]), null);
+  for (const p of ["Directory.Read.All", "Mail.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All", "full_access_as_app"]) assert.ok(PRIVILEGED_API_PERMISSION.test(p), p);
+  for (const p of ["User.Read.All", "Mail.Send.Shared", "Sites.Selected"]) assert.ok(!PRIVILEGED_API_PERMISSION.test(p), p);
+  assert.ok(WI_RULE_DOCS["WI-19"].url.startsWith("https://learn.microsoft.com/"));
+});

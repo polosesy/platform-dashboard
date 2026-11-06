@@ -68,6 +68,13 @@ const ConnectionSchema = z.object({
   /** Log Analytics workspaces (customer id GUIDs) read through this connection */
   logAnalyticsWorkspaces: z.array(GUID).default([]),
   /**
+   * Microsoft Graph reads with this connection's identity (opt-in — the tenant admin grants the application
+   * permission first): readApplications = service principals and app registrations a cluster's workloads sign in as
+   * (Application.Read.All — display name, type, credential counts and expiry dates, federated credentials, API
+   * permissions; never a secret value). Lighthouse and delegated connections can't (no Graph token for the tenant).
+   */
+  entra: z.object({ readApplications: z.boolean().optional() }).strict().optional(),
+  /**
    * Who owns what — the team on 통합 위험 issues (and its filter). The first rule that matches wins; namespace rules
    * before resource-group rules. Patterns: an exact name (case-insensitive) or a prefix ending in `*`. Team names
    * only (no people, no ids — nothing is looked up in a directory).

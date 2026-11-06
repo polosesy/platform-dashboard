@@ -15,6 +15,8 @@ import { accessibleConnections, callerOf, canUse, connectionForbidden } from "./
 const ARM_SCOPE = "https://management.azure.com/.default";
 const LOG_ANALYTICS_SCOPE = "https://api.loganalytics.io/.default";
 const PROMETHEUS_SCOPE = "https://prometheus.monitor.azure.com/.default";
+const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 /** Default request timeout for Azure ARM / Log Analytics calls (ms).
  *  Resource Health availability statuses can be slow (15s+), so we
@@ -201,6 +203,28 @@ function userLogFetcher(env: Env, bearerToken: string): LogAnalyticsFetcher {
 function userPrometheusFetcher(env: Env, bearerToken: string, clusterArmId?: string): PrometheusFetcher {
   const connection = clusterArmId ? connectionFor(env, subscriptionInPath(clusterArmId)) : homeConnection(env);
   return buildPrometheusFetcher(() => connectionToken(env, bearerToken, connection, PROMETHEUS_SCOPE));
+}
+
+export type GraphFetcher = { get<T>(path: string, timeoutMs?: number): Promise<T> };
+/**
+ * Microsoft Graph (read only) with a cluster's connection identity — only for a connection that opted in
+ * (`entra.readApplications`) and holds its own app-only identity: platform / servicePrincipal. Lighthouse delegates
+ * ARM only and delegated would need a second consent, so those answer 501. Paths are relative to /v1.0 (no host —
+ * nothing else is reachable through it).
+ */
+export function getGraphFetcher(env: Env, bearerToken: string | undefined, clusterArmId: string): GraphFetcher {
+  if (!bearerToken) throw signinRequiredError();
+  const connection = connectionFor(env, subscriptionInPath(clusterArmId));
+  if (!connection.entra?.readApplications) throw new HttpError(501, "graph_not_enabled", "Graph reads are not enabled for this connection");
+  const group = credentialGroup(env, connection);
+  if (group === "delegated" || connection.mode === "lighthouse") throw new HttpError(501, "graph_unsupported_mode", "This connection mode has no app-only Graph token for the tenant");
+  return {
+    async get<T>(path: string, timeoutMs = 10_000): Promise<T> {
+      if (!path.startsWith("/") || path.includes("//") || /^\/?https?:/i.test(path)) throw new HttpError(400, "invalid_graph_path", "A Graph path relative to /v1.0");
+      const token = await connectionToken(env, bearerToken, connection, GRAPH_SCOPE);
+      return fetchJsonWithTimeout<T>("Graph", `${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } }, timeoutMs);
+    },
+  };
 }
 
 // ── Signed-in user (verified token) ──

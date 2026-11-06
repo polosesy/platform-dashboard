@@ -8,11 +8,11 @@
 // builder (services/workloadIdentity.ts) keeps unknowns unknown.
 
 import * as k8s from "@kubernetes/client-node";
-import type { WiRoleUsage, WorkloadIdentityResponse } from "@aud/types";
+import type { WiRoleUsage, WiServicePrincipal, WorkloadIdentityResponse } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto, getLogAnalyticsFetcherAuto, tableToObjects, type LogAnalyticsResponse } from "../infra/azureClientFactory.js";
-import { kqlString, safeMessage } from "../infra/requestParams.js";
+import { clusterConnection, getArmFetcherAuto, getGraphFetcher, getLogAnalyticsFetcherAuto, tableToObjects, type GraphFetcher, type LogAnalyticsResponse } from "../infra/azureClientFactory.js";
+import { HttpError, kqlString, safeMessage } from "../infra/requestParams.js";
 import { withLang, type Lang } from "../infra/lang.js";
 import { k8sFailureReason, k8sStatusOf, withK8sRetry } from "../infra/k8sRetry.js";
 import { loadKubeConfig } from "./kubernetes.js";
@@ -20,7 +20,7 @@ import { collectPolicyInventory } from "./k8sPolicyCollector.js";
 import { getClusterContext, mapLimit, type ClusterContext } from "./azureEndpoints.js";
 import {
   DATA_ROLES, SCAN_CAP, USAGE_DAYS, WI_ANN, buildWorkloadIdentityMap, isGuid, roleUsageQuery, usageKey, usageVerdict,
-  type InvFicList, type InvIdentity, type InvNodePool, type InvRoleAssignment, type InvServiceAccount, type WiInput,
+  type InvFicList, type InvGraph, type InvIdentity, type InvNodePool, type InvRoleAssignment, type InvServiceAccount, type WiInput,
 } from "./workloadIdentity.js";
 
 const ARG = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01";
@@ -92,6 +92,134 @@ export async function collectRoleUsage(
 }
 
 type ArgRows<T> = { data?: T[] };
+
+// ── Service principals (Microsoft Graph, opt-in per connection) ──
+
+/** Client IDs looked up per open (the rest wait for the next one) */
+const GRAPH_MAX = 30;
+type GraphSp = { id?: string; appId?: string; displayName?: string; servicePrincipalType?: string; appOwnerOrganizationId?: string | null; accountEnabled?: boolean; alternativeNames?: string[] };
+type GraphCred = { endDateTime?: string | null };
+/** One client ID's answer: a managed identity elsewhere, an app registration, or nothing in the tenant */
+export type SpLookup =
+  | { found: "none" }
+  | { found: "managedIdentity"; principalId: string; name: string; armId: string | null }
+  | { found: "application"; principalId: string; name: string; sp: WiServicePrincipal; fics: InvFicList | null };
+const spCache = new CacheManager<SpLookup>(300, 600_000);
+/** API service principal → its app roles (id → value), an hour — Microsoft Graph's own has ~300 */
+const appRoleCache = new CacheManager<Record<string, string>>(50, 3_600_000);
+
+/**
+ * Application permissions that write the directory or reach every mailbox / site — a service principal holding one can
+ * do far more than the cluster workload needs (shown as "privileged"; names only)
+ */
+export const PRIVILEGED_API_PERMISSION = /ReadWrite\.All$|^RoleManagement\.ReadWrite|^AppRoleAssignment\.ReadWrite|^Directory\.|^Application\.ReadWrite|full_access_as_app|^Sites\.FullControl|^Mail\.Send$/;
+
+/** Pure: a credential list → counts, expired ones, the next expiry still ahead */
+export function credentialFacts(secrets: GraphCred[], certificates: GraphCred[], now: Date): NonNullable<WiServicePrincipal["credentials"]> {
+  const ends = [...secrets, ...certificates].map((c) => (c.endDateTime ? Date.parse(c.endDateTime) : NaN));
+  const ahead = ends.filter((t) => Number.isFinite(t) && t > now.getTime()).sort((a, b) => a - b);
+  return {
+    secrets: secrets.length, certificates: certificates.length,
+    expired: ends.filter((t) => Number.isFinite(t) && t <= now.getTime()).length,
+    nextExpiry: ahead.length ? new Date(ahead[0]!).toISOString() : null,
+  };
+}
+
+/** Pure: a managed identity's service principal names its ARM ID among alternativeNames */
+export function managedIdentityArmId(alt: string[] | undefined): string | null {
+  return (alt ?? []).find((a) => UAMI_ID.test(a)) ?? null;
+}
+
+const graphStatus = (e: unknown) => Number(/^Graph (\d{3}):/.exec(safeMessage(e))?.[1] ?? 0);
+
+export async function lookupServicePrincipal(graph: GraphFetcher, appId: string, tenantId: string, now: Date): Promise<SpLookup> {
+  let sp: GraphSp;
+  try {
+    sp = await graph.get<GraphSp>(`/servicePrincipals(appId='${appId}')?$select=id,appId,displayName,servicePrincipalType,appOwnerOrganizationId,accountEnabled,alternativeNames`);
+  } catch (e) {
+    if (graphStatus(e) === 404) return { found: "none" };
+    throw e;
+  }
+  if (!sp.id) return { found: "none" };
+  if (sp.servicePrincipalType === "ManagedIdentity") return { found: "managedIdentity", principalId: sp.id, name: sp.displayName ?? "", armId: managedIdentityArmId(sp.alternativeNames) };
+  const thisTenant = (sp.appOwnerOrganizationId ?? "").toLowerCase() === tenantId.toLowerCase();
+  // API permissions: app role assignments, named by the API's own app role list
+  let apiPermissions: WiServicePrincipal["apiPermissions"] = null;
+  try {
+    type Ara = { resourceId?: string; resourceDisplayName?: string; appRoleId?: string };
+    const r = await graph.get<{ value?: Ara[] }>(`/servicePrincipals/${sp.id}/appRoleAssignments?$select=resourceId,resourceDisplayName,appRoleId&$top=100`);
+    apiPermissions = [];
+    for (const a of r.value ?? []) {
+      if (!isGuid(a.resourceId) || !isGuid(a.appRoleId)) continue;
+      let roles = appRoleCache.get(a.resourceId!.toLowerCase());
+      if (!roles) {
+        const api = await graph.get<{ appRoles?: Array<{ id?: string; value?: string }> }>(`/servicePrincipals/${a.resourceId}?$select=appRoles`);
+        roles = Object.fromEntries((api.appRoles ?? []).filter((x) => x.id && x.value).map((x) => [x.id!.toLowerCase(), x.value!]));
+        appRoleCache.set(a.resourceId!.toLowerCase(), roles);
+      }
+      const permission = roles[a.appRoleId!.toLowerCase()] ?? "?";
+      apiPermissions.push({ api: a.resourceDisplayName ?? "?", permission, privileged: PRIVILEGED_API_PERMISSION.test(permission) });
+    }
+    apiPermissions.sort((x, y) => Number(y.privileged) - Number(x.privileged) || (x.api + x.permission < y.api + y.permission ? -1 : 1));
+  } catch { /* stays null = not read */ }
+  // Credentials and federated credentials live on the app registration — readable only for this tenant's apps
+  let credentials: WiServicePrincipal["credentials"] = null;
+  let fics: InvFicList | null = null;
+  if (thisTenant) {
+    try {
+      const app = await graph.get<{ passwordCredentials?: GraphCred[]; keyCredentials?: GraphCred[] }>(`/applications(appId='${appId}')?$select=passwordCredentials,keyCredentials`);
+      credentials = credentialFacts(app.passwordCredentials ?? [], app.keyCredentials ?? [], now);
+    } catch { /* null = not read */ }
+    try {
+      type F = { name?: string; issuer?: string; subject?: string; audiences?: string[] };
+      const r = await graph.get<{ value?: F[] }>(`/applications(appId='${appId}')/federatedIdentityCredentials?$select=name,issuer,subject,audiences`);
+      fics = { status: "ok", items: (r.value ?? []).map((f) => ({ name: f.name ?? "", issuer: f.issuer ?? "", subject: f.subject ?? "", audiences: f.audiences ?? [] })) };
+    } catch (e) {
+      fics = { status: graphStatus(e) === 403 ? "forbidden" : graphStatus(e) === 429 ? "throttled" : "error", items: [] };
+    }
+  }
+  return {
+    found: "application", principalId: sp.id, name: sp.displayName ?? "",
+    sp: { owner: thisTenant ? "thisTenant" : "otherTenant", enabled: typeof sp.accountEnabled === "boolean" ? sp.accountEnabled : null, apiPermissions, credentials },
+    fics,
+  };
+}
+
+/**
+ * Client IDs no visible managed identity has → Microsoft Graph with the cluster connection's identity (opt-in). The
+ * first refusal stops the round (403 = the permission isn't granted — every other ask would fail the same way).
+ */
+async function collectServicePrincipals(
+  env: Env, bearerToken: string | undefined, clusterId: string, appIds: string[], now: Date,
+): Promise<{ state: InvGraph["state"]; results: Map<string, SpLookup>; message?: string }> {
+  const results = new Map<string, SpLookup>();
+  if (!appIds.length) return { state: "notNeeded", results };
+  let graph: GraphFetcher;
+  try {
+    graph = getGraphFetcher(env, bearerToken, clusterId);
+  } catch (e) {
+    if (e instanceof HttpError && e.code === "graph_not_enabled") return { state: "off", results };
+    if (e instanceof HttpError && e.code === "graph_unsupported_mode") return { state: "delegated", results };
+    throw e;
+  }
+  const tenantId = clusterConnection(env, clusterId).tokenTenantId;
+  let refused: string | null = null;
+  await mapLimit(appIds.slice(0, GRAPH_MAX), 4, async (appId) => {
+    if (refused) return;
+    const key = `${cachePrefix(bearerToken)}:wi-sp:${tenantId}:${appId}`;
+    const hit = spCache.get(key);
+    if (hit) { results.set(appId, hit); return; }
+    try {
+      const r = await lookupServicePrincipal(graph, appId, tenantId, now);
+      spCache.set(key, r);
+      results.set(appId, r);
+    } catch (e) {
+      refused ??= safeMessage(e);
+    }
+  });
+  if (refused) return { state: / 403:/.test(refused) || /Authorization_RequestDenied/.test(refused) ? "forbidden" : "error", results, message: refused };
+  return { state: "ok", results };
+}
 
 /** KQL that finds user-assigned identities by client ID (GUIDs only, capped) */
 export function uamiByClientIdQuery(clientIds: string[]): string {
@@ -348,7 +476,36 @@ export async function collectWorkloadIdentity(
     identities.push({ armId: a.armId, name: m?.[3] ?? "", resourceGroup: m?.[2] ?? "", subscriptionId: m?.[1] ?? "", location: "", clientId: a.clientId, principalId: a.principalId, tenantId: "", scanned: clientIds.includes(a.clientId.toLowerCase()) ? "annotated" : "nodePool" });
   }
 
+  // Client IDs still unnamed (no managed identity we can read): Graph — an app registration, or a managed identity of a
+  // subscription no connection reads
+  const seen = new Set(identities.map((i) => i.clientId.toLowerCase()));
+  const unnamed = [...new Set(clientIds)].filter((c) => !seen.has(c)).sort();
   const fics = new Map<string, InvFicList>();
+  const graph = await collectServicePrincipals(env, bearerToken, clusterId, unnamed, new Date()).catch((e) => ({ state: "error" as const, results: new Map<string, SpLookup>(), message: safeMessage(e) }));
+  if (graph.message) gaps.push(`${tr("SP 조회(Microsoft Graph)", "Service principal lookup (Microsoft Graph)")}: ${graph.message}`);
+  if (unnamed.length > GRAPH_MAX && graph.state === "ok") gaps.push(tr(`SP 조회는 client-id ${GRAPH_MAX}개까지 — 나머지 ${unnamed.length - GRAPH_MAX}개는 미확인`, `Service principal lookup covers ${GRAPH_MAX} client IDs — ${unnamed.length - GRAPH_MAX} stay unresolved`));
+  const graphTenant = graph.state === "ok" ? clusterConnection(env, clusterId).tokenTenantId : "";
+  const graphNotFound = new Set<string>();
+  for (const appId of unnamed) {
+    const r = graph.results.get(appId);
+    if (!r) continue;
+    if (r.found === "none") { graphNotFound.add(appId); continue; }
+    if (r.found === "managedIdentity") {
+      const m = r.armId ? /^\/subscriptions\/([^/]+)\/resourcegroups\/([^/]+)\//i.exec(r.armId) : null;
+      identities.push({
+        armId: r.armId ?? `mi:${appId}`, name: r.name, resourceGroup: m?.[2] ?? "", subscriptionId: m?.[1] ?? "", location: "",
+        clientId: appId, principalId: r.principalId, tenantId: graphTenant, scanned: "annotated", outsideConnections: true,
+      });
+      continue;
+    }
+    const armId = `sp:${appId}`;
+    identities.push({
+      armId, name: r.name, resourceGroup: "", subscriptionId: "", location: "", clientId: appId, principalId: r.principalId,
+      tenantId: graphTenant, scanned: "annotated", kind: "servicePrincipal", sp: r.sp,
+    });
+    if (r.fics) fics.set(armId, r.fics);
+  }
+
   const roleQ = identities.length
     ? argRows<{ principalId: string; rdGuid: string; roleName?: string; roleType?: string; scope: string; hasCondition: boolean; actions?: string[] }>(
       roleAssignmentsQuery(identities.map((i) => i.principalId)),
@@ -359,7 +516,8 @@ export async function collectWorkloadIdentity(
     }))).catch((e) => { gaps.push(`${tr("역할 할당(Resource Graph)", "Role assignments (Resource Graph)")}: ${safeMessage(e)}`); return null; })
     : Promise.resolve([] as InvRoleAssignment[]);
   const [, roleAssignments] = await Promise.all([
-    mapLimit(identities, 4, async (i) => { fics.set(i.armId.toLowerCase(), await listFics(env, bearerToken, i.armId)); }),
+    // App registrations' credentials came from Graph above; managed identities' from ARM
+    mapLimit(identities.filter((i) => i.kind !== "servicePrincipal"), 4, async (i) => { fics.set(i.armId.toLowerCase(), await listFics(env, bearerToken, i.armId)); }),
     roleQ,
   ]);
   // Granted vs used — after the role assignments are known; a failure only leaves usage "unknown"
@@ -375,6 +533,7 @@ export async function collectWorkloadIdentity(
   const out = withLang(lang, () => buildWorkloadIdentityMap({
     clusterId, inventory, serviceAccounts, saStatus, cluster, identities, identityLookup, fics,
     roleAssignments: roleAssignments ?? null, roleUsage, subNames, scan, gaps,
+    graph: { state: graph.state, notFound: graphNotFound },
     nodePools: nodeImds?.nodePools ?? null,
     imds: nodeImds
       ? { podAccess: nodeImds.podAccess, restrictionBlockedBy: nodeImds.restrictionBlockedBy, pools: nodeImds.pools, nodeResourceGroup: nodeImds.nodeResourceGroup }

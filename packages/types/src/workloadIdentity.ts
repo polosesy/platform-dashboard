@@ -7,7 +7,7 @@ import type { EvidenceKind, RbacRiskKey } from "./policyInsights.js";
 
 export type WiRuleId =
   | "WI-01" | "WI-02" | "WI-03" | "WI-04" | "WI-05" | "WI-06" | "WI-07" | "WI-08"
-  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16" | "WI-17" | "WI-18";
+  | "WI-09" | "WI-10" | "WI-11" | "WI-12" | "WI-13" | "WI-14" | "WI-15" | "WI-16" | "WI-17" | "WI-18" | "WI-19";
 export type WiSeverity = "crit" | "warn" | "low" | "info";
 export type WiScopeLevel = "root" | "managementGroup" | "subscription" | "resourceGroup" | "resource";
 /** Display only — never an ARM id or a subscription GUID */
@@ -109,9 +109,25 @@ export type WiRoleAssignment = {
   data?: { svc: "keyVault" | "storage"; write: boolean };
 };
 
+/**
+ * A service principal (app registration) a workload signs in as — read from Microsoft Graph with the cluster
+ * connection's identity, only when the connection opts in (`entra.readApplications`, Application.Read.All). Counts,
+ * dates and display names only: no object ID, no secret name or value.
+ */
+export type WiServicePrincipal = {
+  /** The app registration lives in this tenant (its credentials and federated credentials are readable) or another */
+  owner: "thisTenant" | "otherTenant";
+  enabled: boolean | null;
+  /** Application permissions granted to it (app role assignments): the API and the permission value */
+  apiPermissions: Array<{ api: string; permission: string; privileged: boolean }> | null;
+  /** The app registration's client secrets and certificates (null = another tenant's app, or not readable) */
+  credentials: { secrets: number; certificates: number; expired: number; nextExpiry: string | null } | null;
+};
+
 export type WiIdentity = {
   id: string;
-  kind: "userAssigned" | "unresolved";
+  /** servicePrincipal = an app registration (Graph) · userAssigned may sit outside the connected subscriptions (Graph) */
+  kind: "userAssigned" | "servicePrincipal" | "unresolved";
   name?: string;
   resourceGroup?: string;
   /** Subscription display name only */
@@ -119,7 +135,14 @@ export type WiIdentity = {
   location?: string;
   clientIdTail: string;
   tenantIdTail?: string;
-  unresolvedReason?: "notFoundInConnectedSubscriptions" | "lookupFailed";
+  /**
+   * graphOff = Graph lookup not enabled for the connection · graphFailed = Graph refused / failed · notInTenant = Graph
+   * has no service principal with that client ID in the connection's tenant
+   */
+  unresolvedReason?: "notFoundInConnectedSubscriptions" | "lookupFailed" | "graphOff" | "graphFailed" | "notInTenant";
+  /** Found through Graph: a managed identity of a subscription no connection reads (its roles may be partly visible) */
+  outsideConnections?: boolean;
+  sp?: WiServicePrincipal;
   fic: {
     status: "ok" | "forbidden" | "throttled" | "error" | "notListed";
     /** null = not listed */
@@ -219,6 +242,8 @@ export type WorkloadIdentityResponse = {
     pimEligibleIncluded: false;
     identityBindings: "notCollected";
     subscriptionScan: { requested: boolean; scanned: number; total: number | null; cap: number };
+    /** Microsoft Graph lookup of client IDs that are no managed identity we can see (service principals) */
+    graph: "ok" | "off" | "forbidden" | "error" | "delegated" | "notNeeded";
   };
   gaps: string[];
 };

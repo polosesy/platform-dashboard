@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-security
-last-verified: 2026-11-03
-covers: [apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
+last-verified: 2026-11-06
+covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 보안 기능 운영 가이드 — 이슈 목록 · 위험 조합 · 워크로드 ID
 
@@ -114,7 +114,7 @@ covers: [apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedVi
 - 밖으로 나가는 것: OSV에 **오픈소스 모듈 이름·버전만**(앱 이미지 이름·테넌트 정보는 보내지 않음). 끄기: `AUD_ADVISORY_OSV=false`(조회만) / `AUD_ADVISORY_FEEDS=false`(외부 전부)
 - Defender 결과가 0건이면: 구독의 Defender for Containers 플랜과 '레지스트리 취약성 평가' 확장, 레지스트리 종류(ACR)를 확인하세요. 플랜이 켜져 있어도 결과가 0건일 수 있습니다(시험 환경 실측) — 그때도 화면은 '모름'으로 정직하게 남습니다
 
-## 5. 워크로드 ID — WI-17 · WI-18 (AKS 보안 점검 › ID·권한 › 워크로드 ID)
+## 5. 워크로드 ID — WI-17 · WI-18 · WI-19 (AKS 보안 점검 › ID·권한 › 워크로드 ID)
 
 ### 5.1 WI-17 — 노드 풀에 붙은 관리 ID (IMDS 경로)
 
@@ -135,6 +135,23 @@ covers: [apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedVi
 | 확인 불가 — 기록하는 로그 없음 | 제어 평면 역할(Contributor 등 — 읽기는 Activity Log에 안 남음)·AcrPull·관리 그룹 범위 | 판정하지 않음 |
 
 **지우기 전에**: 월말·분기 배치처럼 30일보다 드물게 쓰는 작업이 있는지, 로그 보존 기간이 30일보다 짧지 않은지, 같은 ID가 다른 범위의 역할로 같은 리소스를 쓰는지 확인하세요. 예: Key Vault CSI 드라이버를 워크로드 ID 모드로 쓰면 **추가 기능 ID의 Key Vault 역할은 쓰이지 않아** WI-18로 나옵니다 — 이 경우 지워도 됩니다.
+
+### 5.3 SP(앱 등록) — '관리 ID · SP' 열과 WI-19
+
+워크로드의 client-id가 연결된 구독의 관리 ID가 아니면, 대시보드는 그 클러스터 연결의 신원으로 **Microsoft Graph**에 물어 정체를 알아냅니다. 이 기능은 연결 파일의 `entra.readApplications: true`로 켜며, 그 연결의 앱에 `Application.Read.All` 애플리케이션 권한과 관리자 동의가 필요합니다. 끄면 이전처럼 '관리 ID로 찾지 못함 — SP 조회 꺼짐'으로 나옵니다.
+
+| Graph 답 | 화면 | 읽는 것 |
+|---|---|---|
+| 앱 등록(Application) | **SP 카드**(같은 열, 'SP' 표시) | 이름, 로그인 허용 여부, Azure 역할(Resource Graph — 개체 ID로), API 권한(애플리케이션 권한 — 디렉터리 쓰기·모든 사서함 등은 '높은 권한'), 비밀·인증서 **개수와 만료일**, 앱의 페더레이션 자격 증명 |
+| 다른 테넌트의 앱(멀티테넌트) | SP 카드 + '다른 테넌트의 앱' | 이름·역할·API 권한만(자격 증명은 그 테넌트에 있음) |
+| 관리 ID(ManagedIdentity) | 관리 ID 카드 + '연결 밖 구독' | Graph가 알려 준 ARM ID로 역할·자격 증명 — 그 구독을 읽는 연결이 없으면 일부만 |
+| 없음 | '이 테넌트에 이 client-id의 SP가 없음' | 삭제된 앱이거나 다른 테넌트의 client-id |
+
+비밀 값·이름, 개체 ID, 전체 GUID는 화면과 응답에 넣지 않습니다(이름·끝 4자리·개수·날짜만).
+
+**WI-19**(주의): 서비스 계정이 페더레이션 자격 증명으로 이 SP에 로그인하는데, 앱 등록에 비밀이나 인증서가 **아직 남아 있는** 경우입니다. 페더레이션이면 비밀이 필요 없고, 남은 비밀이 새어 나가면 클러스터 밖 어디서든 이 SP로 로그인할 수 있습니다(Learn: "These credentials pose a security risk and have to be stored securely and rotated regularly"). CI·스크립트가 그 비밀을 쓰지 않는지 확인한 뒤 지우세요. **만료된 것만** 남아 있으면 '참고'입니다(정리만 하면 됨).
+
+Azure 역할도 API 권한도 없는 SP가 나오면 두 경우 중 하나입니다. 하나는 그 토큰을 자기 앱의 API(사용자 지정 audience)나 Key Vault 접근 정책·리소스 자체 권한(데이터베이스 사용자 등)에 쓰는 경우이고, 다른 하나는 쓰이지 않는 SP입니다. stg 실측(2026-11-06)에서 client-id 6종 중 5종은 관리 ID, 1종은 SP(역할 0·API 권한 0·FIC 1·비밀 1, 2027-06 만료)였습니다. stg의 Key Vault 12개는 모두 RBAC 방식이라 접근 정책은 없었습니다.
 
 ## 6. 배포 출처 · 고칠 곳 (Argo CD)
 

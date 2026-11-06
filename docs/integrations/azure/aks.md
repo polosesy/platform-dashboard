@@ -99,6 +99,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 
 ```json
 { "key": "custb", "mode": "servicePrincipal", "...": "...",
+  "entra": { "readApplications": true },
   "aks": { "podLogNamespaces": ["app"], "allowLocalAccount": false, "hubbleExec": false,
            "imageMirrors": ["<registry>.azurecr.io/<mirror-path>"],
            "observability": { "grafana": { "endpoint": "https://<grafana-name>.<region>.grafana.azure.com",
@@ -108,6 +109,8 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 `observability.grafana`(선택)는 고객 Azure Managed Grafana로 가는 **링크만** 만듭니다(AKS 모니터링 › 관측 스택의 값마다 그 PromQL로 Explore). 대시보드는 Grafana를 읽지 않으므로 Grafana 역할·송신 규칙이 필요 없습니다. 주소는 `https://*.grafana.azure.com`만 받습니다.
 
 `imageMirrors`(선택, 최대 20)는 팀이 상위 이미지(오픈 소스·Docker Hardened Images 등)를 복사해 두는 레지스트리 경로 접두사입니다. 그 아래 이미지는 KBOM에서 '외부 제공(근거: 미러)'으로 분류됩니다. CVE는 상위가 고치므로, 할 일은 새 태그를 다시 미러하는 것입니다. 적지 않으면 사설 레지스트리 이미지는 '우리 팀 이미지'가 됩니다. 이름 모양으로 미러를 추측하지 않습니다. 원래 조직 경로 없이 이름만 복사한 미러가 많기 때문입니다.
+
+`entra.readApplications`(선택, 연결 단위)를 켜면 워크로드 ID가 SP(앱 등록)로 로그인할 때 그 SP의 이름·Azure 역할·API 권한·비밀 만료·페더레이션 자격 증명을 Microsoft Graph로 읽습니다. 그 연결의 앱에 `Application.Read.All`(관리자 동의)이 필요합니다([권한](./permissions.md)). 끄면 '관리 ID로 찾지 못함'으로 남습니다.
 
 `observability.hubbleUi`(선택, `{ "url": "http://hubble-ui.kube-system:80" }`)는 Hubble exec가 꺼진 연결에서 Hubble 흐름·서비스 맵을 **클러스터의 Hubble UI 백엔드**로 읽습니다(Relay 최근 흐름 표본 — Secret·exec·새 RBAC 없음, 대시보드 파드 → `kube-system/hubble-ui:8081` 네트워크만). 자세한 이유·한계는 [AKS 모니터링 연동](../../observability/aks-monitoring-integration.md).
 

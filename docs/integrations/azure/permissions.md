@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-30
+last-verified: 2026-11-06
 covers: [apps/api/src/services/featureCatalog.ts]
 ---
 # Azure 연결 권한 표
@@ -42,6 +42,7 @@ Microsoft 기본 제공 역할 정의 ID(템플릿에서 사용): Reader `acdd72
 
 - **AKS**: Entra 연동 클러스터는 연결의 자격 증명으로 받은 짧은 Entra 토큰으로 로그인합니다(kubelogin 실행 없음). Entra 연동이 **없는** 클러스터의 kubeconfig는 **클러스터 관리자 인증서**라 기본 거부합니다(`403 aks_local_account_refused`, 연결별 `aks.allowLocalAccount`로만 허용). 프라이빗 클러스터·Tier·네트워크 경로는 [aks.md](./aks.md).
 - **Hubble exec**(Cilium agent Pod 안에서 `hubble observe`)는 노드 수준 접근입니다 — 프로덕션 기본 꺼짐(`HUBBLE_EXEC_ENABLED`), 고객 연결은 `aks.hubbleExec: true`일 때만. 읽기 역할(`aud-dashboard-reader`)에는 들어 있지 않습니다.
+- **Microsoft Graph(선택)**: 워크로드 ID가 SP(앱 등록)로 로그인하면, 그 SP의 이름·Azure 역할·API 권한·비밀 만료를 보기 위해 Graph `Application.Read.All`(애플리케이션 권한·관리자 동의, 읽기만)이 필요합니다. 연결 파일 `entra.readApplications: true`로 켠 연결만 Graph를 부릅니다(플랫폼·servicePrincipal 연결 — Lighthouse·delegated는 Graph 토큰이 없어 '지원 안 함'). 이 권한은 테넌트의 모든 앱을 읽을 수 있으므로, 필요 없으면 켜지 마세요(그때는 '관리 ID로 찾지 못함'으로 남습니다). 연결 점검의 권한 표(Azure RBAC·Kubernetes)에는 아직 나오지 않습니다.
 - **Lighthouse**는 일부 역할(예: DataActions가 있는 역할 — Storage Blob Data Reader, Monitoring Data Reader)의 위임을 제한할 수 있습니다. 배포 전에 최신 Microsoft 문서의 "Lighthouse에서 지원되는 역할"을 확인하고, 안 되면 그 기능만 고객 서비스 주체(B)로 연결하세요.
 - 다음 권한이 보이면 연결 점검이 **경고**합니다(차단하지 않음): 모든 작업(`*`), 쓰기·삭제, 역할 할당 쓰기, 클러스터 관리자 자격 증명.
 
