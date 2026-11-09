@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-ops
-last-verified: 2026-11-04
+last-verified: 2026-11-09
 covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts, apps/api/test/runtimeSecurity.test.ts]
 ---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
@@ -251,4 +251,15 @@ Host aud-onprem
   | API | @azure/msal-node 6.0.1 → **7.1.2**(GHSA-xcx6-jx8p-x3h5 High, 인증 코드 흐름 — 우리는 OBO·클라이언트 자격 증명만이라 닿지 않지만 올림) | `@azure/identity` 4.14.1 |
   | API | uuid 8.3.2(GHSA-w5hq-g745-h8pq, `@azure/ms-rest-js` 경유) | `@azure/arm-resourcegraph` **5.0.0**(새 core 기반 — ms-rest-js·uuid 없음, 호출 형태 같음) |
 
-  재발 방지: `runtimeSecurity.test.ts`가 잠금 파일의 수정 버전 하한(zod·msal-node·identity)·되돌아오면 안 되는 패키지(ms-rest-js·uuid)·런타임 단계의 npm 삭제 + 마지막 `USER 65532`를 검사, `container-smoke.mjs`에 'npm·corepack·yarn 없음' 확인. 대시보드 자체 SBOM(보안 › 긴급 취약점 › 우리 구성 요소)도 이제 Node.js 런타임의 전역 패키지(`<prefix>/lib/node_modules`, 구성 요소 'Node.js')를 읽어 Defender와 같은 것을 봄 — 예전엔 앱 `node_modules`만 읽어 이번 npm 묶음을 못 봤음. 확인: `kubectl exec … -c api -- node -e "process.exit(require('fs').existsSync('/usr/local/lib/node_modules/npm')?1:0)"`. Defender 결과는 새 이미지 스캔 뒤(보통 몇 시간) 사라짐.
+  **2026-11-09 — 지웠는데도 다시 보고됨**(시험 배포 이미지 `High`: minimatch·apt·brace-expansion·undici, `Medium`: ip-address·glob·postcss-selector-parser): 최종 파일 시스템에는 없었습니다(이미지 안의 node로 전부 확인). 원인은 **레이어**입니다. 우리 Dockerfile은 베이스 위의 24.6kB 레이어에서 npm을 지웠지만, 파일은 베이스 Node 이미지의 157MB 레이어 안에 그대로 남아 있었고, Defender는 레이어를 하나씩 읽습니다. 베이스 `node:24.22.1-bookworm-slim`의 npm 11.19.1에 들어 있는 버전이 Defender가 보고한 버전과 정확히 같았습니다. apt 2.6.1은 실제로 설치된 Debian 패키지였고, Debian 보안 저장소에는 이미 2.6.2가 나와 있었습니다.
+
+  | 조치 | 어떻게 |
+  |---|---|
+  | 지운 파일이 아래 레이어에 남지 않게 | `runtime-base` 단계에서 정리한 뒤 **`FROM scratch` + `COPY --from=runtime-base / /`** — 베이스 파일 시스템이 **한 레이어**(216MB)가 되고, npm은 어느 레이어에도 없음 |
+  | Debian 보안 업데이트 | 정리 스크립트 `deploy/docker/runtime-clean.cjs`(node로 실행 — 셸 없는 DHI에서도)가 `apt-get upgrade`(2026-11-09: apt 2.6.2·libapt-pkg6.0·tzdata 2026f) |
+  | apt 제거 | 런타임은 패키지를 설치하지 않으므로 `dpkg --purge apt libapt-pkg6.0`(다른 패키지가 의존하지 않음 — 시험 컨테이너로 확인) |
+  | 깨진 이미지가 나가지 않게 | 합친 뒤 `RUN ["node", …]`가 node 실행·npm/apt 없음을 확인 — 하나라도 남으면 빌드 실패 |
+
+  합치면 베이스 이미지의 설정(ENV·ENTRYPOINT)은 따라오지 않습니다. 그래서 `PATH`를 직접 정하고(`--build-arg RUNTIME_PATH`, 기본 = 공식 Node 이미지 값), ENTRYPOINT(`docker-entrypoint.sh`)는 없이 `CMD ["node", …]`로 바로 실행합니다. Helm 차트의 API는 `command`로, 웹은 CMD로 실행하므로 바꿀 것이 없습니다. 확인 결과: 시험 배포 이미지 `0.1.0-bb60125-flat`에서 웹·API Ready, 재시작 0회, `/readyz` 200. Defender 결과는 새 이미지를 다시 스캔한 뒤(보통 몇 시간) 사라집니다.
+
+  재발 방지: `runtimeSecurity.test.ts`가 잠금 파일의 수정 버전 하한(zod·msal-node·identity)·되돌아오면 안 되는 패키지(ms-rest-js·uuid)·**한 레이어로 합친 런타임**(`FROM scratch` + `COPY --from=runtime-base / /` + `PATH`)·정리 스크립트의 npm·apt 제거 + 마지막 `USER 65532`를 검사, `container-smoke.mjs`에 'npm·corepack·yarn·apt 없음' 확인. 대시보드 자체 SBOM(보안 › 긴급 취약점 › 우리 구성 요소)도 이제 Node.js 런타임의 전역 패키지(`<prefix>/lib/node_modules`, 구성 요소 'Node.js')를 읽어 Defender와 같은 것을 봄 — 예전엔 앱 `node_modules`만 읽어 이번 npm 묶음을 못 봤음. 확인: `kubectl exec … -c api -- node -e "process.exit(require('fs').existsSync('/usr/local/lib/node_modules/npm')?1:0)"`. Defender 결과는 새 이미지 스캔 뒤(보통 몇 시간) 사라짐.

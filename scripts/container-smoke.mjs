@@ -77,7 +77,7 @@ try {
   check("only the web port is published", !/4000/.test(ports), ports.replace(/\s+/g, " "));
   check("runs as 65532", docker("exec", `${P}-web`, "node", "-e", "process.stdout.write(String(process.getuid()))") === "65532");
   check("read-only root filesystem", execIn(`${P}-web`, "require('fs').writeFileSync('/app/x','')").status !== 0);
-  check("no npm · corepack · yarn in the image (scanners report what they bundle)", execIn(`${P}-web`, "const fs=require('fs');process.exit(['/usr/local/lib/node_modules/npm','/usr/local/bin/npm','/usr/local/bin/corepack'].some(p=>fs.existsSync(p))?1:0)").status === 0);
+  check("no npm · corepack · yarn · apt in the image (scanners report what they bundle)", execIn(`${P}-web`, "const fs=require('fs');process.exit(['/usr/local/lib/node_modules/npm','/usr/local/bin/npm','/usr/local/bin/corepack','/usr/bin/apt-get'].some(p=>fs.existsSync(p))?1:0)").status === 0);
   check("no .env or config in the image", execIn(`${P}-web`, "const fs=require('fs');process.exit(['/app/.env','/app/config','/app/apps/api/.env'].some(p=>fs.existsSync(p))?1:0)").status === 0);
   const t0 = Date.now();
   docker("stop", "-t", "15", `${P}-api`);

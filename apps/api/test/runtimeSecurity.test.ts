@@ -47,13 +47,22 @@ test("locked API runtime packages are at least the fixed versions; retired packa
   for (const name of RETIRED) assert.deepEqual(prod.filter(([k]) => nameOf(k) === name).map(([k]) => k), [], `${name} is back in the runtime tree`);
 });
 
-test("the runtime stage removes the Node image's package managers, then drops to 65532", () => {
-  const df = readFileSync(new URL("../../../Dockerfile", import.meta.url), "utf8");
-  const runtime = df.slice(df.indexOf("AS runtime"));
-  const rm = runtime.indexOf("RUN [\"node\"");
-  assert.ok(rm > 0, "no exec-form node step in the runtime stage (a hardened runtime has no shell)");
-  for (const p of ["/usr/local/lib/node_modules", "/usr/local/bin/npm", "/usr/local/bin/npx", "/usr/local/bin/corepack"]) assert.ok(runtime.includes(`'${p}'`), `${p} is not removed`);
+test("the runtime is one flattened layer of the cleaned base (scanners read every layer), then drops to 65532", () => {
+  const df = readFileSync(new URL("../../../Dockerfile", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const clean = readFileSync(new URL("../../../deploy/docker/runtime-clean.cjs", import.meta.url), "utf8");
+  const base = df.slice(df.indexOf("AS runtime-base"), df.indexOf("AS runtime\n"));
+  assert.match(base, /RUN \["node", "\/tmp\/runtime-clean\.cjs"\]/, "the base is cleaned with node (a hardened runtime has no shell)");
+  // 2026-11-09: deleting on top of the base left npm's packages in the base layer — Defender still reported them
+  const runtime = df.slice(df.indexOf("AS runtime\n") - "FROM scratch ".length);
+  assert.match(runtime, /^FROM scratch AS runtime\n/, "the runtime starts empty");
+  assert.match(runtime, /COPY --from=runtime-base \/ \//, "…and takes the cleaned file system as one layer");
+  assert.match(runtime, /ENV PATH=\$\{RUNTIME_PATH\}/, "the base image's PATH is not inherited — set it");
+  for (const p of ["/usr/local/lib/node_modules", "/usr/local/bin/npm", "/usr/local/bin/npx", "/usr/local/bin/corepack", "/usr/local/bin/yarn"]) assert.ok(clean.includes(`"${p}"`), `${p} is not removed`);
+  assert.match(clean, /"dpkg", \["--purge", "apt", "libapt-pkg6\.0"\]/, "apt (and its library) is removed on Debian bases");
+  assert.match(clean, /"upgrade"\]/, "Debian security updates are applied before");
+  const check = runtime.indexOf("RUN [\"node\"");
+  assert.ok(check > 0 && runtime.includes("'/usr/bin/apt-get'"), "the runtime verifies that nothing came back");
   const users = [...runtime.matchAll(/^USER (\S+)/gm)].map((m) => m[1]);
   assert.equal(users.at(-1), "65532:65532", "the image must end as the non-root user");
-  assert.ok(runtime.lastIndexOf("USER 65532") > rm, "USER 65532 comes after the removal step");
+  assert.ok(runtime.lastIndexOf("USER 65532") > check, "USER 65532 comes after the check");
 });

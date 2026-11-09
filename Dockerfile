@@ -10,8 +10,9 @@
 # Nothing environment-specific is baked in: no .env, no connections file, no sign-in IDs (the web reads AUD_WEB_*
 # per request). The cluster build swaps the base images for the customer's hardened (DHI) mirror:
 #   --build-arg NODE_BUILD_IMAGE=<acr>/common-resource/dhi-node:<ver>-dev --build-arg NODE_RUNTIME_IMAGE=<acr>/common-resource/dhi-node:<ver>
-# The runtime stage only COPYs (a hardened runtime image has no shell or npm), after one node step that removes the
-# package managers a Docker Hub Node image ships (npm · corepack · yarn — scanners report what they bundle).
+# The runtime stage only COPYs (a hardened runtime image has no shell or npm) onto a one-layer copy of the runtime
+# base cleaned by deploy/docker/runtime-clean.cjs (no npm · corepack · yarn, Debian security updates, no apt) —
+# scanners read every layer, so nothing deleted may sit underneath. Another runtime base: --build-arg RUNTIME_PATH.
 ARG NODE_BUILD_IMAGE=node:24.22.1-bookworm-slim
 ARG NODE_RUNTIME_IMAGE=node:24.22.1-bookworm-slim
 
@@ -42,19 +43,30 @@ COPY packages/types/package.json packages/types/
 # /prune/apps/api/node_modules — both are copied; the directory always exists so the COPY never fails
 RUN npm ci --omit=dev --workspace @aud/api --include-workspace-root=false --no-audit --no-fund  && mkdir -p apps/api/node_modules
 
-# ── runtime: files only, root-owned and read-only to the non-root user ──
-FROM ${NODE_RUNTIME_IMAGE} AS runtime
+# ── runtime-base: the Node runtime image without its package managers, OS updates applied, apt gone ──
+# (deploy/docker/runtime-clean.cjs — node exec form: a hardened runtime has no shell). USER 0 only here: a hardened
+# image defaults to non-root.
+FROM ${NODE_RUNTIME_IMAGE} AS runtime-base
+USER 0:0
+COPY deploy/docker/runtime-clean.cjs /tmp/runtime-clean.cjs
+RUN ["node", "/tmp/runtime-clean.cjs"]
+
+# ── runtime: that file system as ONE layer, then files only, root-owned and read-only to the non-root user ──
+# Deleting in a layer on top leaves the files in the base layer, and scanners read every layer (2026-11-04 the in-place
+# delete; 2026-11-09 Defender still reported npm 11.19.1's minimatch · brace-expansion · glob · ip-address · undici ·
+# postcss-selector-parser and apt 2.6.1). The copy keeps files, not the base image's settings: PATH is set here
+# (RUNTIME_PATH — the official Node image's; another runtime base passes its own) and there is no entrypoint script.
+FROM scratch AS runtime
 ARG AUD_VERSION=dev
+ARG RUNTIME_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+COPY --from=runtime-base / /
+ENV PATH=${RUNTIME_PATH}
 LABEL org.opencontainers.image.title="azure-unified-dashboard" \
       org.opencontainers.image.version="${AUD_VERSION}" \
       org.opencontainers.image.description="Azure Unified Dashboard (API + web) — read-only Azure / AKS operations dashboard"
 WORKDIR /app
-# The package managers that come with the Node image (npm · corepack · yarn) never run here, but scanners report
-# the packages they bundle (2026-11-04 Defender: npm's minimatch 10.2.5 · brace-expansion 5.0.9, OSV also glob ·
-# undici · ip-address …). Removed with node itself (exec form — a hardened runtime has no shell; it has no npm
-# either, so there this deletes nothing). USER 0 only for this step: a hardened image defaults to non-root.
-USER 0:0
-RUN ["node", "-e", "const fs=require('fs');const gone=['/usr/local/lib/node_modules','/usr/local/bin/npm','/usr/local/bin/npx','/usr/local/bin/corepack','/usr/local/bin/yarn','/usr/local/bin/yarnpkg',...(fs.existsSync('/opt')?fs.readdirSync('/opt').filter(d=>d.startsWith('yarn')).map(d=>'/opt/'+d):[])];for(const p of gone)fs.rmSync(p,{recursive:true,force:true});if(gone.some(p=>fs.existsSync(p)))process.exit(1)"]
+# The build fails here when node isn't on PATH or a package manager / apt survived (a broken image never ships)
+RUN ["node", "-e", "const fs=require('fs');const left=['/usr/local/lib/node_modules','/usr/local/bin/npm','/usr/local/bin/npx','/usr/local/bin/corepack','/usr/bin/apt','/usr/bin/apt-get','/tmp/runtime-clean.cjs'].filter(p=>fs.existsSync(p));if(left.length){console.error('left: '+left.join(', '));process.exit(1)}"]
 # HOSTNAME=0.0.0.0: the Next standalone server binds to $HOSTNAME, which Kubernetes sets to the pod name
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOME=/tmp HOSTNAME=0.0.0.0 AUD_VERSION=${AUD_VERSION}
 COPY --from=prune /prune/node_modules /app/node_modules
