@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-02
-covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
+last-verified: 2026-11-09
+covers: [apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 에러 카탈로그
 
@@ -72,6 +72,12 @@ covers: [apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksA
 - **에러**: KQL 쿼리 실패 (`column not found`)
 - **원인**: AMA agent 유무에 따라 `ContainerLogV2` vs `ContainerLog` 테이블 차이
 - **해결**: `ContainerLogV2` 우선 조회 → 실패 시 `ContainerLog` fallback
+
+### OBS-004: AKS 모니터링 '메트릭 조회가 제한되었습니다(429)' — `expanding series … Query cost=… exceeds max limit=15000`
+- **에러**: SLO 탭 전체가 `Prometheus 429: error: expanding series: Response status: 429 Too Many Requests`. '잠시 뒤 다시 시도'해도 그대로입니다
+- **원인**: 속도 제한이 **아닙니다**. Azure Monitor 작업 영역은 **질의 하나의 비용**이 15,000을 넘으면 거절합니다. 비용 = 시계열 수 × (기간 ÷ 수집 간격) ÷ 5000이고, 기간 안에 한 번이라도 있었던 시계열을 모두 셉니다. 2026-11-09 stg 실측: 지금 시계열은 501개였지만 30일 동안 파드가 바뀌며 생긴 시계열은 6,898개였습니다 → `increase(…[30d])` 비용 ≈ 27,900, 매번 429입니다(오류 본문 `Query cost=27939 exceeds max limit=15000 … # of Ts:6898`). 가끔 통과하는 것은 Azure가 수집 간격을 '무작위로 고른 시계열 하나'로 추정하기 때문입니다
+- **해결**: SLO 기간을 **3일 조각**(`[3d] offset 3d·i`, 첫 조각 = 3일 소진 창 재사용)으로 묻고 서버에서 라벨 집합별로 더합니다(`workloadSlo.ts` `sloWindowParts`·`mergeSloParts`, 조각 하나라도 실패 = 그 값은 실패 — 부분 합을 기간 값처럼 보이지 않음). 조각 합 = 한 번에 묻기와 0.005% 차이(6일 실측). stg 질의 40개 12.9초, 실패 0. 비용 초과 429는 `tooCostly`(재시도 안 함 — 같은 답) · 일반 429는 `throttled`(3초 뒤 1회 재시도 — Azure는 신원별 30초 창으로 셈). 모든 사용자·탭이 같은 연결 신원으로 읽으므로 작업 영역별 동시 질의는 프로세스 전체 8개(`PROM_MAX_IN_FLIGHT`)
+- **새 질의를 만들 때**: 긴 기간(≥ 1일)·여러 서비스 합산 질의는 `count(last_over_time(<선택자>[기간]))`로 그 기간의 시계열 수를 먼저 재고, 시계열 × 시간 × (3600 ÷ 수집 간격초) ÷ 5000 < 15,000(여유 절반)인지 확인합니다
 
 ---
 

@@ -333,7 +333,7 @@ export type ObservabilityStackResponse = {
   /** The window's end when it is not now (the time picker moved back) */
   at?: string;
   /** Same states as the Hubble metrics view (workspace / permission / scope) */
-  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
   message?: string;
   cluster: string | null;
   components: StackComponent[];
@@ -347,7 +347,7 @@ export type ObservabilityStackResponse = {
   /** This refresh failed as a whole: the last complete answer (≤ 15 min old) is shown, with why the refresh failed */
   stale?: { failedAt: string; state: ObservabilityStackResponse["metricsState"]; message?: string };
 };
-export type StackQueryGap = { query: string; reason: "timeout" | "throttled" | "failed" };
+export type StackQueryGap = { query: string; reason: "timeout" | "throttled" | "tooCostly" | "failed" };
 
 // ── Data sources (services/observabilitySources.ts) — what the dashboard reads vs only links to ──
 
@@ -466,7 +466,7 @@ export type WorkloadHeatmapResponse = {
   windowMinutes: number;
   /** The window's end when it is not now (the time picker moved back) — every query was evaluated at this time */
   at?: string;
-  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
   message?: string;
   cluster: string | null;
   thresholds: Record<HeatMetric, { warn: number; danger: number }>;
@@ -753,7 +753,7 @@ export type WorkloadSloResponse = {
   clusterId: string;
   generatedAt: string;
   at?: string;
-  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
   message?: string;
   cluster: string | null;
   windowDays: number;

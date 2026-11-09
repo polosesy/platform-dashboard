@@ -154,12 +154,19 @@ export function aggregateHubbleMetrics(input: MetricsInput): Body {
   };
 }
 
+/**
+ * Pure: Azure Monitor's per-query cost limit (429 "expanding series … Query cost=27939 exceeds max limit=15000") — cost
+ * = series × (range ÷ sample interval) ÷ 5000; a retry gets the same answer, so it is never retried or called a rate limit
+ */
+export const isQueryCostLimit = (message: string): boolean => /exceeds max limit/i.test(message) && /query cost/i.test(message);
+
 /** A Prometheus failure as a state the UI names (no sample data for signed-in callers) */
 export function metricsStateOf(e: unknown): { state: HubbleMetricsState; message: string } {
   const message = safeMessage(e);
   if (e instanceof HttpError && (e.status === 401 || e.status === 403)) return { state: "forbidden", message };
   const status = Number(/^(?:Prometheus|ARM)\s+(\d{3})\b/.exec(message)?.[1] ?? 0);
   if (status === 401 || status === 403) return { state: "forbidden", message };
+  if (status === 429 && isQueryCostLimit(message)) return { state: "tooCostly", message };
   if (status === 429) return { state: "throttled", message };
   return { state: "failed", message };
 }

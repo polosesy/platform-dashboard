@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SLO_DEFAULTS, aggregateSlo, effectiveBucket, sliExpr, sloQueries, targetsFor, type SloConfig, type SloRaw,
+  SLO_DEFAULTS, SLO_PART_DAYS, aggregateSlo, effectiveBucket, mergeSloParts, sliExpr, sloPartKey, sloQueries, sloWindowParts, targetsFor,
+  type SloConfig, type SloRaw,
 } from "../src/services/workloadSlo.js";
 
 // Shapes measured in a customer Azure Monitor workspace (Micrometer http_server_requests_seconds, 2026-11-05):
@@ -165,13 +166,45 @@ test("coverage, untagged series, uninstrumented workloads, order (worst first), 
 
 test("queries: one grouping for both SLIs, /actuator never counted, the SLO window and every burn window", () => {
   const q = sloQueries(C, 'cluster="aks-a"', 30, ["1.0"]);
-  for (const w of WINDOWS) {
+  for (const w of WINDOWS.filter((x) => x !== "30d")) {
     assert.match(q[`n:${w}`]!, new RegExp(`sum by \\(namespace, application, uri, method, status\\).*\\[${w}\\]`));
     assert.match(q[`g:${w}:1.0`]!, /le="1\.0"/);
   }
   assert.ok(Object.values(q).filter((x) => x.includes("http_server")).every((x) => x.includes('uri!~"/actuator.*"')));
-  assert.match(q.coverage!, /\[30d:1h\]/);
   assert.match(sliExpr(C, "latency", "shop", "orders", 30, "1.0"), /status!~"1\.\."/);
+});
+
+// 2026-11-09 stg: `increase(…[30d])` over every service read 6,898 series (501 alive now) → Azure Monitor 429 "Query
+// cost=27939 exceeds max limit=15000" on every try. The window is read in 3-day parts (part 0 = the 3d burn window).
+test("the SLO window: never one long range — 3-day parts with offsets, part 0 reused, no gap or overlap", () => {
+  assert.deepEqual(sloWindowParts(7), [{ range: "3d", offset: "" }, { range: "3d", offset: " offset 3d" }, { range: "1d", offset: " offset 6d" }]);
+  for (const d of [7, 14, 28, 30]) {
+    const parts = sloWindowParts(d);
+    assert.equal(parts.reduce((s, p) => s + parseInt(p.range, 10), 0), d, `${d} days covered exactly`);
+    assert.ok(parts.every((p) => parseInt(p.range, 10) <= SLO_PART_DAYS));
+    const q = sloQueries(C, 'cluster="aks-a"', d, ["1.0"]);
+    for (const [name, expr] of Object.entries(q)) {
+      for (const m of expr.matchAll(/\[(\d+)d(?::1h)?\]/g)) assert.ok(Number(m[1]) <= SLO_PART_DAYS, `${name} reads ${m[1]} days in one query`);
+    }
+    assert.equal(q[`n:${d}d`], undefined, "no single-window query");
+    assert.equal(sloPartKey(`n:${d}d`, d, 0), "n:3d", "part 0 is the burn window's query");
+    // PromQL: the offset follows the range selector — `[3d] offset 3d`, never inside the brackets
+    assert.match(q[sloPartKey(`g:${d}d:1.0`, d, parts.length - 1)]!, new RegExp(`\\[\\d+d\\] offset ${(parts.length - 1) * 3}d\\)`));
+    assert.ok(Object.values(q).every((x) => !/\[[^\]]*offset/.test(x)), "no offset inside a range selector");
+    assert.equal(Object.keys(q).filter((k) => k.startsWith("coverage#")).length, parts.length);
+  }
+});
+
+test("the SLO window's parts sum per label set; one failed part fails the value (never a partial window)", () => {
+  const m = (uri: string) => ({ namespace: "shop", application: "orders", uri, method: "get", status: "200" });
+  const rawParts: SloRaw = { "n:3d": [{ metric: m("/a"), value: 10 }], "n:7d#1": [{ metric: m("/a"), value: 5 }, { metric: m("/b"), value: 1 }], "n:7d#2": [{ metric: m("/a"), value: 2 }],
+    "g:3d:1.0": [{ metric: { ...m("/a"), le: "1.0" }, value: 9 }], "g:7d:1.0#1": [], "g:7d:1.0#2": [],
+    "coverage#0": [{ metric: { namespace: "shop", application: "orders" }, value: 72 }], "coverage#1": [{ metric: { namespace: "shop", application: "orders" }, value: 70 }] };
+  const ok = mergeSloParts(rawParts, new Set(["coverage#2"]), 7, ["1.0"]);
+  assert.deepEqual(ok.raw["n:7d"]!.map((r) => [r.metric.uri, r.value]), [["/a", 17], ["/b", 1]]);
+  assert.equal(ok.raw["g:7d:1.0"]![0]!.value, 9);
+  assert.ok(ok.failed.has("coverage") && !ok.failed.has("n:7d"), "a coverage part failing only drops coverage");
+  assert.ok(mergeSloParts(rawParts, new Set(["n:7d#1"]), 7, ["1.0"]).failed.has("n:7d"));
 });
 
 // ── web lib/sloView.ts (pure) ──

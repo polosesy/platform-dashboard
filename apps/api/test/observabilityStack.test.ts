@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { metricsStateOf } from "../src/services/hubbleMetrics.js";
 import { aggregateStack, gapReason, grafanaExploreUrl, isTransient, notReadySinceQuery, pyroscopeTarget, rollup, stackQueries, withFallback, type StackRaw } from "../src/services/observabilityStack.js";
 import type { ObservabilityStackResponse } from "@aud/types";
 import { pickScope, scopeMatchers } from "../src/services/promScope.js";
@@ -106,6 +107,12 @@ test("query errors: timeouts / 504 / 429 / network retried once; 4xx and PromQL 
   assert.ok(!isTransient(new Error("Prometheus 400: bad_data: parse error")));
   assert.ok(!isTransient(new Error("Prometheus 403: Forbidden: no access")));
   assert.ok(!isTransient(new Error("Prometheus query failed: bad_data")));
+  // 2026-11-09 stg (the SLO tab): one query over Azure Monitor's per-query cost limit — the same answer on every retry
+  const cost = new Error(`Prometheus 429: error: expanding series: Response status: 429 Too Many Requests. Error: {"Error":{"Code":"429","Message":"Request failed because Query cost=27939 exceeds max limit=15000 for GetRawTimeSeriesData manager. # of Ts:6898"}}`);
+  assert.equal(gapReason(cost), "tooCostly");
+  assert.ok(!isTransient(cost), "never retried");
+  assert.equal(metricsStateOf(cost).state, "tooCostly");
+  assert.equal(metricsStateOf(new Error("Prometheus 429: TooManyRequests")).state, "throttled");
 });
 
 test("a refresh that fails as a whole shows the last complete answer, marked with when and why", () => {

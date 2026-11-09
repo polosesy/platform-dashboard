@@ -349,7 +349,9 @@ export type HubbleStatusResponse = {
 export type HubbleDataSource = "exec" | "flowLogs" | "hubbleUi" | "metrics" | "none";
 export type HubbleUiState = "ok" | "notConfigured" | "unreachable" | "unsupported" | "failed";
 
-export type HubbleMetricsState = "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "failed";
+/** tooCostly = Azure Monitor refused ONE query over its cost limit (429 "Query cost=… exceeds max limit=15000") — the
+ *  same answer on every try, unlike throttled (the identity's rate over 30 s) */
+export type HubbleMetricsState = "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
 export type HubbleLogsState = "ok" | "notEnabled" | "forbidden" | "failed";
 
 export type HubbleSourcesResponse = {

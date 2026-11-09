@@ -26,7 +26,7 @@ import { HttpError } from "../infra/requestParams.js";
 import { withK8sRetry } from "../infra/k8sRetry.js";
 import { loadKubeConfig } from "./kubernetes.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
-import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
+import { isQueryCostLimit, metricsStateOf, type PromRow } from "./hubbleMetrics.js";
 import { pickScope, scopeMatchers } from "./promScope.js";
 import { ownerIndex, resolveWorkload, type OwnerRow } from "./workloadOwners.js";
 
@@ -330,19 +330,25 @@ const rowsOf = (resp: unknown): PromRow[] => {
 export const STACK_QUERY_TIMEOUT_MS = 12_000;
 
 const errText = (e: unknown) => (e instanceof Error ? `${e.name} ${e.message}` : String(e));
-/** Pure: why a query did not answer — timeout (our abort / the workspace's 504), throttled (429), failed */
+/** Pure: why a query did not answer — timeout (our abort / the workspace's 504), tooCostly (429 over the per-query
+ *  cost limit), throttled (another 429 — the identity's rate), failed */
 export function gapReason(e: unknown): StackQueryGap["reason"] {
   const m = errText(e);
   if (/AbortError|aborted|timed? ?out|Prometheus 504\b/i.test(m)) return "timeout";
-  if (/Prometheus 429\b/.test(m)) return "throttled";
+  if (/Prometheus 429\b/.test(m)) return isQueryCostLimit(m) ? "tooCostly" : "throttled";
   return "failed";
 }
-/** Pure: worth one more try — timeouts, throttling, gateway / network errors; never 4xx answers (same answer again) */
+/** Pure: worth one more try — timeouts, throttling, gateway / network errors; never 4xx answers or a query over the
+ *  cost limit (the same answer again) */
 export function isTransient(e: unknown): boolean {
   const m = errText(e);
-  if (/Prometheus 4(?!29)\d\d\b/.test(m) || /Prometheus query failed/.test(m)) return false;
+  if (/Prometheus 4(?!29)\d\d\b/.test(m) || /Prometheus query failed/.test(m) || isQueryCostLimit(m)) return false;
   return gapReason(e) !== "failed" || /Prometheus 5\d\d\b|fetch failed|ECONNRESET|ETIMEDOUT|socket/i.test(m);
 }
+
+/** Before retrying a rate-limited query: Azure Monitor counts an identity's queries over a 30-second window, so an
+ *  immediate retry lands in the same window (and adds to it) */
+export const THROTTLE_RETRY_DELAY_MS = 3_000;
 
 /** Run queries (at most `limit` in flight); a query that fails twice is a gap with empty rows, the others stand */
 /** `time` = the evaluation time (epoch seconds) for a view of the past; none = now */
@@ -362,6 +368,7 @@ export async function runAll(fetcher: PrometheusFetcher, endpoint: string, queri
         if (e instanceof HttpError) throw e;
         try {
           if (!isTransient(e)) throw e;
+          if (gapReason(e) === "throttled") await new Promise((r) => setTimeout(r, THROTTLE_RETRY_DELAY_MS));
           rows[n] = await once(n);
         } catch (e2) {
           if (e2 instanceof HttpError) throw e2;

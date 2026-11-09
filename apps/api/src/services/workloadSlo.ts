@@ -13,6 +13,11 @@
 // - Low traffic: when one bad request would use the whole budget, the ratio is shown but not judged (lowTraffic).
 // - A query that does not answer is a gap: the values that need it say queryFailed; the window's counts failing
 //   fails the page.
+// - The SLO window is read in parts of at most SLO_PART_DAYS (`increase(…[3d] offset 3d·i)`, summed here): Azure
+//   Monitor refuses ONE query whose cost — series × (range ÷ sample interval) ÷ 5000 — exceeds 15,000, and a range
+//   counts every series alive during it (2026-11-09 stg: 501 series now, 6,898 over 30 days as pods are replaced →
+//   cost ≈ 27,900 → 429 "expanding series … Query cost=27939 exceeds max limit=15000" on every try, not a rate limit).
+//   A 3-day part: ≤ 2,500 series, cost ≈ 900–2,000; the parts sum to the single query within 0.005 % (6 d measured).
 
 import type { Env } from "../env.js";
 import type {
@@ -46,8 +51,10 @@ export const SLO_AT_RISK = 0.75;
 /** Under this share of the window with series, the SLI covers fewer days than the window says */
 export const SLO_COVERAGE_PARTIAL = 0.9;
 export const SLO_WINDOW_DAYS = [7, 14, 28, 30] as const;
-/** 30-day queries take 7 – 16 s on stg — more than the stack's 12 s */
+/** A 3-day part takes 1 – 4 s on stg; the limit leaves room for a slow workspace */
 export const SLO_QUERY_TIMEOUT_MS = 25_000;
+/** The SLO window's part length — the 3d burn window is part 0 (see the header: Azure's per-query cost limit) */
+export const SLO_PART_DAYS = 3;
 
 export type SloTargets = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
 export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean }> };
@@ -79,15 +86,38 @@ export function effectiveBucket(les: string[], thresholdMs: number): { le: strin
 }
 
 const BY = "namespace, application, uri, method, status";
+
+/** Pure: the SLO window as consecutive parts, newest first — part 0 is the 3d burn window itself (no extra query) */
+export function sloWindowParts(windowDays: number): Array<{ range: string; offset: string }> {
+  const parts: Array<{ range: string; offset: string }> = [];
+  for (let from = 0; from < windowDays; from += SLO_PART_DAYS) {
+    parts.push({ range: `${Math.min(SLO_PART_DAYS, windowDays - from)}d`, offset: from ? ` offset ${from}d` : "" });
+  }
+  return parts;
+}
+/** Pure: the query name of part i of an SLO-window value (`n:30d`, `g:30d:<le>`, `coverage`) — part 0 of the counts
+ *  is the 3d burn window's own query */
+export function sloPartKey(base: string, windowDays: number, i: number): string {
+  const first = sloWindowParts(windowDays)[0]!;
+  return i === 0 && base !== "coverage" && first.range === `${SLO_PART_DAYS}d` ? base.replace(`:${windowDays}d`, `:${SLO_PART_DAYS}d`) : `${base}#${i}`;
+}
+
 /** Pure: the queries — counts per window, the good-latency bucket per boundary, coverage and the workload names */
 export function sloQueries(C: string, ksm: string, windowDays: number, les: string[]): Record<string, string> {
   const sel = (m: string, extra = "") => `${m}{${[C, 'uri!~"/actuator.*"', extra].filter(Boolean).join(",")}}`;
+  const n = (r: string, off = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_count")}[${r}]${off}))`;
+  const g = (le: string, r: string, off = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_bucket", `le=${promString(le)}`)}[${r}]${off}))`;
   const q: Record<string, string> = {};
-  for (const w of [...BURN_WINDOWS, `${windowDays}d`]) {
-    q[`n:${w}`] = `sum by (${BY}) (increase(${sel("http_server_requests_seconds_count")}[${w}]))`;
-    for (const le of les) q[`g:${w}:${le}`] = `sum by (${BY}) (increase(${sel("http_server_requests_seconds_bucket", `le=${promString(le)}`)}[${w}]))`;
+  for (const w of BURN_WINDOWS) {
+    q[`n:${w}`] = n(w);
+    for (const le of les) q[`g:${w}:${le}`] = g(le, w);
   }
-  q.coverage = `count_over_time((sum by (namespace, application) (${sel("http_server_requests_seconds_count")}))[${windowDays}d:1h])`;
+  const W = `${windowDays}d`;
+  sloWindowParts(windowDays).forEach((p, i) => {
+    q[sloPartKey(`n:${W}`, windowDays, i)] ??= n(p.range, p.offset);
+    for (const le of les) q[sloPartKey(`g:${W}:${le}`, windowDays, i)] ??= g(le, p.range, p.offset);
+    q[sloPartKey("coverage", windowDays, i)] = `count_over_time((sum by (namespace, application) (${sel("http_server_requests_seconds_count")}))[${p.range}:1h]${p.offset})`;
+  });
   const k = (m: string) => `${m}{${ksm}}`;
   q.deployments = `max by (namespace, deployment) (${k("kube_deployment_spec_replicas")}) > 0`;
   q.statefulsets = `max by (namespace, statefulset) (${k("kube_statefulset_replicas")}) > 0`;
@@ -105,6 +135,31 @@ export function sliExpr(C: string, kind: SloKind, namespace: string, application
 }
 
 export type SloRaw = Record<string, PromRow[]>;
+
+/**
+ * Pure: the SLO window's parts summed into `n:<W>` / `g:<W>:<le>` / `coverage` (rows keyed by their whole label set);
+ * a value with a part that failed is failed itself (never a partial sum shown as the window)
+ */
+export function mergeSloParts(raw: SloRaw, failed: Set<string>, windowDays: number, les: string[]): { raw: SloRaw; failed: Set<string> } {
+  const W = `${windowDays}d`;
+  const parts = sloWindowParts(windowDays);
+  const out: SloRaw = { ...raw };
+  const outFailed = new Set(failed);
+  for (const base of [`n:${W}`, ...les.map((le) => `g:${W}:${le}`), "coverage"]) {
+    const keys = parts.map((_, i) => sloPartKey(base, windowDays, i));
+    if (keys.some((k) => failed.has(k))) { out[base] = []; outFailed.add(base); continue; }
+    const sum = new Map<string, PromRow>();
+    for (const k of keys) {
+      for (const r of raw[k] ?? []) {
+        const id = Object.keys(r.metric).sort().map((l) => `${l}=${r.metric[l]}`).join("\u0000");
+        const prev = sum.get(id);
+        sum.set(id, prev ? { metric: prev.metric, value: prev.value + r.value } : { metric: r.metric, value: r.value });
+      }
+    }
+    out[base] = [...sum.values()];
+  }
+  return { raw: out, failed: outFailed };
+}
 type Counts = { events: number; bad: number; uris: Map<string, { uri: string; method: string; events: number; bad: number }> };
 const RANK: Record<SloState, number> = { fastBurn: 7, exhausted: 6, slowBurn: 5, atRisk: 4, ok: 3, lowTraffic: 2, queryFailed: 1, noData: 0 };
 const round = (v: number) => Math.round(v * 1000) / 1000;
@@ -326,13 +381,14 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
       ...Object.values(cfg?.services ?? {}).flatMap((s) => (s.latency ? [s.latency.thresholdMs] : []))]);
     const used = [...new Set([...thresholds].map((ms) => effectiveBucket(les, ms)?.le).filter((x): x is string => !!x))];
     const run = await runAll(fetcher, target.endpoint, sloQueries(C, ksm, windowDays, used), 4, time, SLO_QUERY_TIMEOUT_MS);
-    const failed = new Set(run.gaps.map((g) => g.query));
+    const merged = mergeSloParts(run.rows, new Set(run.gaps.map((g) => g.query)), windowDays, used);
+    const failed = merged.failed;
     if (failed.has(`n:${windowDays}d`)) throw run.firstError;
     const gaps: StackQueryGap[] = run.gaps;
     return {
       ...base, cluster: scope.cluster, instrumented: true,
       buckets: les.map(Number).sort((a, b) => a - b),
-      ...aggregateSlo(run.rows, { cfg, windowDays, les: used, C, failed }),
+      ...aggregateSlo(merged.raw, { cfg, windowDays, les: used, C, failed }),
       ...(gaps.length ? { gaps } : {}),
     };
   } catch (e) {

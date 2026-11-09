@@ -992,6 +992,7 @@ const CORE: Translations = {
   "obs.stack.gapsValues": { ko: "조회 실패한 값: {list}", en: "Values not read: {list}" },
   "obs.stack.gap.timeout": { ko: "Azure Monitor 작업 영역 응답 시간 초과", en: "the Azure Monitor workspace did not answer in time" },
   "obs.stack.gap.throttled": { ko: "질의 한도 초과(429)", en: "query limit reached (429)" },
+  "obs.stack.gap.tooCostly": { ko: "질의 하나의 비용 상한 초과(429 — 다시 시도해도 같음)", en: "one query over the cost limit (429 — same on retry)" },
   "obs.stack.gap.failed": { ko: "질의 오류", en: "query error" },
   "obs.stack.staleTitle": { ko: "{at}에 읽은 값입니다 — 이번 새로 고침은 실패했습니다", en: "Values read at {at} — this refresh failed" },
   "obs.stack.staleHint": { ko: "{at} 조회가 실패해 마지막으로 끝까지 읽은 결과(15분 이내)를 보여 줍니다. 지금 상태와 다를 수 있습니다.", en: "The read at {at} failed, so the last complete result (within 15 min) is shown. It may differ from now." },

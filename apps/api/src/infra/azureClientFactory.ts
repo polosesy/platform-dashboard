@@ -362,16 +362,40 @@ function buildArmFetcher(token: () => Promise<string>): ArmFetcher {
   };
 }
 
+/**
+ * Queries in flight to one Azure Monitor workspace from this whole process. Every user and every tab reads a cluster's
+ * workspace with the same connection identity, and Azure Monitor rates that identity over 30-second windows — so the
+ * per-service limits (4 each) alone let the heatmap, stack, SLO, Hubble and node panels of several users burst together
+ */
+export const PROM_MAX_IN_FLIGHT = 8;
+const promSlots = new Map<string, { active: number; waiting: Array<() => void> }>();
+async function withPromSlot<T>(endpoint: string, run: () => Promise<T>): Promise<T> {
+  const key = endpoint.toLowerCase();
+  let s = promSlots.get(key);
+  if (!s) promSlots.set(key, (s = { active: 0, waiting: [] }));
+  if (s.active < PROM_MAX_IN_FLIGHT) s.active++;
+  else await new Promise<void>((r) => s!.waiting.push(r)); // the finishing query hands its slot over
+  try {
+    return await run();
+  } finally {
+    const next = s.waiting.shift();
+    if (next) next();
+    else s.active--;
+  }
+}
+
 function buildPrometheusFetcher(token: () => Promise<string>): PrometheusFetcher {
   return {
     async query(endpoint: string, promql: string, time?: string, opts?: { timeoutMs?: number }): Promise<unknown> {
       const params = new URLSearchParams({ query: promql });
       if (time) params.set("time", time);
-      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers: { Authorization: `Bearer ${await token()}` } }, opts?.timeoutMs);
+      return withPromSlot(endpoint, async () =>
+        fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query?${params}`, { headers: { Authorization: `Bearer ${await token()}` } }, opts?.timeoutMs));
     },
     async queryRange(endpoint: string, promql: string, start: string, end: string, step: string): Promise<unknown> {
       const params = new URLSearchParams({ query: promql, start, end, step });
-      return fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query_range?${params}`, { headers: { Authorization: `Bearer ${await token()}` } });
+      return withPromSlot(endpoint, async () =>
+        fetchJsonWithTimeout("Prometheus", `${endpoint}/api/v1/query_range?${params}`, { headers: { Authorization: `Bearer ${await token()}` } }));
     },
   };
 }
