@@ -149,7 +149,7 @@ export function NetworkTab({ clusterId, live = false, nonce = 0 }: Props) {
                   <td>{d.source}</td>
                   <td>{d.destination}</td>
                   <td style={{ fontWeight: 600, color: rgba("danger", 0.85) }}>{d.count}</td>
-                  <td style={{ fontSize: 11, color: rgba("ink", 0.55) }}>{d.dropReason || "—"}</td>
+                  <td style={{ fontSize: 12, color: rgba("ink", 0.55) }}>{d.dropReason || "—"}</td>
                 </tr>
               ))}
             </tbody>

@@ -10,28 +10,28 @@
 .statusDot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .select {
   appearance: none;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: rgba(var(--paper-rgb), 0.66);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .generateBtn {
   padding: 7px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(var(--accent-rgb), 0.3);
   background: var(--accent-soft);
   color: rgba(var(--accent-rgb), 0.9);
-  font-weight: 800;
-  font-size: 12px;
+  font-weight: 700;
+  font-size: var(--text-caption);
   cursor: pointer;
   transition: background 150ms ease;
   white-space: nowrap;
@@ -52,7 +52,7 @@
   background: var(--danger-soft);
   border-radius: var(--radius-md);
   color: rgba(var(--danger-rgb), 0.95);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 /* ── Control Bar ── */
@@ -74,9 +74,9 @@
   width: 200px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--fg);
   outline: none;
   transition: border-color 0.15s;
@@ -97,8 +97,8 @@
   overflow-y: auto;
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(var(--ink-rgb), 0.12);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
   z-index: 100;
   padding: 4px;
 }
@@ -110,9 +110,9 @@
   width: 100%;
   padding: 6px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--fg);
   text-align: left;
   cursor: pointer;
@@ -130,11 +130,11 @@
 }
 .resourceSearchKind {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   background: rgba(var(--ink-rgb), 0.04);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .overlayToggles {
@@ -149,10 +149,10 @@
   gap: 5px;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--paper-rgb), 0.5);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   color: var(--muted);
   cursor: pointer;
   user-select: none;
@@ -181,7 +181,7 @@
 .canvasWrap {
   position: relative;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
@@ -200,8 +200,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
   color: var(--subtle);
   background: rgba(var(--paper-rgb), 0.85);
   border: 1px solid var(--border);
@@ -236,7 +236,7 @@
   position: relative;
   width: 100%;
   height: 100%;
-  border-radius: 16px;
+  border-radius: var(--radius-md);
   pointer-events: none; /* allow edge clicks to pass through to SVG layer */
   /* border-color, border-style, border-width, background set via inline style from scopeStyle() */
 }
@@ -257,8 +257,8 @@
 }
 
 .groupNodeLabel {
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--canvas-text-sm);
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: rgba(var(--ink-rgb), 0.5);
   white-space: nowrap;
@@ -270,8 +270,8 @@
 }
 
 .groupNodeSubtitle {
-  font-family: var(--font-geist-mono);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   color: rgba(var(--accent-rgb), 0.55);
   white-space: nowrap;
@@ -280,11 +280,11 @@
 }
 
 .groupNodeRegion {
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   color: rgba(var(--ink-rgb), 0.38);
   background: rgba(var(--ink-rgb), 0.06);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
   white-space: nowrap;
   flex-shrink: 0;
@@ -294,7 +294,7 @@
 
 .alertSidebar {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
@@ -305,7 +305,7 @@
 .alertTitle {
   padding: 14px;
   border-bottom: 1px solid var(--border);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
   display: flex;
   align-items: center;
@@ -314,17 +314,17 @@
 
 .alertBadge {
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--danger-rgb), 0.12);
   color: rgba(var(--danger-rgb), 0.9);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--text-caption);
+  font-weight: 700;
 }
 
 .alertHint {
   margin: 0;
   padding: 10px 14px 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.5;
   color: var(--muted);
 }
@@ -332,7 +332,7 @@
 .alertEmpty {
   padding: 14px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .alertList {
@@ -348,7 +348,7 @@
   cursor: pointer;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   display: grid;
   gap: 6px;
@@ -369,32 +369,32 @@
 .alertDot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
 }
 
 .alertSeverity {
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
 .alertTime {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-mono);
 }
 
 .alertName {
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: var(--text-small);
   letter-spacing: -0.01em;
 }
 
 .alertSummary {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.4;
 }
@@ -408,25 +408,25 @@
 }
 
 .alertCausesLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
 
 .alertCause {
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--warning-rgb), 0.08);
   border: 1px solid rgba(var(--warning-rgb), 0.18);
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--warning-rgb), 0.85);
 }
 
 .alertAffected {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-mono);
 }
 
 /* ── Topology stats bar ── */
@@ -434,7 +434,7 @@
 .statsBar {
   display: flex;
   gap: 16px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -445,8 +445,8 @@
 }
 
 .statVal {
-  font-weight: 800;
-  font-family: var(--font-geist-mono);
+  font-weight: 700;
+  font-family: var(--font-mono);
   color: rgba(var(--ink-rgb), 0.72);
 }
 
@@ -473,7 +473,7 @@
 .faultTimelineEmpty {
   padding: 14px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .faultTimelineSvg {
@@ -507,7 +507,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   transition: background 150ms ease;
 }
 
@@ -518,13 +518,13 @@
 .faultTimelineSevDot {
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
 }
 
 .faultTimelineItemTitle {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -532,9 +532,9 @@
 }
 
 .faultTimelineItemTime {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-mono);
   flex: none;
 }
 
@@ -542,7 +542,7 @@
 
 .detailPanel {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   overflow: hidden;
   /* near-opaque: the canvas behind made small text hard to read */
   background: rgba(var(--paper-rgb), 0.94);
@@ -563,7 +563,7 @@
 .detailHealthDot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
 }
 
@@ -575,8 +575,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-body);
   color: var(--muted);
   transition: background 150ms ease;
   flex: none;
@@ -606,7 +606,7 @@
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 /* ── Tenant/Subscription Selector Bar ── */
@@ -621,7 +621,7 @@
   gap: 8px 16px;
   padding: 8px 14px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(8px);
 }
@@ -633,8 +633,8 @@
 }
 
 .selectorLabel {
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -670,13 +670,13 @@
 }
 
 .essentialsLabel {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--muted);
 }
 
 .essentialsValue {
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 500;
   color: rgba(var(--ink-rgb), 0.88);
   overflow-wrap: anywhere;
@@ -685,8 +685,8 @@
 }
 
 .essentialsValueMono {
-  font-family: var(--font-geist-mono);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.88);
   word-break: break-all;
@@ -703,8 +703,8 @@
   align-items: center;
   gap: 4px;
   width: 100%;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--muted);
@@ -718,7 +718,7 @@
 }
 
 .toggleChevron {
-  font-size: 9px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -727,7 +727,7 @@
 .edgeHeaderTitle {
   flex: 1;
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--text-caption);
   white-space: normal;
   word-break: break-all;
   overflow: hidden;
@@ -736,17 +736,17 @@
 }
 
 .edgeHeaderArrow {
-  font-size: 14px;
+  font-size: var(--text-body);
   color: rgba(var(--accent-rgb), 0.72);
-  font-weight: 800;
+  font-weight: 700;
   flex: none;
 }
 
 .edgeProtocolBadge {
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
   letter-spacing: 0.03em;
   background: rgba(var(--accent-rgb), 0.08);
   color: rgba(var(--accent-rgb), 0.82);
@@ -755,14 +755,14 @@
 }
 
 .edgeRefreshInfo {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 500;
   padding: 2px 0 4px;
 }
 
 .edgeLoadingNote {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
   padding: 12px 0;
   text-align: center;
@@ -775,7 +775,7 @@
 }
 
 .edgeSubSectionLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.55);
   text-transform: uppercase;
@@ -784,7 +784,7 @@
 }
 
 .edgeEmptyNote {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-style: italic;
 }
@@ -796,7 +796,7 @@
 }
 
 .edgeEndpointLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--accent-rgb), 0.72);
   padding-bottom: 2px;
@@ -810,8 +810,8 @@
   gap: 6px;
   align-items: center;
   padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
   font-weight: 600;
 }
 
@@ -826,8 +826,8 @@
 }
 
 .nsgRuleAccess {
-  font-weight: 800;
-  font-size: 10px;
+  font-weight: 700;
+  font-size: var(--text-caption);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -842,18 +842,18 @@
 }
 
 .nsgRuleProto {
-  font-family: monospace;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
 }
 
 .nsgRulePort {
-  font-family: monospace;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   font-weight: 700;
 }
 
 .nsgRuleSrc {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -861,7 +861,7 @@
 }
 
 .nsgRulePriority {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   text-align: right;
 }
@@ -873,23 +873,23 @@
   gap: 6px;
   align-items: center;
   padding: 3px 0;
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 
 .udrRoutePrefix {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.75);
 }
 
 .udrRouteArrow {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--text-caption);
 }
 
 .udrRouteHop {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--accent-rgb), 0.8);
   font-weight: 600;
 }
@@ -903,7 +903,7 @@
 
 .flowRecord {
   padding: 5px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(var(--ink-rgb), 0.07);
   background: rgba(var(--paper-rgb), 0.55);
   display: grid;
@@ -923,27 +923,27 @@
 }
 
 .internetIcon {
-  font-size: 11px;
+  font-size: var(--text-caption);
   flex: none;
 }
 
 .flowIp {
-  font-family: monospace;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.8);
   font-weight: 600;
 }
 
 .flowArrow {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   flex: none;
 }
 
 .flowProtoBadge {
   padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
   font-weight: 700;
   background: rgba(var(--ink-rgb), 0.07);
   color: rgba(var(--ink-rgb), 0.55);
@@ -954,9 +954,9 @@
 
 .flowActionBadge {
   padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 9px;
-  font-weight: 800;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   flex: none;
@@ -975,8 +975,8 @@
 .flowBytes {
   display: flex;
   gap: 10px;
-  font-size: 10px;
-  font-family: monospace;
+  font-size: var(--text-caption);
+  font-family: var(--font-mono);
   color: var(--muted);
 }
 
@@ -994,23 +994,23 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--text-caption);
   padding: 2px 0;
 }
 
 .portSummaryPort {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.75);
 }
 
 .portSummaryCount {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--text-caption);
 }
 
 .portSummaryExternal {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--accent-rgb), 0.7);
   font-weight: 600;
   padding-top: 2px;
@@ -1058,23 +1058,23 @@
   align-items: center;
   gap: 3px;
   padding: 2px 7px 2px 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--paper-rgb), 0.92);
   border: 1px solid rgba(var(--accent-rgb), 0.25);
-  font-size: 9px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   color: var(--accent-strong);
   cursor: pointer;
   white-space: nowrap;
   transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
-  box-shadow: 0 1px 4px rgba(var(--ink-rgb), 0.08);
+  box-shadow: none;
   line-height: 1;
 }
 
 .nsgBadge:hover {
   background: rgba(var(--accent-rgb), 0.08);
   border-color: rgba(var(--accent-rgb), 0.4);
-  box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.15);
+  box-shadow: var(--shadow-raise);
 }
 
 .nsgBadgeIcon {
@@ -1100,8 +1100,8 @@
 }
 
 .nsgDetachedX {
-  font-weight: 800;
-  font-size: 10px;
+  font-weight: 700;
+  font-size: var(--canvas-text-xs);
   color: rgba(var(--danger-rgb), 0.72);
   flex: none;
 }
@@ -1116,13 +1116,13 @@
   white-space: nowrap;
   background: rgba(var(--ink-rgb), 0.88);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   font-weight: 600;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   pointer-events: none;
   z-index: 9999;
-  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.18);
+  box-shadow: var(--shadow-pop);
 }
 
 .nsgBadgeDetached:hover .nsgDetachedTooltip {
@@ -1134,12 +1134,12 @@
 .multiSelectBtn {
   appearance: none;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: rgba(var(--paper-rgb), 0.66);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
-  font-size: 12px;
+  font-size: var(--text-caption);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1177,10 +1177,10 @@
 .multiSelectBtnCount {
   background: rgba(var(--accent-rgb), 0.12);
   color: rgba(var(--accent-rgb), 0.9);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--text-caption);
+  font-weight: 700;
   flex-shrink: 0;
 }
 
@@ -1194,8 +1194,8 @@
   overflow-y: auto;
   background: white;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(var(--ink-rgb), 0.10);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
   z-index: 200;
   padding: 4px;
   display: flex;
@@ -1208,8 +1208,8 @@
   box-sizing: border-box;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text);
   background: rgba(var(--canvas-rgb), 0.8);
@@ -1227,9 +1227,9 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--text);
   user-select: none;
@@ -1249,9 +1249,9 @@
   background: rgba(var(--accent-rgb), 0.08);
   color: var(--accent-strong);
   border: 1px solid rgba(var(--accent-rgb), 0.18);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -1280,7 +1280,7 @@
    right after it, ▴ folds them back */
 .wafToggle { border-style: dashed; background: rgba(var(--accent-rgb), 0.03); }
 .wafToggle .cardDesc { color: var(--accent); }
-.wafChevron { flex: none; margin-left: auto; font-size: 12px; line-height: 1; color: var(--accent); }
+.wafChevron { flex: none; margin-left: auto; font-size: var(--text-caption); line-height: 1; color: var(--accent); }
 
 /* ── Internet Node (아웃바운드 트래픽 종착 노드) ── */
 
@@ -1296,7 +1296,7 @@
   box-sizing: border-box;
   overflow: hidden;
   padding: 6px 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1.5px dashed rgba(var(--egress-rgb), 0.55);
   background: rgba(var(--egress-rgb), 0.06);
   backdrop-filter: blur(4px);
@@ -1333,7 +1333,7 @@
 }
 
 .internetNodeLabel {
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   font-weight: 700;
   color: rgba(var(--egress-rgb), 0.90);
   letter-spacing: 0.01em;
@@ -1345,22 +1345,22 @@
 }
 
 .internetNodeCount {
-  font-size: 9px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   color: var(--muted);
   background: rgba(var(--paper-rgb), 0.05);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .internetNodeDeprecatedBadge {
-  font-size: 9px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   color: rgba(var(--fault-rgb), 0.90);
   background: rgba(var(--fault-rgb), 0.10);
   border: 1px solid rgba(var(--fault-rgb), 0.25);
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   text-align: center;
   line-height: 1.3;
   margin-top: 2px;
@@ -1388,8 +1388,8 @@
 }
 
 .impactListTitle {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   color: var(--muted);
 }
 
@@ -1412,7 +1412,7 @@
 }
 
 .impactName {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1421,13 +1421,13 @@
 
 .impactTrigger {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   white-space: nowrap;
 }
 
 .impactCount {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -1440,9 +1440,9 @@
 .impactNeighbour {
   all: unset;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-caption);
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid rgba(var(--warning-rgb), 0.45);
   color: rgba(var(--ink-rgb), 0.8);
   max-width: 160px;
@@ -1454,10 +1454,10 @@
 /* ── Card badges: fault impact role, other-VNet ghost ── */
 
 .impactBadge {
-  font-size: 9px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
   flex: none;
 }
@@ -1485,7 +1485,7 @@
 .emptyHint {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .emptyActions {
@@ -1500,7 +1500,7 @@
 .laneNode {
   width: 100%;
   height: 100%;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   border: 1px dashed rgba(var(--ink-rgb), 0.16);
   background: rgba(var(--ink-rgb), 0.015);
   pointer-events: none;
@@ -1528,8 +1528,8 @@
 
 .laneTitle {
   padding: 9px 12px 0;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--canvas-text-sm);
+  font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--muted);
 }
@@ -1564,7 +1564,7 @@
   flex: none;
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--ink-rgb), 0.25);
 }
 
@@ -1581,10 +1581,10 @@
 
 .egressChip {
   all: unset;
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1628,7 +1628,7 @@
 }
 
 .nicChip {
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
@@ -1658,10 +1658,10 @@
   flex: none;
   height: 20px;
   line-height: 18px;
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid rgba(var(--peering-rgb), 0.55);
   color: rgba(var(--peering-rgb), 1);
   background: var(--panel-solid);
@@ -1705,9 +1705,9 @@
   display: flex;
   align-items: center;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px dashed rgba(var(--ink-rgb), 0.22);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--muted);
   cursor: pointer;
@@ -1727,10 +1727,10 @@
   position: absolute;
   pointer-events: none;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid;
   background: var(--panel-solid);
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   font-weight: 700;
   white-space: nowrap;
   color: rgba(var(--ink-rgb), 0.78);
@@ -1754,10 +1754,10 @@
 .legendToggle {
   all: unset;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--panel-solid);
 }
@@ -1779,7 +1779,7 @@
   padding: 0;
   display: grid;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 
 .legendList li {
@@ -1790,7 +1790,7 @@
 
 .legendNote {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -1801,10 +1801,10 @@
   width: 220px;
   height: 100px;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1.5px solid rgba(var(--ink-rgb), 0.1);
   background: var(--panel-solid);
-  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.06);
+  box-shadow: none;
   overflow: hidden;
   transition: border-color 300ms ease, opacity 300ms ease;
 }
@@ -1824,7 +1824,7 @@
   right: 6px;
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--danger);
   z-index: 2;
 }
@@ -1856,7 +1856,7 @@
 .cardName {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 15px;
+  font-size: var(--text-body);
   font-weight: 700;
   line-height: 20px;
   white-space: nowrap;
@@ -1870,8 +1870,8 @@
   height: 18px;
   line-height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--canvas-text-sm);
   font-weight: 600;
   white-space: nowrap;
   color: rgba(var(--ink-rgb), 0.6);
@@ -1888,7 +1888,7 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   line-height: 16px;
   color: var(--muted);
 }
@@ -1912,8 +1912,8 @@
   height: 16px;
   line-height: 16px;
   padding: 0 5px;
-  border-radius: 4px;
-  font-size: 10.5px;
+  border-radius: var(--radius-sm);
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   white-space: nowrap;
   border: 1px solid rgba(var(--ink-rgb), 0.15);
@@ -1971,7 +1971,7 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   line-height: 12px;
   color: var(--muted);
@@ -1981,14 +1981,14 @@
 .cardTrendDot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   display: inline-block;
 }
 
 .cardCellVal {
-  font-family: var(--font-geist-mono);
-  font-size: 16px;
-  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: var(--text-heading);
+  font-weight: 700;
   /* key 12 + gap 1 + value 15 = 28 px = the metric row (20 px overflowed the row by 5 px) */
   line-height: 15px;
   white-space: nowrap;
@@ -1998,15 +1998,15 @@
 .cardCellVal small,
 .cardCellValBig small {
   margin-left: 1px;
-  font-family: var(--font-sans, inherit);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: var(--canvas-text-sm);
   font-weight: 600;
   color: var(--muted);
 }
 
 .cardCell[data-unmeasured] .cardCellVal {
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--muted);
 }
@@ -2049,7 +2049,7 @@
   width: 22px;
   height: 4px;
   margin-left: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: rgba(var(--ink-rgb), 0.08);
 }
@@ -2088,7 +2088,7 @@
 }
 
 .cardMeterKey {
-  font-size: 15px;
+  font-size: var(--text-body);
   font-weight: 600;
   line-height: 18px;
   color: var(--muted);
@@ -2100,14 +2100,14 @@
   width: auto;
   height: 6px;
   margin: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .cardMeterVal {
   justify-self: end;
-  font-family: var(--font-geist-mono);
-  font-size: 18px;
-  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: var(--text-heading);
+  font-weight: 700;
   line-height: 18px;
   white-space: nowrap;
   color: rgba(var(--ink-rgb), 0.9);
@@ -2115,22 +2115,22 @@
 
 .cardMeterVal small {
   margin-left: 1px;
-  font-family: var(--font-sans, inherit);
-  font-size: 12px;
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--muted);
 }
 
 .cardMeter[data-unmeasured] .cardMeterVal {
-  font-family: var(--font-sans, inherit);
-  font-size: 14px;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--muted);
 }
 
 .cardRelation {
   align-self: center;
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
@@ -2165,8 +2165,8 @@
 .cardNameBig {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 22px;
-  font-weight: 800;
+  font-size: var(--text-title);
+  font-weight: 700;
   line-height: 28px;
   white-space: nowrap;
   overflow: hidden;
@@ -2175,7 +2175,7 @@
 
 .cardGlyphBig {
   flex: none;
-  font-size: 18px;
+  font-size: var(--text-heading);
 }
 
 .cardMetricBig {
@@ -2186,16 +2186,16 @@
 }
 
 .cardCellKeyBig {
-  font-size: 18px;
+  font-size: var(--text-heading);
   font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
 }
 
 .cardCellValBig {
-  font-family: var(--font-geist-mono);
-  font-size: 20px;
-  font-weight: 800;
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -2217,8 +2217,8 @@
 
 .cardNameHuge {
   min-width: 0;
-  font-size: 26px;
-  font-weight: 800;
+  font-size: var(--text-display);
+  font-weight: 700;
   line-height: 30px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2266,18 +2266,18 @@
 
 .canvasWrap[data-lod="summary"] .groupNodeLabel,
 .canvasWrap[data-lod="glance"] .groupNodeLabel {
-  font-size: 18px;
+  font-size: var(--text-title);
   line-height: 20px;
   max-width: none;
   color: rgba(var(--ink-rgb), 0.7);
 }
 
-.canvasWrap[data-lod="summary"] .edgePill { font-size: 22px; padding: 4px 14px; }
-.canvasWrap[data-lod="glance"] .edgePill { font-size: 30px; padding: 6px 18px; }
+.canvasWrap[data-lod="summary"] .edgePill { font-size: var(--text-title); padding: 4px 14px; }
+.canvasWrap[data-lod="glance"] .edgePill { font-size: var(--text-display); padding: 6px 18px; }
 
 .canvasWrap[data-lod="summary"] .laneTitle,
 .canvasWrap[data-lod="glance"] .laneTitle {
-  font-size: 18px;
+  font-size: var(--text-title);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2293,12 +2293,12 @@
   min-height: 24px;
   box-sizing: border-box;
   padding: 3px 2px 3px 8px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: var(--panel-solid);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
   box-shadow: var(--shadow-md);
-  font-family: var(--font-geist-mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   font-weight: 500;
   line-height: 18px;
   color: var(--muted);
@@ -2342,7 +2342,7 @@
 }
 
 /* Selected card: a ring (box-shadow) so a fault-impact red / orange border stays */
-.card[data-focused] { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), 0 4px 14px rgba(var(--ink-rgb), 0.1); }
+.card[data-focused] { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), var(--shadow-raise); }
 .card[data-focused]:not([data-impact]) { border-color: rgba(var(--accent-rgb), 0.75); }
 .canvasWrap[data-lod="summary"] .card[data-focused] { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.28); }
 .canvasWrap[data-lod="glance"] .card[data-focused] { box-shadow: 0 0 0 9px rgba(var(--accent-rgb), 0.32); }
@@ -2370,7 +2370,7 @@
 .dpBack {
   all: unset;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--accent);
 }
@@ -2391,7 +2391,7 @@
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-heading);
   font-weight: 700;
   line-height: 20px;
   overflow-wrap: anywhere;
@@ -2409,7 +2409,7 @@
   height: 24px;
   text-align: center;
   line-height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
 }
 
@@ -2419,8 +2419,8 @@
   display: flex;
   align-items: flex-start;
   gap: 4px;
-  font-family: var(--font-geist-mono);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   color: var(--muted);
   /* break at the separators (<wbr> after - _ .), not inside "001" */
   overflow-wrap: anywhere;
@@ -2432,7 +2432,7 @@
 .dpFullName [data-kept] { color: rgba(var(--ink-rgb), 0.92); font-weight: 700; }
 
 .dpWhere {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -2451,11 +2451,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .dpReason { color: rgba(var(--ink-rgb), 0.8); }
-.dpUpdated { margin-left: auto; font-size: 11px; color: var(--muted); }
+.dpUpdated { margin-left: auto; font-size: var(--text-caption); color: var(--muted); }
 
 .dpActions {
   display: flex;
@@ -2464,7 +2464,7 @@
 }
 
 .dpPortal {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--accent);
   text-decoration: none;
@@ -2523,24 +2523,24 @@
 }
 
 .dpSectionTitle {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
 }
 
 .dpSection[data-level="1"] > .dpSectionHead > .dpSectionTitle {
-  font-size: 13px;
+  font-size: var(--text-small);
   letter-spacing: -0.005em;
   color: rgba(var(--ink-rgb), 0.92);
 }
 
 .dpSectionHead[data-static] { cursor: default; }
-.dpHeadNote { margin-left: auto; font-size: 12px; color: var(--muted); }
+.dpHeadNote { margin-left: auto; font-size: var(--text-caption); color: var(--muted); }
 
 .dpCount {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--ink-rgb), 0.06);
   color: rgba(var(--ink-rgb), 0.7);
 }
@@ -2575,7 +2575,7 @@
   min-height: 22px;
   padding: 0;
   margin: 0 0 2px;
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: rgba(var(--ink-rgb), 0.66);
@@ -2584,7 +2584,7 @@
 
 .dpSection[data-level="2"] > .dpSectionHead > .dpSectionTitle,
 .dpGroupTitleText { font: inherit; color: inherit; min-width: 0; }
-.dpSection[data-level="2"] .dpCount { font-size: 10px; padding: 0 5px; }
+.dpSection[data-level="2"] .dpCount { font-size: var(--text-caption); padding: 0 5px; }
 
 .dpRule {
   flex: 1 1 16px;
@@ -2625,7 +2625,7 @@
 .dpRow:first-child { border-top: 0; }
 
 .dpLabel {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--muted);
   line-height: 18px;
@@ -2639,7 +2639,7 @@
   align-items: flex-start;
   gap: 4px;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 500;
   line-height: 18px;
   color: rgba(var(--ink-rgb), 0.88);
@@ -2654,8 +2654,8 @@
 
 .dpValue[data-mono] .dpValueText,
 .detailPanel [data-mono="true"] {
-  font-family: var(--font-geist-mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
   word-break: normal;
 }
@@ -2671,7 +2671,7 @@
   width: 24px;
   height: 18px;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-body);
   line-height: 18px;
   color: var(--muted);
   opacity: 0.5;
@@ -2681,7 +2681,7 @@
 .dpCopy:focus-visible { opacity: 1; color: var(--accent); }
 
 .dpMuted {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -2715,7 +2715,7 @@ button.dpTwoLine {
   padding: 5px 6px;
   margin: 0 -6px;
   border-top: 1px solid rgba(var(--ink-rgb), 0.05);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   min-width: 0;
 }
@@ -2727,18 +2727,18 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 .dpTag[data-grade="flow"] { background: rgba(var(--ink-rgb), 0.06); }
 
 .dpTwoLineMain {
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 /* Folded list under an unidentified-caller group (IPs, copy as is) */
-.dpDetails { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.dpDetails { grid-column: 1 / -1; font-size: var(--text-caption); color: var(--muted); }
 .dpDetails summary { cursor: pointer; }
-.dpMono { font-family: var(--font-mono, ui-monospace, monospace); word-break: break-all; }
+.dpMono { font-family: var(--font-mono); word-break: break-all; }
 
 .dpTwoLineSub {
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -2755,8 +2755,8 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
   display: inline-block;
   margin-left: 4px;
   padding: 0 5px;
-  border-radius: 4px;
-  font-size: 10.5px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
   font-weight: 600;
   background: rgba(var(--ink-rgb), 0.06);
   color: rgba(var(--ink-rgb), 0.7);
@@ -2783,8 +2783,8 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 .dpMetric:first-child { border-top: 0; }
 
 .dpMetricVal {
-  font-family: var(--font-geist-mono);
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
   font-weight: 600;
   text-align: right;
   white-space: nowrap;
@@ -2792,13 +2792,13 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 
 .dpMetricVal small {
   margin-left: 1px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
 .dpMetricVal[data-unmeasured] {
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--muted);
 }
@@ -2811,7 +2811,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 
 .dpFoot {
   padding-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -2824,8 +2824,8 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
   column-gap: 6px;
   min-height: 28px;
   padding-block: 3px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
 }
 
 .dpConn:hover,
@@ -2851,7 +2851,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 .dpConnName img { flex: none; }
 .dpConnText,
 .dpConnWhere { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dpConnWhere { font-size: 11px; color: var(--muted); font-weight: 400; }
+.dpConnWhere { font-size: var(--text-caption); color: var(--muted); font-weight: 400; }
 
 /* Relationship labels above every node (VNet / subnet boxes included), like the lines (edge zIndex 1000) */
 .canvasWrap :global(.react-flow__edgelabel-renderer) {
@@ -2871,7 +2871,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 
 .canvasWrap[data-lod="summary"] .emptySubnets,
 .canvasWrap[data-lod="glance"] .emptySubnets {
-  font-size: 18px;
+  font-size: var(--text-title);
 }
 
 /* Peering list in the VNet panel (detail/PeeringSection) — one expandable row per peering */
@@ -2882,7 +2882,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 .dpConnRel[data-tone="unknown"] { color: var(--muted); font-style: italic; }
 
 /* Peering line: the two VNets' sides side by side (detail/EdgeFacts) */
-.peerCmpRow { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 2px 0; font-size: 12px; }
+.peerCmpRow { display: grid; grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 2px 0; font-size: var(--text-caption); }
 .peerCmpHead { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .peerCmpCell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2907,7 +2907,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 /* Summary zoom: the WAF icon after the name, dimmed when unknown, orange ring when it does not block */
 .cardWafGlyph { flex: none; opacity: 0.9; }
 .cardWafGlyph[data-tone="muted"] { opacity: 0.45; }
-.cardWafGlyph[data-tone="public"] { border-radius: 4px; box-shadow: 0 0 0 2px rgba(var(--warning-rgb), 0.55); }
+.cardWafGlyph[data-tone="public"] { border-radius: var(--radius-sm); box-shadow: 0 0 0 2px rgba(var(--warning-rgb), 0.55); }
 
 /* Sub-cards (WAF policies) hang from their card: a tree guide on the left — from the card above to this one's middle */
 .subCardWrap { position: relative; width: 100%; height: 100%; }
@@ -2928,7 +2928,7 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
 /* Alerts that fired and resolved in the last hours (a flapping rule is not "no alerts") */
 .dpAlertHistory { margin-top: 6px; }
 .dpAlertHistoryTitle {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: rgba(var(--warning-rgb), 0.95);
   padding: 2px 0;
@@ -2945,8 +2945,8 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
   margin: 0 0 8px;
   border: 1px solid rgba(var(--accent-rgb), 0.25);
   background: rgba(var(--accent-rgb), 0.05);
-  border-radius: var(--radius-md, 8px);
-  font-size: 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-caption);
 }
 .arrangeBadge { font-weight: 600; color: rgba(var(--accent-rgb), 0.95); }
 .arrangeStale { color: rgba(var(--warning-rgb), 0.95); }
@@ -2958,9 +2958,9 @@ button.dpTwoLine:focus-visible { background: rgba(var(--accent-rgb), 0.06); }
   pointer-events: none;
   box-sizing: border-box;
 }
-.arrangeArea { border: 1.5px dashed rgba(var(--accent-rgb), 0.45); border-radius: 10px; background: rgba(var(--accent-rgb), 0.03); }
-.arrangeTarget { border: 2px solid rgba(var(--accent-rgb), 0.9); border-radius: 10px; background: rgba(var(--accent-rgb), 0.12); }
-.arrangeBar { background: rgba(var(--accent-rgb), 0.9); border-radius: 2px; }
+.arrangeArea { border: 1.5px dashed rgba(var(--accent-rgb), 0.45); border-radius: var(--radius-md); background: rgba(var(--accent-rgb), 0.03); }
+.arrangeTarget { border: 2px solid rgba(var(--accent-rgb), 0.9); border-radius: var(--radius-md); background: rgba(var(--accent-rgb), 0.12); }
+.arrangeBar { background: rgba(var(--accent-rgb), 0.9); border-radius: var(--radius-sm); }
 .arrangeTarget[data-bad], .arrangeBar[data-bad] { border-color: rgba(var(--danger-rgb), 0.9); background: rgba(var(--danger-rgb), 0.12); }
 .canvasWrap[data-edit="arrange"] :global(.react-flow__node.nopan) { cursor: grab; }
 .canvasWrap[data-edit="arrange"] :global(.react-flow__node.dragging) { cursor: grabbing; opacity: 0.85; }

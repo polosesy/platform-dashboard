@@ -18,11 +18,11 @@
   gap: 4px 14px;
   padding: 7px 12px;
   margin-bottom: 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
   cursor: help;
 }
 .coverageNote strong { color: var(--fg); font-weight: 600; }
@@ -46,10 +46,10 @@
 }
 
 .statusBadge {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -79,12 +79,12 @@
 .summaryCard {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 16px;
 }
 
 .summaryCardLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -93,14 +93,14 @@
 }
 
 .summaryCardValue {
-  font-size: 28px;
+  font-size: var(--text-display);
   font-weight: 700;
   line-height: 1;
   color: var(--fg);
 }
 
 .summaryCardSub {
-  font-size: 11px;
+  font-size: var(--text-caption);
   margin-top: 4px;
   color: rgba(var(--ink-rgb), 0.50);
 }
@@ -115,36 +115,36 @@
 }
 .mapToolbarSelect {
   padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--text-caption);
   min-width: 120px;
 }
 .mapToolbarSearch {
   padding: 5px 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--text-caption);
   min-width: 160px;
 }
 .mapToolbarSearch::placeholder { color: rgba(var(--ink-rgb), 0.3); }
 .mapToolbarRefresh {
   padding: 5px 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--text-caption);
   cursor: pointer;
   white-space: nowrap;
 }
 .mapToolbarRefresh:hover { background: var(--panel-sunken); }
 .mapToolbarStats {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.4);
   margin-left: auto;
   white-space: nowrap;
@@ -160,7 +160,7 @@
 /* ── Service Map Canvas ── */
 .mapContainer {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: rgb(var(--canvas-rgb));
   height: calc(100vh - 380px);
@@ -178,7 +178,7 @@
 .svcNode {
   background: rgba(var(--paper-rgb), 0.92);
   border: 1.5px solid rgba(var(--ink-rgb), 0.12);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   min-width: 150px;
   max-width: 200px;
@@ -188,7 +188,7 @@
 }
 .svcNode:hover {
   border-color: rgba(var(--accent-rgb), 0.4);
-  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.15);
+  box-shadow: var(--shadow-raise);
   transform: translateY(-1px);
 }
 .svcNodeOk     { border-color: rgba(var(--success-rgb), 0.35); }
@@ -196,7 +196,7 @@
 .svcNodeCrit   { border-color: rgba(var(--danger-rgb), 0.4); box-shadow: 0 0 0 1px rgba(var(--danger-rgb), 0.15); }
 .svcNodeSelected {
   border-color: rgba(var(--accent-rgb), 0.7) !important;
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2), 0 2px 12px rgba(var(--accent-rgb), 0.15) !important;
+  box-shadow: var(--ring-accent) !important;
 }
 
 .svcNodeHeader {
@@ -207,12 +207,12 @@
 }
 
 .svcNodeIcon {
-  font-size: 11px;
+  font-size: var(--canvas-text-sm);
   flex-shrink: 0;
 }
 
 .svcNodeNs {
-  font-size: 9px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -224,10 +224,10 @@
 }
 
 .svcNodeTypeBadge {
-  font-size: 8px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--ink-rgb), 0.06);
   color: rgba(var(--ink-rgb), 0.5);
   white-space: nowrap;
@@ -235,7 +235,7 @@
 }
 
 .svcNodeName {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--fg);
   margin-bottom: 5px;
@@ -248,7 +248,7 @@
 .svcNodeMetrics {
   display: flex;
   gap: 6px;
-  font-size: 10px;
+  font-size: var(--canvas-text-xs);
   color: rgba(var(--ink-rgb), 0.55);
   flex-wrap: wrap;
 }
@@ -278,10 +278,10 @@
   overflow-y: auto;
   border: 1px solid var(--border);
   border-left: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--surface, #fff);
   padding: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .detailPanelHeader {
   display: flex;
@@ -294,20 +294,20 @@
   background: var(--surface, #fff);
   z-index: 1;
 }
-.detailPanelIcon { font-size: 16px; margin-right: 8px; }
+.detailPanelIcon { font-size: var(--text-heading); margin-right: 8px; }
 .detailPanelTitle {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 700;
   color: var(--fg);
 }
 .detailPanelClose {
   border: none;
   background: none;
-  font-size: 14px;
+  font-size: var(--text-body);
   cursor: pointer;
   color: rgba(var(--ink-rgb), 0.4);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .detailPanelClose:hover { background: rgba(var(--ink-rgb), 0.06); color: var(--fg); }
 
@@ -321,14 +321,14 @@
   padding: 3px 0;
   color: rgba(var(--ink-rgb), 0.65);
 }
-.detailPanelMetaRow span:first-child { font-weight: 600; color: rgba(var(--ink-rgb), 0.45); font-size: 11px; }
+.detailPanelMetaRow span:first-child { font-weight: 600; color: rgba(var(--ink-rgb), 0.45); font-size: var(--text-caption); }
 
 .detailPanelSection {
   padding: 12px 16px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
 }
 .detailPanelSectionTitle {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -347,13 +347,13 @@
   gap: 2px;
 }
 .detailMetricValue {
-  font-size: 16px;
+  font-size: var(--text-heading);
   font-weight: 700;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 .detailMetricLabel {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.4);
   font-weight: 600;
 }
@@ -366,12 +366,12 @@
   gap: 4px;
 }
 .detailLabel {
-  font-size: 10px;
+  font-size: var(--text-caption);
   padding: 2px 6px;
   background: rgba(var(--accent-rgb), 0.06);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   color: rgba(var(--accent-rgb), 0.7);
-  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  font-family: var(--font-mono);
 }
 
 .detailConnList {
@@ -384,14 +384,14 @@
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--ink-rgb), 0.02);
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 .detailConnItem:hover { background: rgba(var(--ink-rgb), 0.04); }
 .detailConnDir {
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--text-caption);
   width: 16px;
   text-align: center;
   flex-shrink: 0;
@@ -407,7 +407,7 @@
   white-space: nowrap;
 }
 .detailConnProto {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.4);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -415,11 +415,11 @@
 .detailConnFlows {
   font-variant-numeric: tabular-nums;
   color: rgba(var(--ink-rgb), 0.5);
-  font-size: 10px;
+  font-size: var(--text-caption);
   white-space: nowrap;
 }
 .detailConnL7 {
-  font-size: 9px;
+  font-size: var(--text-caption);
   color: rgba(var(--accent-rgb), 0.5);
   font-family: var(--font-mono);
 }
@@ -431,15 +431,15 @@
   gap: 10px;
   padding: 8px 12px;
   margin-top: 8px;
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.45);
   background: rgba(var(--ink-rgb), 0.02);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-wrap: wrap;
 }
 .mapLegendTitle {
   font-weight: 700;
-  font-size: 10px;
+  font-size: var(--text-caption);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: rgba(var(--ink-rgb), 0.35);
@@ -453,24 +453,24 @@
   display: inline-block;
   width: 16px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 .mapLegendSep {
   color: rgba(var(--ink-rgb), 0.15);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 /* ── Flow Table ── */
 .flowTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .flowTable th {
   text-align: left;
   padding: 8px 10px;
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -494,7 +494,7 @@
   max-height: calc(100vh - 340px);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .flowRow { transition: background 0.1s; }
@@ -503,10 +503,10 @@
 .flowRowDropped:hover { background: rgba(var(--danger-rgb), 0.06); }
 
 .verdictBadge {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 .verdictForwarded { background: rgba(var(--success-rgb), 0.10); color: rgba(var(--success-rgb), 0.85); }
@@ -514,17 +514,17 @@
 .verdictAudit     { background: rgba(var(--warning-rgb), 0.10); color: rgba(var(--warning-strong-rgb), 0.90); }
 
 .protocolBadge {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--accent-rgb), 0.08);
   color: rgba(var(--accent-rgb), 0.70);
 }
 
 .flowMono {
-  font-family: var(--font-mono, 'Cascadia Code', 'Consolas', monospace);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.65);
 }
 
@@ -540,22 +540,22 @@
 .toolbar select,
 .toolbar input {
   padding: 5px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .toolbarCount {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.4);
   margin-left: auto;
 }
 
 /* ── Section Title ── */
 .sectionTitle {
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -567,14 +567,14 @@
 .dataTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin-bottom: 20px;
 }
 
 .dataTable th {
   text-align: left;
   padding: 6px 10px;
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   text-transform: uppercase;
   color: rgba(var(--ink-rgb), 0.45);
@@ -599,10 +599,10 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 9px;
+  font-size: var(--canvas-text-xs);
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--accent-rgb), 0.10);
   color: rgba(var(--accent-rgb), 0.75);
   white-space: nowrap;
@@ -612,7 +612,7 @@
   cursor: default;
 }
 .svcNodeEpCount {
-  font-size: 8px;
+  font-size: var(--canvas-text-xs);
   font-weight: 700;
   color: rgba(var(--success-rgb), 0.8);
   margin-left: 2px;
@@ -622,7 +622,7 @@
 .detailSvcBlock {
   background: rgba(var(--accent-rgb), 0.03);
   border: 1px solid rgba(var(--accent-rgb), 0.10);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px;
   margin-bottom: 8px;
 }
@@ -634,14 +634,14 @@
 }
 .detailSvcName {
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--accent-rgb), 0.85);
 }
 .detailSvcType {
-  font-size: 9px;
+  font-size: var(--text-caption);
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--ink-rgb), 0.06);
   color: rgba(var(--ink-rgb), 0.5);
 }
@@ -649,7 +649,7 @@
 /* ── Detail Panel: Endpoint Table ── */
 .detailEpTable {
   margin-top: 6px;
-  font-size: 10px;
+  font-size: var(--text-caption);
   border-top: 1px solid rgba(var(--ink-rgb), 0.08);
   padding-top: 4px;
 }
@@ -660,7 +660,7 @@
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.4);
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: var(--text-caption);
   letter-spacing: 0.03em;
   padding: 2px 0 4px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.06);
@@ -692,7 +692,7 @@
 }
 .detailEpStatus {
   font-weight: 600;
-  font-size: 9px;
+  font-size: var(--text-caption);
 }
 
 /* ── Handle (ReactFlow) ── */
@@ -708,12 +708,12 @@
   padding: 32px;
   text-align: center;
   color: rgba(var(--ink-rgb), 0.45);
-  font-size: 13px;
+  font-size: var(--text-small);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   margin: 20px 0;
 }
-.noDataBanner strong { display: block; margin-bottom: 6px; font-size: 14px; color: rgba(var(--ink-rgb), 0.6); }
+.noDataBanner strong { display: block; margin-bottom: 6px; font-size: var(--text-body); color: rgba(var(--ink-rgb), 0.6); }
 
 .spinner {
   display: inline-block;
@@ -732,16 +732,16 @@
   gap: 10px;
   padding: 48px;
   color: rgba(var(--ink-rgb), 0.4);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .errorMsg {
   padding: 16px;
   background: rgba(var(--danger-rgb), 0.06);
   border: 1px solid rgba(var(--danger-rgb), 0.20);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--text-small);
   margin-bottom: 16px;
 }
 
@@ -756,12 +756,12 @@
 .nsTrafficCard {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 12px;
 }
 
 .nsTrafficName {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   margin-bottom: 6px;
 }
@@ -769,7 +769,7 @@
 .nsTrafficRow {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--text-caption);
   padding: 2px 0;
   color: rgba(var(--ink-rgb), 0.55);
 }
@@ -785,20 +785,20 @@
 .verdictBox {
   text-align: center;
   padding: 12px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   min-width: 100px;
 }
 
 .verdictBoxValue {
-  font-size: 24px;
+  font-size: var(--text-display);
   font-weight: 700;
   line-height: 1;
 }
 
 .verdictBoxLabel {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 600;
   text-transform: uppercase;
   color: rgba(var(--ink-rgb), 0.45);
@@ -810,7 +810,7 @@
   width: 100%;
   height: 100%;
   border: 1.5px dashed rgba(var(--ink-rgb), 0.18);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(var(--ink-rgb), 0.02);
   pointer-events: none;
   position: relative;
@@ -823,7 +823,7 @@
   position: absolute;
   top: 8px;
   left: 12px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.35);
   letter-spacing: 0.03em;
@@ -848,7 +848,7 @@
 }
 .flowCollapseBtn:hover { background: rgba(var(--ink-rgb), 0.03); }
 .flowCollapseArrow {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.35);
   transition: transform 0.2s;
   display: inline-block;
@@ -861,12 +861,12 @@
 .viewToggle {
   display: flex;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .viewToggleBtn {
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   border: none;
   background: var(--surface);
@@ -924,7 +924,7 @@
 
 /* ── Flow Table enhancements ── */
 .flowNs {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.35);
   font-style: italic;
 }
@@ -942,9 +942,9 @@
   overflow-y: auto;
   border: 1px solid var(--border);
   border-left: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--surface, #fff);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .flowDetailBody {
   padding: 12px 16px;
@@ -956,12 +956,12 @@
   padding: 5px 0;
 }
 .flowDetailLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.55);
 }
 .flowDetailValue {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--fg);
   word-break: break-all;
 }
@@ -996,14 +996,14 @@
 }
 .metricCardHead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; min-width: 0; }
 .metricCardHead strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metricMeta { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metricNote { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
+.metricMeta { font-size: var(--text-caption); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricNote { font-size: var(--text-caption); color: var(--muted); margin: 6px 0 12px; }
 .metricCardBody {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 2px 10px;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .metricCardBody dt { color: var(--muted); }
 .metricCardBody dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
@@ -1026,10 +1026,10 @@
 .nm [data-status="stale"] { --status: rgba(var(--ink-rgb), 0.3); --status-rgb: var(--ink-rgb); }
 .nmBar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
 .nmMeta { margin-left: auto; display: inline-flex; gap: 10px; align-items: center; }
-.nmSummary { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12.5px; color: rgba(var(--ink-rgb), 0.7); }
+.nmSummary { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: var(--text-small); color: rgba(var(--ink-rgb), 0.7); }
 .nmSummary > [data-status] { color: var(--status); font-weight: 600; }
 .nmAt { color: rgba(var(--ink-rgb), 0.5); }
-.nmLegend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 0 auto; padding: 0; list-style: none; font-size: 12px; color: rgba(var(--ink-rgb), 0.6); }
+.nmLegend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 0 auto; padding: 0; list-style: none; font-size: var(--text-caption); color: rgba(var(--ink-rgb), 0.6); }
 .nmLegend li { display: inline-flex; align-items: center; gap: 4px; }
 .nmLegend li[data-status] span { color: var(--status); font-weight: 700; }
 .nmLine { display: inline-block; width: 18px; height: 0; border-top: 2px solid rgba(var(--ink-rgb), 0.38); }
@@ -1041,22 +1041,22 @@
 @media (max-width: 1100px) { .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr); } }
 
 /* Namespace box = the live diagram's subnet box; lanes = its ingress / outside lanes */
-.nmBox { width: 100%; height: 100%; border: 1px solid rgba(var(--subnet-rgb), 0.35); border-radius: 10px; background: rgba(var(--subnet-rgb), 0.04); }
+.nmBox { width: 100%; height: 100%; border: 1px solid rgba(var(--subnet-rgb), 0.35); border-radius: var(--radius-md); background: rgba(var(--subnet-rgb), 0.04); }
 .nmBox[data-kind="laneIn"], .nmBox[data-kind="laneOut"] { border-style: dashed; border-color: rgba(var(--ink-rgb), 0.22); background: rgba(var(--ink-rgb), 0.025); }
 .nmBox[data-system] { border-color: rgba(var(--ink-rgb), 0.18); background: rgba(var(--ink-rgb), 0.02); }
-.nmBoxHead { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: 12.5px; font-weight: 600; color: rgba(var(--ink-rgb), 0.78); }
-.nmBoxTag { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(var(--subnet-rgb), 0.14); color: rgba(var(--subnet-rgb), 1); }
+.nmBoxHead { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: var(--text-caption); font-weight: 600; color: rgba(var(--ink-rgb), 0.78); }
+.nmBoxTag { font-size: var(--canvas-text-xs); font-weight: 700; padding: 1px 5px; border-radius: var(--radius-sm); background: rgba(var(--subnet-rgb), 0.14); color: rgba(var(--subnet-rgb), 1); }
 .nmBoxTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .nmBoxCounts { margin-left: auto; display: inline-flex; gap: 8px; }
 .nmBoxCounts [data-status] { color: var(--status); font-variant-numeric: tabular-nums; }
 
 /* Card = the live diagram / heatmap tile: white, status strip on the left, glyph + name, kind, two cells */
 .nmCard {
-  position: relative; width: 100%; height: 100%; box-sizing: border-box; padding: 7px 10px 6px 14px; border-radius: 8px;
+  position: relative; width: 100%; height: 100%; box-sizing: border-box; padding: 7px 10px 6px 14px; border-radius: var(--radius-sm);
   background: var(--surface); border: 1px solid rgba(var(--ink-rgb), 0.12); box-shadow: var(--shadow-sm);
   display: grid; grid-template-rows: auto auto 1fr; gap: 2px; cursor: pointer; transition: opacity 0.15s, box-shadow 0.15s;
 }
-.nmCard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: 8px 0 0 8px; background: var(--status); }
+.nmCard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--status); }
 .nmCard[data-status="danger"], .nmCard[data-status="warn"] { border-color: rgba(var(--status-rgb), 0.45); }
 .nmCard[data-status="stale"] { border-style: dashed; background: rgba(var(--ink-rgb), 0.02); }
 .nmCard[data-status="stale"] .nmCardName, .nmCard[data-status="stale"] .nmCells { opacity: 0.6; }
@@ -1064,27 +1064,27 @@
 .nmCard[data-selected] { box-shadow: 0 0 0 2px rgba(var(--status-rgb), 0.55), var(--shadow-sm); }
 .nmCard[data-kind="internetIn"], .nmCard[data-kind="internetOut"] { background: rgba(var(--violet-rgb), 0.04); }
 .nmCardTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.nmGlyph { color: var(--status); font-weight: 700; font-size: 11px; line-height: 1; }
-.nmCardName { font-size: 12.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.nmCardKind { font-size: 11px; color: rgba(var(--ink-rgb), 0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nmCells { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: end; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.nmCells small { display: block; font-size: 10px; font-weight: 500; color: rgba(var(--ink-rgb), 0.5); }
+.nmGlyph { color: var(--status); font-weight: 700; font-size: var(--canvas-text-sm); line-height: 1; }
+.nmCardName { font-size: var(--text-caption); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nmCardKind { font-size: var(--canvas-text-sm); color: rgba(var(--ink-rgb), 0.55); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nmCells { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: end; font-size: var(--text-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+.nmCells small { display: block; font-size: var(--canvas-text-xs); font-weight: 500; color: rgba(var(--ink-rgb), 0.5); }
 .nmCells [data-hot] { color: var(--status); }
 
 /* Detail panel */
 .nmPanel { border: 1px solid rgba(var(--ink-rgb), 0.12); border-radius: var(--radius-md); background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; align-content: start; max-height: calc(100vh - 300px); overflow: auto; }
 .nmPanelHead { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; }
-.nmPanelHead strong { display: block; font-size: 14px; word-break: break-all; }
+.nmPanelHead strong { display: block; font-size: var(--text-body); word-break: break-all; }
 .nmPanelHead small { color: rgba(var(--ink-rgb), 0.55); }
-.nmWhy { margin: 0; font-size: 12.5px; color: rgba(var(--ink-rgb), 0.72); }
-.nmKv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12.5px; }
+.nmWhy { margin: 0; font-size: var(--text-small); color: rgba(var(--ink-rgb), 0.72); }
+.nmKv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: var(--text-small); }
 .nmKv dt { color: rgba(var(--ink-rgb), 0.55); }
 .nmKv dd { margin: 0; font-variant-numeric: tabular-nums; }
-.nmPanel h4 { margin: 4px 0 6px; font-size: 12px; color: rgba(var(--ink-rgb), 0.6); }
+.nmPanel h4 { margin: 4px 0 6px; font-size: var(--text-caption); color: rgba(var(--ink-rgb), 0.6); }
 .nmLinks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .nmLinkRow {
   width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; text-align: left;
-  padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(var(--ink-rgb), 0.08); background: transparent; font: inherit; font-size: 12px; cursor: pointer;
+  padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid rgba(var(--ink-rgb), 0.08); background: transparent; font: inherit; font-size: var(--text-caption); cursor: pointer;
 }
 .nmLinkRow:hover { background: rgba(var(--ink-rgb), 0.04); }
 .nmLinkRow[data-tone="drop"] { border-color: rgba(var(--danger-rgb), 0.35); }
@@ -1094,10 +1094,10 @@
 .nmLinkPeer { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nmLinkPort { font-family: var(--font-mono); color: rgba(var(--ink-rgb), 0.6); }
 .nmLinkFlows { grid-column: 2 / 4; color: rgba(var(--ink-rgb), 0.6); font-variant-numeric: tabular-nums; }
-.nmLinkL7 { grid-column: 2 / 4; font-size: 11px; color: rgba(var(--ink-rgb), 0.5); }
+.nmLinkL7 { grid-column: 2 / 4; font-size: var(--text-caption); color: rgba(var(--ink-rgb), 0.5); }
 
 .refreshCtl { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
 
 .nmCardKind { display: flex; gap: 4px; align-items: center; min-width: 0; }
 .nmCardKind > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
-.nmHub { flex: none; font-size: 9.5px; font-weight: 600; padding: 0 4px; border-radius: 3px; background: rgba(var(--ink-rgb), 0.06); color: rgba(var(--ink-rgb), 0.6); }
+.nmHub { flex: none; font-size: var(--canvas-text-xs); font-weight: 600; padding: 0 4px; border-radius: var(--radius-sm); background: rgba(var(--ink-rgb), 0.06); color: rgba(var(--ink-rgb), 0.6); }

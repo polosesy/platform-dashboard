@@ -71,7 +71,7 @@ export function PermissionMatrix({ data, nav }: { data: PolicyInsightsResponse; 
                     ) : (
                       <span className={styles.mono}>{subjectLabel(m)}</span>
                     )}
-                    <div className={styles.muted} style={{ fontSize: 11 }}>{m.kind} {m.namespace ? `${m.namespace}/` : ""}{m.binding}</div>
+                    <div className={styles.muted} style={{ fontSize: 12 }}>{m.kind} {m.namespace ? `${m.namespace}/` : ""}{m.binding}</div>
                   </td>
                   <td className={styles.muted}>{usage(m)}</td>
                   {cols.map((c) => {

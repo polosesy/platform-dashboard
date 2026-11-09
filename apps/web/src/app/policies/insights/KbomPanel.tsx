@@ -84,7 +84,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
                   title={t(`ins.kbom.owner.fix.${o}`)} style={{ display: "grid", gap: 2, textAlign: "left", padding: "8px 10px" }}>
                   <b>{t(`ins.kbom.owner.${o}`)} · {x.repos}</b>
                   <span>{x.vulnerable === null ? t("ins.kbom.notConnected") : t("ins.kbom.owner.vulnerable", { n: x.vulnerable })}</span>
-                  <span className={styles.muted} style={{ fontSize: 11 }}>{t(`ins.kbom.owner.fix.${o}`)}</span>
+                  <span className={styles.muted} style={{ fontSize: 12 }}>{t(`ins.kbom.owner.fix.${o}`)}</span>
                 </button>
               );
             })}
@@ -93,7 +93,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
         <div className={styles.kbPlat}>
           {k.platform.map((p) => (
             <div key={p.label}>
-              <div className={styles.muted} style={{ fontSize: 11 }}>{p.label}</div>
+              <div className={styles.muted} style={{ fontSize: 12 }}>{p.label}</div>
               <div className={styles.v}>{p.value}</div>
               {p.note && <div className={styles.s}>{p.note}</div>}
             </div>
@@ -112,7 +112,7 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
                     <tr className={styles.catRow}><td colSpan={6}>{cat} <span className={styles.muted} style={{ fontWeight: 500 }}>{items.length}{all.length > items.length ? ` (+${t("ins.managed")} ${all.length - items.length})` : ""}</span></td></tr>
                     {items.map((x) => (
                       <tr key={x.repo}>
-                        <td><b>{x.tech}</b>{x.managed && <span className={styles.mgd}>{t("ins.managed")}</span>}<div className={`${styles.mono} ${styles.muted}`} style={{ fontSize: 11 }}>{x.repo}</div></td>
+                        <td><b>{x.tech}</b>{x.managed && <span className={styles.mgd}>{t("ins.managed")}</span>}<div className={`${styles.mono} ${styles.muted}`} style={{ fontSize: 12 }}>{x.repo}</div></td>
                         <td>{x.versions.map((v) => <span key={v} className={styles.ver} data-bad={/snapshot|latest/i.test(v) || x.versions.length > 1 || undefined}>{v}</span>)}</td>
                         <td className={styles.mono}>{x.registry}</td>
                         <td className={styles.muted} style={{ fontSize: 12 }}>{x.workloads.map((w) => w.split("/")[1]).join(", ")}</td>

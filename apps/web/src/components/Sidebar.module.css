@@ -30,7 +30,7 @@
   background: rgba(var(--paper-rgb), 0.92);
   backdrop-filter: blur(20px);
   border-right: 1px solid var(--border);
-  box-shadow: 16px 0 48px rgba(var(--ink-rgb), 0.08);
+  box-shadow: var(--shadow-pop);
   transform: translateX(-100%);
   transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
@@ -60,15 +60,15 @@
 .sidebarMark {
   width: 28px;
   height: 28px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: conic-gradient(from 210deg, rgb(var(--accent-rgb)), rgb(var(--accent-2-rgb)), rgb(var(--accent-rgb)));
-  box-shadow: 0 8px 18px rgba(var(--accent-rgb), 0.16);
+  box-shadow: none;
   flex: none;
 }
 
 .sidebarTitle {
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--text-body);
+  font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
@@ -80,8 +80,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  font-size: 20px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-title);
   color: var(--muted);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
@@ -122,7 +122,7 @@
 .sectionLabel {
   margin: 0;
   padding: 6px 10px 4px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -130,7 +130,7 @@
 
 .subLabel {
   padding: 6px 10px 2px 38px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--subtle);
 }
@@ -140,8 +140,8 @@
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-small);
   font-weight: 600;
   color: rgba(var(--ink-rgb), 0.76);
   transition: background 120ms ease, color 120ms ease;
@@ -191,8 +191,8 @@
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-small);
   font-weight: 600;
   color: rgba(var(--ink-rgb), 0.76);
 }
@@ -204,7 +204,7 @@
 .langSwitch {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: rgba(var(--paper-rgb), 0.50);
 }
@@ -212,7 +212,7 @@
 .langBtn {
   all: unset;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--muted);
   cursor: pointer;
@@ -241,13 +241,13 @@
 }
 
 .footerLabel {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.55);
 }
 
 .footerMeta {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   margin-top: 2px;
 }

@@ -23,9 +23,9 @@
 .kindBtn {
   padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--paper-rgb), 0.5);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: rgba(var(--ink-rgb), 0.72);
   cursor: pointer;
@@ -46,7 +46,7 @@
 
 .tableWrap {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
@@ -59,7 +59,7 @@
 
 .table thead th {
   text-align: left;
-  font-size: 12px;
+  font-size: var(--text-caption);
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: rgba(var(--ink-rgb), 0.62);
@@ -72,7 +72,7 @@
   padding: 10px 14px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.08);
   vertical-align: middle;
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .table tbody tr:last-child td {
@@ -89,8 +89,8 @@
 }
 
 .mono {
-  font-family: var(--font-geist-mono);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.78);
 }
 
@@ -99,8 +99,8 @@
 .statusBadge {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -135,8 +135,8 @@
 .kindBadge {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 600;
   background: rgba(var(--accent-rgb), 0.08);
   color: rgba(var(--accent-rgb), 0.9);
@@ -147,7 +147,7 @@
 .tableHint {
   padding: 14px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
   text-align: center;
 }
 

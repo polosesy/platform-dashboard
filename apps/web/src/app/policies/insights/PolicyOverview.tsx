@@ -67,7 +67,7 @@ export function PolicyOverview(p: Props) {
 
       <section aria-label={t("ins.ov.combosAria")} id="policy-combos" style={{ display: "grid", gap: 12 }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 750 }}>{t("ins.ov.flowTitle")}</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("ins.ov.flowTitle")}</h3>
           <div className={styles.sub}>{t("ins.ov.flowSub")}</div>
         </div>
         <RiskCombos data={data} findings={findings} selectedId={p.issueId} onSelect={p.onIssue} checked={checked} onToggleAction={p.onToggleAction} nav={p.nav} />

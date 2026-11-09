@@ -95,7 +95,7 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
         {selected.size > 0 && (
           <span className={styles.multiSelectBtnCount}>{selected.size}</span>
         )}
-        <span style={{ opacity: 0.5, fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ opacity: 0.5, fontSize: 12, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className={styles.multiSelectDropdown}>
@@ -164,7 +164,7 @@ function LayerMenu({ layers, counts, onChange }: { layers: ReadonlySet<EdgeLayer
       <button type="button" className={styles.multiSelectBtn} aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="layer-menu">
         <span className={styles.multiSelectBtnLabel}>{t("ld.layer.menu")}</span>
         <span className={styles.multiSelectBtnCount}>{shown}/{total}</span>
-        <span style={{ opacity: 0.5, fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ opacity: 0.5, fontSize: 12, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
       </button>
       {open && (
         <div className={styles.multiSelectDropdown}>

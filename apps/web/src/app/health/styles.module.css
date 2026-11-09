@@ -12,15 +12,15 @@
 }
 
 .title {
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.02em;
-  font-size: 18px;
+  font-size: var(--text-title);
 }
 
 .subTitle {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .error {
@@ -29,7 +29,7 @@
   background: var(--danger-soft);
   border-radius: var(--radius-md);
   color: rgba(var(--danger-rgb), 0.95);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .note {
@@ -38,7 +38,7 @@
   background: rgba(var(--accent-rgb), 0.08);
   border-radius: var(--radius-md);
   color: rgba(var(--accent-rgb), 0.92);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .grid {
@@ -52,7 +52,7 @@
 .overview {
   grid-column: span 12;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   padding: 14px;
@@ -75,7 +75,7 @@
 }
 
 .statSub {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   text-align: center;
 }
@@ -83,7 +83,7 @@
 .statCard {
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   display: flex;
   flex-direction: column;
@@ -94,18 +94,18 @@
 .statDot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .statCount {
-  font-weight: 900;
-  font-size: 28px;
+  font-weight: 700;
+  font-size: var(--text-display);
   letter-spacing: -0.03em;
   line-height: 1;
 }
 
 .statLabel {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
@@ -132,14 +132,14 @@
 }
 
 .donutTotal {
-  font-weight: 900;
-  font-size: 28px;
+  font-weight: 700;
+  font-size: var(--text-display);
   letter-spacing: -0.03em;
   line-height: 1;
 }
 
 .donutLabel {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
@@ -149,7 +149,7 @@
 .tableCard {
   grid-column: span 12;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   overflow: hidden;
@@ -158,7 +158,7 @@
 .cardTitle {
   padding: 14px;
   border-bottom: 1px solid var(--border);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.01em;
   display: flex;
   justify-content: space-between;
@@ -181,8 +181,8 @@
   all: unset;
   cursor: pointer;
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.1);
@@ -219,8 +219,8 @@
   background: var(--accent);
   /* White text on the accent pill (a kept direct color: white text) */
   color: #fff;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   vertical-align: middle;
 }
 
@@ -229,7 +229,7 @@
   margin: 10px 10px 0;
   padding: 10px 12px;
   border: 1px solid var(--accent);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: rgba(var(--accent-rgb), 0.06);
   box-shadow: inset 4px 0 0 var(--accent);
   display: grid;
@@ -245,10 +245,10 @@
 
 .selectedCardHead .selectedPill { margin-left: 0; }
 
-.selectedCardHead .linkBtn { margin-left: auto; font-size: 12px; }
+.selectedCardHead .linkBtn { margin-left: auto; font-size: var(--text-caption); }
 
 .selectedName {
-  font-size: 14px;
+  font-size: var(--text-body);
   overflow-wrap: anywhere;
 }
 
@@ -256,12 +256,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
 .selectedSummary {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.5;
 }
 
@@ -276,7 +276,7 @@
 
 .heatmapGroupArm {
   display: block;
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--muted);
   overflow: hidden;
@@ -294,7 +294,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
   margin-bottom: 10px;
 }
@@ -314,7 +314,7 @@
 
 .heatmapLegendHint {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-caption);
   cursor: help;
 }
 
@@ -354,7 +354,7 @@
 .heatGroupCounts {
   display: inline-flex;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -377,7 +377,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   min-width: 0;
   max-width: 100%;
@@ -416,12 +416,12 @@
   box-sizing: border-box;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   line-height: 1;
   /* White glyph on the filled state color (a kept direct color: white text) */
   color: #fff;
@@ -463,7 +463,7 @@ button.heatTileSelected:focus-visible {
 .heatmapMore {
   all: unset;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--accent);
   padding: 0 4px;
@@ -474,8 +474,8 @@ button.heatTileSelected:focus-visible {
   all: unset;
   cursor: pointer;
   padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -503,7 +503,7 @@ button.heatTileSelected:focus-visible {
 .resourceRow {
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) 120px auto;
@@ -514,7 +514,7 @@ button.heatTileSelected:focus-visible {
 .resDot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .resInfo {
@@ -522,8 +522,8 @@ button.heatTileSelected:focus-visible {
 }
 
 .resName {
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: var(--text-small);
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
@@ -531,7 +531,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .resType {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -539,16 +539,16 @@ button.heatTileSelected:focus-visible {
 }
 
 .resGroup {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
 
 .resState {
   padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 800;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
@@ -566,14 +566,14 @@ button.heatTileSelected:focus-visible {
 }
 
 .reasonBadge {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
 .resLocation {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -582,14 +582,14 @@ button.heatTileSelected:focus-visible {
 
 .resOccurred {
   grid-column: 2 / -1;
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
 
 .resSummary {
   grid-column: 2 / -1;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.4;
 }
@@ -603,14 +603,14 @@ button.heatTileSelected:focus-visible {
   gap: 10px;
   padding: 10px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
 }
 
 .instanceHeaderLabel {
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -620,11 +620,11 @@ button.heatTileSelected:focus-visible {
 .subSelect {
   all: unset;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.88);
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: rgba(var(--paper-rgb), 0.82);
   min-width: 200px;
@@ -637,22 +637,22 @@ button.heatTileSelected:focus-visible {
 }
 
 .instanceNote {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--accent-rgb), 0.72);
   font-weight: 700;
   margin-left: auto;
   background: rgba(var(--accent-rgb), 0.06);
   border: 1px solid rgba(var(--accent-rgb), 0.12);
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .empty {
   padding: 10px 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
   border: 1px dashed rgba(var(--ink-rgb), 0.18);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
 }
 
 /* ── Loading shimmer skeleton ── */
@@ -693,14 +693,14 @@ button.heatTileSelected:focus-visible {
 }
 
 .spinnerLabel {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: var(--muted);
   letter-spacing: 0.01em;
 }
 
 .shimmerBar {
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: linear-gradient(
     90deg,
     rgba(var(--ink-rgb), 0.04) 0%,
@@ -742,7 +742,7 @@ button.heatTileSelected:focus-visible {
   padding: 10px 14px;
   border: 1px solid rgba(var(--warning-rgb), 0.3);
   background: rgba(var(--warning-rgb), 0.06);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
 
 .fallbackNoticeIcon {
@@ -754,20 +754,20 @@ button.heatTileSelected:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 900;
+  font-size: var(--text-small);
+  font-weight: 700;
   color: rgba(var(--warning-rgb), 0.88);
 }
 
 .fallbackNoticeText {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: rgba(var(--warning-rgb), 0.88);
   line-height: 1.4;
 }
 
 .fallbackNoticeHint {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: rgba(var(--ink-rgb), 0.5);
   margin-top: 2px;
@@ -780,7 +780,7 @@ button.heatTileSelected:focus-visible {
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
 }
@@ -791,9 +791,9 @@ button.heatTileSelected:focus-visible {
   flex: 1;
   text-align: center;
   padding: 10px 20px;
-  border-radius: 14px;
-  font-size: 13px;
-  font-weight: 800;
+  border-radius: var(--radius-md);
+  font-size: var(--text-small);
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--muted);
   transition: background 150ms ease, color 150ms ease;
@@ -814,7 +814,7 @@ button.heatTileSelected:focus-visible {
 
 .allGoodCard {
   border: 1px solid rgba(var(--ok-rgb), 0.22);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--ok-rgb), 0.05);
   padding: 56px 24px;
   display: flex;
@@ -826,32 +826,32 @@ button.heatTileSelected:focus-visible {
 .allGoodIcon {
   width: 60px;
   height: 60px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--ok-rgb), 0.12);
   color: rgba(var(--ok-rgb), 0.82);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30px;
-  font-weight: 900;
+  font-size: var(--text-display);
+  font-weight: 700;
   line-height: 1;
 }
 
 .allGoodTitle {
-  font-size: 16px;
-  font-weight: 800;
+  font-size: var(--text-heading);
+  font-weight: 700;
   color: rgba(var(--ok-rgb), 0.82);
   letter-spacing: -0.02em;
 }
 
 .allGoodSub {
-  font-size: 13px;
+  font-size: var(--text-small);
   color: rgba(var(--ok-rgb), 0.6);
 }
 
 .allGoodLink {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--accent-rgb), 0.8);
   text-decoration: none;
@@ -870,7 +870,7 @@ button.heatTileSelected:focus-visible {
 
 .incidentCard {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--panel);
   backdrop-filter: blur(12px);
   padding: 16px 18px;
@@ -887,9 +887,9 @@ button.heatTileSelected:focus-visible {
 
 .incidentStatus {
   padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   flex: none;
@@ -901,26 +901,26 @@ button.heatTileSelected:focus-visible {
 .statusResolved { background: rgba(var(--ok-rgb), 0.1); color: rgba(var(--ok-rgb), 0.8); }
 
 .incidentDate {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   flex: none;
 }
 
 .incidentTitle {
-  font-weight: 800;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: var(--text-body);
   letter-spacing: -0.01em;
   line-height: 1.3;
 }
 
 .incidentDesc {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.5;
 }
 
 .incidentLink {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--accent-rgb), 0.82);
   text-decoration: none;
@@ -941,7 +941,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .badgeLabel {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
   margin-right: 2px;
@@ -949,8 +949,8 @@ button.heatTileSelected:focus-visible {
 
 .regionBadge {
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   background: rgba(var(--accent-rgb), 0.07);
   color: rgba(var(--accent-rgb), 0.82);
@@ -959,8 +959,8 @@ button.heatTileSelected:focus-visible {
 
 .serviceBadge {
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   background: rgba(var(--ink-rgb), 0.05);
   color: rgba(var(--ink-rgb), 0.58);
@@ -972,7 +972,7 @@ button.heatTileSelected:focus-visible {
 .eventSummaryStrip {
   grid-column: span 12;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--paper-rgb), 0.62);
   backdrop-filter: blur(12px);
   padding: 14px;
@@ -991,7 +991,7 @@ button.heatTileSelected:focus-visible {
 
 .eventCard {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--panel);
   backdrop-filter: blur(12px);
   padding: 16px 18px;
@@ -1008,9 +1008,9 @@ button.heatTileSelected:focus-visible {
 
 .eventTypeBadge {
   padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   flex: none;
@@ -1022,20 +1022,20 @@ button.heatTileSelected:focus-visible {
 .eventSecurity { background: rgba(var(--violet-rgb), 0.10); color: rgba(var(--violet-rgb), 0.88); }
 
 .eventTime {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   flex: none;
 }
 
 .eventTitle {
-  font-weight: 800;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: var(--text-body);
   letter-spacing: -0.01em;
   line-height: 1.3;
 }
 
 .eventSummary {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.65);
   line-height: 1.5;
 }
@@ -1044,7 +1044,7 @@ button.heatTileSelected:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
 }
@@ -1107,8 +1107,8 @@ button.heatTileSelected:focus-visible {
 
 .eventLevelBadge {
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1120,8 +1120,8 @@ button.heatTileSelected:focus-visible {
 
 .resolvedBadge {
   padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   background: rgba(var(--ok-rgb), 0.1);
   color: rgba(var(--ok-rgb), 0.8);
@@ -1130,7 +1130,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .eventChevron {
-  font-size: 9px;
+  font-size: var(--text-caption);
   color: var(--muted);
   line-height: 1;
 }
@@ -1146,15 +1146,15 @@ button.heatTileSelected:focus-visible {
 
 .moreBadge {
   padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
   font-weight: 700;
   background: rgba(var(--ink-rgb), 0.07);
   color: rgba(var(--ink-rgb), 0.52);
 }
 
 .expandHint {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-style: italic;
   margin-left: 4px;
@@ -1183,13 +1183,13 @@ button.heatTileSelected:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--accent-rgb), 0.82);
   text-decoration: none;
   padding: 6px 12px;
   border: 1px solid rgba(var(--accent-rgb), 0.2);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--accent-rgb), 0.05);
   transition: background 120ms ease;
   width: fit-content;
@@ -1207,9 +1207,9 @@ button.heatTileSelected:focus-visible {
   padding: 48px 24px;
   text-align: center;
   border: 1px dashed rgba(var(--ink-rgb), 0.14);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 700;
 }
 
@@ -1225,15 +1225,15 @@ button.heatTileSelected:focus-visible {
 }
 
 .sectionTitle {
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--text-body);
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: rgba(var(--ink-rgb), 0.88);
 }
 
 .sectionSub {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -1246,12 +1246,12 @@ button.heatTileSelected:focus-visible {
 
 .regionAffectedBanner {
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(var(--danger-rgb), 0.07);
   border: 1px solid rgba(var(--danger-rgb), 0.18);
   color: rgba(var(--danger-rgb), 0.88);
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
 }
 
 .regionGrid {
@@ -1262,7 +1262,7 @@ button.heatTileSelected:focus-visible {
 
 .regionCard {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   background: var(--panel);
   display: grid;
@@ -1274,7 +1274,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionCard:hover {
-  box-shadow: 0 2px 8px rgba(var(--ink-rgb), 0.06);
+  box-shadow: var(--shadow-raise);
 }
 
 .regionCardGood {
@@ -1288,14 +1288,14 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionCardAffected:hover {
-  box-shadow: 0 2px 12px var(--danger-soft);
+  box-shadow: var(--shadow-raise);
 }
 
 .regionCardExpanded {
   grid-column: 1 / -1;
   border-color: rgba(var(--accent-rgb), 0.28);
   background: rgba(var(--paper-rgb), 0.92);
-  box-shadow: 0 2px 16px rgba(var(--accent-rgb), 0.08);
+  box-shadow: var(--ring-accent);
 }
 
 .regionCardHeader {
@@ -1309,7 +1309,7 @@ button.heatTileSelected:focus-visible {
 .regionDot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
 }
 
@@ -1322,7 +1322,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionName {
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
   flex: 1;
   white-space: nowrap;
@@ -1331,10 +1331,10 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionStatusBadge {
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1358,10 +1358,10 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionIssueChip {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .regionIssueChip[data-type="issue"] {
@@ -1398,7 +1398,7 @@ button.heatTileSelected:focus-visible {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(var(--ink-rgb), 0.03);
   border: 1px solid rgba(var(--ink-rgb), 0.06);
 }
@@ -1406,12 +1406,12 @@ button.heatTileSelected:focus-visible {
 .regionServiceDot {
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   flex: none;
 }
 
 .regionServiceName {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 700;
   color: rgba(var(--ink-rgb), 0.82);
   flex: 1;
@@ -1422,10 +1422,10 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionServiceStatus {
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   flex: none;
@@ -1465,13 +1465,13 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionEventTitle {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.4;
 }
 
 .regionEventSummary {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.5);
   line-height: 1.4;
   display: -webkit-box;
@@ -1481,20 +1481,20 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionEventTime {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 600;
 }
 
 .regionNoEvents {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-style: italic;
   padding: 4px 0;
 }
 
 .regionChevron {
-  font-size: 9px;
+  font-size: var(--text-caption);
   color: var(--muted);
   flex: none;
   transition: transform 120ms ease;
@@ -1505,7 +1505,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionalNote {
-  font-size: 10px;
+  font-size: var(--text-caption);
   color: var(--muted);
   font-style: italic;
 }
@@ -1515,20 +1515,20 @@ button.heatTileSelected:focus-visible {
 .permissionsBox {
   grid-column: span 12;
   border: 1px solid rgba(var(--accent-rgb), 0.2);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: rgba(var(--accent-rgb), 0.04);
   padding: 14px 16px;
 }
 
 .permissionsTitle {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   color: rgba(var(--accent-rgb), 0.88);
   margin-bottom: 8px;
 }
 
 .permissionsBody {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: rgba(var(--ink-rgb), 0.7);
   line-height: 1.6;
 }
@@ -1547,20 +1547,20 @@ button.heatTileSelected:focus-visible {
 }
 
 .permissionsBody code {
-  font-size: 11px;
+  font-size: var(--text-caption);
   background: rgba(var(--accent-rgb), 0.08);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 /* ── Translated content badge ── */
 
 .translatedBadge {
   padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 700;
   letter-spacing: 0.04em;
   background: rgba(var(--violet-rgb), 0.10);
   color: rgba(var(--violet-rgb), 0.82);
@@ -1580,7 +1580,7 @@ button.heatTileSelected:focus-visible {
 .translateToggle {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--panel);
 }
@@ -1589,8 +1589,8 @@ button.heatTileSelected:focus-visible {
   all: unset;
   cursor: pointer;
   padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--text-caption);
+  font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--muted);
   transition: background 120ms ease, color 120ms ease;
@@ -1611,7 +1611,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .translateSpinner {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--violet-rgb), 0.70);
   font-weight: 700;
   animation: pulse 1.2s ease-in-out infinite;
@@ -1623,12 +1623,12 @@ button.heatTileSelected:focus-visible {
 }
 
 .translateNote {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: rgba(var(--warning-rgb), 0.8);
   font-weight: 700;
   background: rgba(var(--warning-rgb), 0.08);
   border: 1px solid rgba(var(--warning-rgb), 0.16);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
 }
 
@@ -1639,7 +1639,7 @@ button.heatTileSelected:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: rgba(var(--paper-rgb), 0.6);
 }
@@ -1659,7 +1659,7 @@ button.heatTileSelected:focus-visible {
 .timestampDot {
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   margin-bottom: 2px;
   flex: none;
 }
@@ -1680,7 +1680,7 @@ button.heatTileSelected:focus-visible {
 }
 
 .timestampLabel {
-  font-size: 10px;
+  font-size: var(--text-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1688,8 +1688,8 @@ button.heatTileSelected:focus-visible {
 }
 
 .timestampValue {
-  font-size: 13px;
-  font-weight: 800;
+  font-size: var(--text-small);
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: rgba(var(--ink-rgb), 0.85);
   line-height: 1.2;
@@ -1726,7 +1726,7 @@ button.heatTileSelected:focus-visible {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -1742,7 +1742,7 @@ button.heatTileSelected:focus-visible {
 .linkBtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
 }
 
 .coveragePanel {
@@ -1751,14 +1751,14 @@ button.heatTileSelected:focus-visible {
 
 .coverageIntro {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
 .coverageTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .coverageTable th {

@@ -78,7 +78,7 @@ test("design tokens: fonts aliased on body, no duplicate :root declarations, one
   assert.ok(!/--font-geist-/.test(rootBlock), "next/font variables live on <body>, so aliases must be declared there");
   const names = [...rootBlock.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]!);
   assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), [], "no token declared twice");
-  for (const t of ["--success", "--danger", "--warning", "--accent-soft", "--radius-xs", "--surface", "--fg", "--line"]) assert.ok(names.includes(t), t);
+  for (const t of ["--success", "--danger", "--warning", "--accent-soft", "--radius-sm", "--text-body", "--surface", "--fg", "--line"]) assert.ok(names.includes(t), t);
   assert.ok(!existsSync(join(webSrc, "components", "ui", "index.ts")), "index.ts would shadow index.tsx");
 });
 

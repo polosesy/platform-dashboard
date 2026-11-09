@@ -18,7 +18,7 @@
 }
 
 .stripText {
-  font-size: 13px;
+  font-size: var(--text-small);
   color: var(--muted);
 }
 
@@ -41,14 +41,14 @@
 }
 
 .link {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--accent);
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .table th,
@@ -60,7 +60,7 @@
 }
 
 .table th {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--muted);
   background: var(--panel-sunken);
@@ -79,7 +79,7 @@
 
 .mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   word-break: break-all;
 }
 
@@ -90,7 +90,7 @@
 .muted {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .wsList {
@@ -98,7 +98,7 @@
   padding-left: 16px;
   display: grid;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .wsList li {
@@ -148,7 +148,7 @@
 .seriesAxis {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -158,7 +158,7 @@
   border-radius: var(--radius-sm);
   background: var(--panel-sunken);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   white-space: pre-wrap;
   word-break: break-all;
 }

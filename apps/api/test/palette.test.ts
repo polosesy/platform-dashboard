@@ -32,8 +32,8 @@ test("named CSS tokens are built from the channels (one source of truth)", () =>
 
 test("rgba / hex helpers", () => {
   assert.equal(p.rgba("accent", 0.55), "rgba(0,120,212,0.55)");
-  assert.equal(p.rgba("danger"), "rgba(216,59,1,1)");
-  assert.equal(p.rgba("danger", 0.1 * 3), `rgba(216,59,1,${0.1 * 3})`, "alpha passes through unchanged");
+  assert.equal(p.rgba("danger"), "rgba(196,43,28,1)");
+  assert.equal(p.rgba("danger", 0.1 * 3), `rgba(196,43,28,${0.1 * 3})`, "alpha passes through unchanged");
   assert.equal(p.hex("accent"), "#0078d4");
   assert.equal(p.hex("ok"), "#107c10");
   assert.equal(p.hex("privateLink"), "#8b5cf6");

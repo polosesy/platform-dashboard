@@ -97,10 +97,10 @@ function IssueGlanceRow({ issue, conf, onOpenRow }: { issue: RiskIssue; conf: st
               <tbody>
                 {issue.members.map((m) => (
                   <tr key={m.rowId}>
-                    <td><button type="button" className={styles.linkish} onClick={() => onOpenRow(m.rowId)} title={t("ins.combos.openHeat")}>{m.name}</button><div className={styles.muted} style={{ fontSize: 11 }}>{m.namespace}</div></td>
+                    <td><button type="button" className={styles.linkish} onClick={() => onOpenRow(m.rowId)} title={t("ins.combos.openHeat")}>{m.name}</button><div className={styles.muted} style={{ fontSize: 12 }}>{m.namespace}</div></td>
                     <td><Pill tone={m.grade}>{t(`ins.sev.${m.grade}`)}</Pill></td>
                     <td>{m.permissions.join(" · ")}</td>
-                    <td className={styles.mono} style={{ fontSize: 11 }}>{m.bindings.join(", ")}</td>
+                    <td className={styles.mono} style={{ fontSize: 12 }}>{m.bindings.join(", ")}</td>
                     <td className={styles.muted} style={{ fontSize: 12 }}>{m.owner}</td>
                   </tr>
                 ))}

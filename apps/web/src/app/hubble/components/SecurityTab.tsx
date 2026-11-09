@@ -122,7 +122,7 @@ export function SecurityTab({ clusterId, live = false, nonce = 0 }: Props) {
                   <td className={styles.flowMono}>{d.port}</td>
                   <td><span className={styles.protocolBadge}>{d.protocol}</span></td>
                   <td style={{ fontWeight: 700, color: rgba("danger", 0.85) }}>{d.count}</td>
-                  <td style={{ fontSize: 11, color: rgba("ink", 0.5) }}>{d.direction}</td>
+                  <td style={{ fontSize: 12, color: rgba("ink", 0.5) }}>{d.direction}</td>
                 </tr>
               ))}
             </tbody>

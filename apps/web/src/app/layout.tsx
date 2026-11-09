@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
-// Bundled font files (the geist package) — `next build` needs no font download (CI and on-prem builds without internet)
-import { GeistSans } from "geist/font/sans";
+// Bundled font files — `next build` needs no font download (CI and on-prem builds without internet).
+// Pretendard (Korean + Latin in one family, OFL): the dynamic-subset build splits the font by unicode-range,
+// so a page downloads only the slices of the 3 MB set its text uses. Geist Mono for code, IDs and queries.
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -23,7 +25,7 @@ export default async function RootLayout({
   const config = webRuntimeConfig(process.env);
   return (
     <html lang="ko">
-      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={GeistMono.variable}>
         <Providers config={config}>
           <AppShell>{children}</AppShell>
         </Providers>

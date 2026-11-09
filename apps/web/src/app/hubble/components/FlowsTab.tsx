@@ -142,12 +142,12 @@ export function FlowsTab({ clusterId, live = false, nonce = 0 }: Props) {
                 <td title={`${f.source.namespace}/${f.source.podName}`}>
                   <span style={{ fontWeight: 600 }}>{f.source.workloadName}</span>
                   <br />
-                  <span style={{ fontSize: 10, color: rgba("ink", 0.4) }}>{f.source.namespace}</span>
+                  <span style={{ fontSize: 12, color: rgba("ink", 0.4) }}>{f.source.namespace}</span>
                 </td>
                 <td title={`${f.destination.namespace}/${f.destination.podName}`}>
                   <span style={{ fontWeight: 600 }}>{f.destination.workloadName}</span>
                   <br />
-                  <span style={{ fontSize: 10, color: rgba("ink", 0.4) }}>{f.destination.namespace}</span>
+                  <span style={{ fontSize: 12, color: rgba("ink", 0.4) }}>{f.destination.namespace}</span>
                 </td>
                 <td><VerdictBadge verdict={f.verdict} /></td>
                 <td><span className={styles.protocolBadge}>{f.l4Protocol}</span></td>

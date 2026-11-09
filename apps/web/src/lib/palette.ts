@@ -12,14 +12,14 @@ type Rgb = readonly [number, number, number];
 
 /** Mirrors --<name>-rgb in globals.css */
 export const UI = {
-  ink: [20, 21, 23],
+  ink: [22, 25, 29],
   paper: [255, 255, 255],
   accent: [0, 120, 212],
   "accent-2": [0, 163, 163],
-  danger: [216, 59, 1],
+  danger: [196, 43, 28],
   warning: [209, 132, 0],
-  "warning-strong": [154, 97, 0], // warning text on light backgrounds
-  "danger-strong": [176, 48, 0], // danger text on its soft tint
+  "warning-strong": [138, 83, 0], // warning text on light backgrounds
+  "danger-strong": [176, 48, 31], // danger text on its soft tint
   "success-strong": [11, 106, 48], // success text on its soft tint
   success: [16, 124, 16],
   ok: [16, 124, 16], // healthy / running — same green as success

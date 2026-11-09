@@ -42,7 +42,7 @@ function createMsal(config: WebRuntimeConfig): PublicClientApplication | null {
 function PopupBridgeNotice() {
   const { t } = useI18n();
   return (
-    <div style={{ display: "grid", placeItems: "center", minHeight: "100vh", fontFamily: "system-ui", color: "var(--muted)" }}>
+    <div style={{ display: "grid", placeItems: "center", minHeight: "100vh", color: "var(--muted)" }}>
       {t("auth.popupRelay")}
     </div>
   );
@@ -51,7 +51,7 @@ function PopupBridgeNotice() {
 function InsecureContextNotice() {
   const { t } = useI18n();
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 32, fontFamily: "system-ui", textAlign: "center" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 32, textAlign: "center" }}>
       <h2 style={{ marginBottom: 12 }}>{t("auth.httpsTitle")}</h2>
       <p style={{ color: "var(--muted)", marginBottom: 8 }}>{t("auth.httpsBody")}</p>
       <p style={{ color: "var(--subtle)", fontSize: 13 }}>

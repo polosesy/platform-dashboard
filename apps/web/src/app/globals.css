@@ -1,14 +1,16 @@
-/* Intentional light theme baseline (no dark-mode defaults). */
+/* Design tokens — the one source for the whole web app (design principles v1, docs/architecture/design-system.md).
+   Light theme only for now; dark mode adds a second set of the same names later.
+   Enforced by apps/api/test/designTokens.test.ts (type scale, weights, radius) and palette.test.ts (colours). */
 :root {
   /* Page-level sticky panels sit under the sticky top bar */
   --sticky-top: 72px;
   /* Colour channels — the single source. Any other opacity: rgba() over the matching *-rgb token.
      Mirrored for JS-drawn graphics (canvas, SVG attributes, three.js) in src/lib/palette.ts. */
-  --ink-rgb: 20, 21, 23;
+  --ink-rgb: 22, 25, 29;
   --paper-rgb: 255, 255, 255;
   --accent-rgb: 0, 120, 212;
   --accent-2-rgb: 0, 163, 163;
-  --danger-rgb: 216, 59, 1;
+  --danger-rgb: 196, 43, 28;
   --warning-rgb: 209, 132, 0;
   --success-rgb: 16, 124, 16;
   /* Status "OK" (healthy / running) — same green as success */
@@ -21,23 +23,27 @@
   --canvas-rgb: 247, 248, 250;
   --violet-rgb: 112, 48, 160;
   --subnet-rgb: 95, 75, 139;
-  --warning-strong-rgb: 154, 97, 0;
-  --danger-strong-rgb: 176, 48, 0;
+  /* Text colours on light / tinted backgrounds — the fills above are too light to read as text
+     (warning fill 3.0:1 is never used for text) */
+  --warning-strong-rgb: 138, 83, 0;
+  --danger-strong-rgb: 176, 48, 31;
   --success-strong-rgb: 11, 106, 48;
   --integration-rgb: 14, 116, 144;
   --workload-rgb: 37, 99, 235;
   --secret-rgb: 8, 145, 178;
   --slate-rgb: 51, 65, 85;
 
-  --bg: #f6f4ef;
-  --panel: rgba(var(--paper-rgb), 0.72);
+  /* Surfaces — a quiet cool ground and opaque white panels (the old translucent panels blurred numbers) */
+  --bg: #f6f7f9;
+  --panel: rgb(var(--paper-rgb));
   --panel-solid: rgb(var(--paper-rgb));
-  --panel-sunken: rgba(var(--ink-rgb), 0.035);
+  --panel-sunken: #f1f3f6;
+  /* Text — ink 17.6:1 · muted (secondary) 7.6:1 · subtle (meta) 4.8:1 on white */
   --ink: rgb(var(--ink-rgb));
-  --muted: rgba(var(--ink-rgb), 0.62);
-  --subtle: rgba(var(--ink-rgb), 0.45);
-  --border: rgba(var(--ink-rgb), 0.12);
-  --border-strong: rgba(var(--ink-rgb), 0.22);
+  --muted: #4b5563;
+  --subtle: #6b7280;
+  --border: #e3e6eb;
+  --border-strong: #cfd4dc;
   --accent: rgb(var(--accent-rgb));
   --accent-soft: rgba(var(--accent-rgb), 0.1);
   --accent-2: rgb(var(--accent-2-rgb));
@@ -51,7 +57,6 @@
   /* Darker variants for text on a tinted background (contrast) */
   --accent-strong: #005a9e;
   --warning-strong: rgb(var(--warning-strong-rgb));
-  /* Text on the soft tinted badges (the base colours are too light to read on their own tint) */
   --danger-strong: rgb(var(--danger-strong-rgb));
   --success-strong: rgb(var(--success-strong-rgb));
   /* Log console — a dark code block on purpose (terminal look), the same in every theme */
@@ -67,15 +72,42 @@
   --sev-low: var(--accent);
   --sev-info: var(--subtle);
 
-  --radius-lg: 18px;
-  --radius-md: 12px;
-  --radius-sm: 10px;
-  --radius-xs: 6px;
+  /* Type — six sizes, nothing under 12px on screen (Apple: text ≥ 11pt at normal viewing distance).
+     CSS modules use these only (no numeric font-size). */
+  --text-display: 28px; /* one big thing per screen: summary sentence or key number */
+  --text-title: 20px; /* page title */
+  --text-heading: 16px; /* panel / section heading */
+  --text-body: 14px; /* body, table cells */
+  --text-small: 13px; /* secondary lines */
+  --text-caption: 12px; /* column names, labels, chips, meta */
+  --leading-display: 1.2;
+  --leading-title: 1.35;
+  --leading-heading: 1.4;
+  --leading-body: 1.5;
+  /* Zoomable canvases only (React Flow nodes, viewBox SVG): sizes are canvas units that scale with zoom,
+     not screen pixels. Allowed only in the files listed in designTokens.test.ts. */
+  --canvas-text-xs: 10px;
+  --canvas-text-sm: 11px;
+  /* Weights: 400 · 500 · 600 · 700 only */
+
+  /* Radius — controls 6, surfaces 10, pills */
+  --radius-sm: 6px;
+  --radius-md: 10px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px rgba(20, 21, 23, 0.06);
-  --shadow-md: 0 8px 24px rgba(20, 21, 23, 0.08);
-  --shadow-pop: 0 12px 32px rgba(20, 21, 23, 0.14);
+  /* Shadows — surfaces are flat (1px border); only things that float get a shadow */
+  --shadow-raise: 0 2px 8px rgba(var(--ink-rgb), 0.08); /* hovered / dragged card */
+  --shadow-pop: 0 12px 32px rgba(var(--ink-rgb), 0.16); /* menus, popovers, drawers, dialogs */
+  --shadow-sm: none;
+  --shadow-md: var(--shadow-raise);
+  /* Selection / focus ring — a ring, not a glow */
+  --ring-accent: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
+
+  /* Motion — only when state changes, ease-out; 0 under prefers-reduced-motion (below) */
+  --motion-fast: 150ms; /* press, hover, chips */
+  --motion-base: 200ms; /* expand, tab switch */
+  --motion-slow: 250ms; /* drawers, quick-open */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /* Aliases for names some page modules use — keep them pointing at the tokens above */
   --surface: var(--panel-solid);
@@ -95,15 +127,15 @@ body {
 
 body {
   color: var(--ink);
-  background:
-    radial-gradient(1200px 700px at 18% 12%, rgba(0, 120, 212, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 84% 18%, rgba(0, 163, 163, 0.16), transparent 55%),
-    radial-gradient(900px 600px at 50% 100%, rgba(20, 21, 23, 0.06), transparent 60%),
-    var(--bg);
-  /* Declared on body: next/font puts --font-geist-* on the body class, not on :root */
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--bg);
+  /* One family for Korean and Latin (Pretendard — bundled from the pretendard package, no download at build or run).
+     Geist Mono for code, IDs and queries. next/font puts --font-geist-mono on the body class, so declare here. */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
+    "Malgun Gothic", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, Consolas, monospace;
   font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -121,4 +153,20 @@ a {
 
 button {
   font-family: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

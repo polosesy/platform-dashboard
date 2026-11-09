@@ -8,7 +8,7 @@ import { rgba } from "@/lib/palette";
 import { Notice } from "@/components/ui";
 
 function GaugeBar({ pct }: { pct: number | null }) {
-  if (pct === null) return <span style={{ fontSize: 11, color: rgba("ink", 0.35) }}>N/A</span>;
+  if (pct === null) return <span style={{ fontSize: 12, color: rgba("ink", 0.35) }}>N/A</span>;
   const clamped = Math.min(100, Math.round(pct));
   const cls = clamped >= 85 ? styles.gaugeCrit : clamped >= 70 ? styles.gaugeWarn : styles.gaugeOk;
   return (
@@ -40,7 +40,7 @@ function PressureIndicators({ conditions }: { conditions: NodeResourceSummary["c
         <span
           key={c.type}
           style={{
-            fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
+            fontSize: 12, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
             background: rgba("danger", 0.08), color: rgba("danger", 0.80),
             border: `1px solid ${rgba("danger", 0.15)}`,
           }}
@@ -103,13 +103,13 @@ export function InfraTab({ nodes, past = false }: { nodes: NodeResourceSummary[]
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <GaugeBar pct={node.diskUsagePct} />
                   {node.diskCapacityGB !== null && (
-                    <span style={{ fontSize: 11, color: rgba("ink", 0.45) }}>{node.diskCapacityGB}GB</span>
+                    <span style={{ fontSize: 12, color: rgba("ink", 0.45) }}>{node.diskCapacityGB}GB</span>
                   )}
                 </div>
               </div>
             )}
 
-            <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 11, color: rgba("ink", 0.45) }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 12, color: rgba("ink", 0.45) }}>
               <span>{t("ob.podsN", { n: node.podCount })}</span>
               {node.cpuCapacityMillicores != null && <span>CPU {node.cpuCapacityMillicores}m</span>}
               {node.memoryCapacityMiB != null && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}

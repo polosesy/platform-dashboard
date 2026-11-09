@@ -54,7 +54,7 @@ export const defaultTokens: DesignTokenSet = {
     healthRingStroke: 3,
   },
   typography: {
-    nodeLabel: { fontSize: 13, fontWeight: 800 },
+    nodeLabel: { fontSize: 13, fontWeight: 700 },
     nodeMetric: { fontSize: 11, fontWeight: 700 },
     edgeLabel: { fontSize: 11, fontWeight: 600 },
   },

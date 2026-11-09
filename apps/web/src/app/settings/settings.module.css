@@ -7,7 +7,7 @@
 .muted {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 /* ── Packages side by side (each adds to the one before) ── */
@@ -36,26 +36,26 @@
 
 .tierName {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--text-title);
   font-weight: 700;
 }
 
 .tagline {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .tierLink {
   justify-self: start;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: rgb(var(--tier-rgb));
 }
 
 .includes {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
 }
 
@@ -65,7 +65,7 @@
   list-style: none;
   display: grid;
   gap: 10px;
-  font-size: 13px;
+  font-size: var(--text-small);
   line-height: 1.45;
 }
 
@@ -83,7 +83,7 @@
   border-radius: 50%;
   background: rgb(var(--tier-rgb));
   color: #fff; /* white glyph on the tier colour (any theme) */
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 700;
 }
 
@@ -97,15 +97,15 @@
 }
 
 .tierRolesTitle {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
   margin-right: 2px;
 }
 
 .roleTag {
-  font-size: 11px;
+  font-size: var(--text-caption);
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid rgba(var(--tier-rgb), 0.35);
   background: rgba(var(--tier-rgb), 0.07);
   white-space: nowrap;
@@ -123,7 +123,7 @@
   margin: 6px 0 2px;
   padding-left: 8px;
   border-left: 3px solid rgb(var(--tier-rgb));
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 700;
 }
 
@@ -144,7 +144,7 @@
   align-items: center;
   gap: 6px 10px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-small);
 }
 
 .featureName {
@@ -154,7 +154,7 @@
 .screens,
 .pre,
 .reason {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
@@ -172,7 +172,7 @@
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .table th,
@@ -204,21 +204,21 @@
 .sample {
   display: block;
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
 .code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--muted);
 }
 
 .copy {
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-caption);
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--panel-solid);
   color: var(--accent-strong);
