@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { domId } from "./model";
 import { useInsightLabels } from "./useInsightLabels";
 import styles from "./insights.module.css";
+import { LinkButton, Button } from "@/components/ui";
 
 export function EvidenceChip({ ev, text }: { ev: EvidenceKind; text?: string }) {
   const { EVK } = useInsightLabels();
@@ -89,9 +90,9 @@ export function Inspector({ model, onClose, cols, autoFocus = true }: { model: I
           {model.chips && <div className={styles.dcChips}>{model.chips}</div>}
         </div>
         {onClose && (
-          <button className={styles.dcX} onClick={onClose} aria-label={t("ins.closeDetail")}>
+          <Button onClick={onClose} ariaLabel={t("ins.closeDetail")} variant="ghost" size="sm">
             ✕
-          </button>
+          </Button>
         )}
       </header>
       {model.callouts?.map((c, i) => (
@@ -110,9 +111,9 @@ export function Inspector({ model, onClose, cols, autoFocus = true }: { model: I
       {!!model.links?.length && (
         <footer className={styles.dcLinks}>
           {model.links.map((l) => (
-            <button key={l.label} className={styles.linkish} onClick={l.onClick}>
+            <LinkButton key={l.label} onClick={l.onClick}>
               {l.label} →
-            </button>
+            </LinkButton>
           ))}
         </footer>
       )}

@@ -2,7 +2,7 @@
 
 import { useMemo, type KeyboardEvent, type ReactNode } from "react";
 import type { ResourceHealthStatus } from "@aud/types";
-import { Panel, Select } from "@/components/ui";
+import { Panel, Select, LinkButton } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
 import { groupResources, groupStateCounts, isUnlistedUnknown, isUserInitiated, scopeOptions, stateTone, visibleTiles, type HeatmapGroupBy, type HealthState, type TileTone } from "@/lib/healthHeatmap";
@@ -183,7 +183,7 @@ export function HealthHeatmap({
                   );
                 })}
                 {more > 0 ? (
-                  <button type="button" className={styles.heatmapMore} onClick={() => onScope({ by, key: g.key, label })}>{t("health.heatmap.more", { n: more })}</button>
+                  <LinkButton onClick={() => onScope({ by, key: g.key, label })}>{t("health.heatmap.more", { n: more })}</LinkButton>
                 ) : null}
               </div>
             </section>

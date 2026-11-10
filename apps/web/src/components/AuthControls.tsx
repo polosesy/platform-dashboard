@@ -10,7 +10,7 @@ import { signInConfigured } from "@/lib/runtimeConfig";
 import { useWebConfig } from "@/lib/webConfig";
 import { useI18n } from "@/lib/i18n";
 import { useMe } from "@/lib/useMe";
-import { Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { NotificationBell } from "./NotificationBell";
 import styles from "./TopNav.module.css";
 
@@ -46,9 +46,9 @@ export function AuthControls() {
             {t(`auth.role.${role ?? "none"}`)}{me?.roleFromDefault ? "*" : ""}
           </Badge>
         ) : null}
-        <button className={styles.btnSecondary} onClick={logout} type="button" disabled={busy}>
+        <Button onClick={logout} disabled={busy} size="sm">
           {t("auth.logout")}
-        </button>
+        </Button>
       </AuthenticatedTemplate>
 
       <UnauthenticatedTemplate>
@@ -57,15 +57,9 @@ export function AuthControls() {
             {error}
           </span>
         )}
-        <button
-          className={styles.btnPrimary}
-          onClick={login}
-          type="button"
-          disabled={!msalConfigured || busy}
-          title={msalConfigured ? undefined : t("auth.notConfigured")}
-        >
+        <Button variant="primary" size="sm" onClick={login} disabled={!msalConfigured || busy} title={msalConfigured ? undefined : t("auth.notConfigured")}>
           {busy ? t("auth.signingIn") : t("auth.login")}
-        </button>
+        </Button>
       </UnauthenticatedTemplate>
     </div>
   );

@@ -3,6 +3,7 @@
 import { ARCH_CATEGORIES, archCategoryOf, type ArchCategory, type ArchModel } from "@/lib/archModel";
 import { useI18n } from "@/lib/i18n";
 import s from "../styles.module.css";
+import { LinkButton } from "@/components/ui";
 
 type Props = {
   model: ArchModel;
@@ -40,9 +41,9 @@ export function CategoryFilter({ model, counts, value, onChange }: Props) {
       </summary>
       <div className={s.layerList}>
         <div className={s.filterHead}>
-          <button type="button" className={s.linkBtn} onClick={() => onChange(null)} disabled={all}>
+          <LinkButton onClick={() => onChange(null)} disabled={all}>
             {t("arch.filter.all")}
-          </button>
+          </LinkButton>
         </div>
         {ARCH_CATEGORIES.map((c) => {
           const on = selected.has(c);

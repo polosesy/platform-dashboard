@@ -9,6 +9,7 @@ import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
 import { AttackGraph, AttackTable, type GraphSel } from "./AttackGraph";
 import styles from "./insights.module.css";
+import { Button, FilterChip, LinkButton, Segmented } from "@/components/ui";
 
 type Props = {
   data: PolicyInsightsResponse;
@@ -97,7 +98,7 @@ function IssueGlanceRow({ issue, conf, onOpenRow }: { issue: RiskIssue; conf: st
               <tbody>
                 {issue.members.map((m) => (
                   <tr key={m.rowId}>
-                    <td><button type="button" className={styles.linkish} onClick={() => onOpenRow(m.rowId)} title={t("ins.combos.openHeat")}>{m.name}</button><div className={styles.muted} style={{ fontSize: 12 }}>{m.namespace}</div></td>
+                    <td><LinkButton onClick={() => onOpenRow(m.rowId)} title={t("ins.combos.openHeat")}>{m.name}</LinkButton><div className={styles.muted} style={{ fontSize: 12 }}>{m.namespace}</div></td>
                     <td><Pill tone={m.grade}>{t(`ins.sev.${m.grade}`)}</Pill></td>
                     <td>{m.permissions.join(" · ")}</td>
                     <td className={styles.mono} style={{ fontSize: 12 }}>{m.bindings.join(", ")}</td>
@@ -214,7 +215,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
           <details>
             <summary className={styles.muted}>{t("ins.combos.cmdSummary")} — kubectl auth can-i</summary>
             <CodeBlock code={n.cmd} />
-            <div className={styles.copyRow}><button className={styles.btnGhost} onClick={() => copyText(n.cmd!).then((ok) => flash(ok ? t("ins.combos.copiedCmd") : t("ins.combos.copyFailed")))}>{t("ins.combos.copyCmd")}</button></div>
+            <div className={styles.copyRow}><Button onClick={() => copyText(n.cmd!).then((ok) => flash(ok ? t("ins.combos.copiedCmd") : t("ins.combos.copyFailed")))} size="sm">{t("ins.combos.copyCmd")}</Button></div>
           </details>
         ) } : null,
       ],
@@ -270,8 +271,8 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
           <div className={styles.queueH}>
             <h3>{t("ins.heat.combosCol")} <span className={styles.muted}>{openCount}</span></h3>
             <div className={styles.ctrls}>
-              <button className={styles.fchip} aria-pressed={quickOnly} onClick={() => setQuickOnly(!quickOnly)}>{t("ins.combos.quickOnly")}</button>
-              {OWNERS.map((k) => <button key={k} className={styles.fchip} aria-pressed={owner === k} onClick={() => setOwner(k)}>{t(`ins.owner.${k}`)}</button>)}
+              <FilterChip pressed={quickOnly} onClick={() => setQuickOnly(!quickOnly)}>{t("ins.combos.quickOnly")}</FilterChip>
+              {OWNERS.map((k) => <FilterChip key={k} pressed={owner === k} onClick={() => setOwner(k)}>{t(`ins.owner.${k}`)}</FilterChip>)}
             </div>
           </div>
           {shown.map((i) => {
@@ -311,7 +312,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
             <>
               <div className={styles.dimH}>
                 <span>{t("ins.combos.hidden", { n: hidden.length })}</span>
-                <button className={styles.linkish} onClick={() => { setOwner("all"); setQuickOnly(false); }}>{t("ins.combos.clearFilter")}</button>
+                <LinkButton onClick={() => { setOwner("all"); setQuickOnly(false); }}>{t("ins.combos.clearFilter")}</LinkButton>
               </div>
               {hidden.map((i) => (
                 <button key={i.id} className={`${styles.card} ${styles.dim}`} data-sev={i.sev} aria-label={`${num(i.id)} ${KIND_LABEL[i.kind]}: ${i.title} — ${t("ins.combos.showUnfiltered")}`}
@@ -329,10 +330,8 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
         <div className={styles.panelH}>
           <h3>{t("ins.combos.pathTitle")}</h3>
           <div className={styles.ctrls}>
-            <div className={styles.toggle}>
-              <button aria-pressed={view === "graph"} onClick={() => setViewChoice("graph")}>{t("ins.combos.graph")}</button>
-              <button aria-pressed={view === "table"} onClick={() => setViewChoice("table")}>{t("ins.combos.table")}</button>
-            </div>
+            <Segmented label={t("ins.combos.pathTitle")} value={view} onChange={setViewChoice}
+              items={[{ id: "graph", label: t("ins.combos.graph") }, { id: "table", label: t("ins.combos.table") }]} />
           </div>
         </div>
         <div className={styles.panelB}>
@@ -370,9 +369,9 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
               {issue.actions.map((a) => <ActionRow key={a.id} a={a} checked={checked.has(a.id)} onToggle={(on) => toggleAct(a.id, on)} />)}
             </div>
             <div>
-              <div className={styles.tabs} role="tablist">
-                <button role="tab" aria-selected={fixTab === "code"} onClick={() => setFixTab("code")}>{t("ins.combos.tabCode")}</button>
-                <button role="tab" aria-selected={fixTab === "ticket"} onClick={() => setFixTab("ticket")}>{t("ins.combos.tabTicket")}</button>
+              <div className={styles.fixSwitch}>
+                <Segmented label={t("ins.ticket.actions")} value={fixTab} onChange={setFixTab}
+                  items={[{ id: "code", label: t("ins.combos.tabCode") }, { id: "ticket", label: t("ins.combos.tabTicket") }]} />
               </div>
               {fixTab === "code" ? (
                 issue.actions.map((a, n) => (
@@ -386,7 +385,7 @@ export function RiskCombos({ data, findings, selectedId, onSelect, checked, onTo
                   <CodeBlock code={ticketText(issue, data, checked, t, lb)} />
                   <div className={styles.copyRow}>
                     <span className={styles.muted} aria-live="polite">{toast}</span>
-                    <button className={styles.btnGhost} onClick={() => copyText(ticketText(issue, data, checked, t, lb)).then((ok) => flash(ok ? t("ins.combos.copiedTicket") : t("ins.combos.copyFailed")))}>{t("ins.combos.copyTicket")}</button>
+                    <Button onClick={() => copyText(ticketText(issue, data, checked, t, lb)).then((ok) => flash(ok ? t("ins.combos.copiedTicket") : t("ins.combos.copyFailed")))} size="sm">{t("ins.combos.copyTicket")}</Button>
                   </div>
                 </>
               )}

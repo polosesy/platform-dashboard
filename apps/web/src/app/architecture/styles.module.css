@@ -798,29 +798,6 @@
   align-items: baseline;
 }
 
-.iLink {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-.iLink:hover {
-  text-decoration: underline;
-}
-
-.iLink:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
 .iDim {
   color: var(--muted);
   font-size: var(--text-caption);
@@ -883,29 +860,6 @@
   display: flex;
   justify-content: flex-end;
   padding: 2px 4px 4px;
-}
-
-.linkBtn {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-size: var(--text-caption);
-  font-weight: 600;
-  color: var(--accent);
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.linkBtn:disabled {
-  color: var(--subtle);
-  cursor: default;
-}
-
-.linkBtn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
 
 .filterName {

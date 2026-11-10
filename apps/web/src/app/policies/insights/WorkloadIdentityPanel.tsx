@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { WiFinding, WiOtherWorkload, WiRoleUsage, WiSeverity, WorkloadIdentityResponse } from "@aud/types";
 import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
-import { Button, Notice, Segmented } from "@/components/ui";
+import { Button, Notice, Segmented, LinkButton, FilterChip } from "@/components/ui";
 import { Inspector, Pill, type InspectorModel, type InspectorRow } from "./Inspector";
 import { chainOf, ficGauge, layoutWi, namespaceCoverage, nodeSeverity, poolOfNodeId, wiGraph, type WiKind } from "./wiLayout";
 import styles from "./insights.module.css";
@@ -56,12 +56,11 @@ function OtherWorkloads({ data, showSystem }: { data: WorkloadIdentityResponse; 
       <summary><h4 className={styles.wiH}>{t("wi.other.title")} <span className={styles.wiCount}>{total}</span></h4></summary>
       <p className={styles.wiNote}>{t("wi.other.note")}</p>
       <div className={styles.wiNsChips} role="group" aria-label={t("wi.other.ns")}>
-        <button type="button" className={styles.wiNsChip} aria-pressed={ns === null} onClick={() => setNs(null)}>{t("wi.other.all")} <b>{total}</b></button>
+        <FilterChip pressed={ns === null} onClick={() => setNs(null)}>{t("wi.other.all")} <b>{total}</b></FilterChip>
         {cov.filter((c) => c.other > 0).map((c) => (
-          <button key={c.namespace} type="button" className={styles.wiNsChip} aria-pressed={ns === c.namespace} onClick={() => setNs(c.namespace)}
-            title={t("wi.other.chipTip", { wi: c.wi, other: c.other })}>
+          <FilterChip key={c.namespace} pressed={ns === c.namespace} onClick={() => setNs(c.namespace)} title={t("wi.other.chipTip", { wi: c.wi, other: c.other })}>
             {c.namespace} <b>{c.other}</b>{c.wi > 0 && <span className={styles.wiMuted}> · {t("wi.other.chipWi", { n: c.wi })}</span>}
-          </button>
+          </FilterChip>
         ))}
       </div>
       <div className={styles.wiOtherBox}>
@@ -95,9 +94,9 @@ function CopyCode({ code }: { code: string }) {
   return (
     <div className={styles.wiCode}>
       <code>{code}</code>
-      <button type="button" className={styles.linkish} onClick={() => { void navigator.clipboard?.writeText(code).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>
+      <LinkButton onClick={() => { void navigator.clipboard?.writeText(code).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>
         {done ? t("wi.copied") : t("wi.copy")}
-      </button>
+      </LinkButton>
     </div>
   );
 }
@@ -275,7 +274,7 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
       )}
       <p className={styles.wiNote}>{t("wi.coverage.ib")} · {t("wi.coverage.exchange")} · {t("wi.roles.pim")}
         {" · "}{scan.requested ? t("wi.scan.done", { scanned: scan.scanned, total: scan.total ?? "?" }) : (
-          <button type="button" className={styles.linkish} onClick={onScan} disabled={scanning}>{t("wi.scan.button", { cap: scan.cap })}</button>
+          <LinkButton onClick={onScan} disabled={scanning}>{t("wi.scan.button", { cap: scan.cap })}</LinkButton>
         )}
       </p>
 
@@ -323,9 +322,9 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                     return (
                       <tr key={s.id}>
                         <td>{data.workloads.filter((w) => w.saId === s.id).map((w) => w.name).join(", ") || "-"}</td>
-                        <td><button type="button" className={styles.linkish} onClick={() => pick(s.id)}>{s.namespace}/{s.name}</button></td>
+                        <td><LinkButton onClick={() => pick(s.id)}>{s.namespace}/{s.name}</LinkButton></td>
                         <td>{s.ficIds.length ? s.ficIds.map((f) => data.fics.find((x) => x.id === f)?.name).join(", ") : <span className={styles.wiMuted}>{s.identityId ? t("wi.noFic") : "-"}</span>}</td>
-                        <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.kind === "unresolved" ? t("wi.unresolved") : idn.name}{idn.kind === "servicePrincipal" ? ` · ${t("wi.sp.tag")}` : ""} {idn.kind !== "unresolved" && idn.fic.status === "ok" ? `(${ficGauge(idn.fic.count).text})` : ""}</button> : "-"}</td>
+                        <td>{idn ? <LinkButton onClick={() => pick(idn.id)}>{idn.kind === "unresolved" ? t("wi.unresolved") : idn.name}{idn.kind === "servicePrincipal" ? ` · ${t("wi.sp.tag")}` : ""} {idn.kind !== "unresolved" && idn.fic.status === "ok" ? `(${ficGauge(idn.fic.count).text})` : ""}</LinkButton> : "-"}</td>
                         <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}${r.usage?.state === "unused" ? ` (${t("wi.usage.unusedShort", { days: r.usage.days })})` : ""}`).join(" · ") || "-"}</td>
                       </tr>
                     );
@@ -335,9 +334,9 @@ export function WorkloadIdentityPanel({ data, showSystem, onScan, scanning }: { 
                     return (
                       <tr key={n.id}>
                         <td>-</td>
-                        <td><button type="button" className={styles.linkish} onClick={() => pick(n.id)}>{label(n.id)?.title}</button></td>
+                        <td><LinkButton onClick={() => pick(n.id)}>{label(n.id)?.title}</LinkButton></td>
                         <td><span className={styles.wiMuted}>{t("wi.imds.path")}</span></td>
-                        <td>{idn ? <button type="button" className={styles.linkish} onClick={() => pick(idn.id)}>{idn.name ?? idn.clientIdTail}</button> : "-"}</td>
+                        <td>{idn ? <LinkButton onClick={() => pick(idn.id)}>{idn.name ?? idn.clientIdTail}</LinkButton> : "-"}</td>
                         <td>{idn?.roles.map((r) => `${r.roleName} @ ${r.scope.label}${r.usage?.state === "unused" ? ` (${t("wi.usage.unusedShort", { days: r.usage.days })})` : ""}`).join(" · ") || "-"}</td>
                       </tr>
                     );

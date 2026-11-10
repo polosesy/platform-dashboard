@@ -2,7 +2,7 @@
 
 import type { DiagramNodeSpec, DiagramSpec } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
-import { CopyButton, Group, KV, Section, TwoLine } from "./primitives";
+import { ConnRow, CopyButton, Group, KV, Section, TwoLine } from "./primitives";
 import styles from "../../styles.module.css";
 
 type Lng = { name: string; prefixes: string[]; peerIp: string | null; fqdn: string | null };
@@ -37,14 +37,14 @@ export function HybridSection({ node, spec, onSelectNode }: {
       <Section id="hybrid" title={t("ld.hybrid.gatewayTitle")} count={sites.length}>
         <KV label={t("ld.hybrid.sku")}>{[m.sku, m.activeActive === "true" ? t("ld.hybrid.activeActive") : null, m.enableBgp === "true" ? "BGP" : t("ld.hybrid.static")].filter(Boolean).join(" · ") || t("ld.peering.unknownValue")}</KV>
         {sites.length ? sites.map((s) => (
-          <button key={s.id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(s.id)}>
+          <ConnRow key={s.id} onClick={() => onSelectNode?.(s.id)}>
             <span className={styles.dpConnArrow}>⇢</span>
             <span className={styles.dpConnRel}>{s.metadata?.protocol ?? "S2S"}</span>
             <span className={styles.dpConnPeer}>
               <span className={styles.dpConnName}><span className={styles.dpConnText} title={s.label}>{s.label}</span></span>
               <span className={styles.dpConnWhere}>{t(`ld.hybrid.status.${s.metadata?.connectionStatus ?? "Unknown"}`)} · {t("ld.hybrid.prefixes", { n: parse<Lng | null>(s.metadata?.lng, null)?.prefixes.length ?? 0 })}</span>
             </span>
-          </button>
+          </ConnRow>
         )) : <div className={styles.dpMuted}>{t("ld.hybrid.noConnections")}</div>}
       </Section>
     );
@@ -73,11 +73,11 @@ export function HybridSection({ node, spec, onSelectNode }: {
         </Group>
       ) : null}
       {gw ? (
-        <button type="button" className={styles.dpConn} onClick={() => onSelectNode?.(gw.id)}>
+        <ConnRow onClick={() => onSelectNode?.(gw.id)}>
           <span className={styles.dpConnArrow}>⇠</span>
           <span className={styles.dpConnRel}>{t("ld.hybrid.via")}</span>
           <span className={styles.dpConnPeer}><span className={styles.dpConnName}><span className={styles.dpConnText}>{gw.label}</span></span></span>
-        </button>
+        </ConnRow>
       ) : null}
       {node.azureResourceId ? <div className={styles.dpActions}><CopyButton value={node.azureResourceId} /></div> : null}
     </Section>

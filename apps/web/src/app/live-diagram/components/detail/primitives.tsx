@@ -153,3 +153,8 @@ export function useRelativeTime() {
     return fmt.format(Math.round(secs / 86400), "day");
   }, [locale]);
 }
+
+/** One row of a "go to" list (connections, impact sources, sites): arrow · relation · name — the whole row opens that card */
+export function ConnRow({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return <button type="button" className={styles.dpConn} onClick={onClick}>{children}</button>;
+}

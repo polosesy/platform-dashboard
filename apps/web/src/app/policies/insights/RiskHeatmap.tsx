@@ -7,7 +7,7 @@ import { issueNum, type InsightLabels, type InsightsNav, type TFn } from "./mode
 import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip, Inspector, type InspectorModel, type InspectorRow } from "./Inspector";
 import { WEIGHT_GLYPH, cellText, hitCount, showsCellText, sortRows, splitFactors, textColumns, visibleFactors, type HeatSort } from "./heatView";
-import { Segmented } from "@/components/ui";
+import { Segmented, FilterChip } from "@/components/ui";
 import styles from "./insights.module.css";
 
 export type HeatSel = { row: string; key: RiskFactorKey | null };
@@ -81,7 +81,7 @@ function heatModel(data: PolicyInsightsResponse, r: WorkloadRiskRow, key: RiskFa
     cellSections.push(
       { h: t("ins.heat.cellDetail", { label: f.label }), rows },
       { h: t("ins.heat.cellCombos", { n: combos.length }), body: combos.length ? <>{combos.map((c) => <div key={c.type} style={{ marginBottom: 6 }}><ComboButton combo={c} data={data} nav={nav} /><div className={styles.muted} style={{ fontSize: 12, marginTop: 3 }}>{COMBO_FORMULA[c.type]}</div></div>)}</> : <div className={styles.muted}>{t("ins.heat.alone")}</div> },
-      { h: t("ins.heat.same", { n: same.length, m: user.length }), body: <div className={styles.ctrls}>{same.map((x) => <button key={x.id} className={styles.fchip} aria-pressed={x.id === r.id} onClick={() => nav.openHeatRow(x.id)}>{x.name}</button>)}</div> },
+      { h: t("ins.heat.same", { n: same.length, m: user.length }), body: <div className={styles.ctrls}>{same.map((x) => <FilterChip key={x.id} pressed={x.id === r.id} onClick={() => nav.openHeatRow(x.id)}>{x.name}</FilterChip>)}</div> },
     );
   }
   const comboKeys = new Set(r.combos.flatMap((c) => c.keys));
@@ -188,13 +188,13 @@ export function RiskHeatmap({ data, sel, onSelect, showManaged, onShowManaged, n
           <Segmented label={t("ins.heat.sort")} value={sortBy} onChange={setSortBy}
             items={[{ id: "risk" as HeatSort, label: t("ins.heat.sortRisk") }, { id: "name" as HeatSort, label: t("ins.heat.sortName") }]} />
           {emptyCols > 0 && (
-            <button className={styles.fchip} aria-pressed={showEmpty} onClick={() => setShowEmpty(!showEmpty)}>
+            <FilterChip pressed={showEmpty} onClick={() => setShowEmpty(!showEmpty)}>
               {showEmpty ? t("ins.heat.hideEmptyCols", { n: emptyCols }) : t("ins.heat.showEmptyCols", { n: emptyCols })}
-            </button>
+            </FilterChip>
           )}
-          <button className={styles.fchip} aria-pressed={showManaged} onClick={() => onShowManaged(!showManaged)}>
+          <FilterChip pressed={showManaged} onClick={() => onShowManaged(!showManaged)}>
             {showManaged ? t("ins.heat.hideManaged", { n: managedCount }) : t("ins.heat.showManaged", { n: managedCount })}
-          </button>
+          </FilterChip>
         </div>
       </div>
       <div className={styles.panelB}>

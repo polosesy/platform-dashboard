@@ -162,7 +162,17 @@ test("UI kit: panel head 56 · foot 44 · flat · stretches in a row; 12-column 
   assert.match(rule(".lg"), /height: 44px/);
   assert.match(kitCss, /@media \(pointer: coarse\) \{[\s\S]*?min-height: 44px/, "touch screens get 44px controls");
   assert.doesNotMatch(rule(".notice"), /border-left-width/, "no thick left edge on notices");
-  for (const name of ["Panel", "Grid", "Cell", "Chip", "CopyButton", "CodeBlock"]) assert.ok(kitTsx.includes(`export function ${name}(`) || kitTsx.includes(`export function ${name}<`), name);
+  for (const name of ["Panel", "Grid", "Cell", "Chip", "CopyButton", "CodeBlock", "FilterChip", "LinkButton"]) assert.ok(kitTsx.includes(`export function ${name}(`) || kitTsx.includes(`export function ${name}<`), name);
+});
+
+// 2026-11-10: the two hand-made controls most screens drew (a pill you press — 18 copies; a word you press — 34) are kit parts
+test("UI kit: FilterChip = 28px pill, chosen = tint + ✓ (not colour alone), touch 44 · LinkButton = accent text, no box", () => {
+  assert.match(rule(".filterChip"), /height: 28px/);
+  assert.match(rule(".filterChip"), /border-radius: var\(--radius-pill\)/);
+  assert.match(kitTsx, /pressed \? <span className=\{s\.filterCheck\} aria-hidden="true">✓<\/span>/, "chosen chips carry a ✓");
+  assert.match(kitCss, /@media \(pointer: coarse\) \{\s*\.filterChip,/, "filter chips are 44 tall on touch screens");
+  assert.match(rule(".linkButton"), /border: 0/);
+  assert.match(rule(".linkButton"), /color: var\(--accent-strong\)/);
 });
 
 test("SLO tab is built from the kit: grid cells, panels, chips — no hand-made card edges", () => {
@@ -180,29 +190,25 @@ test("SLO tab is built from the kit: grid cells, panels, chips — no hand-made 
  * <Button>/<Chip>/<Badge>, and an existing file that needs another raw one raises its number here on purpose.
  */
 const RAW_BUTTONS: Record<string, number> = {
-  "app/architecture/components/ArchNodes.tsx": 3, "app/architecture/components/CategoryFilter.tsx": 1, "app/architecture/components/DiagramCanvas.tsx": 1,
-  "app/architecture/components/Inspector.tsx": 6, "app/architecture/components/Legend.tsx": 1, "app/architecture/page.tsx": 4,
-  "app/health/HealthHeatmap.tsx": 3, "app/health/InstanceHealthPanel.tsx": 3, "app/health/page.tsx": 4,
-  "app/hubble/components/ServiceMapTab.tsx": 1, "app/live-diagram/components/AlertSidebar.tsx": 3, "app/live-diagram/components/EdgeDetailPanel.tsx": 1,
-  "app/live-diagram/components/EmptySubnetsNode.tsx": 1, "app/live-diagram/components/FaultTimeline.tsx": 1, "app/live-diagram/components/GroupNode.tsx": 5,
-  "app/live-diagram/components/Legend.tsx": 1, "app/live-diagram/components/LiveCanvas.tsx": 1, "app/live-diagram/components/LiveNode.tsx": 3,
-  "app/live-diagram/components/ResourceDetailPanel.tsx": 12, "app/live-diagram/components/detail/HybridSection.tsx": 2, "app/live-diagram/components/detail/PeeringSection.tsx": 1,
-  "app/live-diagram/components/detail/PrivateLinkUsage.tsx": 4, "app/live-diagram/components/detail/WafPanel.tsx": 4, "app/live-diagram/components/detail/primitives.tsx": 3,
-  "app/live-diagram/page.tsx": 4, "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1,
-  "app/observability/components/LogsTab.tsx": 1, "app/observability/components/WorkloadHeatmap.tsx": 11, "app/observability/components/WorkloadLogStream.tsx": 2,
-  "app/policies/components/ManagedComponentsPanel.tsx": 1, "app/policies/components/NetpolSimPanel.tsx": 6, "app/policies/insights/AttackGraph.tsx": 2,
-  "app/policies/insights/ExplorePanel.tsx": 12, "app/policies/insights/Inspector.tsx": 2, "app/policies/insights/KbomPanel.tsx": 2,
-  "app/policies/insights/NetworkMap.tsx": 7, "app/policies/insights/PermissionMatrix.tsx": 1, "app/policies/insights/RiskCombos.tsx": 12,
-  "app/policies/insights/RiskHeatmap.tsx": 5, "app/policies/insights/WorkloadIdentityPanel.tsx": 8, "app/policies/page.tsx": 2,
+  "app/architecture/components/ArchNodes.tsx": 3, "app/architecture/components/DiagramCanvas.tsx": 1, "app/architecture/components/Legend.tsx": 1,
+  "app/architecture/page.tsx": 2, "app/health/HealthHeatmap.tsx": 2, "app/health/page.tsx": 4,
+  "app/hubble/components/ServiceMapTab.tsx": 1, "app/live-diagram/components/AlertSidebar.tsx": 3, "app/live-diagram/components/EmptySubnetsNode.tsx": 1,
+  "app/live-diagram/components/FaultTimeline.tsx": 1, "app/live-diagram/components/GroupNode.tsx": 5, "app/live-diagram/components/Legend.tsx": 1,
+  "app/live-diagram/components/LiveCanvas.tsx": 1, "app/live-diagram/components/LiveNode.tsx": 3, "app/live-diagram/components/detail/PeeringSection.tsx": 1,
+  "app/live-diagram/components/detail/PrivateLinkUsage.tsx": 1, "app/live-diagram/components/detail/primitives.tsx": 4, "app/live-diagram/page.tsx": 4,
+  "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1, "app/observability/components/LogsTab.tsx": 1,
+  "app/observability/components/WorkloadHeatmap.tsx": 11, "app/observability/components/WorkloadLogStream.tsx": 1, "app/policies/components/ManagedComponentsPanel.tsx": 1,
+  "app/policies/components/NetpolSimPanel.tsx": 1, "app/policies/insights/ExplorePanel.tsx": 1, "app/policies/insights/KbomPanel.tsx": 1,
+  "app/policies/insights/RiskCombos.tsx": 2, "app/policies/insights/RiskHeatmap.tsx": 2, "app/policies/page.tsx": 2,
   "app/security/advisories/page.tsx": 2, "app/security/components.tsx": 1, "app/security/risk/IssueQueue.tsx": 1,
   "app/security/risk/page.tsx": 1, "app/security/threats/page.tsx": 1, "app/settings/PermissionTable.tsx": 1,
-  "components/AuthControls.tsx": 2, "components/Sidebar.tsx": 3, "components/TopNav.tsx": 3,
+  "components/Sidebar.tsx": 1, "components/TopNav.tsx": 3,
 };
 /** Page CSS classes that draw their own badge / chip / pill (the kit has Chip and Badge) — names per file, frozen */
 const OWN_CHIP_CLASSES: Record<string, number> = {
-  "app/architecture/styles.module.css": 7, "app/health/styles.module.css": 14, "app/hubble/styles.module.css": 7, "app/kubernetes/styles.module.css": 2,
-  "app/live-diagram/styles.module.css": 22, "app/notifications/notifications.module.css": 1, "app/observability/styles.module.css": 12,
-  "app/policies/insights/insights.module.css": 12, "app/policies/styles.module.css": 5, "app/security/security.module.css": 2,
+  "app/architecture/styles.module.css": 7, "app/health/styles.module.css": 13, "app/hubble/styles.module.css": 7, "app/kubernetes/styles.module.css": 2,
+  "app/live-diagram/styles.module.css": 22, "app/notifications/notifications.module.css": 1, "app/observability/styles.module.css": 11, "app/policies/insights/insights.module.css": 10,
+  "app/policies/styles.module.css": 4, "app/security/security.module.css": 2,
 };
 
 test("ratchet: raw <button>s and page-made chip classes outside the kit only go down", () => {

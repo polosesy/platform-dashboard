@@ -175,22 +175,6 @@
 }
 
 /* Group filter from the heatmap: one chip, click clears */
-.groupChip {
-  all: unset;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.1);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-}
-
-.groupChip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 
 /* The row picked from the heatmap: accent bar on the left, tinted, and a short flash when picked */
 .resourceRowSelected {
@@ -456,16 +440,6 @@ button.heatTileSelected:focus-visible {
   background-image: repeating-linear-gradient(135deg, rgba(var(--ink-rgb), 0.1) 0 2px, transparent 2px 5px);
   border: 1px solid rgba(var(--ink-rgb), 0.25);
   color: var(--muted);
-}
-
-.heatmapMore {
-  all: unset;
-  cursor: pointer;
-  font-size: var(--text-caption);
-  font-weight: 700;
-  color: var(--accent);
-  padding: 0 4px;
-  line-height: 16px;
 }
 
 .filterBtn {

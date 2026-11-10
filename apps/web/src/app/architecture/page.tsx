@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MarkerType, type Edge, type Node } from "reactflow";
 import type { ArchitectureGraph } from "@aud/types";
-import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Segmented, Select } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Segmented, Select, LinkButton } from "@/components/ui";
 import { applyBand, applyManualLines, arrangementStatus, bandPlan, cellPlan, compactBox, dropPlan, moveInOrder, parseArrangement, relationBetween, relationIndex, resetBand, resetBox, samePair, serializeArrangement, setCols, stepBand, stepCell, stepInOrder, type Arrangement, type LineStyle, type ManualLine, type MoveResult } from "@/lib/archArrange";
 import { maskGuids } from "@/lib/mask";
 import { useArrangement } from "./hooks/useArrangement";
@@ -745,7 +745,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
                       <option value="straight">{t("arch.edit.style.straight")}</option>
                       <option value="curve">{t("arch.edit.style.curve")}</option>
                     </select>
-                    <button type="button" className={s.linkBtn} onClick={() => commit({ ...arrangement, lines: arrangement.lines.filter((x) => x !== l) })}>{t("arch.edit.toAuto")}</button>
+                    <LinkButton onClick={() => commit({ ...arrangement, lines: arrangement.lines.filter((x) => x !== l) })}>{t("arch.edit.toAuto")}</LinkButton>
                   </li>
                 ))}
               </ul>
@@ -758,7 +758,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
           <span className={s.filterBanner}>
             <span>{t("arch.filter.banner", { shown: scope.shown, total: scope.total, ctx: scope.ctx, cut: scope.cut.length })}</span>
             {scope.byKind.size ? <span className={s.iDim}>({[...scope.byKind].map(([k, n]) => `${t(`arch.edge.${k}`)} ${n}`).join(", ")})</span> : null}
-            <button type="button" className={s.linkBtn} onClick={() => changeCats(null)}>{t("arch.filter.clear")}</button>
+            <LinkButton onClick={() => changeCats(null)}>{t("arch.filter.clear")}</LinkButton>
           </span>
         </Notice>
       ) : null}

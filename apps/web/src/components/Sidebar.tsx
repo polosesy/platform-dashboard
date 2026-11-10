@@ -93,18 +93,11 @@ export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
           })}
 
           <div className={styles.section}>
-            <h2 id="nav-sec-settings" className={styles.sectionLabel}>{t("nav.settings")}</h2>
+            <h2 id="nav-sec-settings" className={styles.sectionLabel}>{t("nav.display")}</h2>
             <div className={styles.settingRow}>
-              <span className={styles.navIcon}><NavIcon name="globe" /></span>
               <span className={styles.settingLabel}>{t("settings.language")}</span>
-              <div className={styles.langSwitch} role="group" aria-label={t("settings.language")}>
-                <button type="button" className={`${styles.langBtn} ${locale === "ko" ? styles.langBtnActive : ""}`} aria-pressed={locale === "ko"} onClick={() => setLocale("ko")}>
-                  {t("settings.korean")}
-                </button>
-                <button type="button" className={`${styles.langBtn} ${locale === "en" ? styles.langBtnActive : ""}`} aria-pressed={locale === "en"} onClick={() => setLocale("en")}>
-                  {t("settings.english")}
-                </button>
-              </div>
+              <Segmented label={t("settings.language")} value={locale} onChange={setLocale}
+                items={[{ id: "ko", label: t("settings.korean") }, { id: "en", label: t("settings.english") }]} />
             </div>
             {/* Display: theme (dark is opt-in) and density — this browser only */}
             <div className={styles.settingRow}>

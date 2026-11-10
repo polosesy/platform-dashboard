@@ -15,6 +15,7 @@ import { EvidenceChip, Inspector, Pill, type InspectorModel, type InspectorRow }
 import type { InsightsNav } from "./model";
 import { COND_GROUPS, CONDITIONS, PRESETS, buildGraph, decodeQuery, encodeQuery, runQuery, type CondKey, type GraphPaas, type GraphWorkload } from "@/lib/securityGraph";
 import styles from "./insights.module.css";
+import { FilterChip, LinkButton } from "@/components/ui";
 
 const SAVED_KEY = "aud.explore.saved";
 type Saved = { name: string; q: string };
@@ -164,31 +165,29 @@ export function ExplorePanel({ clusterId, insights, wi, wiState, nav }: {
           <div className={styles.sub}>{t("ex.sub")}</div>
         </div>
         <div className={styles.ctrls}>
-          <button className={styles.fchip} aria-pressed={includeManaged} onClick={() => setIncludeManaged(!includeManaged)}>{t("ex.includeManaged")}</button>
-          {keys.length ? <button className={styles.fchip} onClick={() => apply([])}>{t("ex.clear")}</button> : null}
+          <FilterChip pressed={includeManaged} onClick={() => setIncludeManaged(!includeManaged)}>{t("ex.includeManaged")}</FilterChip>
+          {keys.length ? <FilterChip onClick={() => apply([])}>{t("ex.clear")}</FilterChip> : null}
         </div>
       </div>
       <div className={styles.panelB}>
         <div className={styles.exPresets}>
           <span className={styles.muted}>{t("ex.presets")}</span>
-          {PRESETS.map((p) => <button key={p.id} className={styles.fchip} aria-pressed={encodeQuery(p.keys) === encodeQuery(keys)} title={p.keys.map(label).join(" ∧ ")} onClick={() => apply(p.keys)}>{t(`ex.preset.${p.id}`)}</button>)}
+          {PRESETS.map((p) => <FilterChip key={p.id} pressed={encodeQuery(p.keys) === encodeQuery(keys)} title={p.keys.map(label).join(" ∧ ")} onClick={() => apply(p.keys)}>{t(`ex.preset.${p.id}`)}</FilterChip>)}
           {saved.map((s) => (
             <span key={s.name} className={styles.exSaved}>
-              <button className={styles.fchip} aria-pressed={s.q === encodeQuery(keys)} onClick={() => apply(decodeQuery(s.q))} title={decodeQuery(s.q).map(label).join(" ∧ ")}>★ {s.name}</button>
-              <button className={styles.linkish} aria-label={t("ex.deleteSaved", { name: s.name })} onClick={() => remove(s.name)}>×</button>
+              <FilterChip pressed={s.q === encodeQuery(keys)} onClick={() => apply(decodeQuery(s.q))} title={decodeQuery(s.q).map(label).join(" ∧ ")}>★ {s.name}</FilterChip>
+              <LinkButton ariaLabel={t("ex.deleteSaved", { name: s.name })} onClick={() => remove(s.name)}>×</LinkButton>
             </span>
           ))}
           {team.map((q) => (
             <span key={q.id} className={styles.exSaved}>
-              <button className={styles.fchip} aria-pressed={q.q === encodeQuery(keys) && q.includeManaged === includeManaged}
-                onClick={() => { apply(decodeQuery(q.q)); setIncludeManaged(q.includeManaged); }}
-                title={`${decodeQuery(q.q).map(label).join(" ∧ ")}${q.updatedBy ? ` — ${q.updatedBy}` : ""}`}>
+              <FilterChip pressed={q.q === encodeQuery(keys) && q.includeManaged === includeManaged} onClick={() => { apply(decodeQuery(q.q)); setIncludeManaged(q.includeManaged); }} title={`${decodeQuery(q.q).map(label).join(" ∧ ")}${q.updatedBy ? ` — ${q.updatedBy}` : ""}`}>
                 {t("ex.team.chip")} {q.name}{q.watch ? ` · ${t("ex.team.watching", { sev: t(`ex.sev.${q.sev}`) })}` : ""}
-              </button>
+              </FilterChip>
               {canWrite ? (
                 <>
-                  <button className={styles.linkish} onClick={() => void setTeamWatch(q)}>{q.watch ? t("ex.team.unwatch") : t("ex.team.watch")}</button>
-                  <button className={styles.linkish} aria-label={t("ex.deleteSaved", { name: q.name })} onClick={() => void removeTeam(q)}>×</button>
+                  <LinkButton onClick={() => void setTeamWatch(q)}>{q.watch ? t("ex.team.unwatch") : t("ex.team.watch")}</LinkButton>
+                  <LinkButton ariaLabel={t("ex.deleteSaved", { name: q.name })} onClick={() => void removeTeam(q)}>×</LinkButton>
                 </>
               ) : null}
             </span>
@@ -200,7 +199,7 @@ export function ExplorePanel({ clusterId, insights, wi, wiState, nav }: {
               <div className={styles.exGroupH}>{t(`ex.group.${g}`)}</div>
               <div className={styles.ctrls}>
                 {CONDITIONS.filter((c) => c.group === g).map((c) => (
-                  <button key={c.key} className={styles.fchip} aria-pressed={keys.includes(c.key)} title={t(`ex.hint.${c.key}`)} onClick={() => toggle(c.key)}>{label(c.key)}</button>
+                  <FilterChip key={c.key} pressed={keys.includes(c.key)} title={t(`ex.hint.${c.key}`)} onClick={() => toggle(c.key)}>{label(c.key)}</FilterChip>
                 ))}
               </div>
             </div>
@@ -212,7 +211,7 @@ export function ExplorePanel({ clusterId, insights, wi, wiState, nav }: {
           {keys.length ? (
             <span className={styles.exSave}>
               <input value={name} maxLength={40} placeholder={t("ex.saveName")} onChange={(e) => setName(e.target.value)} aria-label={t("ex.saveName")} />
-              <button className={styles.fchip} disabled={!name.trim()} onClick={save}>{t("ex.save")}</button>
+              <FilterChip disabled={!name.trim()} onClick={save}>{t("ex.save")}</FilterChip>
               {canWrite ? (
                 <>
                   <label className={styles.exWatch}><input type="checkbox" checked={watch} onChange={(e) => setWatch(e.target.checked)} /> {t("ex.team.watchLabel")}</label>
@@ -221,7 +220,7 @@ export function ExplorePanel({ clusterId, insights, wi, wiState, nav }: {
                       {(["critical", "high", "medium"] as const).map((v) => <option key={v} value={v}>{t(`ex.sev.${v}`)}</option>)}
                     </select>
                   ) : null}
-                  <button className={styles.fchip} disabled={!name.trim()} onClick={saveTeam}>{t("ex.team.save")}</button>
+                  <FilterChip disabled={!name.trim()} onClick={saveTeam}>{t("ex.team.save")}</FilterChip>
                 </>
               ) : null}
             </span>

@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import type { PolicyInsightsResponse, RbacMatrixRow } from "@aud/types";
+import { LinkButton } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import type { InsightsNav } from "./model";
 import { useInsightLabels } from "./useInsightLabels";
@@ -67,7 +68,7 @@ export function PermissionMatrix({ data, nav }: { data: PolicyInsightsResponse; 
                 <tr key={`${m.kind}/${m.namespace ?? ""}/${m.binding}`}>
                   <td>
                     {m.workloadId ? (
-                      <button className={`${styles.linkish} ${styles.mono}`} onClick={() => nav.openHeatRow(m.workloadId!)} aria-label={t("ins.perm.openRow", { name: subjectLabel(m) })}>{subjectLabel(m)}</button>
+                      <LinkButton onClick={() => nav.openHeatRow(m.workloadId!)} ariaLabel={t("ins.perm.openRow", { name: subjectLabel(m) })}><span className={styles.mono}>{subjectLabel(m)}</span></LinkButton>
                     ) : (
                       <span className={styles.mono}>{subjectLabel(m)}</span>
                     )}

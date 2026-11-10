@@ -481,8 +481,88 @@
   font-size: var(--text-body);
 }
 
+/* ── Filter chip — a pressable pill, 28 like a small button ── */
+.filterChip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel-solid);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
+}
+
+.filterChip:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.filterChip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.filterChip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.filterChip:focus-visible,
+.linkButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.filterCheck {
+  font-size: var(--text-caption);
+}
+
+/* ── Link button — an action that reads as text ── */
+.linkButton {
+  appearance: none;
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.linkButton:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkButton:disabled {
+  color: var(--subtle);
+  cursor: not-allowed;
+}
+
+.linkMuted {
+  color: var(--muted);
+}
+
 /* Touch screens: every control at least 44 tall (Apple: tap targets ≥ 44pt); a mouse keeps 32 */
 @media (pointer: coarse) {
+  .filterChip,
   .button,
   .sm,
   .toggle,

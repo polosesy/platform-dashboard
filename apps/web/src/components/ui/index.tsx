@@ -104,6 +104,31 @@ export function Chip({ level = "neutral", children, title, glyph }: { level?: Ch
   );
 }
 
+/* ── Filter chip ── a pill you press: a filter, a preset, a saved query (28 px like a small button; touch 44).
+   `pressed` given = an on/off filter (aria-pressed, chosen = tinted + ✓ so it is not colour alone); left out = a one-shot action. */
+export function FilterChip({
+  children, onClick, pressed, title, ariaLabel, disabled,
+}: { children: ReactNode; onClick: () => void; pressed?: boolean; title?: string; ariaLabel?: string; disabled?: boolean }) {
+  return (
+    <button type="button" className={s.filterChip} aria-pressed={pressed} title={title} aria-label={ariaLabel} disabled={disabled} onClick={onClick}>
+      {pressed ? <span className={s.filterCheck} aria-hidden="true">✓</span> : null}
+      {children}
+    </button>
+  );
+}
+
+/* ── Link button ── an action that reads as text: a name in a table that opens its row, "show all", "clear" —
+   accent text, no box (the row or sentence around it is the target's frame) */
+export function LinkButton({
+  children, onClick, title, ariaLabel, ariaExpanded, tone = "accent", disabled,
+}: { children: ReactNode; onClick: () => void; title?: string; ariaLabel?: string; ariaExpanded?: boolean; tone?: "accent" | "muted"; disabled?: boolean }) {
+  return (
+    <button type="button" className={cx(s.linkButton, tone === "muted" && s.linkMuted)} title={title} aria-label={ariaLabel} aria-expanded={ariaExpanded} disabled={disabled} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
 /** Copy a text (a config snippet, a command) — says "copied" for a moment */
 export function CopyButton({ text, label, copiedLabel }: { text: string; label: string; copiedLabel: string }) {
   const [copied, setCopied] = useState(false);

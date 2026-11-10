@@ -9,6 +9,7 @@ import { maskGuids } from "@/lib/mask";
 import { regionName } from "../utils/toFlow";
 import { useI18n } from "@/lib/i18n";
 import s from "../styles.module.css";
+import { LinkButton } from "@/components/ui";
 
 export type InspectorTarget =
   | { type: "shape"; shape: ArchPlaced }
@@ -151,9 +152,9 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
             const other = e.source === sh.id ? e.target : e.source;
             return (
               <li key={e.id}>
-                <button type="button" className={s.iLink} onClick={() => onSelect(other)}>
+                <LinkButton onClick={() => onSelect(other)}>
                   {e.source === sh.id ? "→" : "←"} {nameOf(other)}
-                </button>
+                </LinkButton>
                 <span className={s.iDim}>{t(`arch.edge.${e.kind}`)}{e.count > 1 ? ` ×${e.count}` : ""}</span>
               </li>
             );
@@ -163,7 +164,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
             const at = shownAt.get(other);
             return (
               <li key={`off-${e.id}`}>
-                {at ? <button type="button" className={s.iLink} onClick={() => onSelect(at)}>{nameOf(other)}</button> : <span>{nameOf(other)}</span>}
+                {at ? <LinkButton onClick={() => onSelect(at)}>{nameOf(other)}</LinkButton> : <span>{nameOf(other)}</span>}
                 <span className={s.iDim}>{t(`arch.edge.${e.kind}`)}</span>
               </li>
             );
@@ -186,7 +187,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
           <ul className={s.iList}>
             {exits.map((e) => (
               <li key={e.id}>
-                <button type="button" className={s.iLink} onClick={() => onSelect(shownAt.get(e.source) ?? e.source)}>{nameOf(e.source)}</button>
+                <LinkButton onClick={() => onSelect(shownAt.get(e.source) ?? e.source)}>{nameOf(e.source)}</LinkButton>
                 <span className={s.iDim}>{model.resources.get(e.source)?.publicIps.join(", ")}</span>
               </li>
             ))}
@@ -208,7 +209,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
           <Row k={t("arch.site.peer")}><span className={s.mono}>{st.peerIp ?? st.fqdn ?? "—"}</span></Row>
           {st.bgp ? <Row k="BGP">✓</Row> : null}
           <Row k={t("arch.site.gateway")}>
-            <button type="button" className={s.iLink} onClick={() => onSelect(shownAt.get(st.gatewayId) ?? st.gatewayId)}>{nameOf(st.gatewayId)}</button>
+            <LinkButton onClick={() => onSelect(shownAt.get(st.gatewayId) ?? st.gatewayId)}>{nameOf(st.gatewayId)}</LinkButton>
           </Row>
         </dl>
         <section className={s.iSection}>
@@ -242,7 +243,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
           <ul className={s.iList}>
             {entries.map((e) => (
               <li key={e.id}>
-                <button type="button" className={s.iLink} onClick={() => onSelect(shownAt.get(e.target) ?? e.target)}>{nameOf(e.target)}</button>
+                <LinkButton onClick={() => onSelect(shownAt.get(e.target) ?? e.target)}>{nameOf(e.target)}</LinkButton>
                 <span className={s.iDim}>{t(`arch.edge.${e.kind}`)} · {model.resources.get(e.target)?.publicIps.join(", ")}</span>
               </li>
             ))}
@@ -373,7 +374,7 @@ function FlowWhy({ model, id, nameOf, onSelect }: { model: ArchModel; id: string
           <ol className={s.iPath}>
             {path.map((x, i) => (
               <li key={x}>
-                {x === "internet" || x === lead ? <span>{nameOf(x)}</span> : <button type="button" className={s.iLink} onClick={() => onSelect(x)}>{nameOf(x)}</button>}
+                {x === "internet" || x === lead ? <span>{nameOf(x)}</span> : <LinkButton onClick={() => onSelect(x)}>{nameOf(x)}</LinkButton>}
                 {i < path.length - 1 ? <span aria-hidden> → </span> : null}
               </li>
             ))}

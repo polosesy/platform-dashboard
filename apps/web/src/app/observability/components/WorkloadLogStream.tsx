@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import type { WorkloadHeatmapResponse, WorkloadLogsResponse } from "@aud/types";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Button, EmptyState, Segmented } from "@/components/ui";
+import { Button, EmptyState, Segmented, FilterChip } from "@/components/ui";
 import { filterByException, frameLabel, groupLogLines, shortPod, visibleFrames, type LogGroup } from "@/lib/logView";
 import styles from "../styles.module.css";
 
@@ -56,10 +56,9 @@ export function WorkloadLogStream({ data, workload, errorsOnly, onErrorsOnly, gr
       {data.exceptions.length > 0 && (
         <div className={styles.lgChips} role="group" aria-label={t("ob.lg.exceptions")}>
           {data.exceptions.map((x) => (
-            <button key={x.cls} type="button" className={styles.lgChip} aria-pressed={cls === x.cls}
-              title={x.cls} onClick={() => setCls(cls === x.cls ? null : x.cls)}>
+            <FilterChip key={x.cls} pressed={cls === x.cls} title={x.cls} onClick={() => setCls(cls === x.cls ? null : x.cls)}>
               <span className={styles.lgChipName}>{x.cls.split(".").pop()}</span> <strong>{x.count}</strong>
-            </button>
+            </FilterChip>
           ))}
         </div>
       )}

@@ -8,7 +8,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { NetpolModel, NetworkInsight } from "@aud/types";
-import { Button, Select, Stat } from "@/components/ui";
+import { Button, Select, Stat, LinkButton, FilterChip } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import {
   STATE_GLYPH, STATE_LEVEL, changeEffects, changeKey, endpointsOf, groupOf, matrixOf, simulate, virtualChange, withoutAllows,
@@ -105,20 +105,20 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
               <div className={styles.chips}>
                 {changes.map((c) => (
                   <span key={changeKey(c)} className={styles.npChange}>
-                    <button type="button" className={styles.npChip} onClick={() => toggle(c)} title={t("nps.remove")}>
+                    <FilterChip onClick={() => toggle(c)} title={t("nps.remove")}>
                       {changeLabel(c)} ×
-                    </button>
+                    </FilterChip>
                     <span className={styles.npEffect} data-none={effects.get(changeKey(c))?.why ? true : undefined}>{effectText(c)}</span>
                   </span>
                 ))}
-                <button type="button" className={styles.linkBtn} onClick={() => { setChanges([]); pick(null); }}>{t("nps.reset")}</button>
+                <LinkButton onClick={() => { setChanges([]); pick(null); }}>{t("nps.reset")}</LinkButton>
               </div>
             ) : <div className={styles.muted}>{t("nps.noChanges")}</div>}
             {noEffect ? <div className={styles.npHint}>{t("nps.noEffect")}</div> : null}
             {auditPolicies.length ? (
               <div className={styles.npHint}>
                 {t("nps.auditHint", { n: auditPolicies.length })}{" "}
-                <button type="button" className={styles.linkBtn} onClick={enforceAll}>{t("nps.enforceAll")}</button>
+                <LinkButton onClick={enforceAll}>{t("nps.enforceAll")}</LinkButton>
               </div>
             ) : null}
 
@@ -158,9 +158,9 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
                       {p.ingress ? <Badge tone={p.ingress.isolates ? "ok" : "medium"}>{t(p.ingress.isolates ? "nps.dirOn" : "nps.dirAudit", { dir: t("nps.dir.ingress") })}</Badge> : null}
                       {p.egress ? <Badge tone={p.egress.isolates ? "ok" : "medium"}>{t(p.egress.isolates ? "nps.dirOn" : "nps.dirAudit", { dir: t("nps.dir.egress") })}</Badge> : null}
                       {audit ? (
-                        <button type="button" className={styles.linkBtn} onClick={() => toggle({ op: "enforce", policyId: p.id })}>
+                        <LinkButton onClick={() => toggle({ op: "enforce", policyId: p.id })}>
                           {has({ op: "enforce", policyId: p.id }) ? t("nps.enforced") : t("nps.enforce")}
-                        </button>
+                        </LinkButton>
                       ) : null}
                     </div>
                   </div>
@@ -231,7 +231,7 @@ export function NetpolSimPanel({ model, network, includeSystem }: { model: Netpo
                 </div>
                 <div className={styles.muted}>{t(cell ? "nps.d.sub" : "nps.d.subPick")}</div>
               </div>
-              {cell ? <button type="button" className={styles.linkBtn} onClick={() => pick(null)}>{t("nps.list.clear")}</button> : null}
+              {cell ? <LinkButton onClick={() => pick(null)}>{t("nps.list.clear")}</LinkButton> : null}
             </div>
             {listed.length ? (
               <NetpolFlowDetail edges={listed} changed={changed} nameOf={nameOf} nodeLabel={nodeLabel} groupOf={(id) => groupLabel(groupOf(id, eps))} />

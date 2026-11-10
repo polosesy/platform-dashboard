@@ -5,7 +5,7 @@ import type { DiagramNodeSpec } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import { maskGuids } from "@/lib/mask";
 import { policyPill, wafBadge, wafFacts, type WafDomainInfo, type WafFacts, type WafPolicyInfo, type WafTone } from "@/lib/liveWaf";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, LinkButton } from "@/components/ui";
 import { FetchFailed } from "./kindSections";
 import { CopyButton, Group, KV, Section, TwoLine } from "./primitives";
 import { getAzureIconUrl } from "../../utils/azureIcons";
@@ -31,9 +31,9 @@ function Folded<T>({ items, limit, render }: { items: T[]; limit: number; render
     <>
       {shown.map(render)}
       {items.length > limit ? (
-        <button type="button" className={styles.dpLink} onClick={() => setAll(!all)}>
+        <LinkButton onClick={() => setAll(!all)}>
           {all ? t("ld.waf.panel.showLess") : t("ld.waf.panel.showMore", { n: items.length - limit })}
-        </button>
+        </LinkButton>
       ) : null}
     </>
   );
@@ -99,7 +99,7 @@ export function WafPanel({ parent, wafKey, metrics, measured, onSelectNode, onWa
   const where = (
     <>
       {t(kind === "appGateway" ? "ld.waf.panel.ofAgw" : "ld.waf.panel.ofAfd")} ·{" "}
-      <button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(parent.id)}>{parent.label}</button>
+      <LinkButton onClick={() => onSelectNode?.(parent.id)}>{parent.label}</LinkButton>
     </>
   );
   const policy = wafKey?.startsWith("p:") ? f?.policies.find((p) => `p:${p.name}` === wafKey) : undefined;
@@ -109,7 +109,7 @@ export function WafPanel({ parent, wafKey, metrics, measured, onSelectNode, onWa
       <div className={styles.dpTitleRow}>
         <img src={getAzureIconUrl("waf")} alt="" width={20} height={20} />
         <h2 className={styles.dpTitle} tabIndex={-1}>{title}</h2>
-        <button type="button" className={styles.dpClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
+        <Button onClick={onClose} ariaLabel={t("hb.close")} variant="ghost" size="sm">✕</Button>
       </div>
       <div className={styles.dpWhere}>{where}</div>
       <div className={styles.dpStatusRow}>{status}</div>
@@ -124,7 +124,7 @@ export function WafPanel({ parent, wafKey, metrics, measured, onSelectNode, onWa
       </aside>
     );
   }
-  const goOverview = <button type="button" className={styles.dpLink} onClick={() => onWafSelect?.(parent.id, null)}>{t("ld.waf.panel.overview")}</button>;
+  const goOverview = <LinkButton onClick={() => onWafSelect?.(parent.id, null)}>{t("ld.waf.panel.overview")}</LinkButton>;
   const domainRow = (d: WafDomainInfo) => (
     <TwoLine key={`${d.kind}:${d.host}`} main={d.host} mono copy={d.host}
       sub={[t(`ld.waf.kind.${d.kind}`), d.policy && !policy ? maskGuids(d.policy) : null, d.reason ? t(`ld.waf.reason.${d.reason}`) : d.state !== "prevent" ? t(`ld.waf.domain.${d.state}`) : null].filter(Boolean).join(" · ")} />

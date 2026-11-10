@@ -5,7 +5,7 @@ import type { DiagramNodeSpec, PlSourceStatus, PrivateLinkUsage, PrivateLinkUsag
 import { groupUnresolved, unresolvedCount, type UnresolvedGroup } from "@/lib/plUsage";
 import { useI18n } from "@/lib/i18n";
 import { formatMetric } from "@/lib/liveMetricFormat";
-import { Notice } from "@/components/ui";
+import { Notice, LinkButton } from "@/components/ui";
 import { CopyButton, Group, Section, useRelativeTime } from "./primitives";
 import styles from "../../styles.module.css";
 
@@ -90,7 +90,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
         <>
           {t(g.basis === "identity" ? "ld.plu.group.ambiguousIdentity" : "ld.plu.group.ambiguousSubnet", { count: g.candidates.length })}{" "}
           {g.candidates.slice(0, 4).map((c, i) => (
-            <span key={c}>{i ? " · " : ""}<button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(c)}>{nameOf(c)}</button></span>
+            <span key={c}>{i ? " · " : ""}<LinkButton onClick={() => onSelectNode?.(c)}>{nameOf(c)}</LinkButton></span>
           ))}
           {g.candidates.length > 4 ? ` +${g.candidates.length - 4}` : ""}
         </>
@@ -102,7 +102,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
         if (p?.kind === "onPremSite") return (
           <>
             {t("ld.plu.place.onPremSite", { prefix: p.prefix })}{" "}
-            <button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(p.siteNodeId)}>{nameOf(p.siteNodeId)}</button>
+            <LinkButton onClick={() => onSelectNode?.(p.siteNodeId)}>{nameOf(p.siteNodeId)}</LinkButton>
           </>
         );
         if (p?.kind === "private") return t("ld.plu.place.private");
@@ -192,7 +192,7 @@ export function PrivateLinkUsageSection({ node, spec, usage, loading, nameOf, on
         <Group title={t("ld.plu.unresolvedTitle", { count: unresolvedCount(unresolved) })}>
           {unresolvedGroups.slice(0, showAllGroups ? undefined : 5).map(groupRow)}
           {unresolvedGroups.length > 5 && !showAllGroups ? (
-            <button type="button" className={styles.dpLink} onClick={() => setShowAllGroups(true)}>{t("ld.plu.group.moreGroups", { count: unresolvedGroups.length - 5 })}</button>
+            <LinkButton onClick={() => setShowAllGroups(true)}>{t("ld.plu.group.moreGroups", { count: unresolvedGroups.length - 5 })}</LinkButton>
           ) : null}
         </Group>
       ) : null}

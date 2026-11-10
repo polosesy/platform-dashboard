@@ -10,6 +10,7 @@ import { useInsightLabels } from "./useInsightLabels";
 import { Inspector, type InspectorModel, type InspectorRow } from "./Inspector";
 import { ComboButton, FactorStrip } from "./RiskHeatmap";
 import styles from "./insights.module.css";
+import { FilterChip, Segmented } from "@/components/ui";
 
 // [label key, colour, dash]
 const ECLS: Record<NetEdgeClass, [string, string, string | undefined]> = {
@@ -508,23 +509,19 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
       </div>
       <div className={styles.panelB}>
         <div className={styles.ctrls} style={{ marginBottom: 10 }}>
-          <div className={styles.toggle} role="group" aria-label={t("ins.net.viewAria")}>
-            <button aria-pressed={view === "nest"} onClick={() => setView("nest")}>{t("ins.net.viewNest")}</button>
-            <button aria-pressed={view === "flow"} onClick={() => setView("flow")}>{t("ins.net.viewFlow")}</button>
-          </div>
+          <Segmented label={t("ins.net.viewAria")} value={view} onChange={setView}
+            items={[{ id: "nest", label: t("ins.net.viewNest") }, { id: "flow", label: t("ins.net.viewFlow") }]} />
           {view === "nest" && (
-            <div className={styles.toggle} role="group" aria-label={t("ins.net.linesAria")} title={t("ins.net.linesHint")}>
-              <button aria-pressed={lineMode === "bundle"} onClick={() => setLineMode("bundle")}>{t("ins.net.linesBundle")}</button>
-              <button aria-pressed={lineMode === "each"} onClick={() => setLineMode("each")}>{t("ins.net.linesEach")}</button>
-            </div>
+            <Segmented label={t("ins.net.linesAria")} value={lineMode} onChange={setLineMode}
+              items={[{ id: "bundle", label: t("ins.net.linesBundle"), title: t("ins.net.linesHint") }, { id: "each", label: t("ins.net.linesEach"), title: t("ins.net.linesHint") }]} />
           )}
           {(Object.keys(ECLS) as NetEdgeClass[]).map((k) => (
-            <button key={k} className={styles.fchip} aria-pressed={on[k]} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>
+            <FilterChip key={k} pressed={on[k]} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>
               <span className={styles.ecls} style={{ borderTopColor: ECLS[k][1], borderTopStyle: ECLS[k][2] ? "dashed" : "solid" }} />{t(ECLS[k][0])}
-            </button>
+            </FilterChip>
           ))}
-          <button className={styles.fchip} aria-pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>{t("ins.net.includeManaged")}</button>
-          <button className={styles.fchip} aria-pressed={overlay} onClick={() => setOverlay(!overlay)}>{t("ins.net.overlay")}</button>
+          <FilterChip pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>{t("ins.net.includeManaged")}</FilterChip>
+          <FilterChip pressed={overlay} onClick={() => setOverlay(!overlay)}>{t("ins.net.overlay")}</FilterChip>
         </div>
         <div className={styles.netLayout}>
           <div className={styles.graphWrap}>{view === "nest" ? renderNest() : renderFlow()}</div>

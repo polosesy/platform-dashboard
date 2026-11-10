@@ -185,6 +185,7 @@ const CORE: Translations = {
 
   // ── Navigation / Sidebar ──
   "nav.settings": { ko: "설정", en: "Settings" },
+  "nav.display": { ko: "보기 설정", en: "Display" },
 
   // ── Auth ──
   "auth.login": { ko: "로그인", en: "Sign in" },

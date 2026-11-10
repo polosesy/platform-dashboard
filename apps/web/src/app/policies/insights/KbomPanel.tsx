@@ -2,7 +2,7 @@
 
 import { Fragment, useState, type ReactNode } from "react";
 import type { ImageOwner, KbomItem, PolicyInsightsResponse } from "@aud/types";
-import { Stat } from "@/components/ui";
+import { Stat, FilterChip } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { Pill } from "./Inspector";
 import styles from "./insights.module.css";
@@ -64,9 +64,9 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
           <h3>{t("ins.kbom.title")}</h3>
           <div className={styles.sub}>{t("ins.kbom.sub")}</div>
         </div>
-        <button className={styles.fchip} aria-pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>
+        <FilterChip pressed={showManaged} onClick={() => setShowManaged(!showManaged)}>
           {showManaged ? t("ins.kbom.hideManaged") : t("ins.kbom.showManaged", { n: managed })}
-        </button>
+        </FilterChip>
       </div>
       <div className={styles.panelB} style={{ display: "grid", gap: 12 }}>
         <div className={styles.kbSum}>
@@ -80,11 +80,11 @@ export function KbomPanel({ data }: { data: PolicyInsightsResponse }) {
             {OWNERS.map((o) => {
               const x = k.summary.owners![o];
               return (
-                <button key={o} type="button" className={styles.fchip} aria-pressed={owner === o} onClick={() => { setOwner(owner === o ? null : o); if (o === "aks") setShowManaged(true); }}
-                  title={t(`ins.kbom.owner.fix.${o}`)} style={{ display: "grid", gap: 2, textAlign: "left", padding: "8px 10px" }}>
+                <button key={o} type="button" className={styles.kbOwner} aria-pressed={owner === o} onClick={() => { setOwner(owner === o ? null : o); if (o === "aks") setShowManaged(true); }}
+                  title={t(`ins.kbom.owner.fix.${o}`)}>
                   <b>{t(`ins.kbom.owner.${o}`)} · {x.repos}</b>
                   <span>{x.vulnerable === null ? t("ins.kbom.notConnected") : t("ins.kbom.owner.vulnerable", { n: x.vulnerable })}</span>
-                  <span className={styles.muted} style={{ fontSize: 12 }}>{t(`ins.kbom.owner.fix.${o}`)}</span>
+                  <span className={styles.muted}>{t(`ins.kbom.owner.fix.${o}`)}</span>
                 </button>
               );
             })}

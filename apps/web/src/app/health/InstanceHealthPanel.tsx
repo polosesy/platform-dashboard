@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HealthCoverage, HealthSummary, ResourceHealthStatus } from "@aud/types";
-import { ErrorNotice, LoadingState, Notice, Panel, Segmented, Stat, Toggle } from "@/components/ui";
+import { ErrorNotice, LoadingState, Notice, Panel, Segmented, Stat, Toggle, LinkButton, FilterChip } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
 import { groupKey, isUnlistedUnknown, isUserInitiated, type HeatmapGroupBy } from "@/lib/healthHeatmap";
@@ -141,9 +141,9 @@ export function InstanceHealthPanel({
       ) : (
         <>
           <span>{t("health.coverage.notice", { n: coverage.noStatusResources, k: uncovered.length, total: coverage.inventoryResources })}</span>
-          <button type="button" className={styles.linkBtn} aria-expanded={coverageOpen} onClick={() => setCoverageOpen((v) => !v)}>
+          <LinkButton ariaExpanded={coverageOpen} onClick={() => setCoverageOpen((v) => !v)}>
             {coverageOpen ? t("health.coverage.hide") : t("health.coverage.show")}
-          </button>
+          </LinkButton>
         </>
       )}
       <a className={styles.linkBtn} href={coverage.doc.url} target="_blank" rel="noreferrer">{t("health.coverage.docLink", { date: coverage.doc.date })}</a>
@@ -226,9 +226,9 @@ export function InstanceHealthPanel({
         sub={groupFilter ? undefined : String(filtered.length)}
         actions={<>
           {groupFilter ? (
-            <button type="button" className={styles.groupChip} onClick={() => setGroupFilter(null)} aria-label={t("health.heatmap.clearGroup")}>
+            <FilterChip onClick={() => setGroupFilter(null)} ariaLabel={t("health.heatmap.clearGroup")}>
               {groupFilter.label} ✕
-            </button>
+            </FilterChip>
           ) : null}
           <Segmented label={t("health.filterLabel")} value={filter} onChange={setFilter}
             items={(["all", ...STATES] as FilterState[]).map((f) => ({ id: f, label: f === "all" ? `${t("health.filterAll")} (${total})` : `${STATE_GLYPH[f]} ${t(`health.state.${f}`)}` }))} />
@@ -248,7 +248,7 @@ export function InstanceHealthPanel({
               <span className={`${styles.resState} ${STATE_STYLE[selected.availabilityState]}`}>{t(`health.state.${selected.availabilityState}`)}</span>
               {isUserInitiated(selected) ? <span className={styles.reasonBadge}>{t("health.userInitiated")}</span> : null}
               {isUnlistedUnknown(selected, unlisted) ? <span className={styles.reasonBadge}>{t("health.unlisted")}</span> : null}
-              <button type="button" className={styles.linkBtn} onClick={() => setSelectedId(null)}>{t("health.selected.clear")}</button>
+              <LinkButton onClick={() => setSelectedId(null)}>{t("health.selected.clear")}</LinkButton>
             </div>
             <div className={styles.selectedMeta}>
               <span title={armType(selected.resourceType)}>{typeName(selected.resourceType, t)}</span>

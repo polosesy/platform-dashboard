@@ -18,7 +18,7 @@ import type {
   PowerState,
 } from "@aud/types";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, LinkButton } from "@/components/ui";
 import { maskGuids } from "@/lib/mask";
 import { shortNamesWithParts } from "@/lib/liveNames";
 import { NameParts } from "./NameParts";
@@ -40,7 +40,7 @@ import { getAzureIconUrl } from "../utils/azureIcons";
 import { formatAzureRegion } from "../utils/regionFormat";
 import { cardStatus } from "@/lib/liveStatus";
 import { Spark } from "./Spark";
-import { CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
+import { ConnRow, CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
 import { gatewayFrontends, isOutboundOnlyLb, unresolvedBackends } from "@/lib/liveBackends";
 import { AgcFacts, AksCluster, AksNodePool, BackendPools, FrontDoorFacts, NsgRules, useAksPlane, useBackendPool, useNsgDetail, useVmssInstances } from "./detail/kindSections";
 import { AksMaintenanceSection, REAL_ARM } from "./detail/AksMaintenance";
@@ -240,7 +240,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
     const peerName = p?.resourceKind === "internet" ? t(p.metadata?.direction === "ingress" ? "ld.internetIn" : "ld.internetOut") : nameOf(r.peer);
     const where = pSub?.icon === "subnet" ? nameOf(pSub.id) : p?.metadata?.ghostOf ? `↗ ${p.metadata.ghostOf}` : "";
     return (
-      <button key={r.id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(r.peer)}>
+      <ConnRow key={r.id} onClick={() => onSelectNode?.(r.peer)}>
         <span className={styles.dpConnArrow}>{r.arrow}</span>
         <span className={styles.dpConnRel} title={r.rel}>{r.rel}</span>
         {/* Name on one line, where it lives under it — long Azure names truncate (full text in the tooltip) */}
@@ -251,7 +251,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
           </span>
           {where ? <span className={styles.dpConnWhere} title={where}>{where}</span> : null}
         </span>
-      </button>
+      </ConnRow>
     );
   };
   const groupBlock = (key: string, rows: Row[]) => rows.length ? (
@@ -293,12 +293,12 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
     <aside className={styles.detailPanel} aria-label={node.label}>
       <header className={styles.dpHeader}>
         {onBack && (alertCount > 0 || impacts.length > 0) ? (
-          <button type="button" className={styles.dpBack} onClick={onBack}>← {t("ld.panel.back", { alerts: alertCount, impacts: impacts.length })}</button>
+          <div className={styles.dpBack}><LinkButton onClick={onBack}>← {t("ld.panel.back", { alerts: alertCount, impacts: impacts.length })}</LinkButton></div>
         ) : null}
         <div className={styles.dpTitleRow}>
           <img src={getAzureIconUrl(node.icon)} alt="" width={20} height={20} />
           <h2 className={styles.dpTitle} tabIndex={-1}>{nameOf(node.id)}</h2>
-          <button type="button" className={styles.dpClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
+          <Button onClick={onClose} ariaLabel={t("hb.close")} variant="ghost" size="sm">✕</Button>
         </div>
         <div className={styles.dpFullName}>
           {/* Short name's words bold inside the full name (masked names are shown as they are) */}
@@ -307,7 +307,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         </div>
         <div className={styles.dpWhere}>
           {kindName}
-          {isSubnetParent && subnet ? <> · <button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(subnet.id)}>{nameOf(subnet.id)}</button></> : null}
+          {isSubnetParent && subnet ? <> · <LinkButton onClick={() => onSelectNode?.(subnet.id)}>{nameOf(subnet.id)}</LinkButton></> : null}
           {vnet ? <> › {vnet.label}</> : null}
           {node.metadata?.placement === "public-frontend" ? <> · {t(isOutboundOnlyLb(node.metadata) ? "ld.panel.noSubnetOutbound" : "ld.panel.noSubnetPublic")}</> : null}
           {kind === "aks" && !node.parentId ? <> · {t("ld.panel.aksPlane")}</> : null}
@@ -336,17 +336,17 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
                     <>
                       <div className={styles.dpMuted}>{t("ld.panel.impactSource", { n: fi.affectedNodeIds.length })}</div>
                       {fi.affectedNodeIds.map((id) => (
-                        <button key={id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(id)}>
+                        <ConnRow key={id} onClick={() => onSelectNode?.(id)}>
                           <span className={styles.dpConnArrow}>▲</span><span className={styles.dpConnPeer}>{nameOf(id)}</span>
-                        </button>
+                        </ConnRow>
                       ))}
                     </>
                   );
                 })()
               : impacts.filter((i) => i.affectedNodeIds.includes(node.id)).map((i) => (
-                  <button key={i.sourceNodeId} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(i.sourceNodeId)}>
+                  <ConnRow key={i.sourceNodeId} onClick={() => onSelectNode?.(i.sourceNodeId)}>
                     <span className={styles.dpConnArrow}>■</span><span className={styles.dpConnRel}>{t("ld.panel.impactFrom")}</span><span className={styles.dpConnPeer}>{nameOf(i.sourceNodeId)}</span>
-                  </button>
+                  </ConnRow>
                 ))}
           </Section>
         ) : null}
@@ -436,8 +436,8 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
               </KV>
             ) : null}
             {kind !== "lb" && publics.length ? <KV label={t("ld.panel.publicIp")} mono copy={publics[0]!.endpoint}>{publics.map((p) => p.endpoint).join(", ")}</KV> : null}
-            {subnetNsgs.map((n) => <KV key={n.id} label={t("ld.panel.subnetNsg")}><button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(n.id)}>{n.label}</button></KV>)}
-            {ownNsgs.map((n) => <KV key={n.id} label={t("ld.panel.nicNsg")}><button type="button" className={styles.dpLink} onClick={() => onSelectNode?.(n.id)}>{n.label}</button></KV>)}
+            {subnetNsgs.map((n) => <KV key={n.id} label={t("ld.panel.subnetNsg")}><LinkButton onClick={() => onSelectNode?.(n.id)}>{n.label}</LinkButton></KV>)}
+            {ownNsgs.map((n) => <KV key={n.id} label={t("ld.panel.nicNsg")}><LinkButton onClick={() => onSelectNode?.(n.id)}>{n.label}</LinkButton></KV>)}
             {egressVia?.egressVia ? <KV label={t("ld.lane.egress")}>{egressText({ via: egressVia.egressVia as EgressInfo["via"], name: egressVia.egressName, natBypassed: egressVia.egressNatBypassed === "true" }, t)}</KV> : null}
             {kind === "subnet" ? <UdrRoutesSection meta={node.metadata} cardOf={new Map(spec.edges.filter((e) => e.edgeKind === "udr-route" && e.source === node.id).flatMap((e) => (e.route?.prefixes ?? []).map((p) => [p, e.target] as const)))} nameOf={nameOf} onSelectNode={onSelectNode} /> : null}
             {kind === "subnet" ? <KV label={t("ld.panel.cards")}>{spec.nodes.filter((n) => n.parentId === node.id && n.nodeType !== "group").length}</KV> : null}
@@ -483,9 +483,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         {archRole === "aks-vmss" ? <AksNodePool node={node} instances={vmss.instances} loading={vmss.loading} failed={vmss.failed} /> : null}
         {kind === "privateEndpoint" && peTarget ? (
           <Section id="pe" title={t("ld.panel.peTarget")}>
-            <button type="button" className={styles.dpConn} onClick={() => onSelectNode?.(peTarget)}>
+            <ConnRow onClick={() => onSelectNode?.(peTarget)}>
               <span className={styles.dpConnArrow}>→</span><span className={styles.dpConnRel}>Private Link</span><span className={styles.dpConnPeer}>{nameOf(peTarget)}</span>
-            </button>
+            </ConnRow>
             {privateIp ? <KV label={t("ld.panel.privateIp")} mono copy={privateIp}>{privateIp}</KV> : null}
           </Section>
         ) : null}
@@ -495,9 +495,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
               const pe = byId.get(id);
               const s = pe?.parentId ? byId.get(pe.parentId) : undefined;
               return (
-                <button key={id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(id)}>
+                <ConnRow key={id} onClick={() => onSelectNode?.(id)}>
                   <span className={styles.dpConnArrow}>←</span><span className={styles.dpConnPeer}>{s ? `${nameOf(s.id)} › ` : ""}{nameOf(id)}</span>
-                </button>
+                </ConnRow>
               );
             })}
           </Section>
@@ -505,9 +505,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         {kind === "natGateway" ? (
           <Section id="nat" title={t("ld.panel.natSubnets")} count={natSubnets.length}>
             {natSubnets.map((id) => (
-              <button key={id} type="button" className={styles.dpConn} onClick={() => onSelectNode?.(id)}>
+              <ConnRow key={id} onClick={() => onSelectNode?.(id)}>
                 <span className={styles.dpConnArrow}>←</span><span className={styles.dpConnPeer}>{nameOf(id)}</span>
-              </button>
+              </ConnRow>
             ))}
             {publics.length ? <KV label={t("ld.panel.publicIp")} mono>{publics.map((p) => p.endpoint).join(", ")}</KV> : null}
           </Section>
@@ -606,7 +606,7 @@ function VmssInstancePanel({ data, onClose }: { data: VmssInstancePanelData; onC
         <div className={styles.dpTitleRow}>
           <img src={getAzureIconUrl("vm")} alt="" width={20} height={20} />
           <h2 className={styles.dpTitle} tabIndex={-1}>{data.computerName}</h2>
-          <button type="button" className={styles.dpClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
+          <Button onClick={onClose} ariaLabel={t("hb.close")} variant="ghost" size="sm">✕</Button>
         </div>
         <div className={styles.dpWhere}>{t("ld.node.subtitle")} · {poolName}</div>
         <div className={styles.dpStatusRow}><Badge tone={data.powerState === "running" ? "neutral" : "medium"}>{t(power)}</Badge></div>

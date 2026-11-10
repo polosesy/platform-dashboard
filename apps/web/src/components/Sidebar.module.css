@@ -181,8 +181,7 @@
 }
 
 .navItem:focus-visible,
-.closeBtn:focus-visible,
-.langBtn:focus-visible {
+.closeBtn:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.9);
   outline-offset: 2px;
 }
@@ -204,39 +203,15 @@
   color: var(--muted);
 }
 
+/* Language · theme · density: the label keeps one line, the switch drops below it when the rail is too narrow */
+.settingRow {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
 .settingLabel {
   flex: 1;
-}
-
-.langSwitch {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--panel);
-}
-
-.langBtn {
-  all: unset;
-  padding: 4px 10px;
-  font-size: var(--text-caption);
-  font-weight: 700;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.langBtn:first-child {
-  border-right: 1px solid var(--border);
-}
-
-.langBtn:hover {
-  background: var(--panel);
-}
-
-.langBtnActive {
-  background: rgba(var(--accent-rgb), 0.10);
-  color: rgba(var(--accent-rgb), 0.90);
+  white-space: nowrap;
 }
 
 /* ── Footer ── */

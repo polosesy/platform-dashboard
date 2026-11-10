@@ -16,7 +16,7 @@ import { useI18n } from "@/lib/i18n";
 import { formatBitsPerSec } from "@/lib/format";
 import { isInferredEdge } from "@/lib/liveScope";
 import { exposurePorts, exposureSources } from "@/lib/livePip";
-import { Notice } from "@/components/ui";
+import { Notice, Button } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
 import { PeeringEdgeFacts, SiteEdgeFacts, type PeeringPair } from "./detail/EdgeFacts";
 import { Group, KV, Section } from "./detail/primitives";
@@ -286,7 +286,7 @@ export function EdgeDetailPanel({
         <div className={styles.dpTitleRow}>
           <span className={styles.edgeHeaderArrow} aria-hidden="true">→</span>
           <h2 className={styles.dpTitle} tabIndex={-1} title={`${sourceLabel} → ${targetLabel}`}>{sourceLabel} → {targetLabel}</h2>
-          <button type="button" className={styles.dpClose} onClick={onClose} aria-label={t("hb.close")}>✕</button>
+          <Button onClick={onClose} ariaLabel={t("hb.close")} variant="ghost" size="sm">✕</Button>
         </div>
         <div className={styles.dpStatusRow}>
           <span className={styles.detailHealthDot} style={{ background: STATUS_COLORS[status] ?? STATUS_COLORS.idle }} title={status} />

@@ -8,6 +8,7 @@ import { useInsightLabels } from "./useInsightLabels";
 import { EvidenceChip } from "./Inspector";
 import { captionWidth, laneBounds, placeEdgeLabels, shortLabel, textWidth } from "./graphLabels";
 import styles from "./insights.module.css";
+import { LinkButton } from "@/components/ui";
 
 export type GraphSel = { kind: "node" | "edge"; id: string };
 
@@ -200,7 +201,7 @@ export function AttackTable({ issue, onPick }: { issue: RiskIssue; onPick: (s: G
   const { t } = useI18n();
   const { COLS } = useInsightLabels();
   const byId = new Map(issue.nodes.map((n) => [n.id, n]));
-  const nb = (n: AttackNode) => <button className={styles.linkish} onClick={() => onPick({ kind: "node", id: n.id })}>{n.label}</button>;
+  const nb = (n: AttackNode) => <LinkButton onClick={() => onPick({ kind: "node", id: n.id })}>{n.label}</LinkButton>;
   return (
     <table className={styles.etable}>
       <thead><tr><th>{t("ins.graph.col.step")}</th><th>{t("ins.graph.col.fromTo")}</th><th>{t("ins.graph.col.evidence")}</th><th>{t("ins.graph.col.detail")}</th></tr></thead>
@@ -213,7 +214,7 @@ export function AttackTable({ issue, onPick }: { issue: RiskIssue; onPick: (s: G
               <td>{COLS[a.col]} → {COLS[b.col]}</td>
               <td>{nb(a)} → {nb(b)}</td>
               <td><EvidenceChip ev={e.ev} /></td>
-              <td><button className={styles.linkish} onClick={() => onPick({ kind: "edge", id: edgeKey(e) })}>{e.label || "-"}</button></td>
+              <td><LinkButton onClick={() => onPick({ kind: "edge", id: edgeKey(e) })}>{e.label || "-"}</LinkButton></td>
             </tr>
           );
         })}
