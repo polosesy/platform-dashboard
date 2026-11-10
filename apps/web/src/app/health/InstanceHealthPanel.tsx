@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HealthCoverage, HealthSummary, ResourceHealthStatus } from "@aud/types";
-import { ErrorNotice, LoadingState, Notice, Panel, Segmented, Stat, Toggle, LinkButton, FilterChip } from "@/components/ui";
+import { Badge, Chip, ErrorNotice, FilterChip, LinkButton, LoadingState, Notice, Panel, Segmented, Stat, Toggle, type ChipLevel } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
 import { groupKey, isUnlistedUnknown, isUserInitiated, type HeatmapGroupBy } from "@/lib/healthHeatmap";
@@ -27,11 +27,12 @@ const STATE_STYLE: Record<HealthState, string> = {
   Unknown: styles.stateUnknown ?? "",
 };
 
-const REASON_TYPE_STYLE: Record<string, string> = {
-  Unplanned: rgba("danger", 0.82),
-  Planned: rgba("accent", 0.82),
-  UserInitiated: rgba("ink", 0.5),
-  "Customer Initiated": rgba("ink", 0.5),
+/** Azure's reasonType → a chip: unplanned = danger, planned = info, started by the customer = a plain fact */
+const REASON_TYPE_LEVEL: Record<string, ChipLevel> = {
+  Unplanned: "danger",
+  Planned: "info",
+  UserInitiated: "plain",
+  "Customer Initiated": "plain",
 };
 
 const STATES: HealthState[] = ["Available", "Degraded", "Unavailable", "Unknown"];
@@ -243,11 +244,11 @@ export function InstanceHealthPanel({
         {selected ? (
           <div ref={cardRef} className={styles.selectedCard}>
             <div className={styles.selectedCardHead}>
-              <span className={styles.selectedPill}>{t("health.selected.title")}</span>
+              <Badge tone="info">{t("health.selected.title")}</Badge>
               <strong className={styles.selectedName}>{selected.resourceName}</strong>
               <span className={`${styles.resState} ${STATE_STYLE[selected.availabilityState]}`}>{t(`health.state.${selected.availabilityState}`)}</span>
-              {isUserInitiated(selected) ? <span className={styles.reasonBadge}>{t("health.userInitiated")}</span> : null}
-              {isUnlistedUnknown(selected, unlisted) ? <span className={styles.reasonBadge}>{t("health.unlisted")}</span> : null}
+              {isUserInitiated(selected) ? <Chip level="plain">{t("health.userInitiated")}</Chip> : null}
+              {isUnlistedUnknown(selected, unlisted) ? <Chip level="neutral" glyph="–">{t("health.unlisted")}</Chip> : null}
               <LinkButton onClick={() => setSelectedId(null)}>{t("health.selected.clear")}</LinkButton>
             </div>
             <div className={styles.selectedMeta}>
@@ -277,7 +278,7 @@ export function InstanceHealthPanel({
                   <div className={styles.resInfo}>
                     <div className={styles.resName}>
                       {r.resourceName}
-                      {isSel ? <span className={styles.selectedPill}>{t("health.selected.pill")}</span> : null}
+                      {isSel ? <Badge tone="info">{t("health.selected.pill")}</Badge> : null}
                     </div>
                     <div className={styles.resType} title={armType(r.resourceType)}>{typeName(r.resourceType, t)}</div>
                     {r.location && <div className={styles.resLocation}>{r.location}</div>}
@@ -285,12 +286,12 @@ export function InstanceHealthPanel({
                   <div className={styles.resGroup}>{r.resourceGroup}</div>
                   <div className={styles.resRight}>
                     <div className={`${styles.resState} ${STATE_STYLE[r.availabilityState]}`}>{t(`health.state.${r.availabilityState}`)}</div>
-                    {off ? <div className={styles.reasonBadge}>{t("health.unlisted")}</div> : null}
+                    {off ? <Chip level="neutral" glyph="–">{t("health.unlisted")}</Chip> : null}
                   {r.reasonType && r.availabilityState !== "Available" && !off && (
-                      <div className={styles.reasonBadge} style={{ color: REASON_TYPE_STYLE[r.reasonType] ?? "var(--muted)" }}>
+                      <Chip level={user ? "plain" : REASON_TYPE_LEVEL[r.reasonType] ?? "plain"}>
                         {user ? t("health.userInitiated") : r.reasonType}
                         {r.reasonChronicity ? ` · ${r.reasonChronicity}` : ""}
-                      </div>
+                      </Chip>
                     )}
                   </div>
                   {r.summary && (

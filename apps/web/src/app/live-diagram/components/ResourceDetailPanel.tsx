@@ -526,7 +526,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
           ) : null}
           {tags.length ? (
             <KV label={t("ld.panel.tags", { n: tags.length })}>
-              <span className={styles.dpChips}>{tags.map(([k, v]) => <span key={k} className={styles.dpTag}>{k}: {maskGuids(v)}</span>)}</span>
+              <span className={styles.dpTagList}>{tags.map(([k, v]) => <Badge key={k}>{k}: {maskGuids(v)}</Badge>)}</span>
             </KV>
           ) : null}
         </Section>

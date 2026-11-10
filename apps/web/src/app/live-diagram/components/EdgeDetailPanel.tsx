@@ -16,7 +16,7 @@ import { useI18n } from "@/lib/i18n";
 import { formatBitsPerSec } from "@/lib/format";
 import { isInferredEdge } from "@/lib/liveScope";
 import { exposurePorts, exposureSources } from "@/lib/livePip";
-import { Notice, Button } from "@/components/ui";
+import { Notice, Button, Badge, Chip } from "@/components/ui";
 import { localizeLabel } from "../utils/localizeLabel";
 import { PeeringEdgeFacts, SiteEdgeFacts, type PeeringPair } from "./detail/EdgeFacts";
 import { Group, KV, Section } from "./detail/primitives";
@@ -146,12 +146,8 @@ function FlowList({
               <span className={styles.flowIp}>
                 {flow.destIp}:{flow.destPort}
               </span>
-              <span className={styles.flowProtoBadge}>{flow.protocol}</span>
-              <span
-                className={`${styles.flowActionBadge} ${flow.action === "Allow" ? styles.flowActionAllow : styles.flowActionDeny}`}
-              >
-                {flow.action === "Allow" ? t("detail.edge.allow") : t("detail.edge.deny")}
-              </span>
+              <Badge>{flow.protocol}</Badge>
+              <Chip level={flow.action === "Allow" ? "ok" : "danger"}>{flow.action === "Allow" ? t("detail.edge.allow") : t("detail.edge.deny")}</Chip>
             </div>
             {(flow.bytesSrcToDest != null || flow.bytesDestToSrc != null) && (
               <div className={styles.flowBytes}>
@@ -290,7 +286,7 @@ export function EdgeDetailPanel({
         </div>
         <div className={styles.dpStatusRow}>
           <span className={styles.detailHealthDot} style={{ background: STATUS_COLORS[status] ?? STATUS_COLORS.idle }} title={status} />
-          {protocol ? <span className={styles.edgeProtocolBadge}>{protocol}</span> : null}
+          {protocol ? <Badge>{protocol}</Badge> : null}
           {edgeKind ? <span className={styles.dpMuted}>{edgeKind}</span> : null}
         </div>
       </header>

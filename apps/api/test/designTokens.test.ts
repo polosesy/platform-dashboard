@@ -165,6 +165,18 @@ test("UI kit: panel head 56 · foot 44 · flat · stretches in a row; 12-column 
   for (const name of ["Panel", "Grid", "Cell", "Chip", "CopyButton", "CodeBlock", "FilterChip", "LinkButton"]) assert.ok(kitTsx.includes(`export function ${name}(`) || kitTsx.includes(`export function ${name}<`), name);
 });
 
+// 2026-11-11: chips ON the zoomable canvas keep their own height (a card row is 16–18px — the kit's 24px chip would
+// change the card size the layout math and its tests are built on), but share one grammar: pill corners, weight 600
+test("canvas chips (live diagram cards, subnet heads, edge labels) share one grammar: pill corners, weight 600", () => {
+  const live = readFileSync(join(webSrc, "app", "live-diagram", "styles.module.css"), "utf8").replace(/\r\n/g, "\n");
+  for (const sel of [".cardChip", ".cardPill", ".egressChip", ".nsgBadge", ".edgePill", ".internetNodeDeprecatedBadge"]) {
+    const m = live.match(new RegExp(`(^|\\n)\\${sel} \\{([^}]*)\\}`));
+    assert.ok(m, sel);
+    assert.match(m![2]!, /border-radius: var\(--radius-pill\)/, `${sel} corners`);
+    assert.match(m![2]!, /font-weight: 600/, `${sel} weight`);
+  }
+});
+
 // 2026-11-10: the two hand-made controls most screens drew (a pill you press — 18 copies; a word you press — 34) are kit parts
 test("UI kit: FilterChip = 28px pill, chosen = tint + ✓ (not colour alone), touch 44 · LinkButton = accent text, no box", () => {
   assert.match(rule(".filterChip"), /height: 28px/);
@@ -206,9 +218,9 @@ const RAW_BUTTONS: Record<string, number> = {
 };
 /** Page CSS classes that draw their own badge / chip / pill (the kit has Chip and Badge) — names per file, frozen */
 const OWN_CHIP_CLASSES: Record<string, number> = {
-  "app/architecture/styles.module.css": 7, "app/health/styles.module.css": 13, "app/hubble/styles.module.css": 7, "app/kubernetes/styles.module.css": 2,
-  "app/live-diagram/styles.module.css": 22, "app/notifications/notifications.module.css": 1, "app/observability/styles.module.css": 11, "app/policies/insights/insights.module.css": 10,
-  "app/policies/styles.module.css": 4, "app/security/security.module.css": 2,
+  "app/architecture/styles.module.css": 7, "app/hubble/styles.module.css": 7, "app/kubernetes/styles.module.css": 2, "app/live-diagram/styles.module.css": 14,
+  "app/notifications/notifications.module.css": 1, "app/observability/styles.module.css": 11, "app/policies/insights/insights.module.css": 10, "app/policies/styles.module.css": 4,
+  "app/security/security.module.css": 2,
 };
 
 test("ratchet: raw <button>s and page-made chip classes outside the kit only go down", () => {

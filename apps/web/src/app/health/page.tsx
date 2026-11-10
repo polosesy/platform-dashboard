@@ -19,7 +19,8 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
-import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Stat, Tabs, useNoteText } from "@/components/ui";
+import { Badge, Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Stat, Tabs, useNoteText } from "@/components/ui";
+import type { ChipLevel } from "@/components/ui";
 import { InstanceHealthPanel } from "./InstanceHealthPanel";
 import { rgba } from "@/lib/palette";
 
@@ -34,11 +35,12 @@ const INCIDENT_STATUS_STYLE: Record<GlobalStatusIncidentStatus, string> = {
   Resolved: styles.statusResolved ?? "",
 };
 
-const EVENT_TYPE_STYLE: Record<ServiceHealthEventType, string> = {
-  ServiceIssue: styles.eventServiceIssue ?? "",
-  PlannedMaintenance: styles.eventMaintenance ?? "",
-  HealthAdvisory: styles.eventAdvisory ?? "",
-  SecurityAdvisory: styles.eventSecurity ?? "",
+/** Event type → the platform's state grammar (colour + glyph): an outage is danger, the two advisories watch, maintenance info */
+const EVENT_TYPE_LEVEL: Record<ServiceHealthEventType, ChipLevel> = {
+  ServiceIssue: "danger",
+  PlannedMaintenance: "info",
+  HealthAdvisory: "warn",
+  SecurityAdvisory: "warn",
 };
 
 const EVENT_TYPE_COLORS: Record<ServiceHealthEventType, string> = {
@@ -162,9 +164,9 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
               {svcEvents.map((evt) => (
                 <div key={evt.id} className={styles.regionEventItem}>
                   <div className={styles.regionEventItemHeader}>
-                    <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
+                    <Chip level={EVENT_TYPE_LEVEL[evt.eventType]}>
                       {t(`health.eventType.${evt.eventType}`)}
-                    </span>
+                    </Chip>
                     <span className={styles.regionEventTime}>
                       {evt.lastUpdateTime ? fmtRelative(evt.lastUpdateTime, locale) : ""}
                     </span>
@@ -253,14 +255,14 @@ function GlobalStatusPanel({
                   <div className={styles.incidentDesc}>{inc.description}</div>
                 )}
                 {inc.affectedRegions.length > 0 && (
-                  <div className={styles.badgeRow}>
-                    <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
+                  <div className={styles.tagRow}>
+                    <span className={styles.tagLabel}>{t("health.affectedRegions")}:</span>
                     {inc.affectedRegions.map((r) => <Chip key={r} level="plain" glyph={false}>{r}</Chip>)}
                   </div>
                 )}
                 {inc.affectedServices.length > 0 && (
-                  <div className={styles.badgeRow}>
-                    <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
+                  <div className={styles.tagRow}>
+                    <span className={styles.tagLabel}>{t("health.affectedServices")}:</span>
                     {inc.affectedServices.map((sv) => <Chip key={sv} level="plain" glyph={false}>{sv}</Chip>)}
                   </div>
                 )}
@@ -317,12 +319,6 @@ function EventCard({
   const [expanded, setExpanded] = useState(false);
   const toggle = () => setExpanded((v) => !v);
 
-  const LEVEL_STYLE: Record<string, string> = {
-    Error: styles.levelError ?? "",
-    Warning: styles.levelWarning ?? "",
-    Informational: styles.levelInfo ?? "",
-  };
-
   const displayTitle = showTranslation && translation ? translation.title : evt.title;
   const displaySummary = showTranslation && translation ? translation.summary : (evt.summary ?? "");
 
@@ -331,18 +327,12 @@ function EventCard({
       {/* ── Header row (always visible, clickable) ── */}
       <button type="button" className={styles.eventCardBtn} onClick={toggle} aria-expanded={expanded}>
         <div className={styles.eventCardBtnLeft}>
-          <span className={`${styles.eventTypeBadge} ${EVENT_TYPE_STYLE[evt.eventType]}`}>
+          <Chip level={EVENT_TYPE_LEVEL[evt.eventType]}>
             {t(`health.eventType.${evt.eventType}`)}
-          </span>
-          <span className={`${styles.eventLevelBadge} ${LEVEL_STYLE[evt.level] ?? ""}`}>
-            {evt.level}
-          </span>
-          {evt.isResolved && (
-            <span className={styles.resolvedBadge}>{t("health.incident.Resolved")}</span>
-          )}
-          {showTranslation && translation && (
-            <span className={styles.translatedBadge}>KO</span>
-          )}
+          </Chip>
+          <Chip level="plain" glyph={false}>{evt.level}</Chip>
+          {evt.isResolved && <Chip level="ok">{t("health.incident.Resolved")}</Chip>}
+          {showTranslation && translation && <Badge tone="info">KO</Badge>}
         </div>
         <div className={styles.eventCardBtnRight}>
           <span className={styles.eventTime}>
@@ -368,16 +358,16 @@ function EventCard({
       {!expanded && (evt.affectedRegions.length > 0 || evt.affectedServices.length > 0) && (
         <div className={styles.eventCollapsedHint} onClick={toggle}>
           {evt.affectedRegions.slice(0, 4).map((r) => (
-            <span key={r} className={styles.regionBadge}>{r}</span>
+            <Chip key={r} level="plain" glyph={false}>{r}</Chip>
           ))}
           {evt.affectedRegions.length > 4 && (
-            <span className={styles.moreBadge}>+{evt.affectedRegions.length - 4}</span>
+            <Badge>+{evt.affectedRegions.length - 4}</Badge>
           )}
           {evt.affectedServices.slice(0, 2).map((s) => (
-            <span key={s} className={styles.serviceBadge}>{s}</span>
+            <Chip key={s} level="plain" glyph={false}>{s}</Chip>
           ))}
           {evt.affectedServices.length > 2 && (
-            <span className={styles.moreBadge}>+{evt.affectedServices.length - 2}</span>
+            <Badge>+{evt.affectedServices.length - 2}</Badge>
           )}
           <span className={styles.expandHint}>{t("health.clickToExpand")}</span>
         </div>
@@ -415,20 +405,20 @@ function EventCard({
 
           {/* Affected regions */}
           {evt.affectedRegions.length > 0 && (
-            <div className={styles.badgeRow}>
-              <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
+            <div className={styles.tagRow}>
+              <span className={styles.tagLabel}>{t("health.affectedRegions")}:</span>
               {evt.affectedRegions.map((r) => (
-                <span key={r} className={styles.regionBadge}>{r}</span>
+                <Chip key={r} level="plain" glyph={false}>{r}</Chip>
               ))}
             </div>
           )}
 
           {/* Affected services */}
           {evt.affectedServices.length > 0 && (
-            <div className={styles.badgeRow}>
-              <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
+            <div className={styles.tagRow}>
+              <span className={styles.tagLabel}>{t("health.affectedServices")}:</span>
               {evt.affectedServices.map((s) => (
-                <span key={s} className={styles.serviceBadge}>{s}</span>
+                <Chip key={s} level="plain" glyph={false}>{s}</Chip>
               ))}
             </div>
           )}

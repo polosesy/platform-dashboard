@@ -12,6 +12,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { DEFAULT_EDGE_LAYERS, EDGE_LAYERS, edgeLayer, isInferredEdge, scopeCoverage, scopeImpacts, scopeSpec, type EdgeLayer } from "@/lib/liveScope";
 import { useDiagramSpec } from "./hooks/useDiagramSpec";
 import { useLiveSnapshot, type UpdateMode } from "./hooks/useLiveSnapshot";
+import { LAST_DIAGRAM_KEY, onMissingDiagram, parseLastDiagram, serializeLastDiagram, type LastDiagram } from "@/lib/liveRestore";
 import { LiveCanvas } from "./components/LiveCanvas";
 import { AlertSidebar } from "./components/AlertSidebar";
 import { ResourceDetailPanel } from "./components/ResourceDetailPanel";
@@ -20,7 +21,7 @@ import { formatAzureRegion } from "./utils/regionFormat";
 import { LIVE_EDGE_LOOK, liveStroke, type LiveEdgeStyleKey } from "@/lib/liveStyle";
 import { peeringPairOf, siteOfEdge } from "@/lib/livePeering";
 import styles from "./styles.module.css";
-import { Button, EmptyState, Notice, PageHeader, Segmented, Select, Toggle } from "@/components/ui";
+import { Button, EmptyState, Notice, PageHeader, Segmented, Select, Toggle, Badge } from "@/components/ui";
 import { useStoredArrangement } from "@/lib/useStoredArrangement";
 import { useTeamArrangement } from "../architecture/hooks/useTeamArrangement";
 import { useMe } from "@/lib/useMe";
@@ -33,8 +34,6 @@ const SAMPLE_DIAGRAM_ID = "prod-infra";
 const FOCUS_KEY = "aud.liveDiagram.hoverFocus";
 /** No fault-impact dimming while arranging */
 const NO_IMPACTS: never[] = [];
-/** Last diagram generated from Azure, restored on the next visit */
-const LAST_DIAGRAM_KEY = "aud.liveDiagram.last";
 
 // ── Multi-select dropdown (Region / VNet filter) ──
 type MultiSelectDropdownProps = {
@@ -118,7 +117,7 @@ function MultiSelectDropdown({ label, allLabel, options, selected, onChange, dis
                 onChange={() => toggle(opt.id)}
               />
               <span className={styles.multiSelectOptionLabel}>{opt.label}</span>
-              {opt.badge && <span className={styles.multiSelectOptionBadge}>{opt.badge}</span>}
+              {opt.badge && <Badge>{opt.badge}</Badge>}
             </label>
           ))}
         </div>
@@ -186,7 +185,7 @@ function LayerMenu({ layers, counts, onChange }: { layers: ReadonlySet<EdgeLayer
                   <line x1={1} y1={4} x2={21} y2={4} stroke={liveStroke(LAYER_SWATCH[layer])} strokeWidth={Math.min(look.width + 0.4, 2.4)} strokeDasharray={look.dash} />
                 </svg>
                 <span className={styles.multiSelectOptionLabel}>{t(`ld.layer.${layer}`)}</span>
-                <span className={styles.multiSelectOptionBadge}>{counts[layer]}</span>
+                <Badge>{counts[layer]}</Badge>
               </label>
             );
           })}
@@ -225,17 +224,18 @@ function buildConnectedEdges(
   return result;
 }
 
-function readLastDiagram(): string {
+/** Last diagram generated from Azure (+ its subscription), restored on the next visit — lib/liveRestore */
+function readLastDiagram(): LastDiagram | null {
   try {
-    return window.localStorage.getItem(LAST_DIAGRAM_KEY) ?? "";
+    return parseLastDiagram(window.localStorage.getItem(LAST_DIAGRAM_KEY));
   } catch {
-    return "";
+    return null;
   }
 }
 
-function writeLastDiagram(id: string | null) {
+function writeLastDiagram(d: LastDiagram | null) {
   try {
-    if (id) window.localStorage.setItem(LAST_DIAGRAM_KEY, id);
+    if (d) window.localStorage.setItem(LAST_DIAGRAM_KEY, serializeLastDiagram(d));
     else window.localStorage.removeItem(LAST_DIAGRAM_KEY);
   } catch {
     /* storage unavailable — the page still works, it just starts empty next time */
@@ -257,9 +257,14 @@ export default function LiveDiagramPage() {
     computerName: string; powerState: string; provisioningState?: string; privateIp?: string; nodePoolName?: string; nodeImageVersion?: string; conditions?: AksNodeCondition[]; parentVmssId: string; label: string;
   } | null>(null);
 
+  // Which load of the diagram id this is: every generate bumps it (the id is fixed per subscription — lib/liveRestore)
+  const [rev, setRev] = useState(0);
+  const lastRef = useRef<LastDiagram | null>(null);
+  const regenTried = useRef(false);
   useEffect(() => {
     const last = readLastDiagram();
-    if (last) setDiagramId(last);
+    lastRef.current = last;
+    if (last) setDiagramId(last.id);
   }, []);
 
   const [focusPeeringKey, setFocusPeeringKey] = useState<string | null | undefined>(undefined);
@@ -427,7 +432,9 @@ export default function LiveDiagramPage() {
     return () => { cancelled = true; };
   }, [getApiToken, tenantId]);
 
-  const handleGenerate = useCallback(async () => {
+  /** `forSubscription`: regenerate a remembered diagram the API lost (restart) — otherwise the chosen subscription */
+  const handleGenerate = useCallback(async (forSubscription?: string) => {
+    const sub = forSubscription ?? subscriptionId;
     setGenerating(true);
     setGenerateError(null);
     try {
@@ -437,12 +444,16 @@ export default function LiveDiagramPage() {
         token,
         {
           method: "POST",
-          body: JSON.stringify(subscriptionId ? { subscriptionId } : {}),
+          body: JSON.stringify(sub ? { subscriptionId: sub } : {}),
         },
       );
       if (resp.ok && resp.diagram?.id) {
+        const last = { id: resp.diagram.id, ...(sub ? { subscriptionId: sub } : {}) };
+        lastRef.current = last;
+        writeLastDiagram(last);
+        // A new load even when the id is the same as before (fixed per subscription)
+        setRev((n) => n + 1);
         setDiagramId(resp.diagram.id);
-        writeLastDiagram(resp.diagram.id);
       }
     } catch (e: unknown) {
       const auth = authStateOf(e);
@@ -452,16 +463,22 @@ export default function LiveDiagramPage() {
     }
   }, [getApiToken, subscriptionId, t]);
 
-  const { spec, error: specError, loading: specLoading } = useDiagramSpec(diagramId);
-  const { snapshot, error: snapError, connected, refresh } = useLiveSnapshot(diagramId, mode);
+  const { spec, error: specError, loading: specLoading } = useDiagramSpec(diagramId, rev);
+  const { snapshot, error: snapError, connected, refresh } = useLiveSnapshot(diagramId, mode, 30, rev);
 
-  // A restored diagram the API no longer holds (it keeps generated diagrams in memory) → back to the empty state
+  // A remembered diagram the API no longer holds (it keeps generated diagrams in memory — every restart): generate it
+  // again for its subscription, once; otherwise back to the empty state
   useEffect(() => {
-    if (specError && diagramId && diagramId !== SAMPLE_DIAGRAM_ID && /404|not found/i.test(specError)) {
-      writeLastDiagram(null);
-      setDiagramId("");
+    if (specLoading || !specError || !diagramId || diagramId === SAMPLE_DIAGRAM_ID || !/404|not found/i.test(specError)) return;
+    const next = onMissingDiagram(lastRef.current, diagramId, regenTried.current);
+    const sub = lastRef.current?.subscriptionId;
+    writeLastDiagram(null);
+    setDiagramId("");
+    if (next === "regenerate" && sub) {
+      regenTried.current = true;
+      void handleGenerate(sub);
     }
-  }, [specError, diagramId]);
+  }, [specError, specLoading, diagramId, handleGenerate]);
 
   const isSample = diagramId === SAMPLE_DIAGRAM_ID || snapshot?.dataSource === "mock";
   // Team layout (API /api/live/arrangement — one per subscription, keys = ARM IDs): load into this browser's edit, or
@@ -756,7 +773,7 @@ export default function LiveDiagramPage() {
         <div className={styles.selectorDivider} />
         <button
           className={styles.generateBtn}
-          onClick={handleGenerate}
+          onClick={() => void handleGenerate()}
           disabled={generating}
           type="button"
         >
@@ -805,7 +822,7 @@ export default function LiveDiagramPage() {
         <EmptyState title={t("ld.empty.title")}>
           <p className={styles.emptyHint}>{t("ld.empty.hint")}</p>
           <div className={styles.emptyActions}>
-            <Button onClick={handleGenerate} disabled={generating}>
+            <Button onClick={() => void handleGenerate()} disabled={generating}>
               {generating ? t("live.generating") : t("live.generateFromAzure")}
             </Button>
             <Button onClick={() => setDiagramId(SAMPLE_DIAGRAM_ID)}>{t("ld.empty.sample")}</Button>
@@ -893,7 +910,7 @@ export default function LiveDiagramPage() {
       {/* Manual arrangement bar: in edit mode, or while an arrangement exists (to switch it off for a look) */}
       {filteredSpec && (editMode || arrangeStatus.boxes > 0) && (
         <div className={styles.arrangeBarRow} data-testid="arrange-bar">
-          {arrangeStatus.boxes > 0 ? <span className={styles.arrangeBadge}>{t("ld.edit.badge", { n: arrangeStatus.boxes })}</span> : null}
+          {arrangeStatus.boxes > 0 ? <Badge tone="info">{t("ld.edit.badge", { n: arrangeStatus.boxes })}</Badge> : null}
           {arrangeStatus.stale > 0 ? <span className={styles.arrangeStale} title={t("ld.edit.staleHint")}>{t("ld.edit.stale", { n: arrangeStatus.stale })}</span> : null}
           {!editMode ? (
             <Toggle checked={applyManual} onChange={setApplyManual} title={t("ld.edit.applyHint")}>{t("ld.edit.apply")}</Toggle>

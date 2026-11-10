@@ -5,7 +5,7 @@ import type { LiveAlert, AlertSeverity, FaultImpact } from "@aud/types";
 import { defaultTokens } from "../utils/designTokens";
 import styles from "../styles.module.css";
 import { useI18n } from "@/lib/i18n";
-import { Segmented } from "@/components/ui";
+import { Segmented, Badge, Chip } from "@/components/ui";
 import { FaultTimeline } from "./FaultTimeline";
 
 type AlertSidebarProps = {
@@ -45,7 +45,7 @@ export function AlertSidebar({ alerts, onAlertClick, impacts, nodeLabel, onNodeC
     <aside className={styles.alertSidebar}>
       <div className={styles.alertTitle}>
         {t("live.alerts")}
-        {alerts.length > 0 && <span className={styles.alertBadge}>{alerts.length}</span>}
+        {alerts.length > 0 && <Badge tone="high">{alerts.length}</Badge>}
         <span className={styles.alertTabs}>
           <Segmented
             label={t("live.alerts")}
@@ -65,7 +65,7 @@ export function AlertSidebar({ alerts, onAlertClick, impacts, nodeLabel, onNodeC
             {impacts.map((fi) => (
               <div key={fi.sourceNodeId} className={styles.impactItem}>
                 <button type="button" className={styles.impactSource} onClick={() => onNodeClick(fi.sourceNodeId)}>
-                  <span className={styles.impactBadge} data-impact="source">{t("ld.impact.sourceBadge")}</span>
+                  <Chip level="danger">{t("ld.impact.sourceBadge")}</Chip>
                   <span className={styles.impactName}>{nodeLabel(fi.sourceNodeId)}</span>
                   <span className={styles.impactTrigger}>{t(fi.trigger === "alert" ? "ld.impact.byAlert" : "ld.impact.byMetric")}</span>
                 </button>

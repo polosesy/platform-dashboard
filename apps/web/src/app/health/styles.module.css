@@ -47,6 +47,13 @@
   gap: 12px;
 }
 
+/* Every block of the page is full width unless its own class says otherwise (span 4 · 8 … below win — same weight,
+   later in the file). A kit Panel has no grid placement of its own: without this the resource list sat in 1 of 12
+   columns (~90px) */
+.grid > * {
+  grid-column: span 12;
+}
+
 /* ── Overview: donut + the four counts, one row ── */
 
 .overview {
@@ -193,19 +200,6 @@
   .resourceRowSelected { animation: none; }
 }
 
-.selectedPill {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  /* White text on the accent pill (a kept direct color: white text) */
-  color: #fff;
-  font-size: var(--text-caption);
-  font-weight: 700;
-  vertical-align: middle;
-}
-
 /* Pinned above the list (outside its scroll box) */
 .selectedCard {
   margin: 10px 10px 0;
@@ -225,7 +219,6 @@
   gap: 8px;
 }
 
-.selectedCardHead .selectedPill { margin-left: 0; }
 
 .selectedCardHead .linkBtn { margin-left: auto; font-size: var(--text-caption); }
 
@@ -533,12 +526,6 @@ button.heatTileSelected:focus-visible {
   flex-direction: column;
   align-items: flex-end;
   gap: 3px;
-}
-
-.reasonBadge {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .resLocation {
@@ -894,38 +881,18 @@ button.heatTileSelected:focus-visible {
 
 /* ── Shared Badge Row ── */
 
-.badgeRow {
+.tagRow {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 }
 
-.badgeLabel {
+.tagLabel {
   font-size: var(--text-caption);
   color: var(--muted);
   font-weight: 700;
   margin-right: 2px;
-}
-
-.regionBadge {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  background: rgba(var(--accent-rgb), 0.07);
-  color: rgba(var(--accent-rgb), 0.82);
-  border: 1px solid rgba(var(--accent-rgb), 0.14);
-}
-
-.serviceBadge {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  background: rgba(var(--ink-rgb), 0.05);
-  color: var(--muted);
-  border: 1px solid rgba(var(--ink-rgb), 0.1);
 }
 
 /* ── Event Summary Strip (Tab 3) ── */
@@ -964,19 +931,6 @@ button.heatTileSelected:focus-visible {
   align-items: center;
   gap: 8px;
 }
-
-.eventTypeBadge {
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  flex: none;
-}
-
-.eventServiceIssue { background: var(--danger-soft); color: rgba(var(--danger-rgb), 0.92); }
-.eventMaintenance { background: var(--accent-soft); color: rgba(var(--accent-rgb), 0.92); }
-.eventAdvisory { background: var(--warning-soft); color: rgba(var(--warning-rgb), 0.92); }
-.eventSecurity { background: rgba(var(--violet-rgb), 0.10); color: rgba(var(--violet-rgb), 0.88); }
 
 .eventTime {
   font-size: var(--text-caption);
@@ -1062,26 +1016,6 @@ button.heatTileSelected:focus-visible {
   overflow: hidden;
 }
 
-.eventLevelBadge {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-}
-
-.levelError { background: rgba(var(--danger-rgb), 0.08); color: rgba(var(--danger-rgb), 0.88); }
-.levelWarning { background: rgba(var(--warning-rgb), 0.1); color: rgba(var(--warning-rgb), 0.88); }
-.levelInfo { background: rgba(var(--ink-rgb), 0.06); color: var(--subtle); }
-
-.resolvedBadge {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  background: rgba(var(--ok-rgb), 0.1);
-  color: rgba(var(--ok-rgb), 0.8);
-}
-
 .eventChevron {
   font-size: var(--text-caption);
   color: var(--muted);
@@ -1095,15 +1029,6 @@ button.heatTileSelected:focus-visible {
   align-items: center;
   cursor: pointer;
   padding-top: 2px;
-}
-
-.moreBadge {
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  background: rgba(var(--ink-rgb), 0.07);
-  color: var(--subtle);
 }
 
 .expandHint {
@@ -1303,14 +1228,6 @@ button.heatTileSelected:focus-visible {
   text-overflow: ellipsis;
 }
 
-.regionStatusBadge {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  flex: none;
-}
-
 .regionStatusOk {
   background: rgba(var(--ok-rgb), 0.1);
   color: rgba(var(--ok-rgb), 0.82);
@@ -1326,23 +1243,6 @@ button.heatTileSelected:focus-visible {
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
-}
-
-.regionIssueChip {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-}
-
-.regionIssueChip[data-type="issue"] {
-  background: var(--danger-soft);
-  color: rgba(var(--danger-rgb), 0.88);
-}
-
-.regionIssueChip[data-type="maintenance"] {
-  background: var(--accent-soft);
-  color: rgba(var(--accent-rgb), 0.88);
 }
 
 .regionServices {
@@ -1524,16 +1424,6 @@ button.heatTileSelected:focus-visible {
 }
 
 /* ── Translated content badge ── */
-
-.translatedBadge {
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  background: rgba(var(--violet-rgb), 0.10);
-  color: rgba(var(--violet-rgb), 0.82);
-  border: 1px solid rgba(var(--violet-rgb), 0.16);
-}
 
 /* ── Translation toggle row ── */
 

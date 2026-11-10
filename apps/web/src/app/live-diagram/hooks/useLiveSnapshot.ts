@@ -10,7 +10,7 @@ import { startPolling } from "@/lib/usePolling";
 export type UpdateMode = "polling" | "sse";
 
 type SnapshotState = {
-  /** `${diagramId}:${mode}` the state belongs to — anything else is stale. */
+  /** `${diagramId}:${mode}:${rev}` the state belongs to — anything else is stale. */
   key: string;
   snapshot: LiveDiagramSnapshot | null;
   error: string | null;
@@ -23,11 +23,13 @@ export function useLiveSnapshot(
   diagramId: string,
   mode: UpdateMode = "polling",
   intervalSec = 30,
+  /** which load of this id (a new generate keeps the id — lib/liveRestore) */
+  rev = 0,
 ) {
   const getApiToken = useApiToken();
   const { t } = useI18n();
   const sseLost = t("ld.sseLost");
-  const key = `${diagramId}:${mode}`;
+  const key = `${diagramId}:${mode}:${rev}`;
   const [state, setState] = useState<SnapshotState>({ key: "", ...EMPTY });
 
   const fetchSnapshot = useCallback(async () => {
