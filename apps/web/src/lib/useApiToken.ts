@@ -4,6 +4,10 @@ import { InteractionRequiredAuthError } from "@azure/msal-browser";
 import { useMsal } from "@azure/msal-react";
 import { useCallback } from "react";
 import { useWebConfig } from "./webConfig";
+import { loginUrl, reasonOfError } from "./loginFlow";
+
+/** One trip to /login per page load — many panels ask for a token at once */
+let sentToLogin = false;
 
 /**
  * Bearer token for the API (OBO on the server). Returns null when signed out or when the
@@ -25,7 +29,12 @@ export function useApiToken() {
       return resp.accessToken;
     } catch (e) {
       if (e instanceof InteractionRequiredAuthError) {
-        console.warn("[auth] session expired — sign in again", e.errorCode);
+        // The session needs the user again (expired, or consent): the sign-in page says which and comes back here
+        if (!sentToLogin && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+          sentToLogin = true;
+          const reason = reasonOfError(e) === "consent" ? "consent" : "expired";
+          window.location.assign(loginUrl(`${window.location.pathname}${window.location.search}`, reason));
+        }
         return null;
       }
       throw e;

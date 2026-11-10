@@ -945,7 +945,7 @@
 .sloTable { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
 .sloTable th { height: 40px; padding: 0 16px; text-align: left; font-size: var(--text-caption); font-weight: 500; color: var(--muted); background: var(--panel-sunken); white-space: nowrap; }
 .sloTable td { padding: 8px 16px; border-top: 1px solid var(--border); vertical-align: middle; font-variant-numeric: tabular-nums; }
-.sloTable tr { height: 56px; }
+.sloTable tr { height: var(--row); }
 .sloCellMain { display: block; font-weight: 600; }
 .sloCellSub { display: block; font-size: var(--text-caption); color: var(--subtle); }
 .sloWhere { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }

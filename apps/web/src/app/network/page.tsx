@@ -7,7 +7,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useI18n } from "@/lib/i18n";
-import { SubscriptionSelect } from "@/components/SubscriptionSelect";
+import { useOnChange } from "@/lib/useOnChange";
 import { ErrorNotice, LoadingState, PageHeader, Select, Tabs } from "@/components/ui";
 import { NET_TABS, RANGES, TOPS, type NetTab } from "./tabs";
 import { CoverageStrip } from "./components/CoverageStrip";
@@ -39,6 +39,8 @@ function NetworkInner() {
   const [tab, setTab] = useQueryParam<NetTab>("tab", NET_TABS, "map");
   const { subscriptions, subscriptionId, setSubscriptionId, loaded } = useSubscriptions();
   const [vnet, setVnet] = useState("");
+  // The VNet choice belongs to one subscription — the scope bar changing it clears the choice
+  useOnChange(subscriptionId, () => setVnet(""));
   const [range, setRange] = useState(1440);
   const [top, setTop] = useState(20);
   const [dim, setDim] = useState<NetTalkerDim>("subnet");
@@ -70,7 +72,6 @@ function NetworkInner() {
       <PageHeader
         actions={
           <>
-            {subscriptions.length ? <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={(v) => { setSubscriptionId(v); setVnet(""); }} /> : null}
             <Select label={t("net.vnet")} value={vnet} onChange={setVnet} options={vnetOptions} />
             <Select label={t("net.range")} value={String(range)} onChange={(v) => setRange(Number(v))} options={RANGES.map((r) => ({ value: String(r.min), label: r.label }))} />
             {section && section !== "overview" && section !== "map" ? (

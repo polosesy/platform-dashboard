@@ -24,7 +24,8 @@ const rel = (p: string) => relative(webSrc, p).split(sep).join("/");
 const read = (p: string) => readFileSync(p, "utf8");
 
 test("every page renders the shared PageHeader (title = menu label)", () => {
-  const pages = walk(appDir, (f) => f.endsWith(`${sep}page.tsx`));
+  // The sign-in page has no app frame (design draft ①) — its title is the card's
+  const pages = walk(appDir, (f) => f.endsWith(`${sep}page.tsx`) && !f.endsWith(`${sep}login${sep}page.tsx`));
   assert.ok(pages.length >= 15);
   const missing = pages.filter((p) => {
     const s = read(p);

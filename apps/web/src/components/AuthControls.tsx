@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { InteractionStatus } from "@azure/msal-browser";
 import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
-import { loginErrorMessage, loginRequestFor } from "@/lib/msal";
+import { useRouter } from "next/navigation";
+import { loginErrorMessage } from "@/lib/msal";
+import { loginUrl } from "@/lib/loginFlow";
 import { signInConfigured } from "@/lib/runtimeConfig";
 import { useWebConfig } from "@/lib/webConfig";
 import { useI18n } from "@/lib/i18n";
@@ -24,15 +26,9 @@ export function AuthControls() {
   const me = useMe().data;
   const role = me && !me.anonymous ? me.role : undefined;
 
-  const login = async () => {
-    setError(null);
-    try {
-      const result = await instance.loginPopup(loginRequestFor(config));
-      if (result.account) instance.setActiveAccount(result.account);
-    } catch (e) {
-      setError(loginErrorMessage(e, t));
-    }
-  };
+  const router = useRouter();
+  // Sign-in is a page (/login): it explains what signing in does and comes back here afterwards (no popup)
+  const login = () => router.push(loginUrl(`${window.location.pathname}${window.location.search}`));
   // Redirect sign-out: no popup to relay, works even when popups are blocked
   const logout = () => instance.logoutRedirect({ account: user }).catch((e: unknown) => setError(loginErrorMessage(e, t)));
 

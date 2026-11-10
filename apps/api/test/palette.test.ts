@@ -10,7 +10,9 @@ const p = ((ns as unknown as { default?: typeof ns }).default ?? ns) as typeof n
 const css = readFileSync(resolve(fileURLToPath(new URL(".", import.meta.url)), "../../web/src/app/globals.css"), "utf8");
 
 test("JS palette channels equal the --*-rgb tokens in globals.css", () => {
-  const tokens = Object.fromEntries([...css.matchAll(/--([\w-]+)-rgb:\s*([\d\s,]+);/g)].map((m) => [m[1]!, m[2]!.split(",").map((x) => Number(x.trim()))]));
+  // The light :root block — lib/palette.ts mirrors the light values (JS-drawn canvases stay on light paper in dark mode)
+  const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
+  const tokens = Object.fromEntries([...root.matchAll(/--([\w-]+)-rgb:\s*([\d\s,]+);/g)].map((m) => [m[1]!, m[2]!.split(",").map((x) => Number(x.trim()))]));
   // CSS names are kebab-case; palette VIZ keys are camelCase
   const kebab = (k: string) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   for (const [k, v] of Object.entries(p.UI)) assert.deepEqual(tokens[k], [...v], `UI ${k}`);

@@ -6,7 +6,6 @@ import type { CostSummary, CostTrendResponse, BudgetsResponse } from "@aud/types
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
-import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { Cell, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { ReservationsPanel } from "./ReservationsPanel";
@@ -58,7 +57,6 @@ export default function CostPage() {
         meta={summary ? <span>{t("common.updated")} {new Date(summary.generatedAt).toLocaleString(dateLocale(locale))}</span> : loading ? <span>{t("common.loading")}</span> : null}
         actions={
           <>
-            <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />
             <Segmented
               label={t("cost.granularity")}
               value={granularity}

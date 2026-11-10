@@ -6,33 +6,39 @@ import { useEffect, useRef } from "react";
 import { NAV_GROUPS, isItemActive, sectionBefore } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import { NavIcon } from "./navIcons";
+import { Segmented } from "@/components/ui";
+import { useDisplayPrefs } from "@/lib/displayPrefs";
 import styles from "./Sidebar.module.css";
 
 export type SidebarProps = {
   open: boolean;
+  /** Wide screens: always shown on the left (no backdrop, no close button) */
+  docked?: boolean;
   onClose: () => void;
 };
 
-/** Drawer navigation — the same NAV_GROUPS as the top bar, every section expanded. */
-export function Sidebar({ open, onClose }: SidebarProps) {
+/** The menu — docked on the left on wide screens, a drawer on narrow ones; NAV_GROUPS, every section expanded. */
+export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { t, locale, setLocale } = useI18n();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const prefs = useDisplayPrefs();
 
   // Move focus into the drawer when it opens (DOM only — no state change)
   useEffect(() => {
-    if (open) closeRef.current?.focus();
-  }, [open]);
+    if (open && !docked) closeRef.current?.focus();
+  }, [open, docked]);
+  const shown = open || docked;
 
   return (
     <>
-      <div className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`} onClick={onClose} aria-hidden="true" />
+      {docked ? null : <div className={`${styles.backdrop} ${open ? styles.backdropVisible : ""}`} onClick={onClose} aria-hidden="true" />}
 
       <aside
         id="nav-drawer"
-        className={`${styles.sidebar} ${open ? styles.sidebarOpen : ""}`}
-        inert={!open}
-        aria-hidden={!open}
+        className={`${styles.sidebar} ${open ? styles.sidebarOpen : ""} ${docked ? styles.sidebarDocked : ""}`}
+        inert={!shown}
+        aria-hidden={!shown}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.stopPropagation();
@@ -45,9 +51,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <div className={styles.sidebarMark} aria-hidden="true" />
             <span className={styles.sidebarTitle}>Azure Unified Dashboard</span>
           </div>
-          <button ref={closeRef} className={styles.closeBtn} onClick={onClose} type="button" aria-label={t("nav.closeMenu")}>
-            &times;
-          </button>
+          {docked ? null : (
+            <button ref={closeRef} className={styles.closeBtn} onClick={onClose} type="button" aria-label={t("nav.closeMenu")}>
+              &times;
+            </button>
+          )}
         </div>
 
         <nav className={styles.sidebarNav} aria-label={t("nav.main")}>
@@ -66,7 +74,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                         className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
                         aria-current={active ? "page" : undefined}
                         title={t(it.descKey)}
-                        onClick={onClose}
+                        onClick={docked ? undefined : onClose}
                       >
                         <span className={styles.navIcon}><NavIcon name={it.icon} /></span>
                         {t(it.labelKey)}
@@ -97,6 +105,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   {t("settings.english")}
                 </button>
               </div>
+            </div>
+            {/* Display: theme (dark is opt-in) and density — this browser only */}
+            <div className={styles.settingRow}>
+              <span className={styles.settingLabel}>{t("settings.theme")}</span>
+              <Segmented label={t("settings.theme")} value={prefs.theme} onChange={prefs.setTheme}
+                items={[{ id: "light", label: t("settings.theme.light") }, { id: "dark", label: t("settings.theme.dark") }, { id: "system", label: t("settings.theme.system") }]} />
+            </div>
+            <div className={styles.settingRow}>
+              <span className={styles.settingLabel}>{t("settings.density")}</span>
+              <Segmented label={t("settings.density")} value={prefs.density} onChange={prefs.setDensity}
+                items={[{ id: "comfortable", label: t("settings.density.comfortable") }, { id: "compact", label: t("settings.density.compact") }]} />
             </div>
           </div>
         </nav>

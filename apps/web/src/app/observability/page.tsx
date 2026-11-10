@@ -102,21 +102,6 @@ function ObservabilityView() {
         }
         actions={
           <>
-            {clusters.length > 0 ? (
-              <Select label={t("common.cluster")} value={clusterId} onChange={setClusterId} options={clusters.map((c) => ({ value: c.id, label: c.name }))} />
-            ) : (
-              <label className={styles.clusterField}>
-                <span>{t("common.cluster")}</span>
-                <input
-                  type="text"
-                  placeholder={clustersLoading ? t("common.loading") : t("hub.clusterIdPlaceholder")}
-                  value={clusterDraft ?? clusterId}
-                  onChange={(e) => setClusterDraft(e.target.value)}
-                  onBlur={commitClusterDraft}
-                  onKeyDown={(e) => e.key === "Enter" && commitClusterDraft()}
-                />
-              </label>
-            )}
             <TimeRangeBar state={time} />
           </>
         }
@@ -134,8 +119,8 @@ function ObservabilityView() {
         <EmptyState title={t("hub.pickCluster")}>{t("obs.pickClusterHint")}</EmptyState>
       )}
 
-      {/* Tabs */}
-      {clusterId && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview" || tab === "slo") && (
+      {/* Tabs — not while signed out: every tab would repeat the same sign-in notice (one notice per screen) */}
+      {clusterId && error !== t("auth.state.signin") && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview" || tab === "slo") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 

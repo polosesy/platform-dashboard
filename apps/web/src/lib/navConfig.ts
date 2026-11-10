@@ -70,6 +70,31 @@ export const NAV_GROUPS: NavGroup[] = [
   ] },
 ];
 
+/**
+ * What a screen is looked at through — the scope bar at the top of the page (components/ScopeBar) shows these, and the
+ * screen reads the shared choice (lib/scopeStore). Screens not listed have no scope bar (they choose inside, or need none).
+ */
+export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster">> = {
+  "/architecture": ["subscription"],
+  "/health": ["subscription"],
+  "/network": ["subscription"],
+  "/hubble": ["cluster"],
+  "/kubernetes": ["cluster"],
+  "/observability": ["cluster"],
+  "/security/risk": ["subscription"],
+  "/security/advisories": ["cluster"],
+  "/security": ["subscription"],
+  "/security/findings": ["subscription"],
+  "/security/identity": ["subscription"],
+  "/security/threats": ["subscription"],
+  "/security/compliance": ["subscription"],
+  "/policies": ["cluster"],
+  "/cost": ["subscription"],
+};
+
+/** Pages outside the menu (and outside the app frame): the sign-in page */
+export const NAV_EXEMPT_ROUTES = ["/login"] as const;
+
 /** "/" matches only itself; any other href matches itself and its sub-paths. */
 function matches(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";

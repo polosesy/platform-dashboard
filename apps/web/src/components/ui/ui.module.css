@@ -70,8 +70,8 @@
   justify-content: space-between;
   gap: 8px 12px;
   flex-wrap: wrap;
-  min-height: 56px;
-  padding: 8px 16px;
+  min-height: var(--panel-head);
+  padding: 8px var(--panel-pad);
   border-bottom: 1px solid var(--border);
 }
 
@@ -111,7 +111,7 @@
 .panelBody {
   flex: 1;
   min-width: 0;
-  padding: 16px;
+  padding: var(--panel-pad);
 }
 
 .panelFlush {
@@ -126,8 +126,8 @@
   justify-content: space-between;
   gap: 8px 12px;
   flex-wrap: wrap;
-  min-height: 44px;
-  padding: 6px 16px;
+  min-height: var(--panel-foot);
+  padding: 6px var(--panel-pad);
   border-top: 1px solid var(--border);
   font-size: var(--text-small);
   color: var(--muted);
@@ -318,6 +318,7 @@
 .segmented {
   display: inline-flex;
   align-items: center;
+  width: fit-content; /* never stretched by a column / grid parent */
   height: 32px;
   padding: 2px;
   gap: 2px;
@@ -347,7 +348,7 @@
 
 .segment[aria-pressed="true"] {
   background: var(--ink);
-  color: #fff; /* white text on the ink fill */
+  color: var(--panel-solid); /* the page's paper on the ink fill — white in light, dark in dark */
   font-weight: 600;
 }
 

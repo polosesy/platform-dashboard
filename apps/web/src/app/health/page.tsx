@@ -21,7 +21,6 @@ import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
 import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Tabs, useNoteText } from "@/components/ui";
 import { InstanceHealthPanel } from "./InstanceHealthPanel";
-import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { rgba } from "@/lib/palette";
 
 // ── Constants ──
@@ -656,7 +655,6 @@ export default function HealthPage() {
     <div className={styles.page}>
       <PageHeader
         meta={<span>{activeGeneratedAt ? `${t("health.generatedAt")}: ${new Date(activeGeneratedAt).toLocaleString(dateLocale(locale))}` : t("health.loading")}</span>}
-        actions={<SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />}
       />
 
       <Tabs

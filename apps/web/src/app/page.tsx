@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui";
 import { NAV_GROUPS } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import styles from "./home.module.css";
+import { TodayStatus } from "./TodayStatus";
 
 /** 개요 — every screen of the dashboard, grouped exactly like the menu (cards are generated from navConfig). */
 export default function Home() {
@@ -23,6 +24,8 @@ export default function Home() {
           </div>
         }
       />
+      {/* The one big thing on the first screen: is anything wrong right now (design draft ⑦) */}
+      <TodayStatus />
       <p className={styles.intro}>{t("home.intro")}</p>
 
       {groups.map((g) => (

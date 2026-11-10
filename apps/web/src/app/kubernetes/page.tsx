@@ -8,6 +8,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { Badge, Cell, Chip, ErrorNotice, Grid, LoadingState, Notice, PageHeader, Panel, Select, Stat, useNoteText, type ChipLevel } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
+import { useOnChange } from "@/lib/useOnChange";
 
 /** base64url of the cluster's ARM resource ID (path segment for the overview API). */
 function encodeClusterId(id: string): string {
@@ -76,6 +77,8 @@ export default function KubernetesPage() {
   } = useAksClusters();
   const [kindFilter, setKindFilter] = useState<KubernetesObjectKind | "All">("All");
   const [namespaceFilter, setNamespaceFilter] = useState<string>("All");
+  // The cluster comes from the scope bar (shared by every AKS screen); a new cluster starts with no filters
+  useOnChange(selectedClusterId, () => { setKindFilter("All"); setNamespaceFilter("All"); });
 
   const overviewQuery = useApiQuery(selectedClusterId ? `k8s-overview:${selectedClusterId}` : null, (token) =>
     fetchJsonWithBearer<KubernetesClusterOverview>(apiUrl(`/api/kubernetes/cluster/${encodeClusterId(selectedClusterId)}/overview`), token),
@@ -119,21 +122,6 @@ export default function KubernetesPage() {
     <div className={styles.page}>
       <PageHeader
         meta={selectedCluster ? <span>{selectedCluster.name} · {selectedCluster.location} · Kubernetes v{selectedCluster.kubernetesVersion}<AccessBadges access={selectedCluster.access} /></span> : null}
-        actions={
-          <>
-            <Select
-              label={t("common.cluster")}
-              value={selectedClusterId}
-              onChange={(v) => {
-                setSelectedClusterId(v);
-                setKindFilter("All");
-                setNamespaceFilter("All");
-              }}
-              placeholder={loading ? t("common.loading") : t("pol.noCluster")}
-              options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.location})` }))}
-            />
-          </>
-        }
       />
 
       {clustersNote ? <Notice tone="info">{noteText(clustersNote)}</Notice> : null}

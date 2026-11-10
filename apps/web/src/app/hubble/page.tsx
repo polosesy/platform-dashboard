@@ -14,13 +14,6 @@ export default function HubblePage() {
   return (
     <div className={styles.page}>
       <PageHeader
-        actions={
-          clusters.length > 0 ? (
-            <Select label={t("common.cluster")} value={clusterId} onChange={setClusterId} options={clusters.map((c) => ({ value: c.id, label: c.name }))} />
-          ) : (
-            <SearchInput label={t("common.cluster")} value={clusterId} onChange={setClusterId} placeholder={loading ? t("common.loading") : t("hub.clusterIdPlaceholder")} />
-          )
-        }
       />
 
       {clusterId ? (

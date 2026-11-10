@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MarkerType, type Edge, type Node } from "reactflow";
 import type { ArchitectureGraph } from "@aud/types";
-import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Segmented, Select } from "@/components/ui";
 import { applyBand, applyManualLines, arrangementStatus, bandPlan, cellPlan, compactBox, dropPlan, moveInOrder, parseArrangement, relationBetween, relationIndex, resetBand, resetBox, samePair, serializeArrangement, setCols, stepBand, stepCell, stepInOrder, type Arrangement, type LineStyle, type ManualLine, type MoveResult } from "@/lib/archArrange";
 import { maskGuids } from "@/lib/mask";
@@ -48,7 +47,6 @@ export default function ArchitecturePage() {
   return (
     <div className={s.page}>
       <PageHeader
-        actions={<SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />}
         meta={
           <span>
             {t("arch.liveHint")} <Link href="/live-diagram" className={s.inlineLink}>{t("arch.openLive")} →</Link>

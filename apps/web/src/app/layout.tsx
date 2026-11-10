@@ -9,6 +9,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/AppShell";
 import { webRuntimeConfig } from "@/lib/runtimeConfig";
+import { PREFS_BOOT_SCRIPT } from "@/lib/displayPrefsBoot";
 
 export const metadata: Metadata = {
   title: "Azure Unified Dashboard",
@@ -24,7 +25,11 @@ export default async function RootLayout({
   await connection();
   const config = webRuntimeConfig(process.env);
   return (
-    <html lang="ko">
+    // suppressHydrationWarning: the boot script sets data-theme / data-density on <html> before React hydrates
+    <html lang="ko" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: PREFS_BOOT_SCRIPT }} />
+      </head>
       <body className={GeistMono.variable}>
         <Providers config={config}>
           <AppShell>{children}</AppShell>

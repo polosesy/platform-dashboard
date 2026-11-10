@@ -9,7 +9,7 @@ import * as msgNs from "../../web/src/lib/i18nMessages.ts";
 
 const nav = ((navNs as unknown as { default?: typeof navNs }).default ?? navNs) as typeof navNs;
 const msg = ((msgNs as unknown as { default?: typeof msgNs }).default ?? msgNs) as typeof msgNs;
-const { NAV_GROUPS, isItemActive, activeGroupKey, activeNavItem, sectionBefore } = nav;
+const { NAV_GROUPS, NAV_EXEMPT_ROUTES, isItemActive, activeGroupKey, activeNavItem, sectionBefore } = nav;
 
 const appDir = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../web/src/app");
 
@@ -29,8 +29,9 @@ export function pageRoutes(dir: string = appDir): string[] {
 
 const items = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ ...i, group: g.key })));
 
-test("every page route appears in the menu exactly once", () => {
-  const routes = pageRoutes().sort();
+test("every page route appears in the menu exactly once (the sign-in page is the one page outside it)", () => {
+  assert.deepEqual([...NAV_EXEMPT_ROUTES], ["/login"]);
+  const routes = pageRoutes().filter((r) => !(NAV_EXEMPT_ROUTES as readonly string[]).includes(r)).sort();
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
@@ -101,4 +102,12 @@ test("icons are distinct across items and groups", () => {
   assert.equal(new Set(itemIcons).size, itemIcons.length, "item icons");
   assert.equal(new Set(groupIcons).size, groupIcons.length, "group icons");
   assert.deepEqual(itemIcons.filter((i) => groupIcons.includes(i)), [], "no item icon reused by a group");
+});
+
+test("scope bar: PAGE_SCOPE names only menu screens; the AKS screens share the cluster, the Azure screens the subscription", () => {
+  const hrefs = new Set(items.map((i) => i.href));
+  for (const k of Object.keys(nav.PAGE_SCOPE)) assert.ok(hrefs.has(k), `PAGE_SCOPE ${k} is a menu screen`);
+  for (const k of ["/kubernetes", "/observability", "/hubble", "/policies"]) assert.deepEqual([...nav.PAGE_SCOPE[k]!], ["cluster"], k);
+  for (const k of ["/architecture", "/health", "/cost", "/security"]) assert.deepEqual([...nav.PAGE_SCOPE[k]!], ["subscription"], k);
+  assert.equal(nav.PAGE_SCOPE["/live-diagram"], undefined, "the live diagram picks its connection and VNet inside");
 });

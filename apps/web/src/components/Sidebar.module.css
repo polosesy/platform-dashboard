@@ -4,8 +4,7 @@
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: rgba(var(--ink-rgb), 0.25);
-  backdrop-filter: blur(4px);
+  background: rgba(var(--ink-rgb), 0.28);
   opacity: 0;
   pointer-events: none;
   transition: opacity 250ms ease;
@@ -27,8 +26,7 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: rgba(var(--paper-rgb), 0.92);
-  backdrop-filter: blur(20px);
+  background: var(--panel);
   border-right: 1px solid var(--border);
   box-shadow: var(--shadow-pop);
   transform: translateX(-100%);
@@ -38,6 +36,15 @@
 
 .sidebarOpen {
   transform: translateX(0);
+}
+
+/* Wide screens: the menu stays on the left — flat, under the top bar's layer, no slide */
+.sidebarDocked {
+  z-index: 20;
+  width: var(--rail-width);
+  transform: none;
+  box-shadow: none;
+  transition: none;
 }
 
 /* ── Header ── */
@@ -139,11 +146,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
   font-size: var(--text-small);
-  font-weight: 600;
-  color: rgba(var(--ink-rgb), 0.76);
+  font-weight: 500;
+  color: var(--muted);
   transition: background 120ms ease, color 120ms ease;
   cursor: pointer;
   text-decoration: none;
@@ -155,14 +163,14 @@
 }
 
 .navItemActive {
-  background: rgba(var(--accent-rgb), 0.10);
-  color: rgba(var(--accent-rgb), 0.92);
-  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 
 .navItemActive:hover {
   background: rgba(var(--accent-rgb), 0.14);
-  color: rgba(var(--accent-rgb), 0.95);
+  color: var(--accent-strong);
 }
 
 .navIcon {

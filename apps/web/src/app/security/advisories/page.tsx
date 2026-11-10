@@ -223,9 +223,6 @@ export default function SecurityAdvisoriesPage() {
         meta={d ? <span>{t("adv.sourceLine")} · {t("common.updated")} {new Date(d.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : <span>{t("adv.sourceLine")}</span>}
         actions={
           <>
-            <Select label={t("common.cluster")} value={clusterId} onChange={setClusterId}
-              placeholder={clustersLoading ? t("common.loading") : t("adv.noCluster")}
-              options={clusters.map((c) => ({ value: c.id, label: c.name }))} />
             <Button onClick={q.reload} disabled={q.loading}>{q.loading ? t("common.loading") : t("common.refresh")}</Button>
           </>
         }

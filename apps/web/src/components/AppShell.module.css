@@ -2,11 +2,26 @@
   min-height: 100vh;
 }
 
+/* Docked menu (≥ 1100 px, lib/useMediaQuery DOCK_QUERY): the frame sits right of the fixed rail */
+.shell[data-docked] .frame {
+  margin-left: var(--rail-width);
+}
+
+.frame {
+  min-width: 0;
+}
+
 .main {
-  padding: 18px 18px 40px;
+  padding: 24px 24px 40px;
 }
 
 .container {
   max-width: 1400px;
   margin: 0 auto;
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: 16px 16px 32px;
+  }
 }

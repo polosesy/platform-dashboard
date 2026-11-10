@@ -4,6 +4,8 @@
 :root {
   /* Page-level sticky panels sit under the sticky top bar */
   --sticky-top: 72px;
+  /* The docked left menu (≥ 1100 px) */
+  --rail-width: 248px;
   /* Colour channels — the single source. Any other opacity: rgba() over the matching *-rgb token.
      Mirrored for JS-drawn graphics (canvas, SVG attributes, three.js) in src/lib/palette.ts. */
   --ink-rgb: 22, 25, 29;
@@ -103,6 +105,12 @@
   /* Selection / focus ring — a ring, not a glow */
   --ring-accent: 0 0 0 3px rgba(var(--accent-rgb), 0.22);
 
+  /* Density — 편안함(기본) · 조밀(설정 › 화면, data-density="compact"): panel head · foot · inside · table row */
+  --panel-head: 56px;
+  --panel-foot: 44px;
+  --panel-pad: 16px;
+  --row: 56px;
+
   /* Motion — only when state changes, ease-out; 0 under prefers-reduced-motion (below) */
   --motion-fast: 150ms; /* press, hover, chips */
   --motion-base: 200ms; /* expand, tab switch */
@@ -115,6 +123,63 @@
   --fg: var(--ink);
   --text: var(--ink);
   --line: var(--border);
+}
+
+/* ── Dark theme (설정 › 화면 · Ctrl+K) — opt-in: 어둡게, or 시스템 when the OS is dark. Only the surface, text and line
+   tokens change; status hues stay. Diagram canvases keep their light paper (--canvas-rgb and lib/palette.ts are the
+   light values on purpose — JS-drawn graphics read the same in both themes). ── */
+:root[data-theme="dark"] {
+  --ink-rgb: 232, 234, 237;
+  --paper-rgb: 23, 26, 31;
+  --warning-strong-rgb: 240, 182, 90;
+  --danger-strong-rgb: 255, 154, 139;
+  --success-strong-rgb: 111, 207, 122;
+  --bg: #0f1114;
+  --panel-sunken: #1e2228;
+  --muted: #b4bac3;
+  --subtle: #8f97a2;
+  --border: #2a2f36;
+  --border-strong: #3a414b;
+  --accent-strong: #6cb4f5;
+  --accent-soft: rgba(var(--accent-rgb), 0.2);
+  --danger-soft: rgba(var(--danger-rgb), 0.2);
+  --warning-soft: rgba(var(--warning-rgb), 0.18);
+  --success-soft: rgba(var(--success-rgb), 0.2);
+  --shadow-raise: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --ink-rgb: 232, 234, 237;
+    --paper-rgb: 23, 26, 31;
+    --warning-strong-rgb: 240, 182, 90;
+    --danger-strong-rgb: 255, 154, 139;
+    --success-strong-rgb: 111, 207, 122;
+    --bg: #0f1114;
+    --panel-sunken: #1e2228;
+    --muted: #b4bac3;
+    --subtle: #8f97a2;
+    --border: #2a2f36;
+    --border-strong: #3a414b;
+    --accent-strong: #6cb4f5;
+    --accent-soft: rgba(var(--accent-rgb), 0.2);
+    --danger-soft: rgba(var(--danger-rgb), 0.2);
+    --warning-soft: rgba(var(--warning-rgb), 0.18);
+    --success-soft: rgba(var(--success-rgb), 0.2);
+    --shadow-raise: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+
+/* Compact density — more rows per screen for long lists (편안함 is the default) */
+:root[data-density="compact"] {
+  --panel-head: 48px;
+  --panel-foot: 36px;
+  --panel-pad: 12px;
+  --row: 40px;
 }
 
 html,

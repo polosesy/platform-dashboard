@@ -13,9 +13,25 @@ type TopNavProps = {
   onMenuClick?: () => void;
   menuOpen?: boolean;
   menuBtnRef?: RefObject<HTMLButtonElement | null>;
+  /** The menu is docked on the left (wide screens): no ☰, no logo, no dropdowns here — search takes their place */
+  docked?: boolean;
+  /** Opens Ctrl+K quick open */
+  onSearch?: () => void;
 };
 
-export function TopNav({ onMenuClick, menuOpen = false, menuBtnRef }: TopNavProps) {
+/** "Find a screen" — looks like a field, opens quick open (Ctrl+K anywhere does the same) */
+function SearchButton({ onSearch }: { onSearch?: () => void }) {
+  const { t } = useI18n();
+  return (
+    <button type="button" className={styles.search} onClick={onSearch} aria-label={t("cmd.open")} aria-keyshortcuts="Control+K Meta+K">
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" fill="none" /><path d="M10.5 10.5 L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+      <span className={styles.searchText}>{t("cmd.placeholderShort")}</span>
+      <kbd className={styles.searchKbd}>Ctrl K</kbd>
+    </button>
+  );
+}
+
+export function TopNav({ onMenuClick, menuOpen = false, menuBtnRef, docked = false, onSearch }: TopNavProps) {
   const pathname = usePathname();
   const { t } = useI18n();
   // A dropdown is open only for the path it was opened on — navigating closes it without an effect
@@ -70,6 +86,17 @@ export function TopNav({ onMenuClick, menuOpen = false, menuBtnRef }: TopNavProp
     e.preventDefault();
     next?.focus();
   };
+
+  if (docked) {
+    return (
+      <header className={styles.header}>
+        <div className={`${styles.bar} ${styles.barDocked}`}>
+          <SearchButton onSearch={onSearch} />
+          <AuthControls />
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className={styles.header}>
@@ -163,7 +190,10 @@ export function TopNav({ onMenuClick, menuOpen = false, menuBtnRef }: TopNavProp
           })}
         </nav>
 
-        <AuthControls />
+        <div className={styles.rightGroup}>
+          <SearchButton onSearch={onSearch} />
+          <AuthControls />
+        </div>
       </div>
     </header>
   );

@@ -29,6 +29,7 @@ import insightStyles from "./insights/insights.module.css";
 import { Button, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, Toggle } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useQueryParam } from "@/lib/useQueryParam";
+import { useOnChange } from "@/lib/useOnChange";
 import { PANELS, POLICY_GROUPS, groupOfPanel, type Panel } from "./tabs";
 
 /** Panels that render policy insights (risk combinations, network, permissions, KBOM). */
@@ -114,14 +115,14 @@ function Policies() {
       else next.delete(id);
       return next;
     });
-  const changeCluster = (id: string) => {
-    setClusterId(id);
+  // The cluster comes from the scope bar (shared by every AKS screen): a new cluster clears the selections made here
+  useOnChange(clusterId, () => {
     setHeatSel(null);
     setIssueId("");
     setNetSel(null);
     setChecked(new Set());
     setWiScan(false);
-  };
+  });
 
   const findings = useMemo(() => (data?.findings ?? []).filter((f) => showSystem || !f.system), [data, showSystem]);
   const namespaces = useMemo(() => (data?.namespaces ?? []).filter((n) => showSystem || !n.system), [data, showSystem]);
@@ -137,13 +138,6 @@ function Policies() {
         meta={data ? <span>{t("pol.scope")} · {t("common.updated")} {new Date(data.generatedAt).toLocaleTimeString(dateLocale(locale))}</span> : <span>{t("pol.scope")}</span>}
         actions={
           <>
-            <Select
-              label={t("common.cluster")}
-              value={clusterId}
-              onChange={changeCluster}
-              placeholder={clustersLoading ? t("common.loading") : t("pol.noCluster")}
-              options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.location})` }))}
-            />
             <Toggle checked={showSystem} onChange={setShowSystem} title={t("pol.systemHint")}>{t("pol.showSystem")}</Toggle>
             <Button onClick={() => { query.reload(); insightsQuery.reload(); if (tab === "workloadIdentity") wiQuery.reload(); }} disabled={!clusterId || query.loading || insightsQuery.loading}>
               {query.loading || insightsQuery.loading ? t("pol.checking") : t("pol.recheck")}

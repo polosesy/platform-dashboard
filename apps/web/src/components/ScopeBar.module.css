@@ -1,0 +1,42 @@
+/* The scope bar — one line above the page header: 구독 › 클러스터 (the fields read as labels + controls) */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sep {
+  align-self: flex-end;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--subtle);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.input {
+  height: 32px;
+  width: min(480px, 100%);
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-small);
+}

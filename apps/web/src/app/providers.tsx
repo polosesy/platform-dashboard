@@ -1,10 +1,11 @@
 "use client";
 
-import { EventType, PublicClientApplication, type AuthenticationResult, type EventMessage } from "@azure/msal-browser";
+import { EventType, InteractionType, PublicClientApplication, type AuthenticationResult, type EventMessage } from "@azure/msal-browser";
 import { broadcastResponseToMainFrame } from "@azure/msal-browser/redirect-bridge";
 import { MsalProvider } from "@azure/msal-react";
 import { useMemo } from "react";
 import { isAuthPopupResponse, msalConfigFor } from "@/lib/msal";
+import { LOGIN_KEYS, loginUrl, reasonOfError } from "@/lib/loginFlow";
 import type { WebRuntimeConfig } from "@/lib/runtimeConfig";
 import { WebConfigProvider } from "@/lib/webConfig";
 import { I18nProvider, useI18n } from "@/lib/i18n";
@@ -15,7 +16,12 @@ import { I18nProvider, useI18n } from "@/lib/i18n";
  * clears the URL synchronously, so it must run at module load — before MsalProvider's
  * handleRedirectPromise could touch the hash. Without this the opener times out after 60 s.
  */
-const popupResponse = typeof window !== "undefined" && isAuthPopupResponse(window.location);
+// The app signs in by redirect (lib/loginFlow.ts): the response then lands in THIS window, marked before leaving —
+// only a response without that mark is a popup's (kept for any popup flow still in use)
+const redirectReturn = (() => {
+  try { return typeof window !== "undefined" && window.sessionStorage.getItem(LOGIN_KEYS.redirecting) === "1"; } catch { return false; }
+})();
+const popupResponse = typeof window !== "undefined" && !redirectReturn && isAuthPopupResponse(window.location);
 const popupBridge: Promise<void> | null = popupResponse
   ? broadcastResponseToMainFrame().catch((e: unknown) => {
       console.error("[auth] could not hand the sign-in response to the main window", e);
@@ -31,6 +37,16 @@ function createMsal(config: WebRuntimeConfig): PublicClientApplication | null {
       if ((ev.eventType === EventType.LOGIN_SUCCESS || ev.eventType === EventType.ACQUIRE_TOKEN_SUCCESS) && ev.payload) {
         const account = (ev.payload as AuthenticationResult).account;
         if (account) pca.setActiveAccount(account);
+      }
+      // Back from the redirect: the mark is spent. A failed sign-in (consent, wrong redirect address …) is told on /login
+      if (ev.eventType === EventType.HANDLE_REDIRECT_END) {
+        try { window.sessionStorage.removeItem(LOGIN_KEYS.redirecting); } catch { /* storage blocked */ }
+      }
+      // A redirect sign-in that failed on the way back (silent token failures are useApiToken's, not this)
+      if (ev.eventType === EventType.ACQUIRE_TOKEN_FAILURE && ev.interactionType === InteractionType.Redirect) {
+        const reason = reasonOfError(ev.error);
+        try { window.sessionStorage.setItem(LOGIN_KEYS.error, reason); } catch { /* storage blocked */ }
+        if (!window.location.pathname.startsWith("/login")) window.location.replace(loginUrl("/", reason));
       }
     });
     return pca;

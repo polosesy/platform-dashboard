@@ -147,8 +147,14 @@ const rule = (sel: string) => {
 };
 
 test("UI kit: panel head 56 · foot 44 · flat · stretches in a row; 12-column grid; chips and badges 24; buttons 32 (touch 44)", () => {
-  assert.match(rule(".panelHead"), /min-height: 56px/);
-  assert.match(rule(".panelFoot"), /min-height: 44px/);
+  assert.match(rule(".panelHead"), /min-height: var\(--panel-head\)/);
+  assert.match(rule(".panelFoot"), /min-height: var\(--panel-foot\)/);
+  // 편안함 56 · 44 · 16 · 56 (default) — 조밀 48 · 36 · 12 · 40 (data-density="compact")
+  assert.match(globals, /--panel-head: 56px;[\s\S]*--panel-foot: 44px;[\s\S]*--panel-pad: 16px;[\s\S]*--row: 56px;/);
+  assert.match(globals, /\[data-density="compact"\] \{\s*--panel-head: 48px;\s*--panel-foot: 36px;\s*--panel-pad: 12px;\s*--row: 40px;/);
+  // Dark is opt-in (data-theme="dark", or "system" under a dark OS) — never the default
+  assert.match(globals, /:root\[data-theme="dark"\] \{/);
+  assert.match(globals, /@media \(prefers-color-scheme: dark\) \{\s*:root\[data-theme="system"\]/);
   assert.match(rule(".panel"), /height: 100%/);
   assert.doesNotMatch(rule(".panel"), /backdrop-filter|box-shadow/, "panels are flat and opaque");
   assert.match(rule(".panelTitle"), /font-size: var\(--text-heading\)/);
@@ -194,7 +200,7 @@ const RAW_BUTTONS: Record<string, number> = {
   "app/policies/insights/RiskHeatmap.tsx": 5, "app/policies/insights/WorkloadIdentityPanel.tsx": 8, "app/policies/page.tsx": 2,
   "app/security/advisories/page.tsx": 2, "app/security/components.tsx": 1, "app/security/risk/IssueQueue.tsx": 1,
   "app/security/risk/page.tsx": 1, "app/security/threats/page.tsx": 1, "app/settings/PermissionTable.tsx": 1,
-  "components/AuthControls.tsx": 2, "components/Sidebar.tsx": 3, "components/TopNav.tsx": 2,
+  "components/AuthControls.tsx": 2, "components/Sidebar.tsx": 3, "components/TopNav.tsx": 3,
 };
 /** Page CSS classes that draw their own badge / chip / pill (the kit has Chip and Badge) — names per file, frozen */
 const OWN_CHIP_CLASSES: Record<string, number> = {

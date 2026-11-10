@@ -3,9 +3,8 @@
   top: 0;
   /* Above page canvases (ReactFlow, maps) so dropdown panels are never covered; below the drawer (40+) */
   z-index: 30;
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 66%, transparent);
-  border-bottom: 1px solid rgba(var(--ink-rgb), 0.10);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
 }
 
 .bar {
@@ -358,6 +357,69 @@ li:not(:first-child) > .panelSection {
 
 @media (max-width: 680px) {
   .nav {
+    display: none;
+  }
+}
+
+/* Docked menu: the bar holds search (left) and the account (right) */
+.barDocked {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 56px;
+  padding: 8px 24px;
+}
+
+.rightGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 100%);
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--subtle);
+  font: inherit;
+  font-size: var(--text-small);
+  cursor: pointer;
+  text-align: left;
+}
+
+.search:hover {
+  border-color: var(--subtle);
+}
+
+.searchText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchKbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 1099px) {
+  .rightGroup .search {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .rightGroup .searchText,
+  .rightGroup .searchKbd {
     display: none;
   }
 }

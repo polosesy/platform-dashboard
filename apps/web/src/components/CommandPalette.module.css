@@ -1,0 +1,122 @@
+/* Ctrl+K quick open — a floating dialog (the one place besides menus that gets --shadow-pop) */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 80px 16px 16px;
+  background: rgba(var(--ink-rgb), 0.28);
+}
+
+.dialog {
+  width: min(600px, 100%);
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--subtle);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-heading);
+  color: var(--ink);
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--subtle);
+}
+
+.list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.item[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.icon {
+  width: 20px;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--muted);
+  flex: none;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.desc {
+  font-size: var(--text-caption);
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group {
+  flex: none;
+  font-size: var(--text-caption);
+  color: var(--subtle);
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--subtle);
+}
+
+.foot {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-caption);
+  color: var(--subtle);
+}

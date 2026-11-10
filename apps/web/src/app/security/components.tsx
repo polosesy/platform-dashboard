@@ -3,7 +3,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMsal } from "@azure/msal-react";
 import type { PostureDomain, PostureRecommendation, PostureSection, PostureSeverity } from "@aud/types";
-import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { Badge, ErrorNotice, Notice, PageHeader, SearchInput, Segmented, type BadgeTone } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { useSecurity } from "./SecurityContext";
@@ -42,7 +41,6 @@ export function SecurityHeader() {
   const { subscriptions, subscriptionId, setSubscriptionId, posture, loading } = useSecurity();
   return (
     <PageHeader
-      actions={<SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />}
       meta={
         <>
           <span>{t("sec.source")}</span>
