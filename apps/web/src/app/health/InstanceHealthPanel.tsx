@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HealthCoverage, HealthSummary, ResourceHealthStatus } from "@aud/types";
-import { Panel } from "@/components/ui";
+import { ErrorNotice, LoadingState, Notice, Panel, Segmented, Stat, Toggle } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
 import { groupKey, isUnlistedUnknown, isUserInitiated, type HeatmapGroupBy } from "@/lib/healthHeatmap";
@@ -35,6 +35,9 @@ const REASON_TYPE_STYLE: Record<string, string> = {
 };
 
 const STATES: HealthState[] = ["Available", "Degraded", "Unavailable", "Unknown"];
+/** The platform's state grammar — colour and glyph together (Unknown = ?, never a colour alone) */
+const STATE_GLYPH: Record<HealthState, string> = { Available: "●", Degraded: "▲", Unavailable: "■", Unknown: "?" };
+const STAT_TONE: Record<HealthState, "success" | "medium" | "high" | undefined> = { Available: "success", Degraded: "medium", Unavailable: "high", Unknown: undefined };
 
 /**
  * Instance tab: one overview row (donut + the four counts Azure returned), the heatmap, the list, and what Resource
@@ -124,19 +127,8 @@ export function InstanceHealthPanel({
     });
   }, [data, total]);
 
-  if (loading) return (
-    <div className={styles.loadingSkeleton}>
-      <div className={styles.spinnerRow}>
-        <div className={styles.spinner} />
-        <span className={styles.spinnerLabel}>{t("health.loading")}</span>
-      </div>
-      <div className={styles.shimmerStrip}>
-        {[0, 1, 2, 3].map((i) => <div key={i} className={`${styles.shimmerBar} ${styles.shimmerStat}`} />)}
-      </div>
-      <div className={`${styles.shimmerBar} ${styles.shimmerTable}`} />
-    </div>
-  );
-  if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
+  if (loading) return <LoadingState label={t("health.loading")} />;
+  if (error) return <ErrorNotice error={error} title={t("health.error")} />;
 
   const signin = data?.note === "signin_required";
   const hasFallbackNote = data?.note && (signin || data.note.includes("mock") || data.note.includes("timed out") || data.note.includes("error"));
@@ -160,33 +152,26 @@ export function InstanceHealthPanel({
 
   return (
     <div className={styles.grid}>
+      {/* One notice (design-system.md · 8): why these are not live numbers; the permissions it needs fold inside it */}
       {hasFallbackNote && (
-        <div className={styles.fallbackNotice}>
-          <div className={styles.fallbackNoticeIcon}>!</div>
-          <div>
-            <div className={styles.fallbackNoticeText}>
-              {signin ? t("common.sampleData")
-                : data.note!.includes("timed out") ? t("health.timeoutFallback")
-                : data.note!.includes("mock") ? t("health.mockFallback")
-                : t("health.errorFallback")}
-            </div>
-            <div className={styles.fallbackNoticeHint}>{signin ? t("auth.signinForReal") : data.note}</div>
-          </div>
-        </div>
-      )}
-
-      {data?.note?.includes("mock") && (
-        <div className={styles.permissionsBox}>
-          <div className={styles.permissionsTitle}>{t("health.permissionsRequired")}</div>
-          <div className={styles.permissionsBody}>
-            <p>{t("health.permissionsNote")}</p>
-            <ul>
-              <li><code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_CLIENT_SECRET</code></li>
-              <li><code>AZURE_SUBSCRIPTION_IDS</code> — {t("health.perm.subs")}</li>
-              <li>RBAC: <strong>Reader</strong> {t("health.perm.reader")} (<code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
-            </ul>
-          </div>
-        </div>
+        <Notice tone={signin ? "info" : "warning"}
+          title={signin ? t("common.sampleData")
+            : data.note!.includes("timed out") ? t("health.timeoutFallback")
+            : data.note!.includes("mock") ? t("health.mockFallback")
+            : t("health.errorFallback")}>
+          {signin ? t("auth.signinForReal") : data.note}
+          {data.note!.includes("mock") && (
+            <details className={styles.noticeDetails}>
+              <summary>{t("health.permissionsRequired")}</summary>
+              <p>{t("health.permissionsNote")}</p>
+              <ul>
+                <li><code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_CLIENT_SECRET</code></li>
+                <li><code>AZURE_SUBSCRIPTION_IDS</code> — {t("health.perm.subs")}</li>
+                <li>RBAC: <strong>Reader</strong> {t("health.perm.reader")} (<code>Microsoft.ResourceHealth/availabilityStatuses/read</code>)</li>
+              </ul>
+            </details>
+          )}
+        </Notice>
       )}
 
       {/* Overview: the donut and the four counts in one row — the same numbers, one place */}
@@ -208,19 +193,14 @@ export function InstanceHealthPanel({
         </div>
         <div className={styles.overviewStats}>
           {(["Available", "Degraded", "Unavailable", "Unknown"] as const).map((s) => (
-            <div key={s} className={styles.statCard}>
-              <div className={styles.statDot} style={{ background: STATE_COLORS[s] }} />
-              <div className={styles.statCount} style={{ color: STATE_COLORS[s] }}>{counts[s]}</div>
-              <div className={styles.statLabel}>{t(`health.state.${s}`)}</div>
-              {s === "Unavailable" && userCount > 0 ? (
-                <div className={styles.statSub} title={t("health.userInitiated.hint")}>{t("health.userInitiated.sub", { n: userCount })}</div>
-              ) : null}
-              {s === "Unknown" && unlistedCount > 0 ? (
-                <div className={styles.statSub} title={t("health.unlisted.hint", { date: coverage?.doc.date ?? "" })}>{t("health.unlisted.sub", { n: unlistedCount })}</div>
-              ) : s === "Unknown" && counts.Unknown > 0 ? (
-                <div className={styles.statSub} title={t("health.unknown.hint")}>{t("health.unknown.sub")}</div>
-              ) : null}
-            </div>
+            <Stat key={s}
+              label={<><span aria-hidden="true" style={{ color: STATE_COLORS[s] }}>{STATE_GLYPH[s]}</span> {t(`health.state.${s}`)}</>}
+              value={counts[s]}
+              tone={STAT_TONE[s]}
+              hint={s === "Unavailable" && userCount > 0 ? <span title={t("health.userInitiated.hint")}>{t("health.userInitiated.sub", { n: userCount })}</span>
+                : s === "Unknown" && unlistedCount > 0 ? <span title={t("health.unlisted.hint", { date: coverage?.doc.date ?? "" })}>{t("health.unlisted.sub", { n: unlistedCount })}</span>
+                : s === "Unknown" && counts.Unknown > 0 ? <span title={t("health.unknown.hint")}>{t("health.unknown.sub")}</span>
+                : undefined} />
           ))}
         </div>
       </section>
@@ -241,29 +221,21 @@ export function InstanceHealthPanel({
         />
       ) : null}
 
-      <div className={styles.tableCard}>
-        <div className={styles.cardTitle}>
-          <span className={styles.cardTitleMain}>
-            {t("health.resources")}
-            {groupFilter ? (
-              <button type="button" className={styles.groupChip} onClick={() => setGroupFilter(null)} aria-label={t("health.heatmap.clearGroup")}>
-                {groupFilter.label} ✕
-              </button>
-            ) : null}
-          </span>
-          <div className={styles.filterGroup}>
-            {(["all", ...STATES] as FilterState[]).map((f) => (
-              <button key={f} type="button" className={`${styles.filterBtn} ${filter === f ? styles.filterActive : ""}`} onClick={() => setFilter(f)}>
-                {f === "all" ? `${t("health.filterAll")} (${total})` : t(`health.state.${f}`)}
-              </button>
-            ))}
-            {userCount > 0 ? (
-              <button type="button" className={`${styles.filterBtn} ${excludeUser ? styles.filterActive : ""}`} aria-pressed={excludeUser} onClick={() => setExcludeUser((v) => !v)}>
-                {t("health.filter.excludeUser", { n: userCount })}
-              </button>
-            ) : null}
-          </div>
-        </div>
+      <Panel flush
+        title={t("health.resources")}
+        sub={groupFilter ? undefined : String(filtered.length)}
+        actions={<>
+          {groupFilter ? (
+            <button type="button" className={styles.groupChip} onClick={() => setGroupFilter(null)} aria-label={t("health.heatmap.clearGroup")}>
+              {groupFilter.label} ✕
+            </button>
+          ) : null}
+          <Segmented label={t("health.filterLabel")} value={filter} onChange={setFilter}
+            items={(["all", ...STATES] as FilterState[]).map((f) => ({ id: f, label: f === "all" ? `${t("health.filterAll")} (${total})` : `${STATE_GLYPH[f]} ${t(`health.state.${f}`)}` }))} />
+          {userCount > 0 ? (
+            <Toggle checked={excludeUser} onChange={setExcludeUser}>{t("health.filter.excludeUser", { n: userCount })}</Toggle>
+          ) : null}
+        </>}>
         {/* Selected from the heatmap: pinned above the list (outside its scroll box), Azure's fields only */}
         <div className={styles.srOnly} aria-live="polite">
           {selected ? t("health.selected.live", { name: selected.resourceName, state: t(`health.state.${selected.availabilityState}`) }) : ""}
@@ -338,7 +310,7 @@ export function InstanceHealthPanel({
             <div className={styles.empty}>{loading ? t("health.loading") : t("health.noMatch")}</div>
           )}
         </div>
-      </div>
+      </Panel>
 
       {/* What Resource Health does not answer for — counts by type against Microsoft's supported list */}
       {coverage && coverageOpen && !coverage.gaps.length ? (

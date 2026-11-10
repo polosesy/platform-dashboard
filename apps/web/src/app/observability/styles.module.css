@@ -950,7 +950,10 @@
 .sloCellSub { display: block; font-size: var(--text-caption); color: var(--subtle); }
 .sloWhere { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 @media (max-width: 1100px) { .sloWhere { grid-template-columns: minmax(0, 1fr); } }
-.sloWhereList { margin: 0; padding-left: 20px; display: grid; gap: 12px; font-size: var(--text-small); }
+.sloWhereStack { display: grid; gap: 16px; }
+.sloWhereList { margin: 0; padding-left: 20px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 24px; font-size: var(--text-small); }
+@media (max-width: 1100px) { .sloWhereList { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .sloWhereList { grid-template-columns: minmax(0, 1fr); } }
 .sloWhereList li { display: grid; gap: 4px; }
 .sloWhereList span { color: var(--muted); }
 .sloCmd, .sloCode { font-family: var(--font-mono); font-size: var(--text-caption); }

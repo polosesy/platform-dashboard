@@ -44,12 +44,14 @@
 
 /* ── Table ── */
 
+/* Inside the objects Panel (flush): the panel draws the border — the table only scrolls sideways when narrow */
 .tableWrap {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: rgba(var(--paper-rgb), 0.62);
-  backdrop-filter: blur(12px);
-  overflow: hidden;
+  overflow-x: auto;
+}
+
+.kindCell {
+  font-size: var(--text-small);
+  color: var(--muted);
 }
 
 .table {

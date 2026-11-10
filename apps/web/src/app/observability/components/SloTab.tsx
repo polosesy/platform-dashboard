@@ -269,6 +269,10 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
   const draft = useMemo(() => sloConfigDraft(d), [d]);
   const buckets = useMemo(() => bucketHints(d.buckets), [d]);
   const sli = (s: SloService, kind: SloSli["kind"]) => s.slis.find((x) => x.kind === kind);
+  // The met tier, or why there is none: not judged (too few requests / no data / query failed) is not "missed"
+  const metText = (x: SloSli | undefined) => !x ? "—"
+    : x.state === "lowTraffic" || x.state === "noData" || x.state === "queryFailed" ? t(`ob.slo.g.notJudged.${x.state}`)
+    : x.achievable != null ? t("ob.slo.g.met", { v: targetText(x.achievable) }) : t("ob.slo.g.metNone");
   const copy = { copyLabel: t("ob.slo.copy"), copiedLabel: t("ob.slo.copied") };
   const steps = [1, 2, 3, 4] as const;
 
@@ -299,7 +303,7 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
                   <span className={styles.sloBuckets}>
                     <span className={styles.stackMuted}>{t("ob.slo.g.buckets")}</span>
                     {buckets.picks.map((p) => (
-                      <Chip key={p.ms} level={p.exact ? "ok" : p.countedMs === null ? "unknown" : "plain"} glyph={p.exact ? "●" : p.countedMs === null ? "?" : "→"}
+                      <Chip key={p.ms} level={p.exact ? "ok" : p.countedMs === null ? "unknown" : "plain"} glyph={p.exact ? "●" : p.countedMs === null ? "?" : false}
                         title={p.countedMs === null ? t("ob.slo.g.pickNone") : p.exact ? t("ob.slo.g.pickExact") : t("ob.slo.g.pickBelow", { v: msText(p.countedMs) })}>
                         {p.exact || p.countedMs === null ? msText(p.ms) : `${msText(p.ms)} → ${msText(p.countedMs)}`}
                       </Chip>
@@ -340,8 +344,8 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
                   return (
                     <tr key={`${s.namespace}/${s.application}`}>
                       <td><span className={styles.sloCellMain}>{s.application || t("ob.slo.noAppName")}</span><span className={styles.sloCellSub}>{s.namespace}</span></td>
-                      <td><span className={styles.sloCellMain}>{pctText(av?.sli ?? null)}</span><span className={styles.sloCellSub}>{av?.achievable != null ? t("ob.slo.g.met", { v: targetText(av.achievable) }) : t("ob.slo.g.metNone")}</span></td>
-                      <td><span className={styles.sloCellMain}>{pctText(lat?.sli ?? null)}</span><span className={styles.sloCellSub}>{lat ? `${t("ob.slo.g.within", sliLabelParams(lat))} · ${lat.achievable != null ? t("ob.slo.g.met", { v: targetText(lat.achievable) }) : t("ob.slo.g.metNone")}` : "—"}</span></td>
+                      <td><span className={styles.sloCellMain}>{pctText(av?.sli ?? null)}</span><span className={styles.sloCellSub}>{metText(av)}</span></td>
+                      <td><span className={styles.sloCellMain}>{pctText(lat?.sli ?? null)}</span><span className={styles.sloCellSub}>{lat ? `${t("ob.slo.g.within", sliLabelParams(lat))} · ${metText(lat)}` : "—"}</span></td>
                       <td><Chip level={configured ? "info" : "plain"} glyph={false}>{t(configured ? "ob.slo.g.source.config" : "ob.slo.g.source.default")}</Chip></td>
                     </tr>
                   );
@@ -354,7 +358,7 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
 
       <Cell span={12}>
         <Panel title={t("ob.slo.g.whereTitle")} footer={<span>{t("ob.slo.g.whereFoot")}</span>}>
-          <div className={styles.sloWhere}>
+          <div className={styles.sloWhereStack}>
             <ol className={styles.sloWhereList}>
               <li><strong>{t("ob.slo.g.where.find.t")}</strong><span>{t("ob.slo.g.where.find.d")}</span></li>
               <li><strong>{t("ob.slo.g.where.onprem.t")}</strong><span>{t("ob.slo.g.where.onprem.d")}</span><code className={styles.sloCmd}>sudo ~/aud-runtime/audctl restart</code></li>

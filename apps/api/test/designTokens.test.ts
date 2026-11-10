@@ -178,22 +178,23 @@ test("SLO tab is built from the kit: grid cells, panels, chips — no hand-made 
  * <Button>/<Chip>/<Badge>, and an existing file that needs another raw one raises its number here on purpose.
  */
 const RAW_BUTTONS: Record<string, number> = {
-  "app/architecture/components/ArchNodes.tsx": 1, "app/architecture/components/CategoryFilter.tsx": 1, "app/architecture/components/DiagramCanvas.tsx": 1,
+  "app/architecture/components/ArchNodes.tsx": 3, "app/architecture/components/CategoryFilter.tsx": 1, "app/architecture/components/DiagramCanvas.tsx": 1,
   "app/architecture/components/Inspector.tsx": 6, "app/architecture/components/Legend.tsx": 1, "app/architecture/page.tsx": 4,
-  "app/health/HealthHeatmap.tsx": 1, "app/health/InstanceHealthPanel.tsx": 5, "app/health/page.tsx": 2, "app/hubble/components/ServiceMapTab.tsx": 1,
-  "app/live-diagram/components/AlertSidebar.tsx": 3, "app/live-diagram/components/EdgeDetailPanel.tsx": 1, "app/live-diagram/components/FaultTimeline.tsx": 1,
-  "app/live-diagram/components/GroupNode.tsx": 3, "app/live-diagram/components/Legend.tsx": 1, "app/live-diagram/components/LiveNode.tsx": 2,
-  "app/live-diagram/components/ResourceDetailPanel.tsx": 12, "app/live-diagram/components/detail/HybridSection.tsx": 2,
-  "app/live-diagram/components/detail/PeeringSection.tsx": 1, "app/live-diagram/components/detail/PrivateLinkUsage.tsx": 4,
-  "app/live-diagram/components/detail/WafPanel.tsx": 4, "app/live-diagram/components/detail/primitives.tsx": 3, "app/live-diagram/page.tsx": 1,
-  "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1, "app/observability/components/WorkloadHeatmap.tsx": 11,
-  "app/observability/components/WorkloadLogStream.tsx": 2, "app/policies/components/ManagedComponentsPanel.tsx": 1,
-  "app/policies/components/NetpolSimPanel.tsx": 6, "app/policies/insights/AttackGraph.tsx": 2, "app/policies/insights/ExplorePanel.tsx": 12,
-  "app/policies/insights/Inspector.tsx": 2, "app/policies/insights/KbomPanel.tsx": 2, "app/policies/insights/NetworkMap.tsx": 7,
-  "app/policies/insights/PermissionMatrix.tsx": 1, "app/policies/insights/RiskCombos.tsx": 11, "app/policies/insights/RiskHeatmap.tsx": 5,
-  "app/policies/insights/WorkloadIdentityPanel.tsx": 8, "app/policies/page.tsx": 1, "app/security/advisories/page.tsx": 2,
-  "app/security/components.tsx": 1, "app/security/risk/IssueQueue.tsx": 1, "app/security/risk/page.tsx": 1, "app/security/threats/page.tsx": 1,
-  "components/AuthControls.tsx": 1, "components/Sidebar.tsx": 3,
+  "app/health/HealthHeatmap.tsx": 3, "app/health/InstanceHealthPanel.tsx": 3, "app/health/page.tsx": 4,
+  "app/hubble/components/ServiceMapTab.tsx": 1, "app/live-diagram/components/AlertSidebar.tsx": 3, "app/live-diagram/components/EdgeDetailPanel.tsx": 1,
+  "app/live-diagram/components/EmptySubnetsNode.tsx": 1, "app/live-diagram/components/FaultTimeline.tsx": 1, "app/live-diagram/components/GroupNode.tsx": 5,
+  "app/live-diagram/components/Legend.tsx": 1, "app/live-diagram/components/LiveCanvas.tsx": 1, "app/live-diagram/components/LiveNode.tsx": 3,
+  "app/live-diagram/components/ResourceDetailPanel.tsx": 12, "app/live-diagram/components/detail/HybridSection.tsx": 2, "app/live-diagram/components/detail/PeeringSection.tsx": 1,
+  "app/live-diagram/components/detail/PrivateLinkUsage.tsx": 4, "app/live-diagram/components/detail/WafPanel.tsx": 4, "app/live-diagram/components/detail/primitives.tsx": 3,
+  "app/live-diagram/page.tsx": 4, "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1,
+  "app/observability/components/LogsTab.tsx": 1, "app/observability/components/WorkloadHeatmap.tsx": 11, "app/observability/components/WorkloadLogStream.tsx": 2,
+  "app/policies/components/ManagedComponentsPanel.tsx": 1, "app/policies/components/NetpolSimPanel.tsx": 6, "app/policies/insights/AttackGraph.tsx": 2,
+  "app/policies/insights/ExplorePanel.tsx": 12, "app/policies/insights/Inspector.tsx": 2, "app/policies/insights/KbomPanel.tsx": 2,
+  "app/policies/insights/NetworkMap.tsx": 7, "app/policies/insights/PermissionMatrix.tsx": 1, "app/policies/insights/RiskCombos.tsx": 12,
+  "app/policies/insights/RiskHeatmap.tsx": 5, "app/policies/insights/WorkloadIdentityPanel.tsx": 8, "app/policies/page.tsx": 2,
+  "app/security/advisories/page.tsx": 2, "app/security/components.tsx": 1, "app/security/risk/IssueQueue.tsx": 1,
+  "app/security/risk/page.tsx": 1, "app/security/threats/page.tsx": 1, "app/settings/PermissionTable.tsx": 1,
+  "components/AuthControls.tsx": 2, "components/Sidebar.tsx": 3, "components/TopNav.tsx": 2,
 };
 /** Page CSS classes that draw their own badge / chip / pill (the kit has Chip and Badge) — names per file, frozen */
 const OWN_CHIP_CLASSES: Record<string, number> = {
@@ -207,7 +208,7 @@ test("ratchet: raw <button>s and page-made chip classes outside the kit only go 
   for (const f of sources) {
     const r = rel(f);
     if (!r.endsWith(".tsx") || r.startsWith("components/ui/")) continue;
-    const n = (readFileSync(f, "utf8").match(/<button[ >]/g) ?? []).length;
+    const n = (readFileSync(f, "utf8").match(/<button[\s>]/g) ?? []).length; // a tag split over lines counts too
     if (n > (RAW_BUTTONS[r] ?? 0)) over.push(`${r}: ${n} raw <button> (frozen at ${RAW_BUTTONS[r] ?? 0}) — use <Button> from @/components/ui`);
   }
   for (const f of cssModules) {

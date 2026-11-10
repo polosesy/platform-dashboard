@@ -6,7 +6,7 @@ import type { KubernetesClusterAccess, KubernetesClusterOverview, KubernetesObje
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
-import { Badge, ErrorNotice, LoadingState, Notice, PageHeader, Select, Stat, useNoteText } from "@/components/ui";
+import { Badge, Cell, Chip, ErrorNotice, Grid, LoadingState, Notice, PageHeader, Panel, Select, Stat, useNoteText, type ChipLevel } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 
 /** base64url of the cluster's ARM resource ID (path segment for the overview API). */
@@ -36,6 +36,18 @@ const ALL_KINDS: KubernetesObjectKind[] = [
   "StatefulSet", "DaemonSet", "Service", "Ingress",
   "ConfigMap", "Secret", "PersistentVolumeClaim", "Job", "CronJob",
 ];
+
+/** A Kubernetes status word → the platform's state grammar (the word itself is shown; nothing is guessed from it beyond this) */
+const STATUS_OK = new Set(["Running", "Ready", "Active", "Bound", "Succeeded", "Complete", "Completed", "Available"]);
+const STATUS_WARN = new Set(["Pending", "ContainerCreating", "Terminating", "Unknown", "Suspended"]);
+const STATUS_DANGER = new Set(["Failed", "CrashLoopBackOff", "Error", "NotReady", "ImagePullBackOff", "ErrImagePull", "Lost", "OOMKilled"]);
+function statusLevel(status: string | undefined): ChipLevel {
+  if (!status) return "plain";
+  if (STATUS_OK.has(status)) return "ok";
+  if (STATUS_DANGER.has(status)) return "danger";
+  if (STATUS_WARN.has(status)) return "warn";
+  return "plain";
+}
 
 function relativeAge(iso: string): string {
   if (!iso) return "-";
@@ -120,14 +132,6 @@ export default function KubernetesPage() {
               placeholder={loading ? t("common.loading") : t("pol.noCluster")}
               options={clusters.map((c) => ({ value: c.id, label: `${c.name} (${c.location})` }))}
             />
-            {namespaces.length > 0 ? (
-              <Select
-                label={t("k8s.namespace")}
-                value={namespaceFilter}
-                onChange={setNamespaceFilter}
-                options={[{ value: "All", label: t("k8s.allNamespaces") }, ...namespaces.map((ns) => ({ value: ns, label: ns }))]}
-              />
-            ) : null}
           </>
         }
       />
@@ -138,94 +142,69 @@ export default function KubernetesPage() {
       <ErrorNotice error={error} />
       {loading ? <LoadingState /> : null}
 
-      {/* Summary cards */}
+      {/* 12 columns: four cards × 3, the objects table 12 (design-system.md · 8) */}
       {overview && (
-        <div className={styles.summaryStrip}>
-          <Stat label={t("k8s.nodes")} value={overview.summary.nodeCount} />
-          <Stat label={t("k8s.pods")} value={overview.summary.podTotal} />
-          <Stat label={t("k8s.running")} value={overview.summary.podRunning} tone="success" />
-          <Stat label={t("k8s.pending")} value={overview.summary.podPending} tone={overview.summary.podPending ? "medium" : undefined} />
-          <Stat label={t("k8s.failed")} value={overview.summary.podFailed} tone={overview.summary.podFailed ? "high" : undefined} />
-          <Stat label="Deployment" value={overview.summary.deploymentCount} />
-          <Stat label="Service" value={overview.summary.serviceCount} />
-        </div>
-      )}
+        <Grid>
+          <Cell span={3}><Stat label={t("k8s.nodes")} value={overview.summary.nodeCount} /></Cell>
+          <Cell span={3}>
+            <Stat label={t("k8s.podsRunning")} value={`${overview.summary.podRunning} / ${overview.summary.podTotal}`}
+              tone={overview.summary.podFailed ? "high" : overview.summary.podPending ? "medium" : "success"}
+              hint={t("k8s.podsHint", { pending: overview.summary.podPending, failed: overview.summary.podFailed })} />
+          </Cell>
+          <Cell span={3}><Stat label="Deployment" value={overview.summary.deploymentCount} /></Cell>
+          <Cell span={3}><Stat label="Service" value={overview.summary.serviceCount} /></Cell>
 
-      {/* Kind filter */}
-      {overview && (
-        <div className={styles.kindFilter}>
-          <button
-            type="button"
-            className={`${styles.kindBtn} ${kindFilter === "All" ? styles.kindBtnActive : ""}`}
-            onClick={() => setKindFilter("All")}
-          >
-            {t("common.all")} ({overview.objects.length})
-          </button>
-          {visibleKinds.map((kind) => {
-            const count = overview.objects.filter((o) => o.kind === kind).length;
-            return (
-              <button
-                key={kind}
-                type="button"
-                className={`${styles.kindBtn} ${kindFilter === kind ? styles.kindBtnActive : ""}`}
-                onClick={() => setKindFilter(kind)}
-              >
-                {kind} ({count})
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Objects table */}
-      {overviewLoading ? <LoadingState /> : null}
-      {overview && !overviewLoading && (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>{t("k8s.col.name")}</th>
-                <th>{t("k8s.namespace")}</th>
-                <th>{t("k8s.col.kind")}</th>
-                <th>{t("k8s.col.status")}</th>
-                <th>{t("k8s.col.ready")}</th>
-                <th>{t("k8s.col.restarts")}</th>
-                <th>{t("k8s.col.age")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredObjects.map((obj, i) => (
-                <tr key={`${obj.kind}-${obj.namespace}-${obj.name}-${i}`}>
-                  <td>
-                    <span className={styles.objectName}>{obj.name}</span>
-                  </td>
-                  <td className={styles.mono}>{obj.namespace || "-"}</td>
-                  <td>
-                    <span className={styles.kindBadge}>{obj.kind}</span>
-                  </td>
-                  <td>
-                    <span className={styles.statusBadge} data-status={obj.status}>
-                      {obj.status}
-                    </span>
-                  </td>
-                  <td className={styles.mono}>{obj.ready ?? obj.replicas ?? "-"}</td>
-                  <td className={styles.mono}>
-                    {obj.restarts !== undefined ? obj.restarts : "-"}
-                  </td>
-                  <td className={styles.mono}>{relativeAge(obj.createdAt)}</td>
-                </tr>
-              ))}
-              {filteredObjects.length === 0 && (
-                <tr>
-                  <td colSpan={7}>
-                    <div className={styles.tableHint}>{t("k8s.noMatch")}</div>
-                  </td>
-                </tr>
+          <Cell span={12}>
+            <Panel flush title={t("k8s.objects")} sub={`${filteredObjects.length} / ${overview.objects.length}`}
+              actions={<>
+                <Select label={t("k8s.col.kind")} hideLabel value={kindFilter} onChange={(v) => setKindFilter(v as KubernetesObjectKind | "All")}
+                  options={[{ value: "All", label: `${t("common.all")} (${overview.objects.length})` },
+                    ...visibleKinds.map((kind) => ({ value: kind, label: `${kind} (${overview.objects.filter((o) => o.kind === kind).length})` }))]} />
+                {namespaces.length > 0 ? (
+                  <Select label={t("k8s.namespace")} hideLabel value={namespaceFilter} onChange={setNamespaceFilter}
+                    options={[{ value: "All", label: t("k8s.allNamespaces") }, ...namespaces.map((ns) => ({ value: ns, label: ns }))]} />
+                ) : null}
+              </>}>
+              {overviewLoading ? <LoadingState /> : (
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>{t("k8s.col.name")}</th>
+                        <th>{t("k8s.namespace")}</th>
+                        <th>{t("k8s.col.kind")}</th>
+                        <th>{t("k8s.col.status")}</th>
+                        <th>{t("k8s.col.ready")}</th>
+                        <th>{t("k8s.col.restarts")}</th>
+                        <th>{t("k8s.col.age")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredObjects.map((obj, i) => (
+                        <tr key={`${obj.kind}-${obj.namespace}-${obj.name}-${i}`}>
+                          <td><span className={styles.objectName}>{obj.name}</span></td>
+                          <td className={styles.mono}>{obj.namespace || "-"}</td>
+                          <td className={styles.kindCell}>{obj.kind}</td>
+                          <td>{obj.status ? <Chip level={statusLevel(obj.status)}>{obj.status}</Chip> : "-"}</td>
+                          <td className={styles.mono}>{obj.ready ?? obj.replicas ?? "-"}</td>
+                          <td className={styles.mono}>{obj.restarts !== undefined ? obj.restarts : "-"}</td>
+                          <td className={styles.mono}>{relativeAge(obj.createdAt)}</td>
+                        </tr>
+                      ))}
+                      {filteredObjects.length === 0 && (
+                        <tr>
+                          <td colSpan={7}><div className={styles.tableHint}>{t("k8s.noMatch")}</div></td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </Panel>
+          </Cell>
+        </Grid>
       )}
+      {overviewLoading && !overview ? <LoadingState /> : null}
     </div>
   );
 }
