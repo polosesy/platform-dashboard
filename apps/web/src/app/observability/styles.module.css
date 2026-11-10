@@ -892,50 +892,67 @@
 .hmRowNs, .hmRowKind { color: var(--muted); }
 
 /* ── SLO (SloTab) — platform state grammar: left strip + glyph, ● ok · ▲ warn · ■ danger · ○ not judged · ? failed ── */
-.slo { display: grid; gap: 14px; min-width: 0; }
-.sloFilters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.sloGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; align-items: start; }
-.sloCard {
-  display: grid; gap: 10px; min-width: 0; padding: 12px 14px 12px 16px;
-  border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
-}
-.sloCard[data-level="danger"] { border-left-color: var(--danger); }
-.sloCard[data-level="warn"] { border-left-color: var(--warning); }
-.sloCard[data-level="ok"] { border-left-color: var(--success); }
-.sloCard[data-level="unknown"] { border-left-style: dashed; }
-.sloSli { display: grid; gap: 4px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
-.sloSliHead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
-.sloSliName { font-size: var(--text-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sloSli[data-level="danger"] .sloSliName { color: var(--danger); }
-.sloSli[data-level="warn"] .sloSliName { color: var(--warning); }
-.sloVal { font-size: var(--text-title); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sloTarget { font-size: var(--text-caption); }
-.sloBar { height: 8px; border-radius: var(--radius-sm); background: rgba(var(--ink-rgb), 0.08); overflow: hidden; }
-.sloBar span { display: block; height: 100%; border-radius: var(--radius-sm); background: var(--success); }
-.sloSli[data-level="warn"] .sloBar span { background: var(--warning); }
-.sloSli[data-level="danger"] .sloBar span, .sloBar span[data-over] { background: var(--danger); }
-.sloSli[data-level="neutral"] .sloBar span, .sloSli[data-level="unknown"] .sloBar span { background: var(--muted); }
-.sloFoot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; font-size: var(--text-caption); color: var(--muted); }
-.sloChips { display: flex; flex-wrap: wrap; gap: 4px; }
-.sloChip {
-  padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-caption); white-space: nowrap;
-  font-variant-numeric: tabular-nums; color: var(--muted);
-}
-.sloChip[data-level="danger"] { color: var(--danger); border-color: rgba(var(--danger-rgb), 0.5); background: rgba(var(--danger-rgb), 0.08); }
-.sloChip[data-level="warn"] { color: var(--warning); border-color: rgba(var(--warning-rgb), 0.5); background: rgba(var(--warning-rgb), 0.08); }
-.sloChip[data-level="unknown"] { border-style: dashed; }
-.sloAdvice { display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(var(--accent-rgb), 0.06); font-size: var(--text-caption); }
-.sloAdvice ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
-.sloAdviceTitle { font-weight: 700; }
-.sloDetails { font-size: var(--text-caption); min-width: 0; }
-.sloDetails summary { cursor: pointer; color: var(--accent); }
-.sloDetail { display: grid; gap: 6px; margin-top: 8px; min-width: 0; }
-.sloDetail h4 { margin: 4px 0 0; font-size: var(--text-small); }
+.slo { display: grid; gap: 16px; min-width: 0; }
+/* View switch + basis on one line */
+.sloTop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.sloMeta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--muted); }
+.sloEmptyCode { width: min(100%, 640px); margin-top: 12px; text-align: left; }
+/* Section bar above the cards — the same row height as a panel head, no box (the cards are the panels) */
+.sloBar12 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 40px; }
+.sloSection { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--text-heading); font-weight: 600; line-height: var(--leading-heading); }
+.sloSectionSub { font-size: var(--text-small); font-weight: 400; color: var(--subtle); }
+.sloControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sloFootLine { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: var(--text-small); color: var(--muted); }
+.sloLinkBtn { appearance: none; border: 0; background: none; padding: 0; font: inherit; font-weight: 500; color: var(--accent-strong); cursor: pointer; }
+.sloLinkBtn:hover { text-decoration: underline; }
+.sloFootNote { font-size: var(--text-small); color: var(--subtle); font-variant-numeric: tabular-nums; }
+
+/* Card body: the two SLIs side by side (stacked when the card is narrow) */
+.sloSlis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px 24px; }
+.sloSli { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.sloSliHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
+.sloSliName { font-size: var(--text-small); font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sloSli[data-level="danger"] .sloSliName { color: var(--danger-strong); }
+.sloSli[data-level="warn"] .sloSliName { color: var(--warning-strong); }
+.sloExplore { font-size: var(--text-small); color: var(--accent-strong); text-decoration: none; }
+.sloVal { font-size: var(--text-display); font-weight: 700; line-height: var(--leading-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.sloTarget { font-size: var(--text-caption); color: var(--muted); }
+/* Budget meter: fill = budget used, the tick at 75 % = the "watch" line, red past 100 % */
+.sloMeter { position: relative; height: 8px; margin: 4px 0; border-radius: var(--radius-pill); background: rgba(var(--ink-rgb), 0.08); }
+.sloMeterFill { position: absolute; inset: 0 auto 0 0; border-radius: var(--radius-pill); background: var(--success); }
+.sloSli[data-level="warn"] .sloMeterFill { background: var(--warning); }
+.sloSli[data-level="danger"] .sloMeterFill, .sloMeterFill[data-over] { background: var(--danger); }
+.sloSli[data-level="neutral"] .sloMeterFill, .sloSli[data-level="unknown"] .sloMeterFill { background: var(--subtle); }
+.sloMeterTick { position: absolute; left: 75%; top: -3px; width: 1px; height: 14px; background: var(--subtle); }
+.sloBudget { font-size: var(--text-caption); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sloChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sloAdvice { display: grid; gap: 4px; margin-top: 16px; padding: 12px; border-radius: var(--radius-sm); background: var(--panel-sunken); font-size: var(--text-small); }
+.sloAdvice ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.sloAdviceTitle { font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
+.sloDetails { display: grid; gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); min-width: 0; }
+.sloDetail { display: grid; gap: 8px; min-width: 0; }
+.sloDetail h3 { margin: 0; font-size: var(--text-small); font-weight: 600; }
 .sloUri { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sloExpr { display: block; font-size: var(--text-caption); color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
-.sloPre { margin: 6px 0 0; padding: 8px; border-radius: var(--radius-sm); background: rgba(var(--ink-rgb), 0.05); font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
-.sloExplain { font-size: var(--text-small); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); }
-.sloExplain summary { cursor: pointer; font-weight: 600; }
-.sloExplain dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 10px 0 0; }
-.sloExplain dt { font-weight: 700; }
-.sloExplain dd { margin: 0; }
+.sloExpr { display: block; font-family: var(--font-mono); font-size: var(--text-caption); color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* Guide */
+.sloText { margin: 0; font-size: var(--text-small); color: var(--muted); line-height: var(--leading-body); }
+.sloDefs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px 16px; margin: 0; font-size: var(--text-small); }
+.sloDefs dt { font-weight: 600; }
+.sloDefs dd { margin: 0; color: var(--muted); }
+.sloBuckets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.sloTableWrap { overflow-x: auto; }
+.sloTable { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
+.sloTable th { height: 40px; padding: 0 16px; text-align: left; font-size: var(--text-caption); font-weight: 500; color: var(--muted); background: var(--panel-sunken); white-space: nowrap; }
+.sloTable td { padding: 8px 16px; border-top: 1px solid var(--border); vertical-align: middle; font-variant-numeric: tabular-nums; }
+.sloTable tr { height: 56px; }
+.sloCellMain { display: block; font-weight: 600; }
+.sloCellSub { display: block; font-size: var(--text-caption); color: var(--subtle); }
+.sloWhere { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
+@media (max-width: 1100px) { .sloWhere { grid-template-columns: minmax(0, 1fr); } }
+.sloWhereList { margin: 0; padding-left: 20px; display: grid; gap: 12px; font-size: var(--text-small); }
+.sloWhereList li { display: grid; gap: 4px; }
+.sloWhereList span { color: var(--muted); }
+.sloCmd, .sloCode { font-family: var(--font-mono); font-size: var(--text-caption); }
+.sloCmd { justify-self: start; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--panel-sunken); }
+.sloUninst { display: grid; gap: 12px; align-content: start; }

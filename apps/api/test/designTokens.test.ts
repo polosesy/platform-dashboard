@@ -135,3 +135,39 @@ test("shadows: surfaces are flat — a blurred shadow only through var(--shadow-
   for (const t of ["--shadow-raise", "--shadow-pop", "--ring-accent", "--motion-fast", "--motion-base", "--motion-slow"]) assert.match(globals, new RegExp(`${t}:`), t);
   assert.match(globals, /prefers-reduced-motion: reduce/);
 });
+
+// Step 2 — the UI kit carries the panel rules (design canvas ⑤): every screen gets them by using the kit
+const kitCss = readFileSync(join(webSrc, "components", "ui", "ui.module.css"), "utf8");
+const kitTsx = readFileSync(join(webSrc, "components", "ui", "index.tsx"), "utf8");
+const rule = (sel: string) => {
+  const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = kitCss.match(new RegExp(`(^|\\n)${esc} \\{([^}]*)\\}`));
+  assert.ok(m, `ui.module.css has ${sel}`);
+  return m![2]!;
+};
+
+test("UI kit: panel head 56 · foot 44 · flat · stretches in a row; 12-column grid; chips and badges 24; buttons 32 (touch 44)", () => {
+  assert.match(rule(".panelHead"), /min-height: 56px/);
+  assert.match(rule(".panelFoot"), /min-height: 44px/);
+  assert.match(rule(".panel"), /height: 100%/);
+  assert.doesNotMatch(rule(".panel"), /backdrop-filter|box-shadow/, "panels are flat and opaque");
+  assert.match(rule(".panelTitle"), /font-size: var\(--text-heading\)/);
+  assert.match(rule(".grid"), /grid-template-columns: repeat\(12, minmax\(0, 1fr\)\)/);
+  for (const n of [3, 4, 6, 8, 9, 12]) assert.ok(kitCss.includes(`.span${n} { grid-column: span ${n}; }`), `span ${n}`);
+  assert.match(rule(".chip"), /height: 24px/);
+  assert.match(rule(".badge"), /height: 24px/);
+  assert.match(rule(".button"), /height: 32px/);
+  assert.match(rule(".lg"), /height: 44px/);
+  assert.match(kitCss, /@media \(pointer: coarse\) \{[\s\S]*?min-height: 44px/, "touch screens get 44px controls");
+  assert.doesNotMatch(rule(".notice"), /border-left-width/, "no thick left edge on notices");
+  for (const name of ["Panel", "Grid", "Cell", "Chip", "CopyButton", "CodeBlock"]) assert.ok(kitTsx.includes(`export function ${name}(`) || kitTsx.includes(`export function ${name}<`), name);
+});
+
+test("SLO tab is built from the kit: grid cells, panels, chips — no hand-made card edges", () => {
+  const tab = readFileSync(join(webSrc, "app", "observability", "components", "SloTab.tsx"), "utf8");
+  for (const c of ["<Grid>", "<Cell span={3}>", "<Cell span={6}", "<Panel", "<Chip", "<CodeBlock"]) assert.ok(tab.includes(c), c);
+  const css = readFileSync(join(webSrc, "app", "observability", "styles.module.css"), "utf8");
+  assert.doesNotMatch(css, /\.sloCard\b|border-left: 4px/, "the old left-striped SLO card is gone");
+  // One notice per screen: the tab renders at most one (gaps outrank the default-target note)
+  assert.equal((tab.match(/<Notice /g) ?? []).length, 3, "metrics state · gaps · default target — and the page shows only one of them");
+});

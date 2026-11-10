@@ -35,27 +35,87 @@ export function PageHeader({ actions, meta, title, desc }: { actions?: ReactNode
   );
 }
 
-/* ── Panel ── */
+/* ── Panel ──
+   One anatomy for every panel and card (design-system.md · ⑤): head 56 (title 16/600 + meta · controls ≤ 32 on the
+   right) · body · optional foot 44 (counts, source, a link). Panels in one row of a Grid share a height — the foot
+   sits at the bottom and the spare room stays under the body. */
 export function Panel({
-  title, sub, actions, children, flush, className, id, labelledBy,
-}: { title?: ReactNode; sub?: ReactNode; actions?: ReactNode; children: ReactNode; flush?: boolean; className?: string; id?: string; labelledBy?: string }) {
+  title, sub, actions, children, footer, flush, className, id, labelledBy, as = "section", level,
+}: {
+  title?: ReactNode; sub?: ReactNode; actions?: ReactNode; children: ReactNode; footer?: ReactNode; flush?: boolean; className?: string; id?: string;
+  labelledBy?: string; as?: "section" | "article" | "aside";
+  /** A status the panel stands for — only a quiet top line (the chip in `actions` says it in words) */
+  level?: ChipLevel;
+}) {
   const autoId = useId();
   const headId = title ? `${autoId}-h` : undefined;
+  const Tag = as;
   return (
-    <section className={cx(s.panel, className)} id={id} aria-labelledby={labelledBy ?? headId}>
+    <Tag className={cx(s.panel, className)} id={id} aria-labelledby={labelledBy ?? headId} data-level={level}>
       {title || actions ? (
         <div className={s.panelHead}>
           {title ? (
             <h2 className={s.panelTitle} id={headId}>
-              {title}
+              <span className={s.panelTitleText}>{title}</span>
               {sub ? <span className={s.panelSub}>{sub}</span> : null}
             </h2>
           ) : <span />}
-          {actions}
+          {actions ? <div className={s.panelActions}>{actions}</div> : null}
         </div>
       ) : null}
       <div className={flush ? s.panelFlush : s.panelBody}>{children}</div>
-    </section>
+      {footer ? <div className={s.panelFoot}>{footer}</div> : null}
+    </Tag>
+  );
+}
+
+/* ── 12-column grid ── one per page body: cards 3 (×4) or 4 (×3), panels 9 + 3 · 8 + 4 · 6 + 6 · 12, so the edges of a
+   lower row sit on the edges of the cards above. Under 1100 px: 3·4 → 6, 6·8·9 → 12; under 640 px: all 12. */
+export type GridSpan = 3 | 4 | 6 | 8 | 9 | 12;
+export function Grid({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx(s.grid, className)}>{children}</div>;
+}
+export function Cell({ span, children, className }: { span: GridSpan; children: ReactNode; className?: string }) {
+  return <div className={cx(s.cell, s[`span${span}`], className)}>{children}</div>;
+}
+
+/* ── Status chip ── the platform's state grammar: colour + glyph (● ok · ▲ warn · ■ danger · ○ not judged · ? unknown),
+   one size (24 px, 1 px border always — the colour changes, not the size) */
+/** `plain` = a fact with no verdict (a value, a tag, an alert that is not firing) — solid border, muted text */
+export type ChipLevel = "ok" | "warn" | "danger" | "info" | "neutral" | "unknown" | "plain";
+export const CHIP_GLYPH: Record<ChipLevel, string> = { ok: "●", warn: "▲", danger: "■", info: "●", neutral: "○", unknown: "?", plain: "●" };
+export function Chip({ level = "neutral", children, title, glyph }: { level?: ChipLevel; children: ReactNode; title?: string; glyph?: string | false }) {
+  const g = glyph === false ? null : glyph ?? CHIP_GLYPH[level];
+  return (
+    <span className={cx(s.chip, s[`chip_${level}`])} title={title}>
+      {g ? <span className={s.chipGlyph} aria-hidden="true">{g}</span> : null}
+      {children}
+    </span>
+  );
+}
+
+/** Copy a text (a config snippet, a command) — says "copied" for a moment */
+export function CopyButton({ text, label, copiedLabel }: { text: string; label: string; copiedLabel: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button size="sm" onClick={() => {
+      void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined);
+    }}>
+      {copied ? copiedLabel : label}
+    </Button>
+  );
+}
+
+/** A code block with a copy button above it (config snippets, commands) */
+export function CodeBlock({ code, label, copyLabel, copiedLabel }: { code: string; label?: ReactNode; copyLabel: string; copiedLabel: string }) {
+  return (
+    <div className={s.code}>
+      <div className={s.codeHead}>
+        <span>{label}</span>
+        <CopyButton text={code} label={copyLabel} copiedLabel={copiedLabel} />
+      </div>
+      <pre className={s.codePre}>{code}</pre>
+    </div>
   );
 }
 
@@ -160,7 +220,8 @@ export function Button({
   children: ReactNode;
   onClick?: () => void;
   variant?: "primary" | "secondary" | "ghost";
-  size?: "sm";
+  /** 32 by default · sm 28 inside dense rows · lg 44 for the one entry action of a screen (sign-in) */
+  size?: "sm" | "lg";
   disabled?: boolean;
   type?: "button" | "submit";
   title?: string;
@@ -170,7 +231,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={cx(s.button, variant === "primary" && s.primary, variant === "ghost" && s.ghost, size === "sm" && s.sm)}
+      className={cx(s.button, variant === "primary" && s.primary, variant === "ghost" && s.ghost, size === "sm" && s.sm, size === "lg" && s.lg)}
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -286,13 +347,17 @@ export function TimeRangeBar({ state }: { state: TimeRangeState }) {
 }
 
 /* ── Notice / states ── */
-export function Notice({ tone = "info", title, children }: { tone?: "info" | "warning" | "danger" | "success"; title?: ReactNode; children?: ReactNode }) {
+const NOTICE_GLYPH = { info: "●", warning: "▲", danger: "■", success: "●" } as const;
+/** One notice per screen at most (design principle 2 — the rest goes inside the panel it is about). `action` = a button on the right. */
+export function Notice({ tone = "info", title, children, action }: { tone?: "info" | "warning" | "danger" | "success"; title?: ReactNode; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className={cx(s.notice, s[`notice_${tone}`])} role={tone === "danger" ? "alert" : "status"}>
-      <div>
+      <span className={s.noticeGlyph} aria-hidden="true">{NOTICE_GLYPH[tone]}</span>
+      <div className={s.noticeText}>
         {title ? <span className={s.noticeTitle}>{title} </span> : null}
         {children}
       </div>
+      {action ? <div className={s.noticeAction}>{action}</div> : null}
     </div>
   );
 }

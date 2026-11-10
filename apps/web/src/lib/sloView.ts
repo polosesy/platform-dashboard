@@ -89,3 +89,41 @@ export function exploreUrl(endpoint: string, uid: string, expr: string, days: nu
   const panes = { aud: { datasource: uid, queries: [{ refId: "A", datasource: { uid }, expr, instant: true }], range: { from: `now-${days}d`, to: "now" } } };
   return `${endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
 }
+
+/** Pure: a duration in ms as written in the guide (1000 → "1s", 300 → "300ms") */
+export function msText(ms: number): string {
+  return ms >= 1000 ? `${Number((ms / 1000).toFixed(3))}s` : `${Math.round(ms)}ms`;
+}
+
+/**
+ * Pure: a first draft of the connection file's `aks.observability.slo` block for the guide — the file's top level
+ * keeps the current window and targets; a service gets its own entry only where the window met a different standard
+ * tier than that (its `achievable`), so the draft starts from what the service actually did. A draft, never applied:
+ * the team checks it before an admin writes it (services/workloadSlo.ts targetsFor reads the same shape).
+ */
+export function sloConfigDraft(d: {
+  windowDays: number;
+  defaults: { availability: number; latency: { thresholdMs: number; target: number } };
+  services: SloService[];
+}): string {
+  const services: Record<string, { availability?: number; latency?: { thresholdMs: number; target: number } }> = {};
+  for (const s of [...d.services].sort((a, b) => `${a.namespace}/${a.application}`.localeCompare(`${b.namespace}/${b.application}`))) {
+    if (!s.application) continue; // the key is "<namespace>/<application>" — series without the tag cannot be named
+    const entry: { availability?: number; latency?: { thresholdMs: number; target: number } } = {};
+    for (const x of s.slis) {
+      if (x.achievable === null) continue;
+      if (x.kind === "availability" && x.achievable !== d.defaults.availability) entry.availability = x.achievable;
+      if (x.kind === "latency" && x.achievable !== d.defaults.latency.target) {
+        entry.latency = { thresholdMs: x.thresholdMs ?? d.defaults.latency.thresholdMs, target: x.achievable };
+      }
+    }
+    if (Object.keys(entry).length) services[`${s.namespace}/${s.application}`] = entry;
+  }
+  const slo = {
+    windowDays: d.windowDays,
+    availability: d.defaults.availability,
+    latency: d.defaults.latency,
+    ...(Object.keys(services).length ? { services } : {}),
+  };
+  return `"aks": ${JSON.stringify({ observability: { slo } }, null, 2)}`;
+}

@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-web
-last-verified: 2026-11-09
-covers: [apps/web/src/app/globals.css, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
+last-verified: 2026-11-10
+covers: [apps/web/src/app/globals.css, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
 ---
 # 디자인 시스템 — 원칙 v1과 토큰
 
@@ -80,10 +80,33 @@ covers: [apps/web/src/app/globals.css, apps/web/src/app/layout.tsx, apps/web/src
 1. **토큰 + Pretendard + 12px 미만 금지** — 2026-11-09 완료.
    - 글자 크기 25종(8~11.5px 선언 324곳)을 6단계로, 굵기 12종을 4단계로, 모서리 30종을 3단계로 줄였습니다.
    - 흐린 그림자 20곳은 토큰으로 바꿨고, 고정폭 글꼴 선언 7가지는 하나로 합쳤습니다.
-2. **UI 키트** — Panel 해부도(머리 56·꼬리 44·같은 줄 같은 높이), 칩 24px, 버튼 32px(터치 화면 44px), 12칸 격자.
+2. **UI 키트** — 2026-11-10 완료(아래 8절). 첫 적용 화면: AKS 모니터링 › SLO.
 3. **`/login` 페이지 + 범위 막대**(구독 › 클러스터 › 시간).
 4. **왼쪽 메뉴 + Ctrl+K 빠른 이동 + '오늘의 상태' 첫 화면.**
 5. **다크 모드**(토큰 두 벌) · 조밀 보기(행 40).
+
+## 8. UI 키트 (`components/ui`)
+
+| 부품 | 규칙 |
+|------|------|
+| `Panel` | 머리 56(제목 16/600 + 메타 13 · 오른쪽 컨트롤 ≤ 32) · 본문 · 선택 꼬리 `footer` 44. 불투명·그림자 없음. `level` = 위쪽 2px 상태 선(조용하게 — 상태는 머리의 칩이 글로 말함) |
+| `Grid` · `Cell span` | 12칸, 간격 16. 3·4·6·8·9·12칸만. 1100px 아래 3·4 → 6, 6·8·9 → 12 · 640px 아래 모두 12. 같은 줄 칸은 높이가 같음 |
+| `Chip` | 24px 알약, 테두리 1px 항상, 색 + 기호(● ▲ ■ ○ ?). `plain` = 판정 없는 사실(값·태그·안 울린 경보) |
+| `Badge` | 기호 없는 태그 — Chip과 같은 24px |
+| `Button` | 32 · `sm` 28(조밀한 행) · `lg` 44(화면의 주 진입 하나). 터치 화면(`pointer: coarse`)은 모든 제어기 44 |
+| `Segmented` | 32 높이, 고른 것 = 진한 바탕 + 흰 글자 |
+| `Notice` | 화면당 하나. 1px 테두리 + 옅은 바탕 + 기호, 굵은 왼쪽 띠 없음. `action` = 오른쪽 버튼 |
+| `CodeBlock` · `CopyButton` | 설정 조각·명령 — 복사 버튼과 함께 |
+
+**같은 줄 규칙**: 아래 줄의 경계는 위 카드의 경계 위에 놓입니다. 숫자 카드 4개 = 3칸씩이면 아래는 6+6 또는 9+3, 숫자 카드 3개면 4+8. 한쪽에 꼬리가 있으면 다른 쪽에도 둡니다.
+
+**SLO 탭**(첫 적용): 위에 보기 전환 [서비스 SLO | 목표 설정 가이드]과 기준 시각. 알림은 하나만 띄우고(수집 공백 > 기본값 목표), 숫자 카드는 3칸씩, 서비스 카드는 6칸(2열 — 숫자 카드 경계 위)에 놓습니다. 카드 안에는 SLI 두 개를 나란히 두고, 상세는 꼬리의 버튼으로 엽니다. 가이드 탭의 구성은 다음과 같습니다.
+- 4단계(실측 보기 → 팀이 정하기 → 연결 파일에 적기 → 확인)
+- 무엇을 재나요(이 클러스터의 히스토그램 경계)
+- 지난 기간 실측과 '지킨 단계'
+- 어디에 적나요: 온프렘 `~/aud-runtime/config/connections.json` + `audctl restart` / Helm `connections` + 자동 재시작. 실측으로 채운 초안(`sloConfigDraft`)을 복사할 수 있습니다.
+- 항목 설명 — `excludeUris`는 uri 태그와 **정확히 같은 문자열**로 씁니다(패턴 아님).
+- 계측 안 된 워크로드 + Micrometer 설정
 
 ## 7. 새 화면을 만들 때
 

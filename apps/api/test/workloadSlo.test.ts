@@ -239,3 +239,21 @@ test("view: a missed default target is orange (watch), a missed team target is r
   assert.equal(sv.serviceLevel(byDefault), "warn");
   assert.equal(sv.serviceLevel(byTeam), "danger");
 });
+
+test("guide: the config draft starts from the met tiers — the file's shape, defaults on top, a service only where it differs", () => {
+  const res = agg(raw([{ app: "gw", uri: "/a", status: "200", n: 10_000, fast: 9_000 }]));
+  const s = res.services[0]!;
+  const draft = sv.sloConfigDraft({ windowDays: 30, defaults: { availability: 0.999, latency: { thresholdMs: 1000, target: 0.99 } }, services: res.services });
+  assert.ok(draft.startsWith(`"aks": {`), "a fragment to paste into the connection entry");
+  const parsed = JSON.parse(`{${draft}}`) as { aks: { observability: { slo: Record<string, unknown> & { services?: Record<string, { availability?: number; latency?: { thresholdMs: number; target: number } }> } } } };
+  const slo = parsed.aks.observability.slo;
+  assert.deepEqual({ w: slo.windowDays, a: slo.availability, l: slo.latency }, { w: 30, a: 0.999, l: { thresholdMs: 1000, target: 0.99 } });
+  const entry = slo.services?.[`${s.namespace}/gw`];
+  assert.deepEqual(entry?.latency, { thresholdMs: 1000, target: 0.9 }, "90 % within 1 s met the 90 % tier");
+  assert.equal(entry?.availability, 0.9999, "no 5xx in 10 000 requests met the top tier");
+  // A service that met exactly the defaults adds nothing; one without the application tag cannot be keyed
+  const none = sv.sloConfigDraft({ windowDays: 30, defaults: { availability: 0.9999, latency: { thresholdMs: 1000, target: 0.9 } }, services: res.services });
+  assert.ok(!JSON.parse(`{${none}}`).aks.observability.slo.services);
+  assert.equal(sv.msText(1000), "1s");
+  assert.equal(sv.msText(300), "300ms");
+});
