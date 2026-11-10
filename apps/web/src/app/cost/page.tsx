@@ -7,7 +7,7 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
-import { ErrorNotice, PageHeader, SampleDataNotice, Segmented } from "@/components/ui";
+import { Cell, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { ReservationsPanel } from "./ReservationsPanel";
 
@@ -72,121 +72,91 @@ export default function CostPage() {
       <ErrorNotice error={error} />
       <SampleDataNotice note={summary?.note} />
 
-      <div className={styles.grid}>
-        {/* KPI strip */}
-        <div className={styles.kpiCard}>
-          <div className={styles.kpis}>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>{t("cost.currentMonth")}</div>
-              <div className={styles.kpiValue}>{summary ? fmtCurrency(summary.currentMonthTotal, summary.currency) : "-"}</div>
-            </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>{t("cost.previousMonth")}</div>
-              <div className={styles.kpiValue}>{summary ? fmtCurrency(summary.previousMonthTotal, summary.currency) : "-"}</div>
-            </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>{t("cost.change")}</div>
-              <div className={styles.kpiValue}>
-                {summary ? (
-                  <span className={`${styles.kpiChange} ${summary.changePercentage > 0 ? styles.kpiUp : styles.kpiDown}`}>
-                    {fmtPct(summary.changePercentage)}
-                  </span>
-                ) : "-"}
+      {/* 12 columns: 4 cards × 3 · the trend 12 · budgets 6 + 6 · reservations 12 (design-system.md · 8) */}
+      <Grid>
+        <Cell span={3}>
+          <Stat label={t("cost.currentMonth")} value={summary ? fmtCurrency(summary.currentMonthTotal, summary.currency) : "—"}
+            hint={summary ? t("cost.vsPrevious", { pct: fmtPct(summary.changePercentage) }) : undefined} />
+        </Cell>
+        <Cell span={3}>
+          <Stat label={t("cost.previousMonth")} value={summary ? fmtCurrency(summary.previousMonthTotal, summary.currency) : "—"} />
+        </Cell>
+        <Cell span={3}>
+          <Stat label={t("cost.forecast")} value={summary ? fmtCurrency(summary.forecastedTotal, summary.currency) : "—"}
+            hint={summary && summary.previousMonthTotal > 0 ? t("cost.vsPrevious", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : undefined} />
+        </Cell>
+        <Cell span={3}>
+          <Stat label={t("cost.budgetUsed")} value={summary?.budgetUsedPercentage != null ? `${summary.budgetUsedPercentage.toFixed(1)}%` : "—"}
+            tone={summary?.budgetUsedPercentage != null ? STAT_TONE[budgetTone(summary.budgetUsedPercentage)] : undefined} />
+        </Cell>
+
+        <Cell span={12}>
+          <Panel title={t("cost.trend")} sub={t(`cost.ri.${granularity}`)}>
+            {trend && trend.data.length > 0 ? (
+              <div className={styles.trendWrap}>
+                {trend.data.map((p) => {
+                  const h = Math.max(2, (p.cost / trendMax) * 100);
+                  return (
+                    <div key={p.date} className={styles.trendBar} style={{ height: `${h}%` }} title={`${p.date} · ${fmtCurrency(p.cost, p.currency)}`}>
+                      <div className={styles.trendBarLabel}>{fmtCurrency(p.cost, p.currency)}</div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>{t("cost.forecast")}</div>
-              <div className={styles.kpiValue}>{summary ? fmtCurrency(summary.forecastedTotal, summary.currency) : "-"}</div>
-            </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>{t("cost.budgetUsed")}</div>
-              <div className={styles.kpiValue}>{summary?.budgetUsedPercentage != null ? `${summary.budgetUsedPercentage.toFixed(1)}%` : "-"}</div>
-            </div>
-          </div>
-        </div>
+            ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noTrend")} />}
+          </Panel>
+        </Cell>
 
-        {/* Cost trend chart */}
-        <div className={styles.cardWide}>
-          <div className={styles.cardTitle}>{t("cost.trend")} · {t(`cost.ri.${granularity}`)}</div>
-          {trend && trend.data.length > 0 ? (
-            <div className={styles.trendWrap}>
-              {trend.data.map((p) => {
-                const h = Math.max(2, (p.cost / trendMax) * 100);
-                return (
-                  <div key={p.date} className={styles.trendBar} style={{ height: `${h}%` }}>
-                    <div className={styles.trendBarLabel}>{fmtCurrency(p.cost, p.currency)}</div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className={styles.cardBody}>
-              <div className={styles.empty}>{loading ? t("common.loading") : t("cost.noTrend")}</div>
-            </div>
-          )}
-        </div>
-
-        {/* Budgets */}
-        <div className={styles.card}>
-          <div className={styles.cardTitle}>{t("cost.budgets")}</div>
-          <div className={styles.cardBody}>
+        <Cell span={6}>
+          <Panel title={t("cost.budgets")} sub={budgets ? String(budgets.budgets.length) : undefined}>
             {budgets && budgets.budgets.length > 0 ? (
-              budgets.budgets.map((b) => {
-                const tone = budgetTone(b.usedPercentage);
-                return (
-                  <div key={b.budgetName} className={styles.budgetRow}>
-                    <div className={styles.budgetHeader}>
-                      <div className={styles.budgetName}>{b.budgetName}</div>
-                      <div className={`${styles.budgetPct} ${styles[`budget${tone}`]}`}>{b.usedPercentage.toFixed(1)}%</div>
-                    </div>
-                    <div className={styles.budgetBar}>
-                      <div className={styles[`budgetFill${tone}`]} style={{ width: `${Math.min(100, b.usedPercentage)}%` }} />
-                    </div>
-                    <div className={styles.budgetMeta}>
-                      <span>{fmtCurrency(b.currentSpend, b.currency)} / {fmtCurrency(b.amount, b.currency)}</span>
-                      <span>{b.timeGrain}</span>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className={styles.empty}>{loading ? t("common.loading") : t("cost.noBudgets")}</div>
-            )}
-          </div>
-        </div>
+              budgets.budgets.map((b) => (
+                <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.usedPercentage}
+                  left={`${fmtCurrency(b.currentSpend, b.currency)} / ${fmtCurrency(b.amount, b.currency)}`} right={b.timeGrain} />
+              ))
+            ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
+          </Panel>
+        </Cell>
 
-        {/* Forecast comparison */}
-        <div className={styles.card}>
-          <div className={styles.cardTitle}>{t("cost.forecastVsBudget")}</div>
-          <div className={styles.cardBody}>
+        <Cell span={6}>
+          <Panel title={t("cost.forecastVsBudget")}>
             {budgets && budgets.budgets.length > 0 ? (
-              budgets.budgets.map((b) => {
-                const forecastPct = b.amount > 0 ? (b.forecastedSpend / b.amount) * 100 : 0;
-                const tone = budgetTone(forecastPct);
-                return (
-                  <div key={b.budgetName} className={styles.budgetRow}>
-                    <div className={styles.budgetHeader}>
-                      <div className={styles.budgetName}>{b.budgetName}</div>
-                      <div className={`${styles.budgetPct} ${styles[`budget${tone}`]}`}>{forecastPct.toFixed(1)}%</div>
-                    </div>
-                    <div className={styles.budgetBar}>
-                      <div className={styles[`budgetFill${tone}`]} style={{ width: `${Math.min(100, forecastPct)}%` }} />
-                    </div>
-                    <div className={styles.budgetMeta}>
-                      <span>{t("cost.forecast")}: {fmtCurrency(b.forecastedSpend, b.currency)}</span>
-                      <span>{t("cost.budget")}: {fmtCurrency(b.amount, b.currency)}</span>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className={styles.empty}>{loading ? t("common.loading") : t("cost.noBudgets")}</div>
-            )}
-          </div>
+              budgets.budgets.map((b) => (
+                <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.amount > 0 ? (b.forecastedSpend / b.amount) * 100 : 0}
+                  left={`${t("cost.forecast")}: ${fmtCurrency(b.forecastedSpend, b.currency)}`} right={`${t("cost.budget")}: ${fmtCurrency(b.amount, b.currency)}`} />
+              ))
+            ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
+          </Panel>
+        </Cell>
+
+        <Cell span={12}>
+      <ReservationsPanel subscriptionId={subscriptionId} subscriptions={subscriptions} />
+        </Cell>
+      </Grid>
+    </div>
+  );
+}
+
+const STAT_TONE = { Safe: "success", Warn: "medium", Danger: "high" } as const;
+
+/** One budget: name · percent (glyph + colour) · the bar · two facts — the same row in both budget panels */
+function BudgetRow({ name, pct, left, right }: { name: string; pct: number; left: string; right: string }) {
+  const tone = budgetTone(pct);
+  return (
+    <div className={styles.budgetRow}>
+      <div className={styles.budgetHeader}>
+        <div className={styles.budgetName}>{name}</div>
+        <div className={`${styles.budgetPct} ${styles[`budget${tone}`]}`}>
+          <span aria-hidden="true">{tone === "Danger" ? "■" : tone === "Warn" ? "▲" : "●"}</span> {pct.toFixed(1)}%
         </div>
       </div>
-
-      <ReservationsPanel subscriptionId={subscriptionId} subscriptions={subscriptions} />
+      <div className={styles.budgetBar}>
+        <div className={styles[`budgetFill${tone}`]} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <div className={styles.budgetMeta}>
+        <span>{left}</span>
+        <span>{right}</span>
+      </div>
     </div>
   );
 }

@@ -105,7 +105,8 @@ export default function SecurityRiskPage() {
   const loading = !ready || postureLoading || graphQ.loading || clustersLoading || (!!clusterId && !clustersMock && insightsQ.loading);
 
   let body: React.ReactNode;
-  if (sample) body = <Notice tone="warning" title={t("common.sampleData")}>{t("risk.sample")}</Notice>;
+  // The page already says "sample data" once (PostureNotices) — a second banner here would be the same news twice
+  if (sample) body = <EmptyState title={t("risk.sampleTitle")}>{t("risk.sample")}</EmptyState>;
   else if (loading) body = <LoadingState />;
   else if (graphQ.error || clustersError) body = <ErrorNotice error={graphQ.error ?? clustersError} />;
   else if (!clusters.length) body = <EmptyState title={t("risk.noAks")}><Link href="/security/findings" className={s.link}>{t("nav.item.securityFindings")} →</Link></EmptyState>;

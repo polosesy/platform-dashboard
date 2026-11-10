@@ -95,35 +95,74 @@ export function msText(ms: number): string {
   return ms >= 1000 ? `${Number((ms / 1000).toFixed(3))}s` : `${Math.round(ms)}ms`;
 }
 
+/** The standard targets a team picks from — the same list as the API's SLO_TIERS (test-checked) */
+export const SLO_TIERS = [0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999] as const;
+
+/**
+ * Pure: the draft's target for a met tier — one tier below it, so the budget has room (a target equal to what the
+ * window just did spends the whole budget on an ordinary month); the lowest tier stays itself
+ */
+export function draftTarget(achievable: number): number {
+  const i = SLO_TIERS.findIndex((x) => Math.abs(x - achievable) < 1e-9);
+  return i <= 0 ? achievable : SLO_TIERS[i - 1]!;
+}
+
 /**
  * Pure: a first draft of the connection file's `aks.observability.slo` block for the guide — the file's top level
- * keeps the current window and targets; a service gets its own entry only where the window met a different standard
- * tier than that (its `achievable`), so the draft starts from what the service actually did. A draft, never applied:
- * the team checks it before an admin writes it (services/workloadSlo.ts targetsFor reads the same shape).
+ * keeps the current window and targets; a service gets its own entry only where its draft target (one tier under what
+ * the window met — `draftTarget`) differs from that, so the draft starts from what the service actually did, with
+ * room. One service per line so a dozen services stay readable. A draft, never applied: the team checks it before an
+ * admin writes it (services/workloadSlo.ts targetsFor reads the same shape). Services that met no tier are left to the
+ * top level (and named by the guide's table).
  */
 export function sloConfigDraft(d: {
   windowDays: number;
   defaults: { availability: number; latency: { thresholdMs: number; target: number } };
   services: SloService[];
 }): string {
-  const services: Record<string, { availability?: number; latency?: { thresholdMs: number; target: number } }> = {};
+  const lines: string[] = [];
   for (const s of [...d.services].sort((a, b) => `${a.namespace}/${a.application}`.localeCompare(`${b.namespace}/${b.application}`))) {
     if (!s.application) continue; // the key is "<namespace>/<application>" — series without the tag cannot be named
     const entry: { availability?: number; latency?: { thresholdMs: number; target: number } } = {};
     for (const x of s.slis) {
       if (x.achievable === null) continue;
-      if (x.kind === "availability" && x.achievable !== d.defaults.availability) entry.availability = x.achievable;
-      if (x.kind === "latency" && x.achievable !== d.defaults.latency.target) {
-        entry.latency = { thresholdMs: x.thresholdMs ?? d.defaults.latency.thresholdMs, target: x.achievable };
+      const target = draftTarget(x.achievable);
+      if (x.kind === "availability" && target !== d.defaults.availability) entry.availability = target;
+      if (x.kind === "latency" && target !== d.defaults.latency.target) {
+        entry.latency = { thresholdMs: x.thresholdMs ?? d.defaults.latency.thresholdMs, target };
       }
     }
-    if (Object.keys(entry).length) services[`${s.namespace}/${s.application}`] = entry;
+    if (Object.keys(entry).length) lines.push(`        ${JSON.stringify(`${s.namespace}/${s.application}`)}: ${JSON.stringify(entry).replace(/([{,])"/g, "$1 \"").replace(/":/g, "\": ").replace(/}/g, " }")}`);
   }
-  const slo = {
-    windowDays: d.windowDays,
-    availability: d.defaults.availability,
-    latency: d.defaults.latency,
-    ...(Object.keys(services).length ? { services } : {}),
-  };
-  return `"aks": ${JSON.stringify({ observability: { slo } }, null, 2)}`;
+  const lat = d.defaults.latency;
+  return [
+    `"aks": {`,
+    `  "observability": {`,
+    `    "slo": {`,
+    `      "windowDays": ${d.windowDays},`,
+    `      "availability": ${d.defaults.availability},`,
+    `      "latency": { "thresholdMs": ${lat.thresholdMs}, "target": ${lat.target} }${lines.length ? "," : ""}`,
+    ...(lines.length ? [`      "services": {`, lines.join(",\n"), `      }`] : []),
+    `    }`,
+    `  }`,
+    `}`,
+  ].join("\n");
+}
+
+/** The thresholds teams usually pick (ms) — the guide shows which boundary each one is actually counted at */
+export const COMMON_THRESHOLDS_MS = [100, 200, 300, 500, 1000, 2000, 3000, 5000] as const;
+
+/**
+ * Pure: for each common threshold, the boundary it is counted at (the largest at or under it — the API's
+ * effectiveBucket) and whether that is exact; plus the boundaries without duplicates in the guide's text
+ * (Micrometer's default histogram has ~90, several of which read alike: 1.048 ms, 1.398 ms → "1ms")
+ */
+export function bucketHints(bucketsSec: number[]): { picks: Array<{ ms: number; countedMs: number | null; exact: boolean }>; all: string[] } {
+  const ms = [...bucketsSec].filter(Number.isFinite).map((b) => b * 1000).sort((a, b) => a - b);
+  const picks = COMMON_THRESHOLDS_MS.map((t) => {
+    const under = ms.filter((b) => b <= t * (1 + 1e-9));
+    const counted = under.length ? under[under.length - 1]! : null;
+    return { ms: t, countedMs: counted, exact: counted !== null && Math.abs(counted - t) < 1e-6 };
+  });
+  return { picks, all: [...new Set(ms.map(msText))] };
 }

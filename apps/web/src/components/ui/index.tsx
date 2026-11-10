@@ -69,6 +69,16 @@ export function Panel({
   );
 }
 
+/** A tab's top line: view switch / filters on the left, the basis (as of …, window chip) on the right — not a notice */
+export function Toolbar({ start, end }: { start?: ReactNode; end?: ReactNode }) {
+  return (
+    <div className={s.toolbar}>
+      <div className={s.toolbarStart}>{start}</div>
+      {end ? <div className={s.toolbarEnd}>{end}</div> : null}
+    </div>
+  );
+}
+
 /* ── 12-column grid ── one per page body: cards 3 (×4) or 4 (×3), panels 9 + 3 · 8 + 4 · 6 + 6 · 12, so the edges of a
    lower row sit on the edges of the cards above. Under 1100 px: 3·4 → 6, 6·8·9 → 12; under 640 px: all 12. */
 export type GridSpan = 3 | 4 | 6 | 8 | 9 | 12;
@@ -107,14 +117,15 @@ export function CopyButton({ text, label, copiedLabel }: { text: string; label: 
 }
 
 /** A code block with a copy button above it (config snippets, commands) */
-export function CodeBlock({ code, label, copyLabel, copiedLabel }: { code: string; label?: ReactNode; copyLabel: string; copiedLabel: string }) {
+export function CodeBlock({ code, label, copyLabel, copiedLabel, maxHeight }: { code: string; label?: ReactNode; copyLabel: string; copiedLabel: string; maxHeight?: number }) {
   return (
     <div className={s.code}>
       <div className={s.codeHead}>
         <span>{label}</span>
         <CopyButton text={code} label={copyLabel} copiedLabel={copiedLabel} />
       </div>
-      <pre className={s.codePre}>{code}</pre>
+      {/* A long snippet scrolls inside its box — the copy button always takes all of it */}
+      <pre className={s.codePre} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined} tabIndex={maxHeight ? 0 : undefined}>{code}</pre>
     </div>
   );
 }

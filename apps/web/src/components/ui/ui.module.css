@@ -133,6 +133,30 @@
   color: var(--muted);
 }
 
+/* ── Toolbar: a tab's top line ── */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 40px;
+}
+
+.toolbarStart,
+.toolbarEnd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toolbarEnd {
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+
 /* ── 12-column grid ── */
 .grid {
   display: grid;

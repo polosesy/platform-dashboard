@@ -158,21 +158,21 @@
 }
 
 .budgetPct {
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-small);
   font-weight: 700;
 }
 
 .budgetSafe {
-  color: rgba(var(--success-rgb), 0.90);
+  color: var(--success-strong);
 }
 
 .budgetWarn {
-  color: rgba(var(--warning-rgb), 0.90);
+  color: var(--warning-strong);
 }
 
 .budgetDanger {
-  color: rgba(var(--danger-rgb), 0.90);
+  color: var(--danger-strong);
 }
 
 .budgetBar {

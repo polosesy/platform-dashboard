@@ -4,11 +4,10 @@ import type { NodeResourceSummary } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
 import styles from "../styles.module.css";
 import { formatBytes } from "@/lib/format";
-import { rgba } from "@/lib/palette";
-import { Notice } from "@/components/ui";
+import { Cell, Chip, EmptyState, Grid, Notice, Panel, Stat, Toolbar, type ChipLevel } from "@/components/ui";
 
 function GaugeBar({ pct }: { pct: number | null }) {
-  if (pct === null) return <span style={{ fontSize: 12, color: rgba("ink", 0.35) }}>N/A</span>;
+  if (pct === null) return <span className={styles.gaugeNa}>N/A</span>;
   const clamped = Math.min(100, Math.round(pct));
   const cls = clamped >= 85 ? styles.gaugeCrit : clamped >= 70 ? styles.gaugeWarn : styles.gaugeOk;
   return (
@@ -21,35 +20,12 @@ function GaugeBar({ pct }: { pct: number | null }) {
   );
 }
 
-function NodeStatusBadge({ status }: { status: NodeResourceSummary["status"] }) {
-  const cls =
-    status === "Ready" ? styles.nodeReady :
-    status === "NotReady" ? styles.nodeNotReady :
-    styles.nodeUnknown;
-  return <span className={`${styles.nodeStatusBadge} ${cls}`}>{status}</span>;
-}
+const NODE_CHIP: Record<NodeResourceSummary["status"], ChipLevel> = { Ready: "ok", NotReady: "danger", Unknown: "unknown" };
 
 function PressureIndicators({ conditions }: { conditions: NodeResourceSummary["conditions"] }) {
-  const pressures = conditions.filter(
-    (c) => c.type !== "Ready" && c.status === "True"
-  );
+  const pressures = conditions.filter((c) => c.type !== "Ready" && c.status === "True");
   if (pressures.length === 0) return null;
-  return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
-      {pressures.map((c) => (
-        <span
-          key={c.type}
-          style={{
-            fontSize: 12, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
-            background: rgba("danger", 0.08), color: rgba("danger", 0.80),
-            border: `1px solid ${rgba("danger", 0.15)}`,
-          }}
-        >
-          {c.type}
-        </span>
-      ))}
-    </div>
-  );
+  return <div className={styles.nodeChips}>{pressures.map((c) => <Chip key={c.type} level="danger">{c.type}</Chip>)}</div>;
 }
 
 /** Node cards: today's state whatever the time range (`past` = the picker shows a past range — say so louder) */
@@ -57,81 +33,60 @@ export function InfraTab({ nodes, past = false }: { nodes: NodeResourceSummary[]
   const { t } = useI18n();
   if (nodes.length === 0) {
     return (
-      <div className={styles.noDataBanner}>
-        <strong>{t("ob.noNodes")}</strong>
-        {t("ob.noNodesHint")}
-      </div>
+      <EmptyState title={t("ob.noNodes")}>{t("ob.noNodesHint")}</EmptyState>
     );
   }
 
   const ready = nodes.filter((n) => n.status === "Ready").length;
   const notReady = nodes.filter((n) => n.status === "NotReady").length;
+  const pods = nodes.reduce((n, x) => n + x.podCount, 0);
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 20, fontSize: 13, color: rgba("ink", 0.6) }}>
-        <span>{t("ob.allNodes")} <strong style={{ color: "var(--fg)" }}>{nodes.length}</strong></span>
-        <span style={{ color: rgba("success", 0.85) }}>Ready: <strong>{ready}</strong></span>
-        {notReady > 0 && <span style={{ color: rgba("danger", 0.85) }}>NotReady: <strong>{notReady}</strong></span>}
-        {!past && <span>{t("ob.nodesNow")}</span>}
-      </div>
-      {past && <div style={{ marginBottom: 16 }}><Notice tone="info">{t("ob.nodesNowPast")}</Notice></div>}
-
-      <div className={styles.nodeGrid}>
+    <div className={styles.stack}>
+      {past ? <Notice tone="info">{t("ob.nodesNowPast")}</Notice> : <Toolbar end={<Chip level="plain" glyph={false}>{t("ob.nodesNow")}</Chip>} />}
+      <Grid>
+        <Cell span={3}><Stat label={t("ob.allNodes")} value={nodes.length} /></Cell>
+        <Cell span={3}><Stat label={<><span aria-hidden="true">●</span> Ready</>} value={ready} tone="success" /></Cell>
+        <Cell span={3}><Stat label={<><span aria-hidden="true">■</span> NotReady</>} value={notReady} tone={notReady ? "high" : undefined} /></Cell>
+        <Cell span={3}><Stat label={t("ob.podsTotal")} value={pods} /></Cell>
         {nodes.map((node) => (
-          <div key={node.name} className={styles.nodeCard}>
-            <div className={styles.nodeCardHeader}>
-              <span className={styles.nodeName}>{node.name}</span>
-              <NodeStatusBadge status={node.status} />
-            </div>
-
-            <div className={styles.nodeMetrics}>
-              <div>
-                <div className={styles.nodeMetricLabel}>CPU</div>
-                <GaugeBar pct={node.cpuUsagePct} />
-              </div>
-              <div>
-                <div className={styles.nodeMetricLabel}>{t("ob.memory")}</div>
-                <GaugeBar pct={node.memoryUsagePct} />
-              </div>
-            </div>
-
-            {/* Disk */}
-            {node.diskUsagePct !== null && (
-              <div>
-                <div className={styles.nodeMetricLabel}>{t("ob.disk")}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <GaugeBar pct={node.diskUsagePct} />
-                  {node.diskCapacityGB !== null && (
-                    <span style={{ fontSize: 12, color: rgba("ink", 0.45) }}>{node.diskCapacityGB}GB</span>
-                  )}
+          <Cell span={3} key={node.name}>
+            <Panel as="article" level={node.status === "NotReady" ? "danger" : undefined}
+              title={<span title={node.name}>{node.name}</span>}
+              actions={<Chip level={NODE_CHIP[node.status] ?? "unknown"}>{node.status}</Chip>}
+              footer={<span className={styles.nodeFoot}>
+                {t("ob.podsN", { n: node.podCount })}
+                {node.cpuCapacityMillicores != null ? ` · CPU ${node.cpuCapacityMillicores}m` : ""}
+                {node.memoryCapacityMiB != null ? ` · Mem ${Math.round(node.memoryCapacityMiB / 1024)}Gi` : ""}
+              </span>}>
+              <div className={styles.nodeMetrics}>
+                <div>
+                  <div className={styles.nodeMetricLabel}>CPU</div>
+                  <GaugeBar pct={node.cpuUsagePct} />
+                </div>
+                <div>
+                  <div className={styles.nodeMetricLabel}>{t("ob.memory")}</div>
+                  <GaugeBar pct={node.memoryUsagePct} />
                 </div>
               </div>
-            )}
-
-            <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 12, color: rgba("ink", 0.45) }}>
-              <span>{t("ob.podsN", { n: node.podCount })}</span>
-              {node.cpuCapacityMillicores != null && <span>CPU {node.cpuCapacityMillicores}m</span>}
-              {node.memoryCapacityMiB != null && <span>Mem {Math.round(node.memoryCapacityMiB / 1024)}Gi</span>}
-            </div>
-
-            {/* Network throughput */}
-            {(node.networkRxBytesPerSec !== null || node.networkTxBytesPerSec !== null) && (
-              <div className={styles.nodeNetRow}>
-                <span className={styles.nodeNetLabel}>NET</span>
-                {node.networkRxBytesPerSec !== null && (
-                  <span className={styles.nodeNetValue}>↓ {formatBytes(node.networkRxBytesPerSec)}/s</span>
-                )}
-                {node.networkTxBytesPerSec !== null && (
-                  <span className={styles.nodeNetValue}>↑ {formatBytes(node.networkTxBytesPerSec)}/s</span>
-                )}
-              </div>
-            )}
-
-            <PressureIndicators conditions={node.conditions} />
-          </div>
+              {node.diskUsagePct !== null && (
+                <div className={styles.nodeDisk}>
+                  <div className={styles.nodeMetricLabel}>{t("ob.disk")}{node.diskCapacityGB !== null ? ` · ${node.diskCapacityGB}GB` : ""}</div>
+                  <GaugeBar pct={node.diskUsagePct} />
+                </div>
+              )}
+              {(node.networkRxBytesPerSec !== null || node.networkTxBytesPerSec !== null) && (
+                <div className={styles.nodeNetRow}>
+                  <span className={styles.nodeNetLabel}>NET</span>
+                  {node.networkRxBytesPerSec !== null && <span className={styles.nodeNetValue}>↓ {formatBytes(node.networkRxBytesPerSec)}/s</span>}
+                  {node.networkTxBytesPerSec !== null && <span className={styles.nodeNetValue}>↑ {formatBytes(node.networkTxBytesPerSec)}/s</span>}
+                </div>
+              )}
+              <PressureIndicators conditions={node.conditions} />
+            </Panel>
+          </Cell>
         ))}
-      </div>
+      </Grid>
     </div>
   );
 }

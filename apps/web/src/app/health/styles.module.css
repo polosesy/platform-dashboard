@@ -1217,7 +1217,13 @@ button.heatTileSelected:focus-visible {
 
 .globalLayout {
   display: grid;
-  gap: 20px;
+  gap: 16px;
+}
+
+.panelText {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--muted);
 }
 
 .sectionHeader {
@@ -1299,11 +1305,25 @@ button.heatTileSelected:focus-visible {
 }
 
 .regionCardHeader {
+  appearance: none;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow: hidden;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.regionCardHeader .regionName {
+  flex: 1;
+  min-width: 0;
 }
 
 .regionDot {

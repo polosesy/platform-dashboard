@@ -11,12 +11,12 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { durationText, spanMs } from "@/lib/nodeMaintView";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Stat, type BadgeTone } from "@/components/ui";
+import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Stat, Toolbar, type ChipLevel } from "@/components/ui";
 import { atParam, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
 
-const TONE: Record<StackState, BadgeTone> = { ok: "success", degraded: "medium", stale: "medium", down: "high", unknown: "neutral", notDetected: "neutral" };
+const CHIP: Record<StackState, ChipLevel> = { ok: "ok", degraded: "warn", stale: "warn", down: "danger", unknown: "unknown", notDetected: "neutral" };
 
 function grafanaUrl(endpoint: string, uid: string, expr: string): string {
   const panes = { aud: { datasource: uid, queries: [{ refId: "A", datasource: { uid }, expr }], range: { from: "now-1h", to: "now" } } };
@@ -37,11 +37,9 @@ export function StackTab({ clusterId, range, nonce, report }: { clusterId: strin
   if (!d) return <LoadingState />;
   if (d.metricsState !== "ok") {
     return (
-      <div className={styles.stackHead}>
-        <Notice tone={d.metricsState === "noWorkspace" ? "info" : "warning"} title={t(`hb.m.state.${d.metricsState}`)}>
-          {t(`hb.m.stateHint.${d.metricsState}`)}{d.message ? ` (${d.message})` : ""}
-        </Notice>
-      </div>
+      <Notice tone={d.metricsState === "noWorkspace" ? "info" : "warning"} title={t(`hb.m.state.${d.metricsState}`)}>
+        {t(`hb.m.stateHint.${d.metricsState}`)}{d.message ? ` (${d.message})` : ""}
+      </Notice>
     );
   }
 
@@ -57,61 +55,65 @@ export function StackTab({ clusterId, range, nonce, report }: { clusterId: strin
     ...(downUnread ? [t("obs.stack.down")] : []),
   ])];
 
+  // One notice at most: last good values shown (stale) outrank queries that did not answer (gaps)
+  const notice = d.stale ? (
+    <Notice tone="warning" title={t("obs.stack.staleTitle", { at: at(d.generatedAt) })}>
+      {t("obs.stack.staleHint", { at: at(d.stale.failedAt) })}{d.stale.message ? ` (${d.stale.message})` : ""}
+    </Notice>
+  ) : d.gaps?.length ? (
+    <Notice tone="warning" title={t("obs.stack.gapsTitle", { n: d.gaps.length })}>
+      {t("obs.stack.gapsHint", { reasons: [...new Set(d.gaps.map((g) => t(`obs.stack.gap.${g.reason}`)))].join(" · ") })}
+      {unread.length ? <> {t("obs.stack.gapsValues", { list: unread.join(", ") })}</> : null}
+    </Notice>
+  ) : null;
+
   return (
     <div className={styles.stack}>
-      <div className={styles.stackHead}>
-        <Notice tone="info">
-          {d.at
-            ? t("obs.stack.basisAt", { n: d.windowMinutes, at: new Date(d.at).toLocaleString(dateLocale(locale)) })
-            : t("obs.stack.basis", { n: d.windowMinutes, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}
-        </Notice>
-        <Badge tone="info" title={t("obs.stack.windowFixedHint")}>{t("obs.stack.windowFixed", { n: d.windowMinutes })}</Badge>
-      </div>
-      {d.stale && (
-        <Notice tone="warning" title={t("obs.stack.staleTitle", { at: at(d.generatedAt) })}>
-          {t("obs.stack.staleHint", { at: at(d.stale.failedAt) })}{d.stale.message ? ` (${d.stale.message})` : ""}
-        </Notice>
-      )}
-      {d.gaps?.length ? (
-        <Notice tone="warning" title={t("obs.stack.gapsTitle", { n: d.gaps.length })}>
-          {t("obs.stack.gapsHint", { reasons: [...new Set(d.gaps.map((g) => t(`obs.stack.gap.${g.reason}`)))].join(" · ") })}
-          {unread.length ? <> {t("obs.stack.gapsValues", { list: unread.join(", ") })}</> : null}
-        </Notice>
-      ) : null}
+      <Toolbar end={<>
+        {d.at
+          ? t("obs.stack.basisAt", { n: d.windowMinutes, at: new Date(d.at).toLocaleString(dateLocale(locale)) })
+          : t("obs.stack.basis", { n: d.windowMinutes, at: new Date(d.generatedAt).toLocaleString(dateLocale(locale)) })}
+        <Chip level="info" glyph={false} title={t("obs.stack.windowFixedHint")}>{t("obs.stack.windowFixed", { n: d.windowMinutes })}</Chip>
+      </>} />
+      {notice}
 
-      <div className={styles.stackStats}>
-        <Stat label={t("obs.stack.components")} value={d.components.length} hint={t("obs.stack.componentsHint", { ok: counts("ok") })} />
-        <Stat label={t("obs.stack.problems")} value={counts("degraded") + counts("down") + counts("stale")}
+      <Grid>
+        <Cell span={3}><Stat label={t("obs.stack.components")} value={d.components.length} hint={t("obs.stack.componentsHint", { ok: counts("ok") })} /></Cell>
+        <Cell span={3}><Stat label={t("obs.stack.problems")} value={counts("degraded") + counts("down") + counts("stale")}
           tone={counts("down") ? "high" : counts("degraded") + counts("stale") ? "medium" : "success"}
-          hint={t("obs.stack.problemsHint", { down: counts("down"), degraded: counts("degraded"), stale: counts("stale") })} />
-        <Stat label={t("obs.stack.targets")} value={downUnread ? `— / ${total}` : `${total - down} / ${total}`} tone={downUnread ? undefined : down ? "medium" : "success"}
-          hint={downUnread ? t("obs.stack.queryFailed") : t("obs.stack.targetsHint", { n: down })} />
-        <Stat label={t("obs.stack.grafana")} value={d.grafana ? t("obs.stack.linked") : "—"} hint={d.grafana ? new URL(d.grafana.endpoint).host : t("obs.stack.grafanaHint")} />
-      </div>
+          hint={t("obs.stack.problemsHint", { down: counts("down"), degraded: counts("degraded"), stale: counts("stale") })} /></Cell>
+        <Cell span={3}><Stat label={t("obs.stack.targets")} value={downUnread ? `— / ${total}` : `${total - down} / ${total}`} tone={downUnread ? undefined : down ? "medium" : "success"}
+          hint={downUnread ? t("obs.stack.queryFailed") : t("obs.stack.targetsHint", { n: down })} /></Cell>
+        <Cell span={3}><Stat label={t("obs.stack.grafana")} value={d.grafana ? t("obs.stack.linked") : "—"} hint={d.grafana ? new URL(d.grafana.endpoint).host : t("obs.stack.grafanaHint")} /></Cell>
 
-      <div className={styles.stackGrid}>
-        {d.components.map((c) => <ComponentCard key={`${c.kind}|${c.namespace}/${c.name}`} c={c} grafana={d.grafana} promUid={promUid} />)}
-      </div>
-      {d.components.length === 0 && <EmptyState title={t("obs.stack.none")}>{t("obs.stack.noneHint")}</EmptyState>}
+        {d.components.map((c) => (
+          <Cell span={3} key={`${c.kind}|${c.namespace}/${c.name}`}><ComponentCard c={c} grafana={d.grafana} promUid={promUid} /></Cell>
+        ))}
+        {d.components.length === 0 && <Cell span={12}><EmptyState title={t("obs.stack.none")}>{t("obs.stack.noneHint")}</EmptyState></Cell>}
 
-      <h3 className={styles.stackTitle}>{t("obs.stack.targetsTitle")}</h3>
-      <table className={styles.stackTable}>
-        <thead><tr><th>{t("obs.stack.job")}</th><th>{t("obs.stack.total")}</th><th>{t("obs.stack.down")}</th></tr></thead>
-        <tbody>
-          {d.targets.map((x) => (
-            <tr key={x.job}><td>{x.job}</td><td>{x.total}</td><td className={x.down ? styles.stackBad : x.down === null ? styles.stackMuted : undefined}>{x.down ?? t("obs.stack.queryFailed")}</td></tr>
-          ))}
-        </tbody>
-      </table>
-      {d.downTargets.length > 0 && (
-        <Notice tone="warning" title={t("obs.stack.downTitle", { n: d.downTargets.length })}>
-          <ul className={styles.stackList}>
-            {d.downTargets.map((x) => <li key={`${x.job}|${x.namespace}|${x.pod}`}>{x.namespace ?? "—"}/{x.pod ?? "—"} <span className={styles.stackMuted}>({x.job})</span></li>)}
-          </ul>
-          {t("obs.stack.downHint")}
-        </Notice>
-      )}
-      {!d.grafana && <p className={styles.stackMuted}>{t("obs.stack.grafanaSetup")}</p>}
+        <Cell span={12}>
+          <Panel title={t("obs.stack.targetsTitle")} sub={String(d.targets.length)} flush
+            actions={d.downTargets.length ? <Chip level="warn">{t("obs.stack.downTitle", { n: d.downTargets.length })}</Chip> : undefined}
+            footer={!d.grafana ? <span>{t("obs.stack.grafanaSetup")}</span> : undefined}>
+            <table className={`${styles.stackTable} ${styles.stackFlush}`}>
+              <thead><tr><th>{t("obs.stack.job")}</th><th>{t("obs.stack.total")}</th><th>{t("obs.stack.down")}</th></tr></thead>
+              <tbody>
+                {d.targets.map((x) => (
+                  <tr key={x.job}><td>{x.job}</td><td>{x.total}</td><td className={x.down ? styles.stackBad : x.down === null ? styles.stackMuted : undefined}>{x.down ?? t("obs.stack.queryFailed")}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            {d.downTargets.length > 0 && (
+              <div className={styles.stackDown}>
+                <ul className={styles.stackList}>
+                  {d.downTargets.map((x) => <li key={`${x.job}|${x.namespace}|${x.pod}`}>{x.namespace ?? "—"}/{x.pod ?? "—"} <span className={styles.stackMuted}>({x.job})</span></li>)}
+                </ul>
+                <p className={styles.stackMuted}>{t("obs.stack.downHint")}</p>
+              </div>
+            )}
+          </Panel>
+        </Cell>
+      </Grid>
     </div>
   );
 }
@@ -120,18 +122,22 @@ function ComponentCard({ c, grafana, promUid }: { c: StackComponent; grafana: Ob
   const { t } = useI18n();
   const version = [...new Set(c.pods.map((p) => p.version).filter(Boolean))].join(", ");
   const dsUid = c.kind === "loki" || c.kind === "tempo" || c.kind === "pyroscope" ? grafana?.datasources[c.kind] : undefined;
+  const level = CHIP[c.state];
   return (
-    <article className={styles.stackCard}>
-      <header className={styles.stackCardHead}>
-        <div className={styles.stackCardName}>
-          <strong title={c.name}>{c.name}</strong>
-          <span className={styles.stackMuted}>
-            {t(`obs.stack.kind.${c.kind}`)}{c.namespace ? ` · ${c.namespace}` : ""}{c.pods.length ? ` · ${t("hb.m.pods", { n: c.pods.length })}` : ""}{version ? ` · ${version}` : ""}
-          </span>
-          <Readiness c={c} />
-        </div>
-        <Badge tone={TONE[c.state]}>{t(`obs.stack.state.${c.state}`)}</Badge>
-      </header>
+    <Panel as="article" level={level === "danger" || level === "warn" ? level : undefined}
+      title={<span title={c.name}>{c.name}</span>}
+      actions={<Chip level={level}>{t(`obs.stack.state.${c.state}`)}</Chip>}
+      footer={grafana && dsUid ? (
+        <a className={styles.stackLink} href={`${grafana.endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify({ aud: { datasource: dsUid, queries: [{ refId: "A", datasource: { uid: dsUid } }], range: { from: "now-1h", to: "now" } } }))}`} target="_blank" rel="noreferrer">
+          {t("obs.stack.openExplore")} ↗
+        </a>
+      ) : undefined}>
+      <div className={styles.stackCardName}>
+        <span className={styles.stackMuted}>
+          {t(`obs.stack.kind.${c.kind}`)}{c.namespace ? ` · ${c.namespace}` : ""}{c.pods.length ? ` · ${t("hb.m.pods", { n: c.pods.length })}` : ""}{version ? ` · ${version}` : ""}
+        </span>
+        <Readiness c={c} />
+      </div>
       <dl className={styles.stackChecks}>
         {c.checks.map((x) => (
           <div key={x.id} className={styles.stackCheck}>
@@ -143,12 +149,7 @@ function ComponentCard({ c, grafana, promUid }: { c: StackComponent; grafana: Ob
           </div>
         ))}
       </dl>
-      {grafana && dsUid && (
-        <a className={styles.stackLink} href={`${grafana.endpoint}/explore?schemaVersion=1&orgId=1&panes=${encodeURIComponent(JSON.stringify({ aud: { datasource: dsUid, queries: [{ refId: "A", datasource: { uid: dsUid } }], range: { from: "now-1h", to: "now" } } }))}`} target="_blank" rel="noreferrer">
-          {t("obs.stack.openExplore")} ↗
-        </a>
-      )}
-    </article>
+    </Panel>
   );
 }
 

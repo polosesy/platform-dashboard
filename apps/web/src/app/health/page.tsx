@@ -19,7 +19,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
-import { PageHeader, SampleDataNotice, Tabs, useNoteText } from "@/components/ui";
+import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Tabs, useNoteText } from "@/components/ui";
 import { InstanceHealthPanel } from "./InstanceHealthPanel";
 import { SubscriptionSelect } from "@/components/SubscriptionSelect";
 import { rgba } from "@/lib/palette";
@@ -132,29 +132,19 @@ function RegionCard({ region }: { region: RegionHealthStatus }) {
   ].filter(Boolean).join(" ");
 
   return (
-    <div className={cardClass} onClick={() => setExpanded((v) => !v)}>
-      <div className={styles.regionCardHeader}>
-        <div className={styles.regionDot} data-state={isAffected ? "affected" : "ok"} />
+    <div className={cardClass}>
+      {/* The header is the toggle — a real button (keyboard, screen readers); the card itself is not clickable */}
+      <button type="button" className={styles.regionCardHeader} aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
         <span className={styles.regionName}>{region.displayName}</span>
-        <span className={`${styles.regionStatusBadge} ${isAffected ? styles.regionStatusAffected : styles.regionStatusOk}`}>
-          {isAffected ? t("health.regionAffected") : t("health.regionOperational")}
-        </span>
-        <span className={`${styles.regionChevron} ${expanded ? styles.regionChevronOpen : ""}`}>▼</span>
-      </div>
+        <Chip level={isAffected ? "danger" : "ok"}>{isAffected ? t("health.regionAffected") : t("health.regionOperational")}</Chip>
+        <span className={`${styles.regionChevron} ${expanded ? styles.regionChevronOpen : ""}`} aria-hidden="true">▾</span>
+      </button>
 
       {/* Collapsed summary chips */}
       {!expanded && isAffected && (
         <div className={styles.regionIssueRow}>
-          {region.serviceIssueCount > 0 && (
-            <span className={styles.regionIssueChip} data-type="issue">
-              {region.serviceIssueCount} {t("health.regionServiceIssue")}
-            </span>
-          )}
-          {region.maintenanceCount > 0 && (
-            <span className={styles.regionIssueChip} data-type="maintenance">
-              {region.maintenanceCount} {t("health.regionMaintenance")}
-            </span>
-          )}
+          {region.serviceIssueCount > 0 && <Chip level="danger" glyph={false}>{region.serviceIssueCount} {t("health.regionServiceIssue")}</Chip>}
+          {region.maintenanceCount > 0 && <Chip level="info" glyph={false}>{region.maintenanceCount} {t("health.regionMaintenance")}</Chip>}
         </div>
       )}
 
@@ -214,71 +204,41 @@ function GlobalStatusPanel({
   const { t, locale } = useI18n();
   const noteText = useNoteText();
 
-  if (loading) return <div className={styles.empty}>{t("health.loading")}</div>;
-  if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
+  if (loading) return <LoadingState label={t("health.loading")} />;
+  if (error) return <ErrorNotice error={error} title={t("health.error")} />;
   if (!data) return null;
 
   const hasRegions = regionalData && regionalData.regions.length > 0;
 
+  // Kit layout (design-system.md · 8): the sample notice first (the only notice), then two panels —
+  // regions (the count of affected regions is the head's chip, not a second banner) and global incidents
   return (
     <div className={styles.globalLayout}>
-      {/* ── Your Deployed Regions ── */}
-      <section className={styles.regionalSection}>
-        <div className={styles.sectionHeader}>
-          <div className={styles.sectionTitle}>{t("health.yourRegions")}</div>
-          <div className={styles.sectionSub}>{t("health.yourRegionsSub")}</div>
-        </div>
-        {regionalLoading ? (
-          <div className={styles.empty}>
-            <div className={styles.spinner} style={{ width: 24, height: 24, borderWidth: 2, margin: "0 auto 8px" }} />
-            {t("health.loading")}
-          </div>
-        ) : hasRegions ? (
-          <>
-            {/* Sample first: the red "n regions affected" line below must not be read as a real outage */}
-            {regionalData.source === "mock" ? <SampleDataNotice note={regionalData.note ?? "mock data"} /> : null}
-            {regionalData.totalAffected > 0 && (
-              <div className={styles.regionAffectedBanner}>
-                {t("health.regionsAffected", { n: regionalData.totalAffected })}
-              </div>
-            )}
-            <div className={styles.regionGrid}>
-              {regionalData.regions.map((region) => (
-                <RegionCard key={region.name} region={region} />
-              ))}
-            </div>
-            {regionalData.source !== "mock" && regionalData.note ? (
-              <div className={styles.regionalNote}>{noteText(regionalData.note)}</div>
-            ) : null}
-          </>
+      {/* Sample first: the red "n regions affected" chip below must not be read as a real outage */}
+      {regionalData?.source === "mock" ? <SampleDataNotice note={regionalData.note ?? "mock data"} /> : null}
+      <Panel title={t("health.yourRegions")} sub={t("health.yourRegionsSub")}
+        actions={hasRegions ? (regionalData.totalAffected > 0
+          ? <Chip level="danger">{t("health.regionsAffected", { n: regionalData.totalAffected })}</Chip>
+          : <Chip level="ok">{t("health.regionsAllOk")}</Chip>) : undefined}
+        footer={hasRegions && regionalData.source !== "mock" && regionalData.note ? <span>{noteText(regionalData.note)}</span> : undefined}>
+        {regionalLoading ? <LoadingState label={t("health.loading")} /> : hasRegions ? (
+          <Grid>
+            {regionalData.regions.map((region) => (
+              <Cell span={3} key={region.name}><RegionCard region={region} /></Cell>
+            ))}
+          </Grid>
         ) : (
-          <div className={styles.empty}>
-            {regionalData?.note
-              ? <><strong>{t("health.error")}:</strong> {noteText(regionalData.note)}</>
-              : t("health.permissionsNote")}
-          </div>
+          <EmptyState title={regionalData?.note ? t("health.error") : t("health.noRegions")}>
+            {regionalData?.note ? noteText(regionalData.note) : t("health.permissionsNote")}
+          </EmptyState>
         )}
-      </section>
+      </Panel>
 
-      {/* ── Global Incidents (RSS) ── */}
-      <section>
-        <div className={styles.sectionHeader}>
-          <div className={styles.sectionTitle}>{t("health.globalIncidents")}</div>
-        </div>
+      <Panel title={t("health.globalIncidents")}
+        actions={data.activeIncidents === 0 ? <Chip level="ok">{t("health.allOperational")}</Chip> : <Chip level="danger">{t("health.incidentsN", { n: data.activeIncidents })}</Chip>}
+        footer={<a href="https://azure.status.microsoft/en-us/status" target="_blank" rel="noopener noreferrer" className={styles.allGoodLink}>{t("health.azureStatusLink")} ↗</a>}>
         {data.activeIncidents === 0 ? (
-          <div className={styles.allGoodCard}>
-            <div className={styles.allGoodIcon}>✓</div>
-            <div className={styles.allGoodTitle}>{t("health.allOperational")}</div>
-            <div className={styles.allGoodSub}>{t("health.allOperationalSub")}</div>
-            <a
-              href="https://azure.status.microsoft/en-us/status"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.allGoodLink}
-            >
-              {t("health.azureStatusLink")} →
-            </a>
-          </div>
+          <p className={styles.panelText}>{t("health.allOperationalSub")}</p>
         ) : (
           <div className={styles.incidentList}>
             {data.incidents.map((inc: GlobalStatusIncident) => (
@@ -296,26 +256,17 @@ function GlobalStatusPanel({
                 {inc.affectedRegions.length > 0 && (
                   <div className={styles.badgeRow}>
                     <span className={styles.badgeLabel}>{t("health.affectedRegions")}:</span>
-                    {inc.affectedRegions.map((r) => (
-                      <span key={r} className={styles.regionBadge}>{r}</span>
-                    ))}
+                    {inc.affectedRegions.map((r) => <Chip key={r} level="plain" glyph={false}>{r}</Chip>)}
                   </div>
                 )}
                 {inc.affectedServices.length > 0 && (
                   <div className={styles.badgeRow}>
                     <span className={styles.badgeLabel}>{t("health.affectedServices")}:</span>
-                    {inc.affectedServices.map((s) => (
-                      <span key={s} className={styles.serviceBadge}>{s}</span>
-                    ))}
+                    {inc.affectedServices.map((sv) => <Chip key={sv} level="plain" glyph={false}>{sv}</Chip>)}
                   </div>
                 )}
                 {inc.link && (
-                  <a
-                    href={inc.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={styles.incidentLink}
-                  >
+                  <a href={inc.link} target="_blank" rel="noopener noreferrer" className={styles.incidentLink}>
                     {t("health.viewDetails")} →
                   </a>
                 )}
@@ -323,7 +274,7 @@ function GlobalStatusPanel({
             ))}
           </div>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }

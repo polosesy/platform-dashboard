@@ -18,12 +18,12 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import {
-  Button, Cell, Chip, CodeBlock, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Segmented, Select, Stat, type ChipLevel,
+  Button, Cell, Chip, CodeBlock, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Segmented, Select, Stat, Toolbar, type ChipLevel,
 } from "@/components/ui";
 import { atParam, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import {
-  SLO_GLYPH, alertLevel, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
+  SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
 } from "@/lib/sloView";
 import styles from "../styles.module.css";
@@ -82,14 +82,13 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
 
   return (
     <div className={styles.slo}>
-      <div className={styles.sloTop}>
-        <Segmented label={t("ob.slo.view")} value={view} onChange={setView}
-          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
-        <span className={styles.sloMeta}>
+      <Toolbar
+        start={<Segmented label={t("ob.slo.view")} value={view} onChange={setView}
+          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "guide", label: t("ob.slo.view.guide") }]} />}
+        end={<>
           {t(d.at ? "ob.slo.metaAt" : "ob.slo.metaNow", { days: d.windowDays, at: when })}
           <Chip level="info" glyph={false} title={t("ob.slo.windowFixedHint")}>{t("ob.slo.windowFixed", { days: d.windowDays })}</Chip>
-        </span>
-      </div>
+        </>} />
       {notice}
       {view === "services" ? <ServicesView d={d} onGuide={() => setView("guide")} /> : <SloGuide d={d} />}
     </div>
@@ -147,7 +146,7 @@ function ServicesView({ d, onGuide }: { d: WorkloadSloResponse; onGuide: () => v
       <Cell span={12}>
         <div className={styles.sloFootLine}>
           <span>{t("ob.slo.footLine", { judged: d.services.length - notJudged, notJudged, uninst: d.uninstrumented.length })}</span>
-          <button type="button" className={styles.sloLinkBtn} onClick={onGuide}>{t("ob.slo.openGuide")} →</button>
+          <Button size="sm" variant="ghost" onClick={onGuide}>{t("ob.slo.openGuide")} →</Button>
         </div>
       </Cell>
     </Grid>
@@ -268,6 +267,7 @@ function SliDetail({ s }: { s: SloSli }) {
 function SloGuide({ d }: { d: WorkloadSloResponse }) {
   const { t } = useI18n();
   const draft = useMemo(() => sloConfigDraft(d), [d]);
+  const buckets = useMemo(() => bucketHints(d.buckets), [d]);
   const sli = (s: SloService, kind: SloSli["kind"]) => s.slis.find((x) => x.kind === kind);
   const copy = { copyLabel: t("ob.slo.copy"), copiedLabel: t("ob.slo.copied") };
   const steps = [1, 2, 3, 4] as const;
@@ -294,12 +294,23 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
             <dt>{t("ob.slo.g.lat.t")}</dt>
             <dd>
               {t("ob.slo.g.lat.d")}
-              <span className={styles.sloBuckets}>
-                <span className={styles.stackMuted}>{t("ob.slo.g.buckets")}</span>
-                {d.buckets.length
-                  ? d.buckets.map((b) => <Chip key={b} level="plain" glyph={false}>{msText(b * 1000)}</Chip>)
-                  : <span className={styles.stackMuted}>{t("ob.slo.g.noBuckets")}</span>}
-              </span>
+              {buckets.all.length ? (
+                <>
+                  <span className={styles.sloBuckets}>
+                    <span className={styles.stackMuted}>{t("ob.slo.g.buckets")}</span>
+                    {buckets.picks.map((p) => (
+                      <Chip key={p.ms} level={p.exact ? "ok" : p.countedMs === null ? "unknown" : "plain"} glyph={p.exact ? "●" : p.countedMs === null ? "?" : "→"}
+                        title={p.countedMs === null ? t("ob.slo.g.pickNone") : p.exact ? t("ob.slo.g.pickExact") : t("ob.slo.g.pickBelow", { v: msText(p.countedMs) })}>
+                        {p.exact || p.countedMs === null ? msText(p.ms) : `${msText(p.ms)} → ${msText(p.countedMs)}`}
+                      </Chip>
+                    ))}
+                  </span>
+                  <details className={styles.sloAllBuckets}>
+                    <summary>{t("ob.slo.g.allBuckets", { n: buckets.all.length })}</summary>
+                    <span>{buckets.all.join(" · ")}</span>
+                  </details>
+                </>
+              ) : <span className={styles.sloBuckets}><span className={styles.stackMuted}>{t("ob.slo.g.noBuckets")}</span></span>}
             </dd>
             <dt>{t("ob.slo.budget")}</dt>
             <dd>{t("ob.slo.explain.budget")}</dd>
@@ -350,7 +361,7 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
               <li><strong>{t("ob.slo.g.where.aks.t")}</strong><span>{t("ob.slo.g.where.aks.d")}</span></li>
               <li><strong>{t("ob.slo.g.where.check.t")}</strong><span>{t("ob.slo.g.where.check.d")}</span></li>
             </ol>
-            <CodeBlock code={draft} label={t("ob.slo.g.draftLabel", { days: d.windowDays })} {...copy} />
+            <CodeBlock code={draft} label={t("ob.slo.g.draftLabel", { days: d.windowDays })} maxHeight={360} {...copy} />
           </div>
         </Panel>
       </Cell>

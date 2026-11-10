@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SLO_DEFAULTS, SLO_PART_DAYS, aggregateSlo, effectiveBucket, mergeSloParts, sliExpr, sloPartKey, sloQueries, sloWindowParts, targetsFor,
+  SLO_DEFAULTS, SLO_PART_DAYS, SLO_TIERS, aggregateSlo, effectiveBucket, mergeSloParts, sliExpr, sloPartKey, sloQueries, sloWindowParts, targetsFor,
   type SloConfig, type SloRaw,
 } from "../src/services/workloadSlo.js";
 
@@ -240,7 +240,7 @@ test("view: a missed default target is orange (watch), a missed team target is r
   assert.equal(sv.serviceLevel(byTeam), "danger");
 });
 
-test("guide: the config draft starts from the met tiers — the file's shape, defaults on top, a service only where it differs", () => {
+test("guide: the config draft starts one tier under the met tiers — the file's shape, defaults on top, one service per line", () => {
   const res = agg(raw([{ app: "gw", uri: "/a", status: "200", n: 10_000, fast: 9_000 }]));
   const s = res.services[0]!;
   const draft = sv.sloConfigDraft({ windowDays: 30, defaults: { availability: 0.999, latency: { thresholdMs: 1000, target: 0.99 } }, services: res.services });
@@ -249,11 +249,27 @@ test("guide: the config draft starts from the met tiers — the file's shape, de
   const slo = parsed.aks.observability.slo;
   assert.deepEqual({ w: slo.windowDays, a: slo.availability, l: slo.latency }, { w: 30, a: 0.999, l: { thresholdMs: 1000, target: 0.99 } });
   const entry = slo.services?.[`${s.namespace}/gw`];
-  assert.deepEqual(entry?.latency, { thresholdMs: 1000, target: 0.9 }, "90 % within 1 s met the 90 % tier");
-  assert.equal(entry?.availability, 0.9999, "no 5xx in 10 000 requests met the top tier");
-  // A service that met exactly the defaults adds nothing; one without the application tag cannot be keyed
-  const none = sv.sloConfigDraft({ windowDays: 30, defaults: { availability: 0.9999, latency: { thresholdMs: 1000, target: 0.9 } }, services: res.services });
+  assert.deepEqual(entry?.latency, { thresholdMs: 1000, target: 0.9 }, "90 % within 1 s met the lowest tier — it stays");
+  assert.equal(entry?.availability, 0.9995, "no 5xx met the top tier 99.99 % — the draft asks one tier less (room in the budget)");
+  assert.equal(draft.split("\n").filter((l) => l.includes(`"${s.namespace}/gw"`)).length, 1, "one line per service");
+  // A service whose draft equals the top level adds nothing
+  const none = sv.sloConfigDraft({ windowDays: 30, defaults: { availability: 0.9995, latency: { thresholdMs: 1000, target: 0.9 } }, services: res.services });
   assert.ok(!JSON.parse(`{${none}}`).aks.observability.slo.services);
+  assert.equal(sv.draftTarget(0.999), 0.995);
+  assert.equal(sv.draftTarget(0.9), 0.9);
   assert.equal(sv.msText(1000), "1s");
   assert.equal(sv.msText(300), "300ms");
+});
+
+test("guide: the tiers equal the API's; common thresholds name the boundary actually counted; boundaries without look-alikes", () => {
+  assert.deepEqual([...sv.SLO_TIERS], [...SLO_TIERS]);
+  // Micrometer-like: exact 0.1 · 0.3 · 0.5 · 1 · 3 plus default-histogram boundaries
+  const h = sv.bucketHints([0.001, 0.001048576, 0.001398101, 0.1, 0.268435456, 0.3, 0.5, 1, 1.789569706, 3, Number.POSITIVE_INFINITY]);
+  const pick = (ms: number) => h.picks.find((p) => p.ms === ms)!;
+  assert.deepEqual(pick(1000), { ms: 1000, countedMs: 1000, exact: true });
+  assert.equal(pick(2000).exact, false);
+  assert.ok(Math.abs(pick(2000).countedMs! - 1789.569706) < 1e-6, "2 s is counted at 1.79 s");
+  assert.ok(Math.abs(pick(200).countedMs! - 100) < 1e-9, "200 ms is counted at 100 ms");
+  assert.equal(h.all.filter((x) => x === "1ms").length, 1, "1.000 / 1.048 / 1.398 ms read alike — shown once");
+  assert.equal(sv.bucketHints([]).picks[0]!.countedMs, null);
 });

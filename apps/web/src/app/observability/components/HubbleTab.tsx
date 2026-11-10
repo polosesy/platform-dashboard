@@ -9,7 +9,7 @@ import { FlowsTab } from "../../hubble/components/FlowsTab";
 import { NetworkTab } from "../../hubble/components/NetworkTab";
 import { SecurityTab } from "../../hubble/components/SecurityTab";
 import styles from "../../hubble/styles.module.css";
-import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle } from "@/components/ui";
+import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle, Toolbar } from "@/components/ui";
 import { EnableFlowLogsPanel, LokiDrops, METRICS_WINDOWS, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
 import { LOKI_DROP_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
@@ -74,10 +74,10 @@ export function HubbleTab({ clusterId, control }: Props) {
   return (
     <div>
       {pastNote}
-      <div className={styles.statusBadges}>
-        <SourceBadge sources={src} />
-        <Button size="sm" onClick={sources.reload} disabled={!clusterId}>{t("hub.checkStatus")}</Button>
-      </div>
+      {/* The source and what it can show: the tab's top line, not a notice (one notice per screen) */}
+      <Toolbar
+        start={<><SourceBadge sources={src} /><Button size="sm" onClick={sources.reload} disabled={!clusterId}>{t("hub.checkStatus")}</Button></>}
+        end={src.selected === "none" ? undefined : t(src.selected === "flowLogs" ? "hb.src.flowLogsHint" : src.selected === "hubbleUi" ? "hb.src.hubbleUiHint" : "hb.src.metricsHint")} />
       {src.selected === "none" ? (
         <>
           <Notice tone="warning" title={t("hb.src.noneTitle")}>
@@ -87,7 +87,6 @@ export function HubbleTab({ clusterId, control }: Props) {
         </>
       ) : (
         <>
-          <Notice tone="info">{t(src.selected === "flowLogs" ? "hb.src.flowLogsHint" : src.selected === "hubbleUi" ? "hb.src.hubbleUiHint" : "hb.src.metricsHint")}</Notice>
           {tabs}
           {src.selected === "flowLogs" || src.selected === "hubbleUi" ? (
             <>
