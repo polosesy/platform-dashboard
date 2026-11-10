@@ -34,15 +34,11 @@ const CANVAS_CSS = new Set([
   "app/hubble/styles.module.css", // service map cards (also the VNet traffic map)
   "app/policies/insights/insights.module.css", // attack path / network map SVG text
 ]);
+/**
+ * Since 2026-11-10 the canvases follow the 12px minimum too (the canvas tokens are 12px, the inline SVG/React Flow
+ * label sizes are on the scale). The one exception is the draw.io export — a file opened in draw.io, not this screen.
+ */
 const CANVAS_TS = new Set([
-  "app/architecture/components/ArchEdge.tsx",
-  "app/architecture/page.tsx",
-  "app/architecture/utils/toFlow.ts",
-  "app/hubble/components/ServiceMapTab.tsx",
-  "app/network/components/TrafficMapSection.tsx",
-  "app/live-diagram/utils/designTokens.ts",
-  "app/policies/insights/AttackGraph.tsx",
-  "app/policies/insights/NetworkMap.tsx",
   "lib/archDrawio.ts", // draw.io export — a file, not the screen
 ]);
 
@@ -63,8 +59,8 @@ test("globals.css defines exactly the six-step type scale, canvas sizes and the 
   const sizes = Object.fromEntries([...globals.matchAll(/--text-(\w+):\s*(\d+)px/g)].map((m) => [m[1]!, Number(m[2])]));
   assert.deepEqual(sizes, SCALE);
   assert.ok(Math.min(...Object.values(sizes)) >= 12, "nothing under 12px on screen");
-  assert.match(globals, /--canvas-text-xs:\s*10px/);
-  assert.match(globals, /--canvas-text-sm:\s*11px/);
+  assert.match(globals, /--canvas-text-xs:\s*12px/, "canvases too: 12px at 100 % zoom");
+  assert.match(globals, /--canvas-text-sm:\s*12px/);
   assert.match(globals, /font-size: var\(--text-body\);/, "body text = 14px");
   assert.match(globals, /"Pretendard Variable"/, "one family for Korean and Latin");
 });
@@ -224,4 +220,16 @@ test("ratchet: raw <button>s and page-made chip classes outside the kit only go 
     if (names.size > (OWN_CHIP_CLASSES[r] ?? 0)) over.push(`${r}: ${names.size} own chip/badge classes (frozen at ${OWN_CHIP_CLASSES[r] ?? 0}) — use <Chip>/<Badge>`);
   }
   assert.deepEqual(over, []);
+});
+
+test("no blur: surfaces are opaque (a blurred, see-through panel made small numbers hard to read — and dark mode wrong)", () => {
+  const bad = decls("backdrop-filter").filter(({ value }) => value !== "none").map((d) => `${d.file}:${d.line} ${d.value}`);
+  assert.deepEqual(bad, []);
+});
+
+test("text colours come from the text tokens (see-through ink failed contrast), and labels are not all-caps", () => {
+  const bad = decls("color").filter(({ value }) => /^rgba\(var\(--ink-rgb\)/.test(value)).map((d) => `${d.file}:${d.line} color: ${d.value}`);
+  assert.deepEqual(bad, [], "use var(--ink) · var(--muted) (7.6:1) · var(--subtle) (4.8:1)");
+  const caps = decls("text-transform").filter(({ value }) => value === "uppercase").map((d) => `${d.file}:${d.line}`);
+  assert.deepEqual(caps, []);
 });

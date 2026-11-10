@@ -24,10 +24,10 @@
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
-  background: rgba(var(--paper-rgb), 0.5);
+  background: var(--panel);
   font-size: var(--text-caption);
   font-weight: 600;
-  color: rgba(var(--ink-rgb), 0.72);
+  color: var(--muted);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -62,12 +62,10 @@
 .table thead th {
   text-align: left;
   font-size: var(--text-caption);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: rgba(var(--ink-rgb), 0.62);
+  color: var(--muted);
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  background: rgba(var(--paper-rgb), 0.5);
+  background: var(--panel);
 }
 
 .table tbody td {
@@ -93,7 +91,7 @@
 .mono {
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  color: rgba(var(--ink-rgb), 0.78);
+  color: var(--muted);
 }
 
 /* ── Status badge ── */
@@ -104,7 +102,6 @@
   border-radius: var(--radius-pill);
   font-size: var(--text-caption);
   font-weight: 700;
-  letter-spacing: 0.01em;
 }
 
 .statusBadge[data-status="Running"],
@@ -129,7 +126,7 @@
 
 .statusBadge[data-status="Suspended"] {
   background: rgba(var(--ink-rgb), 0.08);
-  color: rgba(var(--ink-rgb), 0.6);
+  color: var(--muted);
 }
 
 /* ── Kind badge ── */

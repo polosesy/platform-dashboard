@@ -86,10 +86,11 @@
   --leading-title: 1.35;
   --leading-heading: 1.4;
   --leading-body: 1.5;
-  /* Zoomable canvases only (React Flow nodes, viewBox SVG): sizes are canvas units that scale with zoom,
-     not screen pixels. Allowed only in the files listed in designTokens.test.ts. */
-  --canvas-text-xs: 10px;
-  --canvas-text-sm: 11px;
+  /* Zoomable canvases (React Flow nodes, viewBox SVG): canvas units that scale with zoom — since 2026-11-10 the same
+     12px minimum as the screen at 100 % zoom (the cards keep their size; a long line ends in …). Two names stay so a
+     canvas can still tell its two small styles apart, and only canvas files use them (designTokens.test.ts). */
+  --canvas-text-xs: 12px;
+  --canvas-text-sm: 12px;
   /* Weights: 400 · 500 · 600 · 700 only */
 
   /* Radius — controls 6, surfaces 10, pills */

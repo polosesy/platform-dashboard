@@ -55,8 +55,8 @@ export const defaultTokens: DesignTokenSet = {
   },
   typography: {
     nodeLabel: { fontSize: 13, fontWeight: 700 },
-    nodeMetric: { fontSize: 11, fontWeight: 700 },
-    edgeLabel: { fontSize: 11, fontWeight: 600 },
+    nodeMetric: { fontSize: 12, fontWeight: 700 },
+    edgeLabel: { fontSize: 12, fontWeight: 600 },
   },
 };
 

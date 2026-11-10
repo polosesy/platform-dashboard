@@ -164,7 +164,7 @@ export function AttackGraph({ issue, sel, cutDone, onPick, onEscape, register }:
             <circle className={styles.ring} r={27} />
             <circle r={22} fill={n.unk ? "var(--unk)" : `var(--n-${n.type})`} fillOpacity={n.unk ? 0.55 : 1} stroke={n.unk ? "var(--unk)" : undefined} strokeDasharray={n.unk ? "3 3" : undefined} strokeWidth={n.unk ? 1.5 : undefined} />
             <Icon type={n.type} />
-            {n.unk && <g transform="translate(16,-16)"><circle r={8} fill="var(--surface)" stroke="var(--unk)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 10, fontWeight: 700, fill: "var(--muted)" }}>?</text></g>}
+            {n.unk && <g transform="translate(16,-16)"><circle r={9} fill="var(--surface)" stroke="var(--unk)" /><text y={4} textAnchor="middle" style={{ fontSize: 12, fontWeight: 700, fill: "var(--muted)" }}>?</text></g>}
             {(n.badges ?? []).slice(0, 1).map((b) => (
               <g key={b.what} className={styles.bdg} transform="translate(-17,-17)"><title>{`${b.n} ${b.what}`}</title><circle r={8} fill="var(--crit)" /><text y={3.5} textAnchor="middle">{b.n}</text></g>
             ))}

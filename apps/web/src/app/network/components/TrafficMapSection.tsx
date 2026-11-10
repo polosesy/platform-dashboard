@@ -142,7 +142,7 @@ function TrafficMap({ map: data, rangeKey, onTalkers }: { map: NetMapData; range
       id: l.id, source: l.source, target: l.target, type: "smoothstep",
       style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: focus && !on ? 0.06 : on ? 1 : l.tone === "forward" ? 0.5 : 0.9 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
-      ...(on ? { label: `${formatBytes(l.edge.bytes)}${top ? ` · ${top.proto ?? ""}:${top.port ?? "—"}` : ""}${l.edge.deniedFlows ? ` · ${t("net.deniedShort")} ${l.edge.deniedFlows.toLocaleString()}` : ""}`, labelStyle: { fontSize: 11 }, labelBgPadding: [4, 2] as [number, number] } : {}),
+      ...(on ? { label: `${formatBytes(l.edge.bytes)}${top ? ` · ${top.proto ?? ""}:${top.port ?? "—"}` : ""}${l.edge.deniedFlows ? ` · ${t("net.deniedShort")} ${l.edge.deniedFlows.toLocaleString()}` : ""}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
       zIndex: on ? 20 : 5,
     } satisfies Edge;
   }), [map.links, focus, t]);

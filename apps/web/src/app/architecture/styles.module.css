@@ -566,7 +566,7 @@
 
 .tile_ghost {
   border-style: dashed;
-  background: rgba(var(--paper-rgb), 0.7);
+  background: var(--panel);
   opacity: 0.85;
 }
 

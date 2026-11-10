@@ -43,7 +43,7 @@ function ChainBadge({ at, vertical, color, text, title }: { at: [number, number]
         <rect x={-1.5} y={-3.6} width={11} height={7.2} rx={3.6} fill="none" stroke={color} strokeWidth={1.8} />
       </g>
       {text ? (
-        <text x={0} y={vertical ? 0 : 20} dx={vertical ? 14 : 0} textAnchor={vertical ? "start" : "middle"} dominantBaseline="middle" fontSize={10} fontWeight={700} fill={color} paintOrder="stroke" stroke="#ffffff" strokeWidth={3}>{text}</text>
+        <text x={0} y={vertical ? 0 : 20} dx={vertical ? 14 : 0} textAnchor={vertical ? "start" : "middle"} dominantBaseline="middle" fontSize={12} fontWeight={700} fill={color} paintOrder="stroke" stroke="#ffffff" strokeWidth={3}>{text}</text>
       ) : null}
     </g>
   );

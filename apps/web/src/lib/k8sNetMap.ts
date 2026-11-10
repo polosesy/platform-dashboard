@@ -18,7 +18,8 @@
 import type { HubbleServiceEdge, HubbleServiceMapResponse, HubbleServiceNode } from "@aud/types";
 import { measure, place, type PackBox, type PackNode } from "./boxPack";
 
-export const NET = { CARD_W: 208, CARD_H: 66, GAP: 14, COL_GAP: 40, HEAD: 30, PAD: 12, COL_MAX: 6, ROW_MAX_W: 2800, LANE_GAP: 64 } as const;
+/** CARD_H 80 (was 66): four 12px lines (name · kind · value label · value) at line-height 1.25 + padding — 2026-11-10 */
+export const NET = { CARD_W: 208, CARD_H: 80, GAP: 14, COL_GAP: 40, HEAD: 30, PAD: 12, COL_MAX: 6, ROW_MAX_W: 2800, LANE_GAP: 64 } as const;
 
 export type NetStatus = "danger" | "warn" | "ok" | "stale";
 export const NET_GLYPH: Record<NetStatus, string> = { danger: "■", warn: "▲", ok: "●", stale: "○" };

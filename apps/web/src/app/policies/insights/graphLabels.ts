@@ -17,10 +17,10 @@ export function laneBounds(centers: number[], width: number): { x0: number; x1: 
 const WIDE: [number, number][] = [[0x1100, 0x11ff], [0x3000, 0x9fff], [0xac00, 0xd7af], [0xff00, 0xffef]];
 const wide = (c: number) => WIDE.some(([a, b]) => c >= a && c <= b);
 
-/** Approximate rendered width at 10.5 px: CJK ≈ 10.5 px, others ≈ 6.2 px */
+/** Approximate rendered width at 12 px (the canvas minimum since 2026-11-10): CJK ≈ 12 px, others ≈ 7.1 px */
 export function textWidth(s: string): number {
   let w = 0;
-  for (const ch of s) w += wide(ch.codePointAt(0) ?? 0) ? 10.5 : 6.2;
+  for (const ch of s) w += wide(ch.codePointAt(0) ?? 0) ? 12 : 7.1;
   return Math.ceil(w);
 }
 

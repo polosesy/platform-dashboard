@@ -156,7 +156,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
       const w = 1.5 + (e.totalBytes / max) * 4.5;
       seen.set(id, {
         id, source: a, target: b, type: "smoothstep", zIndex: 1, animated: true, focusable: false,
-        label: formatBytes(e.totalBytes), labelStyle: { fontSize: 10, fontWeight: 700, fill: hex("accent") }, labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
+        label: formatBytes(e.totalBytes), labelStyle: { fontSize: 12, fontWeight: 700, fill: hex("accent") }, labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
         style: { stroke: EDGE_STYLE.traffic.stroke, strokeWidth: w, strokeDasharray: e.deniedFlows > 0 ? "5 3" : undefined },
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: hex("accent") },
       });

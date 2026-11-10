@@ -19,7 +19,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n, type Locale } from "@/lib/i18n";
-import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Tabs, useNoteText } from "@/components/ui";
+import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Stat, Tabs, useNoteText } from "@/components/ui";
 import { InstanceHealthPanel } from "./InstanceHealthPanel";
 import { rgba } from "@/lib/palette";
 
@@ -514,30 +514,33 @@ function ServiceStatusPanel({
   }, [data, translationMap, getApiToken, t]);
 
   const eventTypeCounts = [
-    { type: "ServiceIssue" as const, key: "serviceIssue" as const },
-    { type: "PlannedMaintenance" as const, key: "plannedMaintenance" as const },
-    { type: "HealthAdvisory" as const, key: "healthAdvisory" as const },
-    { type: "SecurityAdvisory" as const, key: "securityAdvisory" as const },
+    { type: "ServiceIssue" as const, key: "serviceIssue" as const, glyph: "■", tone: "high" as const },
+    { type: "PlannedMaintenance" as const, key: "plannedMaintenance" as const, glyph: "●", tone: undefined },
+    { type: "HealthAdvisory" as const, key: "healthAdvisory" as const, glyph: "▲", tone: "medium" as const },
+    { type: "SecurityAdvisory" as const, key: "securityAdvisory" as const, glyph: "▲", tone: "medium" as const },
   ];
 
-  if (loading) return <div className={styles.empty}>{t("health.loading")}</div>;
-  if (error) return <div className={styles.error}>{t("health.error")}: {error}</div>;
+  if (loading) return <LoadingState label={t("health.loading")} />;
+  if (error) return <ErrorNotice error={error} title={t("health.error")} />;
 
   return (
     <div className={styles.grid}>
       {/* Sample events (anonymous) are marked before anything else — they read like real outages */}
       {data?.source === "mock" ? <SampleDataNotice note={data.note ?? "mock data"} /> : null}
       {/* Event type summary strip */}
-      <div className={styles.eventSummaryStrip}>
-        {eventTypeCounts.map(({ type, key }) => (
-          <div key={type} className={styles.statCard}>
-            <div className={styles.statDot} style={{ background: EVENT_TYPE_COLORS[type] }} />
-            <div className={styles.statCount} style={{ color: EVENT_TYPE_COLORS[type] }}>
-              {data?.byType[key] ?? 0}
-            </div>
-            <div className={styles.statLabel}>{t(`health.eventType.${type}`)}</div>
-          </div>
-        ))}
+      {/* Four kit Stat cards (3 columns each) — the glyph and colour say the kind, the number is Azure's count */}
+      <div className={styles.eventStats}>
+        <Grid>
+          {eventTypeCounts.map(({ type, key, glyph, tone }) => {
+            const n = data?.byType[key] ?? 0;
+            return (
+              <Cell span={3} key={type}>
+                <Stat label={<><span aria-hidden="true" style={{ color: EVENT_TYPE_COLORS[type] }}>{glyph}</span> {t(`health.eventType.${type}`)}</>}
+                  value={n} tone={n > 0 ? tone : undefined} />
+              </Cell>
+            );
+          })}
+        </Grid>
       </div>
 
       {/* ── Translation toggle row ── */}

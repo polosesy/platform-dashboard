@@ -1037,8 +1037,8 @@ const HEAD_ROW = 18;
 export const HEAD_GRIP = 16;
 const HEAD_MAX_ROWS = 4;
 const textW = (s: string, latin: number, cjk: number) => [...s].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? cjk : latin), 0);
-/** Badge width as drawn (10px bold, 5px padding each side, at most 160px — the CSS max-width) */
-const badgeW = (text: string) => Math.min(160, Math.ceil(textW(text, 6.2, 10.5)) + 10);
+/** Badge width as drawn (12px bold — the canvas minimum —, 5px padding each side, at most 160px — the CSS max-width) */
+const badgeW = (text: string) => Math.min(160, Math.ceil(textW(text, 7.4, 12.5)) + 10);
 
 /**
  * A subnet header in rows — the form: row 1 = name (and the CIDR when it fits), then CIDR · NSG · NAT · public IP ·
@@ -1052,7 +1052,7 @@ export function subnetHead(s: ArchSubnet, hidden: number, w: number): { rows: Ar
   const GAP = 6;
   const items: Array<{ it: ArchHeadItem; w: number }> = [];
   const nameW = Math.min(rowW, Math.ceil(textW(s.node.name, 7.4, 12.5)));
-  if (s.node.endpoint) items.push({ it: { k: "cidr" }, w: Math.ceil(s.node.endpoint.length * 6.8) });
+  if (s.node.endpoint) items.push({ it: { k: "cidr" }, w: Math.ceil(s.node.endpoint.length * 7.4) }); // the CIDR in 12px mono
   if (s.nsgs.length) items.push({ it: { k: "nsg" }, w: badgeW(s.nsgs.length > 1 ? `NSG ${s.nsgs.length}` : `NSG ${s.nsgs[0]}`) });
   if (s.natGateways.length) items.push({ it: { k: "nat" }, w: Math.min(160, badgeW(s.natGateways.length > 1 ? `NAT ${s.natGateways.length}` : `NAT ${s.natGateways[0]}`) + (s.egress?.natBypassed ? 40 : 0)) });
   if (shownExit(s.egress)) items.push({ it: { k: "egress" }, w: 150 });

@@ -21,19 +21,22 @@ export function ScopeBar() {
   const item = activeNavItem(pathname);
   const scope = item ? PAGE_SCOPE[item.href] ?? [] : [];
   if (!scope.length) return null;
-  return (
-    <div className={s.bar} role="group" aria-label={t("scope.label")}>
-      {scope.includes("subscription") ? <SubscriptionScope /> : null}
-      {scope.includes("subscription") && scope.includes("cluster") ? <span className={s.sep} aria-hidden="true">›</span> : null}
-      {scope.includes("cluster") ? <ClusterScope /> : null}
-    </div>
-  );
+  return <ScopeBarFor scope={scope} label={t("scope.label")} />;
 }
 
-function SubscriptionScope() {
+/** Only what can be shown: no subscription list (signed out, nothing allowed) = no subscription field — and no bar at all */
+function ScopeBarFor({ scope, label }: { scope: ReadonlyArray<"subscription" | "cluster">; label: string }) {
   const { subscriptions, subscriptionId, setSubscriptionId } = useSubscriptions();
-  if (!subscriptions.length) return null;
-  return <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} />;
+  const showSub = scope.includes("subscription") && subscriptions.length > 0;
+  const showCluster = scope.includes("cluster");
+  if (!showSub && !showCluster) return null;
+  return (
+    <div className={s.bar} role="group" aria-label={label}>
+      {showSub ? <SubscriptionSelect subscriptions={subscriptions} value={subscriptionId} onChange={setSubscriptionId} /> : null}
+      {showSub && showCluster ? <span className={s.sep} aria-hidden="true">›</span> : null}
+      {showCluster ? <ClusterScope /> : null}
+    </div>
+  );
 }
 
 function ClusterScope() {

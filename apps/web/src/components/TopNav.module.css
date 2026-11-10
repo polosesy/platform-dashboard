@@ -34,7 +34,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  color: rgba(var(--ink-rgb), 0.68);
+  color: var(--muted);
   cursor: pointer;
   flex: none;
   transition: background 120ms ease, color 120ms ease;
@@ -49,7 +49,7 @@
 
 .menuBtn:hover {
   background: rgba(var(--ink-rgb), 0.06);
-  color: rgba(var(--ink-rgb), 0.90);
+  color: var(--ink);
 }
 
 .brand {
@@ -114,7 +114,7 @@
 }
 
 .trigger[aria-expanded="true"] {
-  background: rgba(var(--paper-rgb), 0.7);
+  background: var(--panel);
   border-color: rgba(var(--ink-rgb), 0.12);
 }
 
@@ -185,7 +185,7 @@ li:not(:first-child) > .panelSection {
 .panelIcon {
   display: inline-flex;
   margin-top: 1px;
-  color: rgba(var(--ink-rgb), 0.62);
+  color: var(--muted);
 }
 
 .panelLink[data-active] .panelIcon,
@@ -197,7 +197,7 @@ li:not(:first-child) > .panelSection {
   display: block;
   font-size: var(--text-small);
   font-weight: 600;
-  color: rgba(var(--ink-rgb), 0.88);
+  color: var(--ink);
   white-space: nowrap;
 }
 
@@ -218,14 +218,14 @@ li:not(:first-child) > .panelSection {
   align-items: center;
   font-size: var(--text-small);
   font-weight: 600;
-  color: rgba(var(--ink-rgb), 0.74);
+  color: var(--muted);
   white-space: nowrap;
   flex: none;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
 .link:hover {
-  background: rgba(var(--paper-rgb), 0.5);
+  background: var(--panel);
   border-color: rgba(var(--ink-rgb), 0.10);
 }
 
@@ -251,7 +251,7 @@ li:not(:first-child) > .panelSection {
   max-width: 260px;
   padding: 6px 10px;
   border: 1px solid rgba(var(--ink-rgb), 0.10);
-  background: rgba(var(--paper-rgb), 0.55);
+  background: var(--panel);
   border-radius: var(--radius-pill);
 }
 
@@ -269,7 +269,7 @@ li:not(:first-child) > .panelSection {
   white-space: nowrap;
   font-size: var(--text-caption);
   font-weight: 700;
-  color: rgba(var(--ink-rgb), 0.78);
+  color: var(--muted);
 }
 
 .btnPrimary,
@@ -291,9 +291,9 @@ li:not(:first-child) > .panelSection {
 }
 
 .btnSecondary {
-  background: rgba(var(--paper-rgb), 0.6);
+  background: var(--panel);
   border-color: rgba(var(--ink-rgb), 0.12);
-  color: rgba(var(--ink-rgb), 0.82);
+  color: var(--muted);
 }
 
 .btnPrimary:disabled,

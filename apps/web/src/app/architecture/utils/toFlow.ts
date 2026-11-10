@@ -292,7 +292,7 @@ export function buildEdges(edges: ArchDrawEdge[], t: T, selected: string | null 
           ...(peering ? { rail: state.toLowerCase() === "connected", glyph: "chain" as const, glyphTitle: `${t("arch.edge.peering")} · ${t(`arch.peering.state.${["connected", "initiated", "disconnected"].includes(state.toLowerCase()) ? state.toLowerCase() : "unknown"}`)}`, ...(state.toLowerCase() !== "connected" ? { glyphText: t(`arch.peering.state.${["initiated", "disconnected"].includes(state.toLowerCase()) ? state.toLowerCase() : "unknown"}`) } : {}) } : {}),
         },
         label: peering ? undefined : e.count > 1 ? `×${e.count}` : undefined,
-        labelStyle: { fontSize: 10, fontWeight: 700, fill: st.stroke },
+        labelStyle: { fontSize: 12, fontWeight: 700, fill: st.stroke },
         // white label background — the canvas is light in both themes (exported PNG too)
         labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
         style: { stroke: st.stroke, strokeWidth: width, strokeDasharray: st.dash },

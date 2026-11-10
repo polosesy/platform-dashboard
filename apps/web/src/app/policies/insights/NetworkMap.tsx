@@ -186,12 +186,12 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
               ))}
               {overlay && !!n.combos?.length && (
                 <g transform={`translate(${p.w - 4},2)`}>
-                  <rect x={-(n.combos.length * 15 + 4)} y={-1} width={n.combos.length * 15 + 6} height={15} rx={7} fill="var(--crit)" />
-                  {n.combos.map((c, i) => <text key={c} x={-n.combos!.length * 15 + 4 + i * 15} y={10.5} style={{ fontSize: 9.5, fontWeight: 700, fill: "#fff" }}>{COMBO_LABEL[c].slice(0, 1)}</text>)}
+                  <rect x={-(n.combos.length * 16 + 4)} y={-1} width={n.combos.length * 16 + 6} height={18} rx={9} fill="var(--crit)" />
+                  {n.combos.map((c, i) => <text key={c} x={-n.combos!.length * 16 + 4 + i * 16} y={12.5} style={{ fontSize: 12, fontWeight: 700, fill: "#fff" }}>{COMBO_LABEL[c].slice(0, 1)}</text>)}
                   <title>{t("ins.heat.combosCol")}: {n.combos.map((c) => COMBO_LABEL[c]).join(", ")}</title>
                 </g>
               )}
-              {n.exposure === "open" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={6} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
+              {n.exposure === "open" && <g transform={`translate(${p.w - 14},${p.h / 2})`}><circle r={8} fill="var(--warnc)" /><text y={4} textAnchor="middle" style={{ fontSize: 12, fontWeight: 700, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
             </g>
           );
         })}
@@ -315,9 +315,9 @@ export function NetworkMap({ data, sel, onSelect, nav }: Props) {
             <circle className={styles.lring} cx={cx} cy={cy} r={24} />
             <circle cx={cx} cy={cy} r={19} fill={leafColor(v)} fillOpacity={v.kind === "internet" || v.kind === "unknown" ? 0.75 : 1} stroke={v.kind === "internet" || v.kind === "unknown" ? "var(--faint)" : undefined} strokeDasharray={v.kind === "internet" || v.kind === "unknown" ? "3 3" : undefined} />
             <g transform={`translate(${cx},${cy})`}><LeafIcon kind={v.kind} /></g>
-            {overlay && !!v.combos?.length && <g transform={`translate(${cx + 15},${cy - 15})`}><circle r={8} fill="var(--crit)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9.5, fontWeight: 700, fill: "#fff" }}>{v.combos.length}</text><title>{t("ins.heat.combosCol")}: {v.combos.map((x) => COMBO_LABEL[x]).join(", ")}</title></g>}
-            {v.exposure === "open" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={7} fill="var(--warnc)" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
-            {v.sharedIpWith && <g transform={`translate(${cx + 15},${cy + 13})`}><circle r={7} fill="var(--surface)" stroke="var(--faint)" strokeDasharray="2 2" /><text y={3.5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: "var(--muted)" }}>?</text><title>{t("ins.net.sharedIp")}</title></g>}
+            {overlay && !!v.combos?.length && <g transform={`translate(${cx + 15},${cy - 15})`}><circle r={9} fill="var(--crit)" /><text y={4} textAnchor="middle" style={{ fontSize: 12, fontWeight: 700, fill: "#fff" }}>{v.combos.length}</text><title>{t("ins.heat.combosCol")}: {v.combos.map((x) => COMBO_LABEL[x]).join(", ")}</title></g>}
+            {v.exposure === "open" && <g transform={`translate(${cx - 15},${cy - 15})`}><circle r={9} fill="var(--warnc)" /><text y={4} textAnchor="middle" style={{ fontSize: 12, fontWeight: 700, fill: "#fff" }}>!</text><title>{t("ins.net.openToAll")}</title></g>}
+            {v.sharedIpWith && <g transform={`translate(${cx + 15},${cy + 13})`}><circle r={9} fill="var(--surface)" stroke="var(--faint)" strokeDasharray="2 2" /><text y={4} textAnchor="middle" style={{ fontSize: 12, fontWeight: 700, fill: "var(--muted)" }}>?</text><title>{t("ins.net.sharedIp")}</title></g>}
             {overlay && dropped && <circle cx={cx - 15} cy={cy + 14} r={4} fill="var(--crit)"><title>{t("ins.net.dropped")}</title></circle>}
             <rect className={styles.selpill} x={cx - pillW / 2} y={cy + 26} width={pillW} height={17} rx={8.5} fill="transparent" />
             <text className={`${styles.ln} ${styles.halo}`} x={cx} y={cy + 38} textAnchor="middle">{short}</text>

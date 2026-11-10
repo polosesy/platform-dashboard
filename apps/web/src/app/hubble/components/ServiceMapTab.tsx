@@ -200,7 +200,7 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
       id: l.id, source: l.source, target: l.target, type: "smoothstep",
       style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: l.stale ? "2 4" : tone.dash, opacity: dim ? 0.06 : on ? 1 : l.stale ? 0.25 : l.tone === "forward" ? 0.5 : 0.9 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
-      ...(on ? { label: `${l.protocol}:${l.port}${l.tone === "drop" ? ` · ${t("hb.nm.dropped")}` : ""}`, labelStyle: { fontSize: 11 }, labelBgPadding: [4, 2] as [number, number] } : {}),
+      ...(on ? { label: `${l.protocol}:${l.port}${l.tone === "drop" ? ` · ${t("hb.nm.dropped")}` : ""}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
       zIndex: on ? 20 : 5,
     } satisfies Edge];
   }), [map.links, focus, t]);

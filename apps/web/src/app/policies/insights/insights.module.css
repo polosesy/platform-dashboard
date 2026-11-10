@@ -32,9 +32,9 @@
 }
 
 /* ── Shared ── */
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); min-width: 0; }
-.panelH { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 14px 16px 0; flex-wrap: wrap; }
-.panelH h3 { font-size: var(--text-heading); font-weight: 700; margin: 0; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
+.panelH { display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; min-height: var(--panel-head); padding: 8px var(--panel-pad); border-bottom: 1px solid var(--border); flex-wrap: wrap; margin-bottom: 12px; }
+.panelH h3 { font-size: var(--text-heading); font-weight: 600; line-height: var(--leading-heading); margin: 0; }
 .panelB { padding: 10px 16px 14px; min-width: 0; }
 .sub { font-size: var(--text-small); color: var(--muted); }
 .muted { color: var(--muted); }
@@ -84,11 +84,11 @@
 .position { font-size: var(--text-small); padding: 8px 12px; border-radius: var(--radius-md); background: rgba(var(--accent-rgb), 0.08); }
 
 /* ── Inspector ── */
-.dcard { border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; text-align: left; min-width: 0; }
+.dcard { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel); padding: var(--panel-pad); display: grid; gap: 12px; text-align: left; min-width: 0; }
 .dcard > * { min-width: 0; }
 .dcH { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-.dcK { font-size: var(--text-caption); color: var(--accent); font-weight: 700; letter-spacing: 0.03em; }
-.dcard h4 { margin: 2px 0 0; font-size: var(--text-body); line-height: 1.4; outline: none; }
+.dcK { font-size: var(--text-caption); color: var(--accent); font-weight: 700; }
+.dcard h4 { margin: 2px 0 0; font-size: var(--text-body); font-weight: 600; line-height: 1.4; outline: none; }
 .dcSub { font-size: var(--text-caption); color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
 .dcChips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .dcX { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-sm); width: 28px; height: 28px; cursor: pointer; flex: none; color: var(--muted); }
@@ -131,7 +131,7 @@
 .heat thead th.wl { z-index: 3; }
 .heat { border-collapse: separate; border-spacing: 3px; font-size: var(--text-caption); width: 100%; }
 .heat th { font-size: var(--text-caption); font-weight: 600; color: var(--muted); text-align: center; padding: 2px 2px 4px; vertical-align: bottom; line-height: 1.25; word-break: keep-all; }
-.heat th[data-grp="true"] { font-size: var(--text-caption); letter-spacing: 0.06em; color: var(--faint); border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.heat th[data-grp="true"] { font-size: var(--text-caption); color: var(--faint); border-bottom: 1px solid var(--line); padding-bottom: 3px; }
 .heat th[data-obs="true"] { color: var(--accent); }
 .heat th[data-hl="true"] { color: var(--accent); }
 .tot { display: block; font-family: var(--font-mono); color: var(--ink); font-size: var(--text-caption); margin-top: 2px; }
@@ -177,12 +177,12 @@
 }
 .queueH { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .queueH > * { min-width: 0; flex-wrap: wrap; }
-.queueH h3 { font-size: var(--text-body); font-weight: 700; margin: 0; }
-.card { position: relative; text-align: left; width: 100%; min-width: 0; border: 1.5px solid var(--line); border-radius: var(--radius-md); background: var(--surface); padding: 12px 14px 12px 18px; cursor: pointer; display: grid; gap: 7px; color: inherit; font-family: inherit; }
-.card::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--sevc); }
+.queueH h3 { font-size: var(--text-body); font-weight: 600; margin: 0; }
+.card { position: relative; text-align: left; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel); padding: 14px var(--panel-pad) 12px; cursor: pointer; display: grid; gap: 8px; color: inherit; font-family: inherit; overflow: hidden; }
+.card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--sevc, transparent); }
 .card[data-sev="crit"] { --sevc: var(--crit); }
 .card[data-sev="warn"] { --sevc: var(--warnc); }
-.card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12); }
+.card[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring-accent); }
 .card[data-closed="true"] { opacity: 0.55; }
 .cardTop { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cardNum { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--muted); }
@@ -208,7 +208,7 @@
 .graphWrap { overflow-x: auto; position: relative; }
 .graph { width: 100%; min-width: 680px; height: auto; display: block; }
 .graph text { font-family: inherit; fill: var(--ink); }
-.colh { font-size: var(--text-caption); letter-spacing: 0.04em; fill: var(--muted) !important; font-weight: 700; }
+.colh { font-size: var(--text-caption); fill: var(--muted) !important; font-weight: 700; }
 .nlabel { font-size: var(--text-caption); font-weight: 600; }
 .nsub { font-size: var(--text-caption); fill: var(--muted) !important; }
 .elabel { font-size: var(--canvas-text-xs); fill: var(--muted) !important; }
@@ -320,7 +320,7 @@
 .matrix th, .matrix td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
 .matrix th { font-size: var(--text-caption); font-weight: 700; color: var(--muted); }
 .matrix th[data-risk="true"] { text-align: center; vertical-align: bottom; word-break: keep-all; line-height: 1.25; padding: 6px 4px; }
-.matrix th[data-grp="true"] { text-align: center; font-size: var(--text-caption); letter-spacing: 0.06em; color: var(--faint); padding: 4px; }
+.matrix th[data-grp="true"] { text-align: center; font-size: var(--text-caption); color: var(--faint); padding: 4px; }
 .matrix td[data-c="true"] { text-align: center; }
 .matrix th:first-child, .matrix td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; box-shadow: 1px 0 0 var(--line); }
 @media (max-width: 640px) { .matrix { width: 1120px; } }

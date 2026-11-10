@@ -131,7 +131,6 @@
   padding: 6px 10px 4px;
   font-size: var(--text-caption);
   font-weight: 700;
-  letter-spacing: 0.02em;
   color: var(--muted);
 }
 
@@ -202,7 +201,7 @@
   border-radius: var(--radius-md);
   font-size: var(--text-small);
   font-weight: 600;
-  color: rgba(var(--ink-rgb), 0.76);
+  color: var(--muted);
 }
 
 .settingLabel {
@@ -214,7 +213,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: rgba(var(--paper-rgb), 0.50);
+  background: var(--panel);
 }
 
 .langBtn {
@@ -232,7 +231,7 @@
 }
 
 .langBtn:hover {
-  background: rgba(var(--paper-rgb), 0.80);
+  background: var(--panel);
 }
 
 .langBtnActive {
@@ -251,7 +250,7 @@
 .footerLabel {
   font-size: var(--text-caption);
   font-weight: 700;
-  color: rgba(var(--ink-rgb), 0.55);
+  color: var(--muted);
 }
 
 .footerMeta {
