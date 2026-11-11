@@ -29,6 +29,11 @@ type CoreEvent = k8s.CoreV1Event;
 const iso = (v: unknown): string | undefined => (v instanceof Date ? v.toISOString() : v ? String(v) : undefined);
 
 export function mapEvents(items: CoreEvent[], opts: { workload?: string; messages: boolean; limit?: number }): KubeEvent[] {
+  return matchingEvents(items, opts).slice(0, opts.limit ?? 200);
+}
+
+/** All matching Warning events, newest first (the response says how many there were before the limit) */
+export function matchingEvents(items: CoreEvent[], opts: { workload?: string; messages: boolean }): KubeEvent[] {
   return items
     .filter((e) => (e.type ?? "") === "Warning")
     .map((e): KubeEvent => {
@@ -46,39 +51,54 @@ export function mapEvents(items: CoreEvent[], opts: { workload?: string; message
         namespace: e.involvedObject?.namespace ?? e.metadata?.namespace ?? "",
         name: e.involvedObject?.name ?? "",
         count: e.count ?? e.series?.count ?? 1,
+        // who reported it (kubelet · default-scheduler · horizontal-pod-autoscaler …) — kubectl's SOURCE column
+        ...((e.source?.component || e.reportingComponent) ? { component: e.source?.component || e.reportingComponent } : {}),
         ...(opts.messages && e.message ? { message: redactLogLine(e.message).line.slice(0, 1000) } : {}),
       };
     })
     .filter((e) => !opts.workload || eventBelongs(e, opts.workload))
-    .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
-    .slice(0, opts.limit ?? 200);
+    .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
 }
 
-const cache = new CacheManager<CoreEvent[]>(20, 15_000);
+/** Pages of 500 (the API's continue token), at most PAGES — more than that = `truncated`, never a silent cut */
+const PAGE = 500;
+const PAGES = 4;
+
+const cache = new CacheManager<{ items: CoreEvent[]; truncated: boolean }>(20, 15_000);
 
 export async function listWarningEvents(
   env: Env, bearerToken: string | undefined, clusterId: string,
-  opts: { namespace?: string; workload?: string; messages: boolean },
+  opts: { namespace?: string; workload?: string; messages: boolean; limit?: number },
 ): Promise<KubeEventsResponse> {
   if (opts.namespace && !NAME.test(opts.namespace)) throw new HttpError(400, "invalid_namespace", "namespace is not a Kubernetes name");
   if (opts.workload && !NAME.test(opts.workload)) throw new HttpError(400, "invalid_workload", "workload is not a Kubernetes name");
   const key = `${cachePrefix(bearerToken)}:kube-events:${clusterId.toLowerCase()}:${opts.namespace ?? "*"}`;
-  let items = cache.get(key);
-  if (!items) {
+  let got = cache.get(key);
+  if (!got) {
     const kc = await loadKubeConfig(env, bearerToken, clusterId);
     const core = kc.makeApiClient(k8s.CoreV1Api);
+    const items: CoreEvent[] = [];
+    let next: string | undefined;
     try {
-      const list = opts.namespace
-        ? await core.listNamespacedEvent({ namespace: opts.namespace, fieldSelector: "type=Warning", limit: 500 })
-        : await core.listEventForAllNamespaces({ fieldSelector: "type=Warning", limit: 500 });
-      items = list.items;
+      for (let page = 0; page < PAGES; page++) {
+        const q = { fieldSelector: "type=Warning", limit: PAGE, ...(next ? { _continue: next } : {}) };
+        const list = opts.namespace
+          ? await core.listNamespacedEvent({ namespace: opts.namespace, ...q })
+          : await core.listEventForAllNamespaces(q);
+        items.push(...list.items);
+        next = list.metadata?._continue || undefined;
+        if (!next) break;
+      }
     } catch (e) {
       throw k8sError(e);
     }
-    cache.set(key, items);
+    got = { items, truncated: !!next };
+    cache.set(key, got);
   }
+  const all = matchingEvents(got.items, { workload: opts.workload, messages: opts.messages });
   return {
     clusterId, generatedAt: new Date().toISOString(), source: "k8sApi",
-    events: mapEvents(items, { workload: opts.workload, messages: opts.messages }), messages: opts.messages,
+    events: all.slice(0, opts.limit ?? 200), messages: opts.messages,
+    total: all.length, truncated: got.truncated,
   };
 }

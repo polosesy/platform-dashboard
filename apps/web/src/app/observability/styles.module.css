@@ -667,8 +667,13 @@
   align-self: stretch; margin-bottom: 10px; display: flex; flex-direction: column;
   min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
 }
-.hmNs[data-level="danger"] { border-color: rgba(var(--danger-rgb), 0.45); box-shadow: inset 3px 0 0 var(--danger); }
-.hmNs[data-level="warn"] { border-color: rgba(var(--warning-rgb), 0.5); box-shadow: inset 3px 0 0 var(--warning); }
+.hmNs[data-level="danger"] { border-color: rgba(var(--danger-rgb), 0.55); }
+.hmNs[data-level="warn"] { border-color: rgba(var(--warning-rgb), 0.6); }
+/* a problem namespace = its header strip tinted (opaque over the sunken header) — the same "whole surface" grammar as the tiles */
+.hmNs[data-level="danger"] > .hmNsHead, .hmNs[data-level="warn"] > .hmNsHead {
+  background: linear-gradient(rgba(var(--status-rgb), 0.12), rgba(var(--status-rgb), 0.12)), var(--panel-sunken);
+  border-bottom-color: rgba(var(--status-rgb), 0.35);
+}
 .hmNsHead {
   display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 30px; box-sizing: border-box; padding: 0 8px 0 10px;
   font-size: var(--text-caption); font-weight: 700; background: var(--panel-sunken); border-bottom: 1px solid var(--border);
@@ -679,17 +684,25 @@
 .hmNsCounts > span { display: inline-flex; align-items: center; gap: 2px; }
 .hmGrid { display: grid; grid-template-columns: repeat(var(--ns-cols, 2), minmax(0, 1fr)); gap: 4px; padding: 8px; }
 
-/* Tile = a small live card: white, status strip on the left, glyph + value */
+/* Tile = the whole card carries the state (2026-11-11 — a 4 px strip on the left read as decoration, not as the
+   tile's colour): tinted fill + border in the level colour, stronger for warn / danger than for ok; neutral levels
+   (no baseline, stopped, no traffic, not instrumented, not measured) stay uncoloured. The glyph still says it. */
 .hmTile {
   all: unset; box-sizing: border-box; position: relative; display: grid; align-content: center; gap: 3px; height: 44px; min-width: 0;
-  padding: 4px 8px 4px 12px; font-size: var(--text-caption); cursor: pointer; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-sm);
-  background: var(--panel-solid); box-shadow: none; transition: border-color 150ms ease, box-shadow 150ms ease;
+  padding: 4px 8px; font-size: var(--text-caption); cursor: pointer; border-radius: var(--radius-sm);
+  --tile-fill: 0; --tile-line: 0.14;
+  border: 1px solid rgba(var(--status-rgb), var(--tile-line));
+  background: linear-gradient(rgba(var(--status-rgb), var(--tile-fill)), rgba(var(--status-rgb), var(--tile-fill))), var(--panel-solid);
+  box-shadow: none; transition: border-color 150ms ease, box-shadow 150ms ease;
 }
-.hmTile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--status); }
-.hmTile:hover { border-color: rgba(var(--ink-rgb), 0.24); box-shadow: var(--shadow-raise); }
+.hmTile[data-level="ok"] { --tile-fill: 0.1; --tile-line: 0.4; }
+.hmTile[data-level="warn"] { --tile-fill: 0.22; --tile-line: 0.75; }
+.hmTile[data-level="danger"] { --tile-fill: 0.16; --tile-line: 0.7; }
+.hmTile[data-level="noBaseline"] { --status-rgb: var(--ink-rgb); --tile-line: 0.14; }
+.hmTile[data-level="stopped"], .hmTile[data-level="noTraffic"] { background: var(--panel-sunken); }
+.hmTile:hover { --tile-line: 0.95; box-shadow: var(--shadow-raise); }
 .hmTile:focus-visible, .hmTile[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hmTile[aria-pressed="true"] { box-shadow: 0 0 0 4px var(--accent-soft); }
-.hmTile[data-level="warn"], .hmTile[data-level="danger"] { border-color: rgba(var(--status-rgb), 0.45); }
 .hmTile[data-level="notMeasured"] { border-style: dashed; border-color: rgba(var(--ink-rgb), 0.24); }
 .hmTile[data-level="notInstrumented"] { background: repeating-linear-gradient(135deg, var(--panel-solid) 0 6px, rgba(var(--ink-rgb), 0.035) 6px 12px); }
 .hmTile[data-level="stopped"] .hmTileName { color: var(--muted); font-weight: 500; }
@@ -698,10 +711,10 @@
 .hmTileText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hmTileMore { flex: none; font-weight: 700; color: var(--status); }
 .hmTile[data-level="warn"] .hmTileText, .hmTile[data-level="danger"] .hmTileText {
-  padding: 0 6px; border-radius: var(--radius-pill); font-weight: 700; background: rgba(var(--status-rgb), 0.12);
+  padding: 0 6px; border-radius: var(--radius-pill); font-weight: 700; background: var(--panel-solid);
 }
 .hmTile[data-level="warn"] .hmTileText { color: var(--warning-strong); }
-.hmTile[data-level="danger"] .hmTileText { color: var(--danger); }
+.hmTile[data-level="danger"] .hmTileText { color: var(--danger-strong); }
 .hmIdle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0 0; font-size: var(--text-caption); color: var(--muted); }
 
 /* Detail panel */
@@ -951,3 +964,30 @@
 .nodeChips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .nodeDisk { margin-top: 12px; }
 .nodeFoot { font-size: var(--text-small); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ── K8s 이벤트 (EventsTab) — kubectl get events as a table ── */
+.ev { display: grid; gap: 12px; min-width: 0; }
+.evTop { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evFilters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-bottom: 10px; }
+.evReasons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.evN { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.evWhy { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-sunken); font-size: var(--text-small); }
+.evScroll { overflow-x: auto; min-width: 0; }
+.evTable { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
+.evTable th {
+  position: sticky; top: 0; z-index: 1; padding: 6px 8px; text-align: left; white-space: nowrap; font-size: var(--text-caption); font-weight: 600;
+  color: var(--muted); background: var(--panel-solid); border-bottom: 1px solid var(--border-strong);
+}
+.evTable td { padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--border); }
+.evTable tr[data-recent] td { background: rgba(var(--warning-rgb), 0.06); }
+.evTime { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.evTime > span:last-child { display: block; color: var(--muted); margin-top: 2px; }
+.evNs { white-space: nowrap; }
+.evObj { min-width: 180px; overflow-wrap: anywhere; }
+.evKind { color: var(--muted); }
+.evSub { display: block; color: var(--subtle); font-size: var(--text-caption); }
+.evCount { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; }
+.evCount .evSub { font-weight: 400; }
+.evMsg { min-width: 280px; overflow-wrap: anywhere; color: var(--ink); }
+.evMore { padding: 10px 8px 0; }
+.evFoot { color: var(--muted); font-size: var(--text-caption); }

@@ -130,6 +130,12 @@ test("mosaic: cards sized to their tiles (no empty half cards), never wider than
   assert.match(css, /\.hmNs \{[^}]*align-self: stretch; margin-bottom: 10px;/, "a card fills its placed rows; the gap is its margin");
   assert.match(css, /\.hmNsHead \{[^}]*height: 30px;/);
   assert.match(css, /\.hmTile \{[^}]*height: 44px;/);
+  // 2026-11-11: the whole tile carries the state (a left strip read as decoration) — fill + border in the level colour
+  assert.doesNotMatch(css, /\.hmTile::before/, "no status strip");
+  assert.match(css, /\.hmTile \{[^}]*background: linear-gradient\(rgba\(var\(--status-rgb\), var\(--tile-fill\)\)/);
+  const fill = (lv: string) => Number(new RegExp(`\\.hmTile\\[data-level="${lv}"\\] \\{ --tile-fill: ([0-9.]+)`).exec(css)?.[1]);
+  assert.ok(fill("warn") > fill("ok") && fill("danger") > fill("ok"), "problems are stronger than ok");
+  assert.doesNotMatch(css, /\.hmNs\[data-level="(danger|warn)"\] \{[^}]*inset 3px/, "the namespace card's header carries it, not a left line");
   assert.match(css, /\.hmGrid \{[^}]*gap: 4px; padding: 8px;/);
 });
 

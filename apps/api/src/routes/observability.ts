@@ -75,6 +75,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       const messages = roleAtLeast(callerOf(env, req.auth?.bearerToken)?.role ?? null, "operator");
       res.json(await listWarningEvents(env, req.auth?.bearerToken, clusterId, {
         namespace: queryString(req, "namespace"), workload: queryString(req, "workload"), messages,
+        limit: queryInt(req, "limit", 200, 1, 2000),
       }));
     } catch (e: unknown) {
       sendError(res, e, "events_failed", "observability");

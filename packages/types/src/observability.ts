@@ -494,6 +494,8 @@ export type KubeEvent = {
   namespace: string;
   name: string;
   count: number;
+  /** Who reported it — kubelet · default-scheduler · horizontal-pod-autoscaler … (kubectl's SOURCE) */
+  component?: string;
   /** Operators only, redacted (probe bodies, secret names can appear) */
   message?: string;
 };
@@ -505,6 +507,10 @@ export type KubeEventsResponse = {
   source: "k8sApi";
   events: KubeEvent[];
   messages: boolean;
+  /** Matching events before the `limit` (events.length can be smaller) */
+  total?: number;
+  /** The cluster had more Warning events than we read (4 pages of 500) — the list is not all of them */
+  truncated?: boolean;
 };
 
 // ── Workload logs (services/lokiLogs.ts) — the cluster's Loki, read in-cluster with the pod-log gate ──

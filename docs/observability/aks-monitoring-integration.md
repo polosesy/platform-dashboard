@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-05
-covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+last-verified: 2026-11-11
+covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -45,7 +45,7 @@ covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps
 
 **화면 구성**(2026-10-27 개편 — Datadog Kubernetes 개요 방식): 탭 5개 = 클러스터 · 워크로드(기본) · 노드 · 로그 · 네트워크(Hubble) · 수집 상태. 첫 탭 맨 위 **클러스터 한눈에 보기** 띠(`clusterGlance` — 히트맵이 잰 값만): 워크로드(위험·주의·정상 쌓은 막대, 누르면 문제만) · Ready 파드 n/m · 레플리카 부족 · 재시작(기간) · OOMKilled 파드 — 칸을 누르면 아래 히트맵이 그 신호로 칠해집니다. 아무도 재지 않은 값은 '—'·'미측정'(0 아님). 예전 '개요' 탭(Container Insights 요약)은 DCR에 Container Insights가 없으면 0만 보여 없앴습니다. **[히트맵 | 표]**(2026-11-03): 표 = 히트맵과 같은 값(같은 요청)을 워크로드 한 줄씩 — 열 = 한 워크로드라도 잰 신호만, 머리글을 누르면 그 신호의 등급 → 값(나쁜 쪽 먼저, JVM 여유는 낮을수록 나쁨) 순 정렬, 행을 누르면 같은 상세 패널(`tableColumns`·`tableRows`). 예전 '목록 (Container Insights)'은 없앴습니다 — DCR이 Perf·Syslog뿐인 stg에서 늘 비었고, 파드 상태는 AKS 클러스터 화면(Kubernetes API)과 겹쳤습니다.
 
-고객 Grafana '컨테이너 맵'을 한 장으로, **문제 먼저**: 요약 한 줄(판정 알약 '● 주의 필요 없음'/'■ 위험 n · 주의 m' + 울린 신호만 칩 — 누르면 그 신호로 칠함, 나머지는 '정상 신호 n개'·'미측정 신호 n개' 글자(목록은 툴팁) + 범례) → **주의 필요** 목록(있을 때만 — 위험 먼저, `ns / 워크로드`와 이유 '메모리 96% · 재시작 3') → 네임스페이스 카드 **모자이크**(가장 나쁜 카드 먼저; 바깥 격자 = 타일 칸 132px·4px 행, 카드는 자기 타일 수만큼 √(2.2n)열 안팎(빈칸 가장 적은 열)·높이만큼 행을 차지, 배치는 순수 `packMosaic` — 문제 순서대로 가장 위·왼쪽 빈자리, 더 위에 들어가면 폭을 ½까지 바꾸고, 놓은 뒤 오른쪽 빈 열로 넓히고 맨 아래 선까지 늘려 바깥 모양을 직사각형으로(2026-10-30 — `grid-auto-flow: dense`는 카드 크기를 못 바꿔 9칸 화면의 18%가 페이지 배경으로 비었음 → 98%), 카드 사이 틈은 불투명 패널 바탕 `.hmSurface` — 타일 1개 네임스페이스는 타일 1칸 폭, 열 수는 너비에 따라 `mosaicColumns`·`cardShape`). 타일 = **라이브 다이어그램 카드 문법**(흰 바탕 + 왼쪽 상태 띠 + 기호: ● 정상 초록 · ▲ 주의 · ■ 위험 · ○ 실행 대상 없음 · ◎ 측정됨·판정 기준 없음 · ? 미측정 점선 · – 계측 없음 빗금), 주의·위험 값은 색 알약, 이름은 네임스페이스 접두와 카드 공통 접두(`sharedPrefix`, 머리글에 '· 접두…')를 뺌, 종류는 툴팁. 기호가 항상 상태를 함께 보임. 모든 워크로드를 그림(Grafana 통계 패널은 48개 중 26개만 그렸음), '문제만' 토글은 기본 꺼짐. 신호 선택은 묶은 선택 상자 하나(쿠버네티스·Java/Spring·로그). 타일을 누르면 오른쪽 상세(값·파드·Warning 이벤트·로그 스트림 — ERROR 먼저, 예외 클래스 상위 10, trace ID → Tempo 링크), 방향키로 타일 이동·Esc로 닫기. 보기 모델은 `apps/web/src/lib/workloadHeatView.ts`(순수, `workloadHeatView.test.ts`).
+고객 Grafana '컨테이너 맵'을 한 장으로, **문제 먼저**: 요약 한 줄(판정 알약 '● 주의 필요 없음'/'■ 위험 n · 주의 m' + 울린 신호만 칩 — 누르면 그 신호로 칠함, 나머지는 '정상 신호 n개'·'미측정 신호 n개' 글자(목록은 툴팁) + 범례) → **주의 필요** 목록(있을 때만 — 위험 먼저, `ns / 워크로드`와 이유 '메모리 96% · 재시작 3') → 네임스페이스 카드 **모자이크**(가장 나쁜 카드 먼저; 바깥 격자 = 타일 칸 132px·4px 행, 카드는 자기 타일 수만큼 √(2.2n)열 안팎(빈칸 가장 적은 열)·높이만큼 행을 차지, 배치는 순수 `packMosaic` — 문제 순서대로 가장 위·왼쪽 빈자리, 더 위에 들어가면 폭을 ½까지 바꾸고, 놓은 뒤 오른쪽 빈 열로 넓히고 맨 아래 선까지 늘려 바깥 모양을 직사각형으로(2026-10-30 — `grid-auto-flow: dense`는 카드 크기를 못 바꿔 9칸 화면의 18%가 페이지 배경으로 비었음 → 98%), 카드 사이 틈은 불투명 패널 바탕 `.hmSurface` — 타일 1개 네임스페이스는 타일 1칸 폭, 열 수는 너비에 따라 `mosaicColumns`·`cardShape`). 타일 = **카드 전체가 상태 색**(2026-11-11 — 왼쪽 상태 띠는 장식처럼 읽혀 바꿈: 바탕 옅은 색 + 진한 테두리, 정상 옅은 초록 · 주의 노랑 · 위험 빨강, 기준 없음·멈춤·미측정은 색 없음, 문제 네임스페이스 카드는 머리 띠를 칠함) + 기호: ● 정상 · ▲ 주의 · ■ 위험 · ○ 실행 대상 없음 · ◎ 측정됨·판정 기준 없음 · ? 미측정 점선 · – 계측 없음 빗금, 주의·위험 값은 흰 알약에 진한 글자, 이름은 네임스페이스 접두와 카드 공통 접두(`sharedPrefix`, 머리글에 '· 접두…')를 뺌, 종류는 툴팁. 기호가 항상 상태를 함께 보임. 모든 워크로드를 그림(Grafana 통계 패널은 48개 중 26개만 그렸음), '문제만' 토글은 기본 꺼짐. 신호 선택은 묶은 선택 상자 하나(쿠버네티스·Java/Spring·로그). 타일을 누르면 오른쪽 상세(값·파드·Warning 이벤트·로그 스트림 — ERROR 먼저, 예외 클래스 상위 10, trace ID → Tempo 링크), 방향키로 타일 이동·Esc로 닫기. 보기 모델은 `apps/web/src/lib/workloadHeatView.ts`(순수, `workloadHeatView.test.ts`).
 
 | 신호 | 계산(파드별 → 워크로드의 가장 나쁜 파드) | 주의 / 위험 |
 |---|---|---|
@@ -155,6 +155,21 @@ Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`T
 | 질의 | 창마다(5m·30m·1h·6h·3d·30d) `(namespace, application, uri, method, status)`별 개수 1개 + 경계 버킷 1개 → TypeScript가 두 SLI·URI·제외를 한 번에. stg 14개 질의 12.5초(30일 9–12초, 질의마다 25초 한도·1회 재시도·실패 격리), 5분 캐시 |
 
 stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목표 안(gateway 99.956%·예산 44%), 지연은 7개가 기본 목표 미달. 원인이 한 URI에 몰림(workflow-service 웹훅 97%, http-app `POST /actions/make-request` 97%, gateway 웹훅 83%). 요청 적음 4(sap-app 2건, notification-app 0건 …), HTTP 지표 없는 워크로드 6(웹 프런트·fluentd·keycloak 등 — Spring 아님).
+
+## 3d. K8s 이벤트 (AKS 모니터링 › K8s 이벤트)
+
+`kubectl get events -A --field-selector type=Warning`을 화면으로 옮긴 탭입니다(2026-11-11). 같은 API `GET /api/observability/events`를 클러스터 전체로 읽습니다(500개씩 최대 4쪽, 더 있으면 '일부만 읽음'으로 표시).
+
+| 무엇 | 어떻게 |
+|------|--------|
+| 숫자 4칸 | Warning 이벤트 수(대상 수) · **진행 중**(마지막 발생이 읽은 시각 5분 안 — 지금도 되풀이) · 네임스페이스 수(그중 시스템) · 가장 많은 이유 |
+| 거르기 | 네임스페이스(앱/시스템 묶음) · 찾기(대상·이유·메시지·보고자) · 시스템 네임스페이스 포함 · 진행 중만 · **이유 칩**(이벤트의 REASON 그대로, 다른 조건 안에서 셈) |
+| 표 | 마지막 발생(5분 안이면 '▲ 진행 중') · 네임스페이스 · 대상(`Kind/이름` + 보고자) · 이유(누르면 그 이유만) · ×횟수 + '…부터'(처음 발생부터 누적 — 최근 1시간 횟수 아님) · 메시지(운영자만, 민감한 값 가림) |
+| 복사 | 보이는 행을 `네임스페이스  Kind/이름  [이유]  x횟수  메시지` 줄로 |
+
+- **심각도를 만들지 않습니다.** Kubernetes 이벤트에는 Normal·Warning만 있습니다. 대신 자주 나오는 이유 19개(Unhealthy·BackOff·FailedScheduling·FailedMount·Failed·OOMKilling·Evicted …)는 이유 칩을 고르면 '무슨 뜻 · 먼저 볼 곳'을 한 줄로 보여 줍니다(`lib/kubeEventsView.ts` `KNOWN_REASONS`).
+- Kubernetes는 이벤트를 마지막 발생 후 약 1시간만 보관합니다. 시간 범위가 지난 구간이면 '아래는 지금 이벤트' 안내를 띄웁니다. 오래된 기록이 필요하면 이벤트를 Loki 등으로 보내는 고객 파이프라인이 있어야 합니다(이 화면은 가정하지 않음).
+- 새로 고침·자동 새로 고침은 페이지 위 시간 막대를 따릅니다.
 
 ## 4. 연결 파일
 
