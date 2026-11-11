@@ -95,6 +95,17 @@ export function customRange(from: number, to: number, now: number): TimeRange | 
 }
 
 /** The `at` an API takes (epoch seconds), none for now */
+/**
+ * Whether a response's `at` (ISO, absent = read as of now) answers the requested `at` (epoch seconds as text).
+ * The API reads "now" for a time within its last minute — or ahead of its clock — and then sends no `at`: that is
+ * still the answer to this request (useApiQuery only returns the current key's data), so it is accepted; requiring
+ * equality left every panel loading forever when the viewer's clock ran ahead of the server's.
+ */
+export function answersAt(responseAt: string | undefined, requested: string | undefined): boolean {
+  if (!responseAt) return true;
+  return requested !== undefined && String(Math.floor(Date.parse(responseAt) / 1000)) === requested;
+}
+
 export const atParam = (r: TimeRange): string | undefined => (r.to === null ? undefined : String(Math.floor(r.to / 1000)));
 
 /**

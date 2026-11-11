@@ -1,7 +1,7 @@
 import type { Env } from "../env.js";
 import type { SecureScoreSummary, SecureScoreControl, SecurityAlertsResponse, SecurityAlert } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcher } from "../infra/azureClientFactory.js";
+import { getArmFetcher, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 
 // ────────────────────────────────────────────
@@ -36,7 +36,7 @@ export async function tryGetSecureScore(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<SecureScoreSummary | null> {
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
+  const subId = opts?.subscriptionId ?? defaultSubscriptions(env, bearerToken)[0];
   if (!bearerToken || !subId) return null;
 
   const prefix = bearerKeyPrefix(bearerToken);
@@ -59,7 +59,9 @@ export async function tryGetSecureScore(
   const scoreProps = scoreResp.properties?.score;
   const currentScore = scoreProps?.current ?? 0;
   const maxScore = scoreProps?.max ?? 100;
-  const percentage = scoreProps?.percentage ?? (maxScore > 0 ? (currentScore / maxScore) * 100 : 0);
+  // ARM's `score.percentage` is a ratio (0–1, "current divided by max, rounded to 4 digits") — shown as-is it read
+  // 0.5 instead of 47.8. Computed from current / max; the ratio only when max is absent.
+  const percentage = maxScore > 0 ? (currentScore / maxScore) * 100 : (scoreProps?.percentage ?? 0) * 100;
 
   const controlScores: SecureScoreControl[] = (controlsResp.value ?? []).map((c) => ({
     controlName: c.properties?.displayName ?? c.name ?? "Unknown",
@@ -102,7 +104,7 @@ export async function tryGetSecurityAlerts(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<SecurityAlertsResponse | null> {
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
+  const subId = opts?.subscriptionId ?? defaultSubscriptions(env, bearerToken)[0];
   if (!bearerToken || !subId) return null;
 
   const prefix = bearerKeyPrefix(bearerToken);

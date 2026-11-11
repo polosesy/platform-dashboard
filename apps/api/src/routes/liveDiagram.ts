@@ -12,7 +12,7 @@ import { anonymousSpAllowed, signinRequired } from "../infra/azureClientFactory.
 import { mockDiagramSpec, generateMockSnapshot } from "../services/liveDiagramMock.js";
 import { tryGetArchitectureGraphFromAzure, clearGraphCache } from "../services/azure.js";
 import { generateDiagramSpec } from "../services/specGenerator.js";
-import { fetchEdgeNetworkDetail, fetchNsgInfo, fetchBackendPoolInfo, fetchAksPlaneDetail, fetchVmssInstances } from "../services/edgeDetailService.js";
+import { fetchEdgeNetworkDetail, fetchNsgInfo, fetchBackendPoolInfo, fetchAksPlaneDetail, fetchVmssInstances, isSampleResource } from "../services/edgeDetailService.js";
 import { debug } from "../infra/logger.js";
 import { collectPrivateLinkUsage } from "../services/privateLinkUsageCollector.js";
 import {
@@ -223,15 +223,12 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
   router.get("/api/live/nsg-detail", async (req: Request, res: Response) => {
     try {
       const resourceId = queryArmResourceId(req, env, "resourceId", true);
-      const nsg = await fetchNsgInfo(env, req.auth?.bearerToken, resourceId);
-      res.json(
-        nsg ?? {
-          name: resourceId.split("/").pop() ?? "nsg",
-          resourceId,
-          effectiveRules: mockNsgRules(),
-          note: "mock",
-        },
-      );
+      // Sample rules only for the sample diagram's resources; a real NSG that cannot be read is an error (a 403 or
+      // a throttle used to show "AllowHTTPS from *" as the caller's own rules)
+      if (isSampleResource(resourceId)) {
+        return void res.json({ name: resourceId.split("/").pop() ?? "nsg", resourceId, effectiveRules: mockNsgRules(), note: "mock" });
+      }
+      res.json(await fetchNsgInfo(env, req.auth?.bearerToken, resourceId, { strict: true }));
     } catch (e: unknown) {
       sendError(res, e, "nsg_detail_error", "live-diagram");
     }

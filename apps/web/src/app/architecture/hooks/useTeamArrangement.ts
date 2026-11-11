@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { apiUrl, fetchJsonWithBearer, ApiError } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
+import { useOnChange } from "@/lib/useOnChange";
 import { parseArrangement, serializeArrangement, type Arrangement } from "@/lib/archArrange";
 
 export type TeamInfo = { version: number; updatedAt: string; updatedBy?: string; durable: boolean };
@@ -19,6 +20,9 @@ export function useTeamArrangement(subscriptionId: string, endpoint = "/api/arch
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
+  // Another subscription (live diagram: another diagram) = another document: its version and conflict start over —
+  // a publish used to carry the previous subscription's baseVersion
+  useOnChange(subscriptionId, () => { setTeam(null); setConflict(false); });
 
   const toArrangement = (doc: Doc): Arrangement => parseArrangement(JSON.stringify({ v: doc.grid?.length ? 2 : 1, order: doc.order, grid: doc.grid ?? [], lines: doc.lines }));
 

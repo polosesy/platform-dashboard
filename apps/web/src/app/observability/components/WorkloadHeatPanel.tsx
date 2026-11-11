@@ -6,6 +6,8 @@
 // customer's monitor-namespace policy shows why and the rule to add (copy only). A workload with nothing to run (a
 // DaemonSet no node matches, a Deployment at 0) says so once and asks nothing else.
 
+import Link from "next/link";
+import { configHref } from "@/lib/aksConfigView";
 import { useState } from "react";
 import type { HeatWorkload, KubeEventsResponse, WorkloadHeatmapResponse, WorkloadLogsResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
@@ -77,7 +79,10 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
             {w.managed ? <> · <Badge tone="neutral" title={t("ob.hm.managedHint")}>{t("ob.hm.managed")}</Badge></> : null}
           </div>
         </div>
-        <Button size="sm" onClick={onClose}>{t("ob.hm.close")}</Button>
+        <span className={styles.hmPanelActions}>
+          <Link className={styles.hmPanelLink} href={configHref(w.namespace, w.workload)} title={t("ob.hm.toConfigHint")}>{t("ob.hm.toConfig")} →</Link>
+          <Button size="sm" onClick={onClose}>{t("ob.hm.close")}</Button>
+        </span>
       </header>
 
       {idle ? <Notice tone="info" title={t(`ob.hm.code.${idle}`)}>{t(`ob.hm.idleHint.${idle}`)}</Notice> : (

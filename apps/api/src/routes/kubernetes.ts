@@ -3,6 +3,7 @@ import type { Env } from "../env.js";
 import type { KubernetesClusterInfo } from "@aud/types";
 import { listAksClusters, getClusterOverview, mockClusters, mockClusterOverview } from "../services/kubernetes.js";
 import { collectClusterPolicies } from "../services/k8sPolicyCollector.js";
+import { getAksClusterConfig, mockClusterConfig } from "../services/aksClusterConfig.js";
 import { collectPolicyInsights } from "../services/policyInsightsCollector.js";
 import { collectAksManagedVulns } from "../services/aksManagedVulns.js";
 import { collectWorkloadIdentity } from "../services/workloadIdentityCollector.js";
@@ -61,6 +62,25 @@ export function registerKubernetesRoutes(router: Router, env: Env) {
       // sample cluster's overview to a signed-in user)
       if (!isSigninRequired(e)) return sendError(res, upstreamError(e), "cluster_overview_failed", "kubernetes");
       res.json({ ...mockClusterOverview(mockClusters.clusters[0]!), source: "mock", note: "signin_required" });
+    }
+  });
+
+  // Cluster configuration (AKS 클러스터 › 클러스터 구성): what Azure says the cluster is set to — ARM only, so a
+  // private cluster the platform cannot reach still answers. The sample cluster answers its sample configuration.
+  router.get("/api/kubernetes/cluster-config", async (req: Request, res: Response) => {
+    const raw = typeof req.query.clusterId === "string" ? req.query.clusterId.toLowerCase() : "";
+    const sample = mockClusters.clusters.find((c) => c.id === raw);
+    if (sample) return void res.json({ ...mockClusterConfig(sample.id, sample.name), note: req.auth?.bearerToken ? "mock data" : "signin_required" });
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!/\/providers\/microsoft\.containerservice\/managedclusters\/[^/]+$/i.test(clusterId)) {
+        return void res.status(400).json({ error: "invalid_cluster_id", message: "clusterId must be an AKS cluster" });
+      }
+      res.json(await getAksClusterConfig(env, req.auth?.bearerToken, clusterId));
+    } catch (e: unknown) {
+      if (!isSigninRequired(e)) return sendError(res, upstreamError(e), "cluster_config_failed", "kubernetes");
+      const first = mockClusters.clusters[0]!;
+      res.json({ ...mockClusterConfig(first.id, first.name), note: "signin_required" });
     }
   });
 

@@ -334,7 +334,9 @@ export async function getHubbleFlows(
     flowsCache.set(cacheKey, result.set, env.HUBBLE_CACHE_TTL_MS);
     return result.set;
   }
-  console.warn(`[hubble] flows collection warning: ${result.error}`);
+  // Nothing could be read from any agent: that is a failed read, not a quiet cluster (the service map and the
+  // summaries used to say "no traffic · 0 drops")
+  if (discovery.total > 0) throw new HttpError(502, "hubble_collect_failed", `Hubble flows could not be read: ${String(result.error ?? "no agent answered").slice(0, 200)}`);
   return { flows: [], coverage: emptyCoverage(discovery.total) };
 }
 

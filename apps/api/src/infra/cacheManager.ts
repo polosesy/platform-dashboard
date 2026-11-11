@@ -63,6 +63,14 @@ export class CacheManager<T> {
 }
 
 /** Generate a cache key prefix from a bearer token using SHA-256. */
+/** A short digest of what a result depends on (a diagram's node and edge IDs, a set of bindings) — for cache keys.
+ *  A count is not an identity: two diagrams with five edges used to share one cached answer. */
+export function contentKey(parts: Iterable<string>): string {
+  const h = createHash("sha256");
+  for (const p of parts) h.update(p).update("\n");
+  return h.digest("hex").slice(0, 16);
+}
+
 export function bearerKeyPrefix(bearerToken: string): string {
   return createHash("sha256").update(bearerToken).digest("hex").slice(0, 16);
 }

@@ -43,7 +43,8 @@ function NotificationsInner() {
       <PageHeader meta={q.data ? <DesktopToggle /> : null} />
       <Tabs label={t("nav.item.notifications")} idPrefix="notify-tab" value={tab} onChange={setTab}
         items={TABS.map((id) => ({ id, label: t(`notify.tab.${id}`), count: id === "inbox" ? q.data?.counts.firingUnacked : undefined }))} />
-      {tab === "inbox" && (q.error ? <ErrorNotice error={q.error} /> : !q.data ? <LoadingState /> : <Inbox data={q.data} reload={reload} />)}
+      {tab === "inbox" && q.error ? <ErrorNotice error={q.error} /> : null}
+      {tab === "inbox" && (q.data ? <Inbox data={q.data} reload={reload} /> : q.error ? null : <LoadingState />)}
       {tab === "mapping" && <Mapping />}
       {tab === "setup" && <Setup data={q.data ?? null} reload={reload} />}
     </>

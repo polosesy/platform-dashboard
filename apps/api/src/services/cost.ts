@@ -1,7 +1,7 @@
 import type { Env } from "../env.js";
 import type { CostSummary, CostTrendResponse, CostTrendPoint, BudgetsResponse, BudgetStatus } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { getArmFetcher, type ArmFetcher, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 
 // ---------- caches ----------
@@ -75,8 +75,8 @@ function rowCurrency(row: Record<string, unknown> | undefined): string | undefin
   return typeof row?.currency === "string" ? row.currency : undefined;
 }
 
-function resolveSubscription(env: Env, requested: string | undefined): string | undefined {
-  return requested ?? parseSubscriptionIds(env)[0];
+function resolveSubscription(env: Env, requested: string | undefined, bearerToken: string | undefined): string | undefined {
+  return requested ?? defaultSubscriptions(env, bearerToken)[0];
 }
 
 // ---------- Summary ----------
@@ -85,7 +85,7 @@ export async function tryGetCostSummary(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<CostSummary | null> {
-  const subId = resolveSubscription(env, opts?.subscriptionId);
+  const subId = resolveSubscription(env, opts?.subscriptionId, bearerToken);
   if (!bearerToken || !subId) return null;
 
   const key = costCacheKey(bearerKeyPrefix(bearerToken), subId);
@@ -131,7 +131,7 @@ export async function tryGetCostTrend(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string; granularity?: "daily" | "monthly" },
 ): Promise<CostTrendResponse | null> {
-  const subId = resolveSubscription(env, opts?.subscriptionId);
+  const subId = resolveSubscription(env, opts?.subscriptionId, bearerToken);
   if (!bearerToken || !subId) return null;
 
   const granularity = opts?.granularity ?? "daily";
@@ -186,7 +186,7 @@ export async function tryGetBudgets(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<BudgetsResponse | null> {
-  const subId = resolveSubscription(env, opts?.subscriptionId);
+  const subId = resolveSubscription(env, opts?.subscriptionId, bearerToken);
   if (!bearerToken || !subId) return null;
 
   const key = costCacheKey(bearerKeyPrefix(bearerToken), subId, "budgets");

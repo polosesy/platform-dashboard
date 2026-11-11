@@ -6,7 +6,7 @@ import type { HubbleStatusResponse, HubbleFlowsResponse } from "@aud/types";
 import { queryArmResourceId, queryInt, queryPastTime, queryString, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 import { getHubbleSources } from "../services/hubbleSources.js";
-import { getHubbleMetricsSummary } from "../services/hubbleMetrics.js";
+import { getHubbleMetricsSummary, METRICS_WINDOWS } from "../services/hubbleMetrics.js";
 import { getLokiDrops } from "../services/lokiLogs.js";
 
 export function registerHubbleRoutes(router: Router, env: Env) {
@@ -47,9 +47,11 @@ export function registerHubbleRoutes(router: Router, env: Env) {
     try {
       const clusterId = queryArmResourceId(req, env, "clusterId");
       const minutes = queryInt(req, "window", 60, 1, 1440);
-      // AMW cross-check: Hubble counted drops in the same window (hubble_drop_total) — the metrics view's 60 m figure
+      // AMW cross-check: Hubble counted drops (hubble_drop_total) in the SAME window — comparing a fixed 60 minutes
+      // with Loki's 15 called a healthy exporter broken; a window the metrics view cannot read (1440) is not compared
       const amw = async () => {
-        const m = await getHubbleMetricsSummary(env, req.auth?.bearerToken, clusterId, 60);
+        if (!(METRICS_WINDOWS as readonly number[]).includes(minutes)) return null;
+        const m = await getHubbleMetricsSummary(env, req.auth?.bearerToken, clusterId, minutes);
         return m.state === "ok" && !m.missing.includes("hubble_drop_total") ? m.dropsByReason.reduce((a, d) => a + d.count, 0) : null;
       };
       res.json(await getLokiDrops(env, req.auth?.bearerToken, clusterId, minutes, amw, queryPastTime(req, "at")));
@@ -90,7 +92,8 @@ export function registerHubbleRoutes(router: Router, env: Env) {
         generatedAt: new Date().toISOString(),
         flows: flows.slice(0, limit),
         totalReturned: Math.min(flows.length, limit),
-        hasMore: flows.length > limit,
+        // The collectors already cut to `limit`: a full page means there may be more (was always false)
+        hasMore: flows.length >= limit,
         coverage,
       };
       res.json(data);

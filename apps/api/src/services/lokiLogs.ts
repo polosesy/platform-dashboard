@@ -13,7 +13,7 @@
 import type { Env } from "../env.js";
 import type { HubbleFlow, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { clusterConnection } from "../infra/azureClientFactory.js";
+import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { HttpError, safeMessage } from "../infra/requestParams.js";
 import { redactLogLine } from "./logRedaction.js";
 import { parseHubbleJsonOutput } from "./hubbleClient.js";
@@ -160,6 +160,7 @@ export async function getWorkloadLogs(
   opts: { namespace: string; workload: string; pods?: string[]; errorsOnly: boolean; minutes: number; at?: number },
 ): Promise<WorkloadLogsResponse> {
   if (!(LOG_WINDOWS as readonly number[]).includes(opts.minutes)) throw new HttpError(400, "invalid_window", `minutes must be one of ${LOG_WINDOWS.join(", ")}`);
+  assertSignedInForCluster(env, bearerToken);
   const selector = workloadSelector(opts.namespace, opts.workload, opts.pods);
   const base: WorkloadLogsResponse = { clusterId, generatedAt: new Date().toISOString(), state: "ok", lines: [], exceptions: [], truncated: false, redactions: 0, windowMinutes: opts.minutes,
     ...(opts.at !== undefined ? { at: new Date(opts.at * 1000).toISOString() } : {}) };
@@ -212,6 +213,7 @@ export async function getPodLogsFromLoki(
   env: Env, bearerToken: string | undefined, clusterId: string,
   opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number; at?: number },
 ): Promise<{ state: LokiState | "notConfigured"; message?: string; retryAt?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
+  assertSignedInForCluster(env, bearerToken);
   const cfg = lokiConfig(env, clusterId);
   if (!cfg) return { state: "notConfigured", lines: [], redactions: 0, truncated: false };
   for (const v of [opts.namespace, opts.pod, ...(opts.container ? [opts.container] : [])]) {
@@ -269,6 +271,8 @@ export function summarizeLokiDrops(lines: string[]): { drops: LokiDropsResponse[
 }
 
 const dropCache = new CacheManager<LokiDropsResponse>(20, 30_000);
+/** Flow lines read per window (newest first) — more than this and the response says `truncated` */
+export const DROP_LINE_LIMIT = 2000;
 
 /**
  * `at` = the window's end (epoch seconds) for a past range — Loki keeps the exporter's drops for days, unlike the
@@ -279,6 +283,7 @@ export async function getLokiDrops(
   amwDrops: () => Promise<number | null>, at?: number,
 ): Promise<LokiDropsResponse> {
   if (!(DROP_WINDOWS as readonly number[]).includes(minutes)) throw new HttpError(400, "invalid_window", `window must be one of ${DROP_WINDOWS.join(", ")}`);
+  assertSignedInForCluster(env, bearerToken);
   const base: LokiDropsResponse = {
     clusterId, generatedAt: new Date().toISOString(), state: "ok", windowMinutes: minutes, drops: [], flowLines: 0, relayErrors: 0, pipelineBroken: null,
     ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
@@ -292,14 +297,18 @@ export async function getLokiDrops(
   if (wait) return { ...base, ...wait };
   try {
     const [lines, relay, amw] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes, at), limit: "2000", direction: "backward" }),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes, at), limit: String(DROP_LINE_LIMIT), direction: "backward" }),
       lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time({job="hubble-flows"} |= "NODE_ERROR" [${minutes}m]))`, time: String(at === undefined ? nowNs() : BigInt(at) * 1_000_000_000n) }).catch(() => null),
       at === undefined ? amwDrops().catch(() => null) : Promise.resolve(null),
     ]);
+    // Over the body limit the answer is not parsed at all: that is "too much to read", not "no flow lines"
+    if (lines.truncated) return { ...base, state: "failed", message: `more than ${MAX_BODY / 1_000_000} MB of drop lines in ${minutes} minutes — pick a shorter window` };
     const all = (lines.body.data?.result ?? []).flatMap((s) => (s.values ?? []).map((v) => v[1] ?? ""));
     const { drops, flowLines } = summarizeLokiDrops(all);
     const result: LokiDropsResponse = {
       ...base, drops, flowLines,
+      // The newest DROP_LINE_LIMIT lines only: the counts are a floor, not the window's total
+      ...(all.length >= DROP_LINE_LIMIT ? { truncated: true } : {}),
       relayErrors: Math.round(Number(relay?.body.data?.result?.[0]?.value?.[1] ?? 0)),
       // Hubble counted drops (AMW) but the exporter shipped none → the exporter / relay pipeline is broken
       pipelineBroken: amw === null ? null : amw > 0 && flowLines === 0,

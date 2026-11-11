@@ -195,12 +195,15 @@ function GlobalStatusPanel({
   error,
   regionalData,
   regionalLoading,
+  regionalError,
 }: {
   data: GlobalStatusResponse | null;
   loading: boolean;
   error: string | null;
   regionalData: RegionalStatusResponse | null;
   regionalLoading: boolean;
+  /** The regions of the user's resources could not be read — said, not shown as "no regions" */
+  regionalError?: string | null;
 }) {
   const { t, locale } = useI18n();
   const noteText = useNoteText();
@@ -222,7 +225,7 @@ function GlobalStatusPanel({
           ? <Chip level="danger">{t("health.regionsAffected", { n: regionalData.totalAffected })}</Chip>
           : <Chip level="ok">{t("health.regionsAllOk")}</Chip>) : undefined}
         footer={hasRegions && regionalData.source !== "mock" && regionalData.note ? <span>{noteText(regionalData.note)}</span> : undefined}>
-        {regionalLoading ? <LoadingState label={t("health.loading")} /> : hasRegions ? (
+        {regionalLoading ? <LoadingState label={t("health.loading")} /> : regionalError ? <ErrorNotice error={regionalError} title={t("health.error")} /> : hasRegions ? (
           <Grid>
             {regionalData.regions.map((region) => (
               <Cell span={3} key={region.name}><RegionCard region={region} /></Cell>
@@ -670,10 +673,12 @@ export default function HealthPage() {
           error={global.error}
           regionalData={regionalData}
           regionalLoading={regional.loading}
+          regionalError={regional.error}
         />
       )}
       {activeTab === "instance" && (
         <InstanceHealthPanel
+          key={subscriptionId}
           data={instanceData}
           loading={instance.loading}
           error={instance.error}

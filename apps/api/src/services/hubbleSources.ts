@@ -6,6 +6,7 @@
 import type { Env } from "../env.js";
 import type { HubbleDataSource, HubbleSourcesResponse } from "@aud/types";
 import { hubbleExecDecision } from "./aksAccess.js";
+import { assertSignedInForCluster } from "../infra/azureClientFactory.js";
 import { flowLogsAvailability } from "./containerNetworkLogs.js";
 import { getHubbleMetricsSummary } from "./hubbleMetrics.js";
 import { hubbleUiAvailability } from "./hubbleUiSource.js";
@@ -22,6 +23,7 @@ export function pickSource(f: Facts): HubbleDataSource {
 }
 
 export async function getHubbleSources(env: Env, bearerToken: string | undefined, clusterId: string): Promise<HubbleSourcesResponse> {
+  assertSignedInForCluster(env, bearerToken); // the Hubble UI probe below needs no token of its own
   const exec = hubbleExecDecision(env, clusterId);
   // Exec allowed: nothing else is read (the existing path, unchanged)
   const [flowLogs, hubbleUi, metrics] = exec.allowed

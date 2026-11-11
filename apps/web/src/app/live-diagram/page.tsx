@@ -250,7 +250,10 @@ export default function LiveDiagramPage() {
   const [mode, setMode] = useState<UpdateMode>("polling");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [edgeDetail, setEdgeDetail] = useState<EdgeNetworkDetail | null>(null);
+  // The detail and the edge it answers: another edge selected = no detail until its own arrives (the previous
+  // edge's NSG · UDR · flows used to stay under the new edge — and for good when the new read failed)
+  const [edgeDetailState, setEdgeDetailState] = useState<{ edgeId: string; data: EdgeNetworkDetail } | null>(null);
+  const setEdgeDetail = (_: null) => setEdgeDetailState(null);
   const [edgeDetailLoading, setEdgeDetailLoading] = useState(false);
 
   const [selectedVmssInstance, setSelectedVmssInstance] = useState<{
@@ -683,8 +686,8 @@ export default function LiveDiagramPage() {
           apiUrl("/api/live/edge-detail", { diagramId, edgeId: selectedEdgeId }),
           token,
         );
-        if (!cancelled) setEdgeDetail(data);
-      } catch { /* ignore */ }
+        if (!cancelled && selectedEdgeId) setEdgeDetailState({ edgeId: selectedEdgeId, data });
+      } catch { /* the panel keeps this edge's last detail (a refresh that failed) or says loading */ }
       finally { if (!cancelled) setEdgeDetailLoading(false); }
     }
 
@@ -1013,7 +1016,7 @@ export default function LiveDiagramPage() {
           <div className={styles.sidebarStack}>
             {selectedEdgeId ? (
               <EdgeDetailPanel
-                detail={edgeDetail}
+                detail={edgeDetailState && edgeDetailState.edgeId === selectedEdgeId ? edgeDetailState.data : null}
                 loading={edgeDetailLoading}
                 edgeSpec={filteredSpec.edges.find((e) => e.id === selectedEdgeId) ?? null}
                 liveEdge={snapshot?.edges.find((e) => e.id === selectedEdgeId)}

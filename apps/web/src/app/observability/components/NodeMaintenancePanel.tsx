@@ -6,13 +6,13 @@
 // Azure operation says "no record of who", never a guess. The days and their end come from the page's time picker
 // (lib/timeRange maintDaysFor — whole days, at least one, said when the range is shorter).
 
-import type { NodeMaintEpisode, NodeMaintSourceState, NodeMaintWindow, NodeMaintenanceResponse } from "@aud/types";
+import type { NodeMaintEpisode, NodeMaintSourceState, NodeMaintenanceResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { atParam, maintDaysFor, type TimeRange } from "@/lib/timeRange";
+import { atParam, maintDaysFor, type TimeRange, answersAt } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
-import { durationText, nodeCounts, spanMs, versionChange } from "@/lib/nodeMaintView";
+import { durationText, nodeCounts, scheduleText, spanMs, versionChange } from "@/lib/nodeMaintView";
 import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, type BadgeTone } from "@/components/ui";
 import styles from "../styles.module.css";
 
@@ -31,8 +31,7 @@ export function NodeMaintenancePanel({ clusterId, range, nonce, report }: {
     fetchJsonWithBearer<NodeMaintenanceResponse>(apiUrl("/api/observability/node-maintenance", { clusterId, days, at }), token),
   );
   useRangeRefresh("nodeMaintenance", nonce, q.loading, q.reload, report);
-  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
-  const d = q.data?.clusterId === clusterId && q.data.days === days && dAt === at ? q.data : null;
+  const d = q.data?.clusterId === clusterId && q.data.days === days && answersAt(q.data.at, at) ? q.data : null;
   const atText = range.to === null ? null : new Date(range.to).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   return (
     <Panel
@@ -86,16 +85,6 @@ export function Body({ d, compact = false }: { d: NodeMaintenanceResponse; compa
       ) : null}
     </div>
   );
-}
-
-function scheduleText(t: T, w: NodeMaintWindow): string {
-  const s = w.schedule;
-  const when = s.kind === "relativeMonthly" ? t("nm.sched.relMonthly", { n: s.interval, week: t(`nm.week.${(s.weekIndex ?? "").toLowerCase()}`), dow: t(`nm.dow.${(s.dayOfWeek ?? "").toLowerCase()}`) })
-    : s.kind === "absoluteMonthly" ? t("nm.sched.absMonthly", { n: s.interval, d: s.dayOfMonth ?? "?" })
-    : s.kind === "weekly" ? t("nm.sched.weekly", { n: s.interval, dow: t(`nm.dow.${(s.dayOfWeek ?? "").toLowerCase()}`) })
-    : s.kind === "daily" ? t("nm.sched.daily", { n: s.interval })
-    : t("nm.sched.other");
-  return `${when} ${w.startTime ?? ""} (UTC${w.utcOffset ?? ""})${w.durationHours ? ` · ${t("nm.hours", { n: w.durationHours })}` : ""}`;
 }
 
 function Config({ d, fmt, compact }: { d: NodeMaintenanceResponse; fmt: (iso: string) => string; compact: boolean }) {

@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { MetricBinding, MetricAggregation, DiagramEdgeSpec, DiagramNodeSpec, PowerState } from "@aud/types";
-import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
+import { CacheManager, bearerKeyPrefix, contentKey } from "../infra/cacheManager.js";
 import { getArmFetcher, getArmFetcherAuto } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
@@ -221,7 +221,8 @@ export async function collectResourceMetrics(
   bindings: Record<string, MetricBinding>,
 ): Promise<Record<string, number | null>> {
   const prefix = bearerKeyPrefix(bearerToken);
-  const cacheKey = `${prefix}:metrics:${azureResourceId}`;
+  // The values are the bindings' — the same resource in two diagrams with different bindings must not share them
+  const cacheKey = `${prefix}:metrics:${azureResourceId}:${contentKey([JSON.stringify(Object.entries(bindings).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))])}`;
   const cached = metricCache.get(cacheKey);
   if (cached) return cached;
   if (!Object.values(bindings).some((b) => b.source === "monitor")) return {};

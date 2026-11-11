@@ -5,6 +5,7 @@
 // map with edges and no flow list here — per-workload counts, drops, DNS errors. Nothing is filled in: a family the
 // workspace lacks shows as not measured.
 
+import { answersAt } from "@/lib/timeRange";
 import { useState } from "react";
 import type { HubbleMetricsState, HubbleMetricsSummary, HubbleSourcesResponse, LokiDropsResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
@@ -226,8 +227,7 @@ export function LokiDrops({ clusterId, fmt, control }: { clusterId: string; fmt:
     fetchJsonWithBearer<LokiDropsResponse>(apiUrl("/api/hubble/loki-drops", { clusterId, window: String(win), at }), token),
   );
   useRangeRefresh("loki-drops", control?.nonce ?? 0, q.loading, q.reload, control?.report);
-  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
-  const d = q.data?.windowMinutes === win && dAt === at ? q.data : null;
+  const d = q.data?.windowMinutes === win && answersAt(q.data.at, at) ? q.data : null;
   return (
     <section aria-labelledby="hb-loki-drops">
       <h3 id="hb-loki-drops" className={styles.sectionTitle}>{t("hb.ld.title")}</h3>

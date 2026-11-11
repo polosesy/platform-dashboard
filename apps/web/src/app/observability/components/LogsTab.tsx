@@ -126,8 +126,11 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     }
   }, [containerOptions]);  
 
+  // A slow read for the previous pod must not land under the pod picked after it
+  const requestSeq = useRef(0);
   const fetchLogs = useCallback(async () => {
     if (!clusterId || !namespace || !podName) return;
+    const seq = ++requestSeq.current;
 
     // 현재 pod의 유효 컨테이너 목록 확인 (stale container name 방지)
     const podItem = nsPodItems.find((i) => i.namespace === namespace && i.podName === podName);
@@ -143,13 +146,14 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
         apiUrl("/api/observability/logs", { clusterId, namespace, podName, limit: 300, sinceMinutes, at, container: safeContainer }),
         token,
       );
+      if (seq !== requestSeq.current) return;
       setLogs(data.logs);
       setSource(data.source ?? null);
       setAttempts(data.attempts ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (seq === requestSeq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [clusterId, namespace, podName, containerName, sinceMinutes, at, getApiToken, nsPodItems]);
 

@@ -557,6 +557,7 @@ export async function collectPodLogs(
 
     // ContainerLogV2 (newer schema) 우선 시도, 실패 시 ContainerLog (legacy) fallback
     // column_ifexists()로 AMA / OMS / Basic 티어 스키마 차이 흡수
+    let readFailure: unknown = null;
     const logV2Kql = `
 ContainerLogV2
 | where ${within(sinceMinutes)}
@@ -610,6 +611,7 @@ ContainerLog
     } catch (err) {
       // ContainerLogV2 테이블이 없을 수 있음 — fallback
       console.warn(`[containerInsights] logs V2 exception for ${namespace}/${podName}:`, err instanceof Error ? err.message : err);
+      if (!isMissingTable(err)) readFailure = err;
     }
 
     // Fallback to V1
@@ -633,8 +635,12 @@ ContainerLog
         }
       } catch (err) {
         console.error("[containerInsights] logs V1 exception:", err instanceof Error ? err.message : err);
+        if (!isMissingTable(err)) readFailure = err;
       }
     }
+    // Nothing read and a read failed for another reason than "no such table" (403 · 429 · timeout): a failure,
+    // never cached as an empty answer — the page's rule is that a failure is not shown as "no logs"
+    if (entries.length === 0 && readFailure) throw new PodLogReadError(readFailure);
 
     // 시간순 정렬 (오래된 → 최신)
     entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -642,9 +648,19 @@ ContainerLog
     logsCache.set(cacheKey, entries);
     return { logs: entries, containerInsightsAvailable: true };
   } catch (err) {
+    if (err instanceof PodLogReadError) throw err.cause;
     console.error("[containerInsights] logs error:", err instanceof Error ? err.message : err);
     return { logs: [], containerInsightsAvailable: false };
   }
+}
+
+/** A read that failed for a reason other than a missing table — rethrown past the "not configured" catch */
+class PodLogReadError extends Error {
+  constructor(readonly cause: unknown) { super("pod log read failed"); }
+}
+/** Log Analytics says the table does not exist in this workspace (ContainerLogV2 / ContainerLog not collected) */
+export function isMissingTable(e: unknown): boolean {
+  return /could not be resolved|Failed to resolve table|SemanticError|SEM0100|BadArgumentError/i.test(e instanceof Error ? e.message : String(e));
 }
 
 function parseLogStream(source: string): PodLogEntry["stream"] {

@@ -424,6 +424,8 @@ export const OPS_T: Translations = {
   "ob.lg.copy": { ko: "원문 복사", en: "Copy raw" },
   "ob.lg.copied": { ko: "복사됨", en: "Copied" },
   "ob.lg.basis": { ko: "같은 메시지는 한 줄로 묶음(숫자·ID만 다른 것 포함) · ▸ = 앱 코드 프레임 · 가린 값 {r}개 (토큰·세션 ID·키·비밀번호)", en: "Same messages grouped (differing only in numbers / ids) · ▸ = application frame · {r} values masked (tokens, session ids, keys, passwords)" },
+  "ob.hm.toConfig": { ko: "구성 보기", en: "Configuration" },
+  "ob.hm.toConfigHint": { ko: "AKS 클러스터에서 이 워크로드의 객체(Deployment · Service · 파드) 보기", en: "This workload's objects (Deployment · Service · pods) in AKS clusters" },
   "ob.hm.close": { ko: "닫기", en: "Close" },
   "ob.hm.pods": { ko: "파드 {n}개 (메모리 높은 순)", en: "{n} pods (by memory)" },
   "ob.hm.pod": { ko: "파드", en: "Pod" },

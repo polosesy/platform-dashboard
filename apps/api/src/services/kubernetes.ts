@@ -8,7 +8,7 @@ import type {
   AksNodeCondition,
 } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { aksApiToken, anonymousSpAllowed, clusterConnection, getArmFetcherAuto, signinRequired } from "../infra/azureClientFactory.js";
+import { aksApiToken, anonymousSpAllowed, clusterConnection, getArmFetcherAuto, signinRequired, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { HttpError, parseSubscriptionIds } from "../infra/requestParams.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { debug } from "../infra/logger.js";
@@ -59,7 +59,7 @@ export async function listAksClusters(
   const cached = clustersCache.get(cacheKey);
   if (cached) return cached;
 
-  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : defaultSubscriptions(env, bearerToken);
   if (subIds.length === 0) {
     return { generatedAt: new Date().toISOString(), clusters: [], note: "no subscriptions configured" };
   }
@@ -262,6 +262,21 @@ export async function fetchAksNodeInfoMap(
 // 4. Get Cluster Overview via K8s API
 // ────────────────────────────────────────────
 
+/** Pure: the workload a pod belongs to — its owner (a ReplicaSet's name without the pod-template hash), else the pod */
+export function podOwnerName(podName: string, owners: Array<{ kind?: string; name?: string }> | undefined): string {
+  const o = owners?.[0];
+  if (!o?.name) return podName;
+  return o.kind === "ReplicaSet" ? o.name.replace(/-[a-z0-9]{6,10}$/, "") : o.name;
+}
+
+/** Pure: the pods a Service's selector picks in its namespace (every label equal) and the workloads that own them */
+export function serviceTargets(
+  selector: Record<string, string>, namespace: string, pods: Array<{ namespace: string; labels: Record<string, string>; owner: string }>,
+): { pods: number; workloads: string[] } {
+  const hit = pods.filter((p) => p.namespace === namespace && Object.entries(selector).every(([k, v]) => p.labels[k] === v));
+  return { pods: hit.length, workloads: [...new Set(hit.map((p) => p.owner))].sort().slice(0, 10) };
+}
+
 export async function getClusterOverview(
   env: Env,
   bearerToken: string | undefined,
@@ -349,15 +364,22 @@ export async function getClusterOverview(
     }
   }
 
-  // Services
+  // Services — with the workloads their selector picks (only when the pods were read: no pods list = no claim)
   if (services.status === "fulfilled") {
+    const podList = pods.status === "fulfilled" ? pods.value.items.map((p) => ({
+      namespace: p.metadata?.namespace ?? "", labels: p.metadata?.labels ?? {}, owner: podOwnerName(p.metadata?.name ?? "", p.metadata?.ownerReferences),
+    })) : null;
     for (const s of services.value.items) {
+      const namespace = s.metadata?.namespace ?? "";
+      const selector = s.spec?.selector;
       objects.push({
         kind: "Service",
         name: s.metadata?.name ?? "",
-        namespace: s.metadata?.namespace ?? "",
+        namespace,
         status: s.spec?.type ?? "ClusterIP",
         createdAt: s.metadata?.creationTimestamp?.toISOString() ?? "",
+        ports: (s.spec?.ports ?? []).slice(0, 8).map((p) => `${p.port}/${p.protocol ?? "TCP"}${p.targetPort !== undefined && String(p.targetPort) !== String(p.port) ? ` → ${String(p.targetPort)}` : ""}`),
+        ...(podList && selector && Object.keys(selector).length ? { targets: serviceTargets(selector, namespace, podList) } : {}),
       });
     }
   }

@@ -1,7 +1,7 @@
 import { BlobServiceClient } from "@azure/storage-blob";
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix, contentKey } from "../infra/cacheManager.js";
 import { getAnonymousSPCredential, homeConnectionCredential } from "../infra/azureClientFactory.js";
 import { buildIpResourceMap, resolveIpsToNodes, type IpResourceMap } from "./ipResourceMapper.js";
 
@@ -80,7 +80,7 @@ export async function collectNsgFlowLogs(
 ): Promise<NsgFlowEdgeData[]> {
   if (!env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT) return [];
 
-  const cacheKey = `${cachePrefix(bearerToken)}:nsgflow:${env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT}:${edges.length}`;
+  const cacheKey = `${cachePrefix(bearerToken)}:nsgflow:${env.AZURE_NSG_FLOW_LOG_STORAGE_ACCOUNT}:${contentKey([...nodes.map((n) => n.azureResourceId ?? n.id), ...edges.map((e) => e.id)])}`;
   const cached = nsgFlowCache.get(cacheKey);
   if (cached) return cached;
 
@@ -100,18 +100,25 @@ export async function collectNsgFlowLogs(
   // List recent blobs (last hour)
   const now = new Date();
   const oneHourAgo = new Date(now.getTime() - 3600_000);
-  const blobPrefix = buildBlobPrefix(oneHourAgo);
+  // One prefix per NSG of the diagram and hour: the blob name starts with the NSG's resource ID in capitals
+  // (`resourceId=/SUBSCRIPTIONS/…/NETWORKSECURITYGROUPS/<NSG>/y=…/h=…/`) — the old prefix had no ID, matched no blob
+  // and the source was always empty
+  const nsgIds = [...new Set(nodes.map((n) => n.azureResourceId ?? "").filter((id) => /\/providers\/microsoft\.network\/networksecuritygroups\/[^/]+$/i.test(id)))].slice(0, 20);
+  const blobPrefixes = nsgIds.flatMap((id) => [oneHourAgo, now].map((t) => buildBlobPrefix(id, t)));
 
   // Aggregate flows per IP pair
   const ipPairTraffic = new Map<string, { totalBytes: number; allowed: number; denied: number }>();
 
   try {
-    const blobIter = containerClient.listBlobsFlat({ prefix: blobPrefix });
     let blobCount = 0;
+    const names: string[] = [];
+    for (const prefix of new Set(blobPrefixes)) {
+      for await (const blobItem of containerClient.listBlobsFlat({ prefix })) if (blobItem.name.endsWith(".json")) names.push(blobItem.name);
+    }
 
-    for await (const blobItem of blobIter) {
-      if (blobCount >= 10) break; // Limit to 10 most recent blobs
-      if (!blobItem.name.endsWith(".json")) continue;
+    for (const name of names) {
+      if (blobCount >= 10) break; // at most 10 blobs a read
+      const blobItem = { name };
 
       try {
         const blobClient = containerClient.getBlobClient(blobItem.name);
@@ -226,12 +233,12 @@ function parseFlowTuple(tupleStr: string): FlowTuple | null {
  * Build blob prefix for the given time window.
  * NSG Flow Logs use path: resourceId=.../y=YYYY/m=MM/d=DD/h=HH/...
  */
-function buildBlobPrefix(since: Date): string {
+function buildBlobPrefix(nsgId: string, since: Date): string {
   const y = since.getUTCFullYear();
   const m = String(since.getUTCMonth() + 1).padStart(2, "0");
   const d = String(since.getUTCDate()).padStart(2, "0");
   const h = String(since.getUTCHours()).padStart(2, "0");
-  return `resourceId=/y=${y}/m=${m}/d=${d}/h=${h}/`;
+  return `resourceId=${nsgId.toUpperCase()}/y=${y}/m=${m}/d=${d}/h=${h}/`;
 }
 
 /** Convert a ReadableStream to string. */

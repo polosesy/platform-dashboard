@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import type { DiagramNodeSpec, DiagramEdgeSpec } from "@aud/types";
-import { CacheManager } from "../infra/cacheManager.js";
+import { CacheManager, cachePrefix, contentKey } from "../infra/cacheManager.js";
 import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
 
 // ────────────────────────────────────────────
@@ -79,7 +79,8 @@ export async function collectConnectionMonitorData(
 ): Promise<ConnectionMonitorEdgeData[]> {
   if (!env.AZURE_CONNECTION_MONITOR_ENABLED) return [];
 
-  const cacheKey = `connmon:${edges.length}`;
+  // Whose answer and which diagram: the edge count alone gave any 5-edge diagram another one's data — to any caller
+  const cacheKey = `${cachePrefix(bearerToken)}:connmon:${contentKey([...nodes.map((n) => n.azureResourceId ?? n.id), ...edges.map((e) => e.id)])}`;
   const cached = cmCache.get(cacheKey);
   if (cached) return cached;
 

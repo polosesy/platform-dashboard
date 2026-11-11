@@ -1,6 +1,6 @@
 import type { Env } from "../env.js";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { getArmFetcher, type ArmFetcher, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import type {
   ReservationUtilizationResponse,
@@ -132,7 +132,7 @@ export async function tryGetReservationUtilization(
   if (!bearerToken) return null;
 
   const grain: Grain = grainOverride ?? env.AZURE_RESERVATIONS_GRAIN;
-  const subs = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
+  const subs = opts?.subscriptionId ? [opts.subscriptionId] : defaultSubscriptions(env, bearerToken);
   if (subs.length === 0) return null;
 
   const key = `${bearerKeyPrefix(bearerToken)}:${grain}:${subs.join(",")}`;

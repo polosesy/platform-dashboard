@@ -1,7 +1,7 @@
 import type { TokenCredential } from "@azure/identity";
 import { decodeJwt } from "jose";
 import type { Env } from "../env.js";
-import { HttpError, maskGuids } from "./requestParams.js";
+import { HttpError, maskGuids, parseSubscriptionIds } from "./requestParams.js";
 import {
   connectionForSubscription,
   connectionForWorkspace,
@@ -43,6 +43,16 @@ export function anonymousSpAllowed(env: Env, featureFlag = true): boolean {
 }
 
 export const signinRequired = signinRequiredError;
+
+/**
+ * In-cluster backends without authentication of their own (the cluster's Loki, the Hubble UI backend) are read on
+ * behalf of a signed-in user only. They need no Azure token, so nothing else stops an anonymous request that names a
+ * real cluster ID (2026-11-11: /api/hubble/loki-drops answered dropped flows without sign-in — the same class as the
+ * 2026-11-02 log routes). Anonymous = the local development switches only.
+ */
+export function assertSignedInForCluster(env: Env, bearerToken: string | undefined): void {
+  if (!bearerToken && !anonymousSpAllowed(env, env.AUD_ANONYMOUS_K8S)) throw signinRequired();
+}
 
 export type ArmFetcher = {
   /** `language` = Accept-Language (e.g. "ko-KR") — some providers localise their text (Resource Health summaries) */
@@ -135,6 +145,17 @@ export function callerSubscriptions(env: Env, bearerToken: string | undefined): 
   if (!bearerToken) return homeConnection(env).subscriptions;
   const role = callerOf(env, bearerToken)?.role ?? null;
   return accessibleConnections(env, role).flatMap((c) => c.subscriptions);
+}
+
+/**
+ * The default scope of a read that names no subscription: the subscriptions the caller's role can use — asking for
+ * every managed one made the fetcher refuse the whole read (403 connection_forbidden) as soon as one connection was
+ * admin-only. A caller whose role reads none keeps the full list, so the read is refused as an error (never answered
+ * as "nothing configured" or with sample data).
+ */
+export function defaultSubscriptions(env: Env, bearerToken: string | undefined): string[] {
+  const own = callerSubscriptions(env, bearerToken);
+  return own.length ? own : parseSubscriptionIds(env);
 }
 
 type ArgBody = { subscriptions?: string[]; managementGroups?: string[]; options?: Record<string, unknown> };

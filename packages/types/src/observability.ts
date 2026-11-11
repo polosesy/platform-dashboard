@@ -565,6 +565,8 @@ export type LokiDropsResponse = {
   relayErrors: number;
   /** AMW hubble_drop_total rose but Loki holds no flow lines → the exporter pipeline is broken */
   pipelineBroken: boolean | null;
+  /** Only the newest lines were read (the read limit) — the counts are a floor */
+  truncated?: boolean;
 };
 
 // ── VPA recommendations for a workload (services/workloadVpa.ts) — Kubernetes API, recommendation vs current ──

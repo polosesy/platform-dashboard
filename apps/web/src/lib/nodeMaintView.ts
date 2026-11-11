@@ -1,6 +1,6 @@
 // View helpers for node maintenance (AKS 모니터링 › 노드, 라이브 다이어그램 AKS 패널) and pod readiness (수집 상태).
 // Pure; tested from apps/api/test/nodeMaintView.test.ts.
-import type { NodeMaintEpisode, NodeMaintenanceResponse } from "@aud/types";
+import type { NodeMaintEpisode, NodeMaintWindow, NodeMaintenanceResponse } from "@aud/types";
 
 type T = (k: string, v?: Record<string, string | number>) => string;
 
@@ -40,4 +40,15 @@ export function versionChange(e: NodeMaintEpisode): { kind: "kubelet" | "kernel"
     if (pairs.length === 1) { const [from, to] = pairs[0]!.split("→") as [string, string]; return { kind, from, to }; }
   }
   return null;
+}
+
+/** "매주 토요일 02:00 (UTC+09:00) · 4시간" — a planned-maintenance window as a sentence (also AKS 클러스터 › 구성) */
+export function scheduleText(t: T, w: Pick<NodeMaintWindow, "schedule" | "startTime" | "utcOffset" | "durationHours">): string {
+  const s = w.schedule;
+  const when = s.kind === "relativeMonthly" ? t("nm.sched.relMonthly", { n: s.interval, week: t(`nm.week.${(s.weekIndex ?? "").toLowerCase()}`), dow: t(`nm.dow.${(s.dayOfWeek ?? "").toLowerCase()}`) })
+    : s.kind === "absoluteMonthly" ? t("nm.sched.absMonthly", { n: s.interval, d: s.dayOfMonth ?? "?" })
+    : s.kind === "weekly" ? t("nm.sched.weekly", { n: s.interval, dow: t(`nm.dow.${(s.dayOfWeek ?? "").toLowerCase()}`) })
+    : s.kind === "daily" ? t("nm.sched.daily", { n: s.interval })
+    : t("nm.sched.other");
+  return `${when} ${w.startTime ?? ""} (UTC${w.utcOffset ?? ""})${w.durationHours ? ` · ${t("nm.hours", { n: w.durationHours })}` : ""}`;
 }

@@ -13,8 +13,7 @@ import {
   tableToObjects,
   type ArmFetcher,
   type LogAnalyticsFetcher,
-  type LogAnalyticsResponse,
-} from "../infra/azureClientFactory.js";
+  type LogAnalyticsResponse, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { kqlString, parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import { isPrivateV4, joinLbInbound, joinPrivateLinkUsage, type PluAccessRow, type PluLb, type PluCaller, type PluFlowRow, type PluInput, type PluNic, type PluPe, type PluSubnet, type PluSite } from "./privateLinkUsage.js";
@@ -155,10 +154,10 @@ export function scopeFromSpec(spec: DiagramSpec, vnetNodeId: string): Scope | nu
   return { vnet, peerVnetIds, pes, targets, callers, subnets, nodeByArmId, peerings, nsgArmIds, clusterOf, outerSubnets, knownCidrs: [...new Set(knownCidrs)], sites, lbs };
 }
 
-async function graph<T>(arm: ArmFetcher, env: Env, query: string): Promise<T[]> {
+async function graph<T>(arm: ArmFetcher, subs: string[], query: string): Promise<T[]> {
   const res = await arm.postJson<{ data?: T[] }>(
     "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
-    { subscriptions: parseSubscriptionIds(env), query, options: { resultFormat: "objectArray", $top: 1000 } },
+    { subscriptions: subs, query, options: { resultFormat: "objectArray", $top: 1000 } },
     { timeoutMs: 20_000 },
   );
   return res.data ?? [];
@@ -262,7 +261,7 @@ export async function collectPrivateLinkUsage(env: Env, bearerToken: string | un
   const run = (async () => {
     const arm = bearerToken ? await getArmFetcher(env, bearerToken) : await getAnonymousArmFetcher(env, env.AZURE_PL_USAGE_SP_FALLBACK);
     const la = bearerToken ? await getLogAnalyticsFetcher(env, bearerToken) : await getAnonymousLogFetcher(env, env.AZURE_PL_USAGE_SP_FALLBACK);
-    const out = await collectWith(env, arm, la, spec, scope, windowHours);
+    const out = await collectWith(env, arm, la, spec, scope, windowHours, defaultSubscriptions(env, bearerToken));
     const res: PrivateLinkUsageResponse = { ...base, dataSource: "azure", ...out };
     resultCache.set(key, res, env.AZURE_PL_USAGE_CACHE_TTL_MS);
     return res;
@@ -275,7 +274,8 @@ export async function collectPrivateLinkUsage(env: Env, bearerToken: string | un
   }
 }
 
-async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, spec: DiagramSpec, scope: Scope, windowHours: number) {
+/** `subs` = the subscriptions the caller's role can read (every managed one made Resource Graph refuse the whole read) */
+async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, spec: DiagramSpec, scope: Scope, windowHours: number, subs: string[]) {
   const timespan = `PT${windowHours}H`;
   const byId = new Map(spec.nodes.map((n) => [n.id, n]));
   const vnetArmIds = [scope.vnet, ...[...scope.peerVnetIds].map((id) => byId.get(id))].map((v) => v?.azureResourceId).filter((x): x is string => !!x);
@@ -286,7 +286,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
 
   // ── (b) Private Endpoints: IP and connection state ──
   const peArm = scope.pes.map((p) => p.armId).filter((x): x is string => !!x);
-  const peRows = peArm.length ? await settle(graph<{ peId: string; state?: string; ip?: string }>(arm, env, `Resources | where type =~ 'microsoft.network/privateendpoints' and tolower(id) in~ (${kqlList(peArm)})
+  const peRows = peArm.length ? await settle(graph<{ peId: string; state?: string; ip?: string }>(arm, subs, `Resources | where type =~ 'microsoft.network/privateendpoints' and tolower(id) in~ (${kqlList(peArm)})
 | extend c = coalesce(properties.privateLinkServiceConnections[0], properties.manualPrivateLinkServiceConnections[0])
 | mv-expand nic = properties.networkInterfaces
 | project peId=tolower(id), nicId=tolower(tostring(nic.id)), state=tostring(c.properties.privateLinkServiceConnectionState.status)
@@ -303,7 +303,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
   }
 
   // ── (c) NICs of the VNet and its peers (who owns an IP) ──
-  const nicRows = vnetArmIds.length ? await settle(graph<{ ip: string; nicName: string; vmId?: string; peId?: string }>(arm, env, `Resources | where type =~ 'microsoft.network/networkinterfaces'
+  const nicRows = vnetArmIds.length ? await settle(graph<{ ip: string; nicName: string; vmId?: string; peId?: string }>(arm, subs, `Resources | where type =~ 'microsoft.network/networkinterfaces'
 | mv-expand ipc = properties.ipConfigurations
 | extend subnetId = tolower(tostring(ipc.properties.subnet.id))
 | where subnetId has_any (${kqlList(vnetArmIds)})
@@ -311,7 +311,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
   const nics: PluNic[] = nicRows.filter((r) => r.ip && isPrivateV4(r.ip)).map((r) => ({ ip: r.ip, nicName: mask(r.nicName), ...(r.vmId ? { vmArmId: r.vmId } : {}), ...(r.peId ? { peArmId: r.peId } : {}) }));
 
   // ── (d) managed identities → resource (names only leave this function) ──
-  const idRows = await settle(graph<{ id: string; name: string; sys?: string; kubelet?: string; ua?: string }>(arm, env, `Resources | where type in~ ('microsoft.compute/virtualmachines','microsoft.compute/virtualmachinescalesets','microsoft.web/sites','microsoft.app/containerapps','microsoft.containerservice/managedclusters')
+  const idRows = await settle(graph<{ id: string; name: string; sys?: string; kubelet?: string; ua?: string }>(arm, subs, `Resources | where type in~ ('microsoft.compute/virtualmachines','microsoft.compute/virtualmachinescalesets','microsoft.web/sites','microsoft.app/containerapps','microsoft.containerservice/managedclusters')
 | extend sys=tostring(identity.principalId), kubelet=tostring(properties.identityProfile.kubeletidentity.objectId), uas=identity.userAssignedIdentities
 | mv-expand bagexpansion=array uas
 | project id=tolower(id), name, sys, kubelet, ua=tostring(uas[1].principalId)`), [], "identities");
@@ -350,7 +350,7 @@ async function collectWith(env: Env, arm: ArmFetcher, la: LogAnalyticsFetcher, s
 
   // ── (i) flow coverage on the caller side, (j) flows to the PE IPs ──
   type FlowLog = { t: string; targetType: string; enabled?: boolean; ta?: boolean; interval?: number; ws?: string };
-  const flowLogs = vnetArmIds.length ? await settle(graph<FlowLog>(arm, env, `Resources | where type =~ 'microsoft.network/networkwatchers/flowlogs'
+  const flowLogs = vnetArmIds.length ? await settle(graph<FlowLog>(arm, subs, `Resources | where type =~ 'microsoft.network/networkwatchers/flowlogs'
 | extend t = tolower(tostring(properties.targetResourceId)), fa = properties.flowAnalyticsConfiguration.networkWatcherFlowAnalyticsConfiguration
 | where t has_any (${kqlList(vnetArmIds)})${scope.nsgArmIds.length ? ` or t in~ (${kqlList(scope.nsgArmIds)})` : ""}
 | project t, targetType=tostring(split(t, '/')[7]), enabled=tobool(properties.enabled), ta=tobool(fa.enabled), interval=toint(fa.trafficAnalyticsInterval), ws=tostring(fa.workspaceResourceId)`), [] as FlowLog[], "flow logs") : [];

@@ -7,7 +7,7 @@
 import type { ObservabilitySource, ObservabilitySourcesResponse, ObservabilityStackResponse, WorkloadHeatmapResponse } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager } from "../infra/cacheManager.js";
-import { clusterConnection } from "../infra/azureClientFactory.js";
+import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { lokiConfig, lokiStateOf } from "./lokiLogs.js";
 import { getObservabilityStack, grafanaExploreUrl } from "./observabilityStack.js";
 
@@ -78,6 +78,7 @@ function lokiProbe(cfg: { url: string; tenant?: string }, clusterId: string): Pr
 }
 
 export async function getObservabilitySources(env: Env, bearerToken: string | undefined, clusterId: string): Promise<ObservabilitySourcesResponse> {
+  assertSignedInForCluster(env, bearerToken); // the Loki /ready probe below needs no token of its own
   const cfg = lokiConfig(env, clusterId);
   const grafana = clusterConnection(env, clusterId).connection.aks?.observability?.grafana ?? null;
   const [stack, probe] = await Promise.all([

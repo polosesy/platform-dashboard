@@ -119,7 +119,8 @@ function ruleField(single: string | undefined, many: string[] | undefined, asgs?
   return "*";
 }
 
-export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, nsgId: string): Promise<NsgInfo | undefined> {
+/** `strict`: a failed read throws (the on-demand NSG panel); otherwise undefined (an edge's optional NSG rows) */
+export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, nsgId: string, opts?: { strict?: boolean }): Promise<NsgInfo | undefined> {
   try {
     const fetcher = await getArmFetcherAuto(env, bearerToken);
     const url = `https://management.azure.com${nsgId}?api-version=2024-05-01`;
@@ -140,7 +141,8 @@ export async function fetchNsgInfo(env: Env, bearerToken: string | undefined, ns
       destinationAddressPrefix: ruleField(r.properties?.destinationAddressPrefix, r.properties?.destinationAddressPrefixes, r.properties?.destinationApplicationSecurityGroups),
     }));
     return { name: data.name ?? nsgId.split("/").pop() ?? "nsg", resourceId: nsgId, effectiveRules };
-  } catch {
+  } catch (e) {
+    if (opts?.strict) throw e;
     return undefined;
   }
 }
@@ -486,7 +488,7 @@ interface ArmAgwResponse {
 
 /** Resources of the built-in example diagram. Only these ever get sample detail — a real resource whose
  *  lookup fails reports the failure instead of showing invented pools, instances or cluster settings. */
-function isSampleResource(resourceId: string): boolean {
+export function isSampleResource(resourceId: string): boolean {
   return resourceId.startsWith("/subscriptions/mock/");
 }
 
@@ -613,7 +615,8 @@ export async function fetchVmssInstances(
   vmssResourceId: string,
   aksClusterArmId?: string,
 ): Promise<AksVmssInstance[]> {
-  const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}vmss-inst:${vmssResourceId}`;
+  // With the cluster the instances carry node IPs and conditions — a call without it must not answer one with it
+  const cacheKey = `${bearerKeyPrefix(bearerToken ?? "")}vmss-inst:${vmssResourceId}:${(aksClusterArmId ?? "").toLowerCase()}`;
   const cached = vmssInstanceCache.get(cacheKey);
   if (cached) return cached;
   if (isSampleResource(vmssResourceId)) return mockVmssInstances(vmssResourceId);

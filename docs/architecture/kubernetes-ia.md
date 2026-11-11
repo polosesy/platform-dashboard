@@ -1,14 +1,14 @@
 ---
-status: draft
+status: current
 owner: platform-observability
 last-verified: 2026-11-11
-covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/observability/page.tsx, apps/web/src/lib/navConfig.ts]
+covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/page.tsx, apps/web/src/lib/navConfig.ts]
 ---
 # Kubernetes 메뉴 구조 검토 — AKS 클러스터 · AKS 모니터링
 
 > 결론(권장): **합치지 않고 역할을 나눈 뒤, 같은 대상(워크로드)으로 잇는다.**
 > 'AKS 클러스터' = **구성·리소스**(무엇이 있고 어떻게 설정됐나), 'AKS 모니터링' = **상태·신호**(건강한가).
-> 겹치는 숫자는 한 곳에만 두고, 두 화면이 같은 워크로드 상세 패널을 쓴다. 단계 1 → 2 → 3, 아직 구현 전(결정 대기).
+> 겹치는 숫자는 한 곳에만 두고, 두 화면을 같은 워크로드로 잇는다. 2026-11-11 구현 — 무엇을 했고 무엇이 남았는지는 맨 아래 6절.
 
 ## 1. 지금 두 화면 (2026-11-11 코드 기준)
 
@@ -90,3 +90,13 @@ covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/observability/pa
 | 데이터 | "출처가 다른 같은 숫자는 신뢰를 깎는다(Running vs Ready)" | 파드 숫자는 모니터링 한 곳(1단계) |
 | 플랫폼 | "Azure 구성 정보는 관측 플랫폼이 못 주는 이 대시보드의 강점" | 클러스터 화면 = 구성 중심(1단계) |
 | 보안 | "Secret은 이름·사용처까지만, 값은 절대 안 읽는다" | 2단계 범위에 명시 |
+
+## 6. 구현 (2026-11-11)
+
+| 단계 | 한 것 | 남은 것 |
+|---|---|---|
+| 1 | **클러스터 구성** 칸(`GET /api/kubernetes/cluster-config` → `services/aksClusterConfig.ts`, ARM만 — 프라이빗이라 클러스터에 못 닿아도 답함): 버전 · 올릴 수 있는 버전(패치/새 마이너/최신 칩) · 채널 · 요금제 · 유지 보수 창, 노드 풀 표(크기 · 수 · 자동 확장 · OS · 영역 · 버전, 컨트롤 플레인과 다르면 '다름'), 네트워크, 로그인 · 추가 기능(● 켜짐 · ○ 꺼짐 · ? 응답에 없음). Azure가 안 준 값은 '—'(추측 금지), 못 읽은 부분은 알림 한 줄. 'Running 파드' 카드 삭제 → 재고 카드(노드 · 워크로드 · 서비스·인그레스 · 배치) + '상태는 AKS 모니터링에서' 링크. 객체 표에 묶음 칩 · 찾기 · 처음 200행 | — |
+| 2 | 워크로드 행의 '신호 →' = AKS 모니터링에서 그 워크로드 패널 열기(`?wl=<ns>/<이름>`), 모니터링 패널의 '구성 보기 →' = 이 화면에서 그 워크로드 객체(`?ns=&q=`). Service 행에 포트와 '파드 n개 선택 → 워크로드'(선택기가 지금 고르는 파드, 파드 목록을 읽었을 때만) | 패널을 이 화면 안에서 그대로 열기(지금은 화면 이동), ConfigMap · Secret의 '쓰는 워크로드'(목록 권한이 고객 RBAC 템플릿에 없어 보류 — 값은 어떤 경우에도 읽지 않음) |
+| 3 | 메뉴 설명: AKS 클러스터 '구성 · 리소스 — …' / AKS 모니터링 '상태 · 신호 — …' | — |
+
+테스트 `apps/api/test/aksClusterConfig.test.ts`.

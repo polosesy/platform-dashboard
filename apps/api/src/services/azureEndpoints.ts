@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import type { ClusterContainment, PaasNetworkRules } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
+import { getArmFetcherAuto, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import type { AzureEndpoint } from "./policyInsights.js";
@@ -218,7 +218,7 @@ export function privateEndpointIps(pes: ArgRow[], nics: ArgRow[]): Map<string, s
  * PE IP). Network rules and key auth say who else can reach them.
  */
 export async function listAzureEndpoints(env: Env, bearerToken: string | undefined): Promise<{ endpoints: AzureEndpoint[] }> {
-  const subs = parseSubscriptionIds(env);
+  const subs = defaultSubscriptions(env, bearerToken);
   const cacheKey = `${cachePrefix(bearerToken)}:azure-endpoints:${subs.join(",")}`;
   const cached = endpointCache.get(cacheKey);
   if (cached) return cached;

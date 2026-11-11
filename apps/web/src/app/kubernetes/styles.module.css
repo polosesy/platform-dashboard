@@ -150,3 +150,20 @@
   text-align: center;
 }
 
+/* ── 구성 · 리소스 (2026-11-11): section headings, the configuration lists, the objects filter row ── */
+.sectionTitle { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; font-size: var(--text-heading); font-weight: 600; }
+.sectionSub { font-size: var(--text-small); font-weight: 400; color: var(--subtle); }
+.stateLink { font-size: var(--text-small); font-weight: 600; color: var(--accent-strong); text-decoration: none; }
+.stateLink:hover, .rowLink:hover { text-decoration: underline; }
+.rowLink { font-size: var(--text-caption); font-weight: 500; color: var(--accent-strong); text-decoration: none; white-space: nowrap; }
+.cfgList { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: var(--text-small); align-items: baseline; }
+.cfgList dt { color: var(--muted); }
+.cfgList dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.cfgMuted { color: var(--subtle); }
+.cfgSub { display: block; font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 400; color: var(--subtle); }
+.cfgPlain { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.cfgTags { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.groupRow { display: flex; flex-wrap: wrap; gap: 6px; margin-right: auto; }
+.countN { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.more { padding: 10px 14px; border-top: 1px solid var(--border); }

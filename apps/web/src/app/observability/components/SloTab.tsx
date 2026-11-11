@@ -22,7 +22,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import {
   Button, Cell, Chip, CodeBlock, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Segmented, Select, Stat, Toolbar, type ChipLevel,
 } from "@/components/ui";
-import { atParam, type TimeRange } from "@/lib/timeRange";
+import { atParam, type TimeRange, answersAt } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { spanLabel } from "@/lib/sloSettingsView";
 import { ResetForm, SloSettingsView } from "./SloSettings";
@@ -55,8 +55,7 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   // A save or a reset changes the settings version — the SLO numbers' cache key — so both reload
   const changed = () => { sq.reload(); q.reload(); };
   const [view, setView] = useState<View>("services");
-  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
-  const d = q.data?.clusterId === clusterId && dAt === atQ ? q.data : null;
+  const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
   if (!d) return <LoadingState label={t("ob.slo.loading")} />;

@@ -126,6 +126,10 @@ export async function buildLiveSnapshot(
 ): Promise<LiveDiagramSnapshot | null> {
   const spec = getDiagramSpec(diagramId, diagramOwner(bearerToken));
   if (!spec) return null;
+  // Trend series are the owner's: diagram IDs repeat across users (`auto-<subscription prefix>`), so two users polling
+  // "the same" ID used to append to one buffer (interleaved points at twice the rate); the key is the store's, so
+  // evicting a diagram frees its series (the old prefix never matched)
+  const seriesScope = storeKey(diagramOwner(bearerToken), diagramId);
 
   // Check cache
   if (bearerToken) {
@@ -297,12 +301,12 @@ export async function buildLiveSnapshot(
 
     // ── Sparkline ring buffers: one series per (node, metric) so different metrics never mix ──
     // Every measured metric keeps its own trend (card: CPU and memory, panel: each metric row)
-    const bufferKey = `${diagramId}:${nodeSpec.id}:${findPrimaryMetricName(metrics) ?? "primary"}`;
+    const bufferKey = `${seriesScope}:${nodeSpec.id}:${findPrimaryMetricName(metrics) ?? "primary"}`;
     const sparklines: Record<string, SparklineData> = {};
 
     for (const [metricName, value] of Object.entries(metrics)) {
       if (value == null) continue;
-      const key = `${diagramId}:${nodeSpec.id}:${metricName}`;
+      const key = `${seriesScope}:${nodeSpec.id}:${metricName}`;
       let buf = sparklineBuffers.get(key);
       if (!buf) {
         buf = { values: [], timestamps: [] };

@@ -12,7 +12,7 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { durationText, spanMs } from "@/lib/nodeMaintView";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Stat, Toolbar, type ChipLevel } from "@/components/ui";
-import { atParam, type TimeRange } from "@/lib/timeRange";
+import { atParam, type TimeRange, answersAt } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
 
@@ -30,8 +30,7 @@ export function StackTab({ clusterId, range, nonce, report }: { clusterId: strin
     fetchJsonWithBearer<ObservabilityStackResponse>(apiUrl("/api/observability/stack", { clusterId, at: atQ }), token),
   );
   useRangeRefresh("stack", nonce, q.loading, q.reload, report);
-  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
-  const d = q.data?.clusterId === clusterId && dAt === atQ ? q.data : null;
+  const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
   if (!d) return <LoadingState />;

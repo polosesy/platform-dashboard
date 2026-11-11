@@ -13,7 +13,7 @@ import type {
 } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { anonymousSpAllowed, getAnonymousArmFetcher, getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { anonymousSpAllowed, getAnonymousArmFetcher, getArmFetcher, type ArmFetcher, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 
@@ -384,7 +384,7 @@ export async function tryGetSecurityPosture(
   deps: PostureDeps = defaultDeps,
 ): Promise<SecurityPostureResponse | null> {
   if (!env.AZURE_SECURITY_ENABLED) return null;
-  const subs = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
+  const subs = opts?.subscriptionId ? [opts.subscriptionId] : defaultSubscriptions(env, bearerToken);
   if (!subs.length) return null;
   // Anonymous: only in dev mode (AUD_ANONYMOUS_SP) and with this feature's own opt-in
   const useSp = !bearerToken && anonymousSpAllowed(env, env.AZURE_SECURITY_SP_FALLBACK) && !!(env.AZURE_AD_TENANT_ID && env.AZURE_AD_CLIENT_ID && env.AZURE_AD_CLIENT_SECRET);

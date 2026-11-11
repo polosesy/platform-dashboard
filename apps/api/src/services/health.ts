@@ -13,7 +13,7 @@ import type {
   RegionalStatusResponse,
 } from "@aud/types";
 import { CacheManager, bearerKeyPrefix } from "../infra/cacheManager.js";
-import { getArmFetcherAuto, type ArmFetcher } from "../infra/azureClientFactory.js";
+import { getArmFetcherAuto, type ArmFetcher, defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import type { Lang } from "../infra/lang.js";
@@ -119,7 +119,7 @@ export async function tryGetHealthSummary(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string; lang?: Lang },
 ): Promise<HealthSummary | null> {
-  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : defaultSubscriptions(env, bearerToken);
   if (subIds.length === 0) return null;
   const lang = opts?.lang ?? "ko";
 
@@ -158,6 +158,7 @@ async function _fetchHealthSummaryCore(
   );
 
   const resources: ResourceHealthStatus[] = [];
+  let failed = 0;
   for (let i = 0; i < perSubResults.length; i++) {
     const result = perSubResults[i];
     if (result.status === "fulfilled") {
@@ -166,8 +167,11 @@ async function _fetchHealthSummaryCore(
       }
     } else {
       console.warn(`[health] subscription ${subIds[i]} failed:`, result.reason);
+      failed++;
     }
   }
+  // No subscription could be read: an error, not "0 available · 0 unavailable" (which was also cached)
+  if (failed && failed === perSubResults.length) throw (perSubResults[0] as PromiseRejectedResult).reason;
 
   const summary: HealthSummary = {
     generatedAt: new Date().toISOString(),
@@ -179,7 +183,8 @@ async function _fetchHealthSummaryCore(
     subscriptions: subIds,
   };
 
-  healthCache.set(cacheKey, summary, env.AZURE_HEALTH_CACHE_TTL_MS);
+  // A partial read (some subscription failed) is asked again on the next request rather than kept as the answer
+  if (!failed) healthCache.set(cacheKey, summary, env.AZURE_HEALTH_CACHE_TTL_MS);
   return summary;
 }
 
@@ -420,7 +425,7 @@ export async function tryGetServiceHealthEvents(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<ServiceHealthEventsResponse | null> {
-  const subId = opts?.subscriptionId ?? parseSubscriptionIds(env)[0];
+  const subId = opts?.subscriptionId ?? defaultSubscriptions(env, bearerToken)[0];
   if (!subId) return null;
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
@@ -730,7 +735,7 @@ export async function tryGetRegionalStatus(
   bearerToken: string | undefined,
   opts?: { subscriptionId?: string },
 ): Promise<RegionalStatusResponse | null> {
-  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : parseSubscriptionIds(env);
+  const subIds = opts?.subscriptionId ? [opts.subscriptionId] : defaultSubscriptions(env, bearerToken);
   if (subIds.length === 0) return null;
 
   const prefix = bearerToken ? bearerKeyPrefix(bearerToken) : "sp";
@@ -777,6 +782,9 @@ async function _fetchRegionalStatusCore(
     console.error("[health] fetchResourceLocations failed:", locError);
   }
 
+  // No subscription's service-health events could be read: an error — not every region "no issues" (during an
+  // outage a throttled read used to show all regions healthy, cached)
+  if (eventsResults.length && eventsResults.every((r) => r.status === "rejected")) throw (eventsResults[0] as PromiseRejectedResult).reason;
   // Events can repeat across subscriptions (same tracking id) — de-duplicate
   const eventsById = new Map<string, ServiceHealthEvent>();
   for (const r of eventsResults) {

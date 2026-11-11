@@ -16,7 +16,7 @@
 import type { Env } from "../env.js";
 import type { HubbleCoverage, HubbleFlow, HubbleFlowSet } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
-import { clusterConnection } from "../infra/azureClientFactory.js";
+import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { safeMessage } from "../infra/requestParams.js";
 import { parseHubbleJsonOutput } from "./hubbleClient.js";
 import { dedupeObservations, singleSourceCoverage } from "./hubbleMerge.js";
@@ -268,6 +268,7 @@ export async function getFlowsFromHubbleUi(
   env: Env, bearerToken: string | undefined, clusterId: string,
   opts: { limit: number; namespace?: string; verdict?: string; type?: string },
 ): Promise<HubbleFlowSet> {
+  assertSignedInForCluster(env, bearerToken);
   const cfg = hubbleUiConfig(env, clusterId);
   if (!cfg) throw new HubbleUiError("notConfigured", "aks.observability.hubbleUi is not set for this connection");
   const key = `${cachePrefix(bearerToken)}:hubble-ui:${clusterId.toLowerCase()}:${opts.verdict ?? ""}:${opts.type ?? ""}:${opts.limit}`;

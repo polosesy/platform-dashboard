@@ -11,11 +11,12 @@
 // The window and its end come from the page's time picker (lib/timeRange heatWindowFor — over a day reads the range's
 // last 24 h, said beside the meta); 새로 고침 / auto refresh reload it through useRangeRefresh.
 
+import { parseWorkloadParam } from "@/lib/aksConfigView";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
-import { atParam, heatWindowFor, type TimeRange } from "@/lib/timeRange";
+import { atParam, heatWindowFor, type TimeRange, answersAt } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, Select, Toggle } from "@/components/ui";
@@ -86,6 +87,11 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   const [showIdle, setShowIdle] = useState(false);
   const [allAttn, setAllAttn] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // `?wl=<namespace>/<name>` (AKS 클러스터 › 워크로드 행의 '신호'): open that workload's panel — read once after mount
+  useEffect(() => {
+    const wl = parseWorkloadParam(window.location.search);
+    if (wl) setSelected(wl);
+  }, []);
   const [sort, setSort] = useState<TableSort>({ by: "worst", dir: "worse" });
   const lastTile = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -94,8 +100,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
     fetchJsonWithBearer<WorkloadHeatmapResponse>(apiUrl("/api/observability/heatmap", { clusterId, window: String(win), at }), token),
   );
   useRangeRefresh("heatmap", nonce, q.loading, q.reload, report);
-  const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
-  const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win && dAt === at ? q.data : null;
+  const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win && answersAt(q.data.at, at) ? q.data : null;
 
   const ws = d?.workloads ?? [];
   const idleCount = useMemo(() => ws.filter((w) => isIdle(w) && (!ns || w.namespace === ns)).length, [ws, ns]);
@@ -386,7 +391,7 @@ ${t("ob.hm.tileHint")}`}>
         </div>
         {sel && (
           <div ref={panelRef} className={styles.hmPanelWrap}>
-            <WorkloadHeatPanel clusterId={clusterId} w={sel} grafana={d.grafana} windowMinutes={d.windowMinutes} range={range} nonce={nonce} onClose={close} />
+            <WorkloadHeatPanel key={heatKey(sel)} clusterId={clusterId} w={sel} grafana={d.grafana} windowMinutes={d.windowMinutes} range={range} nonce={nonce} onClose={close} />
           </div>
         )}
       </div>

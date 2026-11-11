@@ -393,7 +393,7 @@ export function TimeRangeBar({ state }: { state: TimeRangeState }) {
       {form ? (
         // Two local times → a span ending at `to` (customRange: 5 min – 30 days, not the future, not past 30 days back)
         <div className={s.timeForm} role="dialog" aria-label={t("tr.customTitle")}
-          onKeyDown={(e) => { if (e.key === "Escape") setForm(null); if (e.key === "Enter") apply(); }}>
+          onKeyDown={(e) => { if (e.key === "Escape") setForm(null); if (e.key === "Enter" && e.target instanceof HTMLInputElement) apply(); }}>
           <strong className={s.timeFormTitle}>{t("tr.customTitle")}</strong>
           <label className={s.field}>
             <span className={s.fieldLabel}>{t("tr.from")}</span>

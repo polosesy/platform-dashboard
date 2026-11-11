@@ -345,7 +345,9 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       else {
         const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, { namespace, pod: podName, container, minutes: sinceMinutes, limit, at });
         if (r.state === "ok") {
-          attempts.push({ source: "loki", state: r.lines.length ? "ok" : "empty" });
+          // Over the body limit nothing is parsed: that is a failed read (narrow the range), not "no logs"
+          attempts.push(r.truncated && !r.lines.length ? { source: "loki", state: "failed", message: "the answer was larger than the read limit — pick a shorter range" }
+            : { source: "loki", state: r.lines.length ? "ok" : "empty" });
           if (r.lines.length) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
         } else attempts.push({ source: "loki", state: r.state, ...(r.message ? { message: r.message } : {}) });
       }
