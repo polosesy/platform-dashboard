@@ -42,7 +42,10 @@ function Findings() {
         ) : recGap ? (
           <EmptyState title={t("sec.collectFailed")} />
         ) : (
-          <Panel flush={false}>
+          <Panel flush={false}
+            footer={posture.textLanguage === "en" ? <span>{t("sec.textEnglish")}</span>
+              : posture.textLanguage === "ko" && (posture.textLocalized ?? 0) < recs.length ? <span>{t("sec.textPartly", { n: recs.length, k: recs.length - (posture.textLocalized ?? 0) })}</span>
+              : undefined}>
             <FindingsTable key={domain} recommendations={shown} showDomain={domain === "all"} />
           </Panel>
         )}

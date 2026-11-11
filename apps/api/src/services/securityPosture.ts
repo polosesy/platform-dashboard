@@ -59,6 +59,21 @@ const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
 /** Defender text fields carry light HTML (<br>, <a>); keep plain text with line breaks. */
+/** The named entities Defender's texts use; &emsp; / &ensp; are its indentation for sub-steps ("  a. …") */
+const ENTITIES: Record<string, string> = {
+  nbsp: " ", emsp: "  ", ensp: " ", thinsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+  ndash: "–", mdash: "—", hellip: "…", bull: "•", middot: "·", rarr: "→", larr: "←", copy: "©", reg: "®", trade: "™",
+  lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", laquo: "«", raquo: "»", deg: "°",
+};
+/** `emsp` · `#39` · `#x27` → the character; null = not one we know (the text is left as written) */
+function decodeEntity(e: string): string | null {
+  if (e[0] !== "#") return ENTITIES[e.toLowerCase()] ?? null;
+  const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+  // No control characters (a tab or newline hidden in an entity) and nothing outside Unicode
+  return Number.isFinite(code) && code >= 32 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : null;
+}
+
+/** Defender's HTML as plain text: tags out, line breaks kept, entities decoded once (&amp;lt; stays "&lt;") */
 export function plainText(v: unknown, max = 1200): string | undefined {
   const s = str(v);
   if (!s) return undefined;
@@ -66,11 +81,8 @@ export function plainText(v: unknown, max = 1200): string | undefined {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|li|div)>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
+    .replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z][a-z0-9]{1,10});/gi, (m, e: string) => decodeEntity(e) ?? m)
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t || undefined;
@@ -132,8 +144,8 @@ export function mapRecommendations(rows: RecommendationRow[]): PostureRecommenda
       unhealthy: num(r.unhealthy),
       healthy: num(r.healthy),
       samples: (r.samples ?? []).map(sampleRef).filter((x): x is PostureResourceRef => !!x).slice(0, 5),
-      description: plainText(md.description, 600),
-      remediation: plainText(md.remediationDescription),
+      description: plainText(md.description, 1200),
+      remediation: plainText(md.remediationDescription, 4000),
       userImpact: str(md.userImpact),
       implementationEffort: str(md.implementationEffort),
       portalUrl: `https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade/assessmentKey/${encodeURIComponent(r.key)}`,

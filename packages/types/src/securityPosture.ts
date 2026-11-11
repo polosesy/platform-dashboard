@@ -90,4 +90,11 @@ export type SecurityPostureResponse = {
   /** Per-section failures (messages have IDs masked); the rest of the response is still valid. */
   gaps: PostureGap[];
   note?: string;
+  /**
+   * The language of the recommendation texts when one other than English was asked (`?lang=ko`): "ko" = Microsoft's
+   * own Korean texts were overlaid (`textLocalized` of the recommendations have one — the rest keep English: custom
+   * or not yet translated by Microsoft), "en" = the Korean catalogue could not be read. Absent = English was asked.
+   */
+  textLanguage?: "ko" | "en";
+  textLocalized?: number;
 };

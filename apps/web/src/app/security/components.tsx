@@ -12,6 +12,12 @@ export const DOMAINS: PostureDomain[] = ["identity", "network", "data", "compute
 const SEV_TONE: Record<string, BadgeTone> = { High: "high", Medium: "medium", Low: "low", Informational: "neutral" };
 
 /** Translate a known code, otherwise show Defender's raw value (never invent a label). */
+/** Defender's Low · Moderate · High (user impact, effort) in the app's language; another word is shown as written */
+const LEVELS = new Set(["low", "moderate", "high"]);
+export function levelText(t: (k: string) => string, v: string): string {
+  return LEVELS.has(v.toLowerCase()) ? t(`sec.level.${v.toLowerCase()}`) : v;
+}
+
 export function useLabel() {
   const { t } = useI18n();
   return (prefix: string, raw: string) => {
@@ -142,8 +148,8 @@ export function FindingsTable({ recommendations, showDomain = true }: { recommen
                     {r.remediation ? <Detail title={t("sec.remediation")}><span className={s.pre}>{r.remediation}</span></Detail> : null}
                     {r.userImpact || r.implementationEffort ? (
                       <div className={s.facts}>
-                        {r.userImpact ? <span>{t("sec.userImpact")}: <b>{r.userImpact}</b></span> : null}
-                        {r.implementationEffort ? <span>{t("sec.effort")}: <b>{r.implementationEffort}</b></span> : null}
+                        {r.userImpact ? <span>{t("sec.userImpact")}: <b>{levelText(t, r.userImpact)}</b></span> : null}
+                        {r.implementationEffort ? <span>{t("sec.effort")}: <b>{levelText(t, r.implementationEffort)}</b></span> : null}
                       </div>
                     ) : null}
                     {r.samples.length ? (

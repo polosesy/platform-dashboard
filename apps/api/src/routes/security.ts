@@ -3,6 +3,8 @@ import type { Env } from "../env.js";
 import { mockSecureScore, mockSecurityAlerts, mockSecurityPosture } from "../mockData.js";
 import { tryGetSecureScore, tryGetSecurityAlerts } from "../services/security.js";
 import { tryGetSecurityPosture } from "../services/securityPosture.js";
+import { localizePosture } from "../services/assessmentTexts.js";
+import { defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
@@ -43,7 +45,12 @@ export function registerSecurityRoutes(router: Router, env: Env) {
   router.get("/api/security/posture", (req: Request, res: Response) =>
     respondWithFallback(
       res,
-      async () => tryGetSecurityPosture(env, req.auth?.bearerToken, { subscriptionId: querySubscriptionId(req, env) }),
+      async () => {
+        const subscriptionId = querySubscriptionId(req, env);
+        const posture = await tryGetSecurityPosture(env, req.auth?.bearerToken, { subscriptionId });
+        // ?lang=ko: Microsoft's own Korean recommendation texts over the English ones (services/assessmentTexts.ts)
+        return posture && localizePosture(env, req.auth?.bearerToken, posture, subscriptionId ?? defaultSubscriptions(env, req.auth?.bearerToken)[0], queryLang(req));
+      },
       mockSecurityPosture,
       "security",
     ),

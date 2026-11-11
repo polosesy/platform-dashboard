@@ -316,8 +316,10 @@
   color: var(--muted);
 }
 
+/* pre-wrap: Defender indents sub-steps ("  a. …") — pre-line collapsed the indentation */
 .pre {
-  white-space: pre-line;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .facts {

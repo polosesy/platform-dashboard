@@ -4,6 +4,7 @@
 // selected subscription and the posture response survive moving between the pages
 // (one request per subscription, not one per page).
 
+import { useI18n } from "@/lib/i18n";
 import { createContext, useContext, type ReactNode } from "react";
 import type { AzureSubscriptionOption, SecurityPostureResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
@@ -26,8 +27,10 @@ const SecurityCtx = createContext<SecurityState | null>(null);
 
 export function SecurityProvider({ children }: { children: ReactNode }) {
   const { subscriptions, subscriptionId, setSubscriptionId, loaded } = useSubscriptions();
-  const q = useApiQuery(loaded ? `posture:${subscriptionId}` : null, (token) =>
-    fetchJsonWithBearer<SecurityPostureResponse>(apiUrl("/api/security/posture", { subscriptionId: subscriptionId || undefined }), token),
+  // The recommendation texts come in the app's language (Microsoft's own Korean texts — API services/assessmentTexts.ts)
+  const { locale } = useI18n();
+  const q = useApiQuery(loaded ? `posture:${subscriptionId}:${locale}` : null, (token) =>
+    fetchJsonWithBearer<SecurityPostureResponse>(apiUrl("/api/security/posture", { subscriptionId: subscriptionId || undefined, lang: locale }), token),
   );
   return (
     <SecurityCtx.Provider
