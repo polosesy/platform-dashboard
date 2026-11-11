@@ -111,3 +111,15 @@ test("scope bar: PAGE_SCOPE names only menu screens; the AKS screens share the c
   for (const k of ["/architecture", "/health", "/cost", "/security"]) assert.deepEqual([...nav.PAGE_SCOPE[k]!], ["subscription"], k);
   assert.equal(nav.PAGE_SCOPE["/live-diagram"], undefined, "the live diagram picks its connection and VNet inside");
 });
+
+test("folding the menu: headed groups fold (개요 does not); storage is read defensively; a folded group keeps the current page's link", () => {
+  assert.equal(nav.isCollapsible(NAV_GROUPS.find((g) => g.key === "overview")!), false);
+  assert.ok(NAV_GROUPS.filter((g) => g.key !== "overview").every(nav.isCollapsible));
+  assert.deepEqual([...nav.parseCollapsed('["security","azure","overview","nope",3]')].sort(), ["azure", "security"], "only known foldable keys");
+  for (const bad of [null, "", "{", '{"a":1}', "42"]) assert.equal(nav.parseCollapsed(bad).size, 0, String(bad));
+  const security = NAV_GROUPS.find((g) => g.key === "security")!;
+  assert.equal(nav.shownItems(security, false, "/cost"), security.items, "open: every link");
+  assert.deepEqual(nav.shownItems(security, true, "/cost"), [], "folded, elsewhere: none");
+  assert.deepEqual(nav.shownItems(security, true, "/security/findings").map((i) => i.href), ["/security/findings"], "folded, here: the current page only");
+  assert.ok(nav.NAV_COLLAPSE_KEY.startsWith("aud."));
+});

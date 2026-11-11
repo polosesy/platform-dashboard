@@ -128,10 +128,68 @@
 
 .sectionLabel {
   margin: 0;
-  padding: 6px 10px 4px;
   font-size: var(--text-caption);
   font-weight: 700;
   color: var(--muted);
+}
+
+/* A group's heading folds its links: the whole row is the button (name · count when folded · chevron) */
+.sectionToggle {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.sectionToggle:hover {
+  background: rgba(var(--ink-rgb), 0.05);
+  color: var(--ink);
+}
+
+.sectionToggle:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.9);
+  outline-offset: 2px;
+}
+
+.sectionName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sectionCount {
+  font-weight: 600;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  color: var(--subtle);
+  transform: rotate(-90deg);
+  transition: transform var(--motion-fast) ease;
+}
+
+.chevron[data-open] {
+  transform: none;
+}
+
+.navTools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 10px 2px;
+  font-size: var(--text-caption);
 }
 
 .subLabel {

@@ -97,10 +97,15 @@ export function resetFor(resets: SloBudgetReset[], namespace: string, applicatio
   return best;
 }
 
-/** Pure: a reset's time — now when not given; at most a minute ahead (clock skew) and not before the longest window */
+/**
+ * Pure: a reset's time — now when not given; at most a minute ahead (clock skew) and not before the longest window.
+ * Kept on the minute (floored): the SLO read ends on a minute, and a reset at 14:26:22 read at 14:26:00 would be
+ * "ahead" — left out until the cached result expired (2026-11-11 stg: "scheduled", no chip on the card)
+ */
 export function validateReset(body: SloResetBody, now: Date): { ok: true; at: Date } | { ok: false; error: string } {
-  const at = body.at ? new Date(body.at) : now;
-  if (!Number.isFinite(at.getTime())) return { ok: false, error: "slo_reset_time" };
+  const raw = body.at ? new Date(body.at) : now;
+  if (!Number.isFinite(raw.getTime())) return { ok: false, error: "slo_reset_time" };
+  const at = new Date(Math.floor(raw.getTime() / 60_000) * 60_000);
   if (at.getTime() > now.getTime() + 60_000 || at.getTime() < now.getTime() - SLO_RESET_MAX_AGE_MS) return { ok: false, error: "slo_reset_time" };
   return { ok: true, at };
 }

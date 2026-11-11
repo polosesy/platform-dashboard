@@ -196,10 +196,12 @@ function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged }: 
       </>}
       footer={
         <>
-          <Button size="sm" variant="ghost" ariaPressed={open} onClick={() => setOpen(!open)}>{open ? t("ob.slo.hideDetail") : t("ob.slo.detail")}</Button>
-          {canWrite && s.application ? (
-            <Button size="sm" variant="ghost" ariaPressed={resetting} onClick={() => setResetting(!resetting)}>{t("ob.slo.resetBudget")}</Button>
-          ) : null}
+          <span className={styles.sloFootActions}>
+            <Button size="sm" variant="ghost" ariaPressed={open} onClick={() => setOpen(!open)}>{open ? t("ob.slo.hideDetail") : t("ob.slo.detail")}</Button>
+            {canWrite && s.application ? (
+              <Button size="sm" variant="ghost" ariaPressed={resetting} onClick={() => setResetting(!resetting)}>{t("ob.slo.resetBudget")}</Button>
+            ) : null}
+          </span>
           <span className={styles.sloFootNote}>
             {requests <= 0 ? "—" : s.reset && since ? t("ob.slo.cardFootReset", { n: requests.toLocaleString(), span: since }) : t("ob.slo.cardFoot", { n: requests.toLocaleString(), days })}
           </span>

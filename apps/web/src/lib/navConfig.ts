@@ -126,3 +126,35 @@ export function activeGroupKey(pathname: string): string | null {
   const href = activeNavItem(pathname)?.href;
   return href ? ALL_ITEMS.find((x) => x.item.href === href)!.group : null;
 }
+
+// ── Folding the menu's groups (this browser only) ──
+
+/** localStorage key: the group keys the viewer folded (JSON array) */
+export const NAV_COLLAPSE_KEY = "aud.nav.collapsed";
+
+/** Groups with a heading fold; 개요 (one link, no heading) does not */
+export function isCollapsible(g: NavGroup): boolean {
+  return g.key !== "overview";
+}
+
+/** Pure: the folded groups from storage — only keys of foldable groups, anything unreadable = none folded */
+export function parseCollapsed(raw: string | null): Set<string> {
+  if (!raw) return new Set();
+  try {
+    const v: unknown = JSON.parse(raw);
+    const known = new Set(NAV_GROUPS.filter(isCollapsible).map((g) => g.key));
+    return new Set(Array.isArray(v) ? v.filter((k): k is string => typeof k === "string" && known.has(k)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Pure: the links a group shows — all when open; folded, only the current page's link (the menu always says where
+ * you are) or none
+ */
+export function shownItems(g: NavGroup, folded: boolean, pathname: string): NavItem[] {
+  if (!folded) return g.items;
+  const active = activeNavItem(pathname)?.href;
+  return g.items.filter((it) => it.href === active);
+}

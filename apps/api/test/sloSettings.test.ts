@@ -140,6 +140,11 @@ test("store: a reset needs a reason, a time between 30 days ago and now; one per
   const now = new Date(END);
   assert.ok(!validateReset({ service: "*", reason: "x x x", at: new Date(END + 5 * 60_000).toISOString() }, now).ok, "not ahead");
   assert.ok(!validateReset({ service: "*", reason: "x x x", at: new Date(END - 31 * DAY).toISOString() }, now).ok, "not before the longest window");
+  // kept on the minute: the SLO read ends on a minute — a reset at :22 s read at :00 s was "ahead" and left out (stg)
+  const sec = new Date(END + 22_000);
+  const v = validateReset({ service: "*", reason: "x x x" }, sec);
+  assert.ok(v.ok && v.at.getTime() === END);
+  assert.equal(resetPlans([{ ...reset("*", 0), at: v.ok ? v.at.toISOString() : "" }], Math.floor(sec.getTime() / 60_000) * 60_000, 30).length, 1, "counts on the very next read");
   const one = await addSloReset(undefined, CLUSTER, { service: "shop/orders", reason: "deploy incident" }, { now, by: "Lee" });
   const two = await addSloReset(undefined, CLUSTER, { service: "shop/orders", reason: "second look", at: new Date(END - DAY).toISOString() }, { now });
   assert.ok(one.ok && two.ok);
@@ -221,6 +226,8 @@ test("form: the services listed — measured first, then names only in the setti
   const x = reset("shop/pay", 2);
   assert.deepEqual(V.resetState(x, END, 30), { active: true, endsAt: Date.parse(x.at) + 30 * DAY, future: false });
   assert.equal(V.resetState(x, END + 29 * DAY, 30).active, false);
+  const justNow = { ...x, at: new Date(END + 60_000).toISOString() };
+  assert.deepEqual([V.resetState(justNow, END, 30).active, V.resetState(justNow, END, 30).future], [true, false], "the viewer's clock a minute behind: not 'scheduled'");
   const t = (k: string, v?: Record<string, string | number>) => `${k}:${JSON.stringify(v)}`;
   assert.equal(V.spanLabel(t, 50.5), 'ob.slo.span.dh:{"days":2,"hours":2}');
   assert.equal(V.spanLabel(t, 5), 'ob.slo.span.h:{"days":0,"hours":5}');

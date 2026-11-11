@@ -214,7 +214,8 @@ const RAW_BUTTONS: Record<string, number> = {
   "app/policies/insights/RiskCombos.tsx": 2, "app/policies/insights/RiskHeatmap.tsx": 2, "app/policies/page.tsx": 2,
   "app/security/advisories/page.tsx": 2, "app/security/components.tsx": 1, "app/security/risk/IssueQueue.tsx": 1,
   "app/security/risk/page.tsx": 1, "app/security/threats/page.tsx": 1, "app/settings/PermissionTable.tsx": 1,
-  "components/Sidebar.tsx": 1, "components/TopNav.tsx": 3,
+  // Sidebar 2 (2026-11-11): a group heading is a disclosure that folds its links — a row that expands, not an action
+  "components/Sidebar.tsx": 2, "components/TopNav.tsx": 3,
 };
 /** Page CSS classes that draw their own badge / chip / pill (the kit has Chip and Badge) — names per file, frozen */
 const OWN_CHIP_CLASSES: Record<string, number> = {

@@ -138,11 +138,14 @@ export function serviceRows(measured: SloService[], r: Pick<SloSettingsResponse,
   return out;
 }
 
+/** The viewer's clock may run behind the server's — a reset made "now" is not "scheduled" for being a minute ahead */
+export const CLOCK_SKEW_MS = 2 * 60_000;
 /** Pure: a reset's state at `now` — it counts until it leaves the window (at + window) */
 export function resetState(x: SloBudgetReset, now: number, windowDays: number): { active: boolean; endsAt: number; future: boolean } {
   const at = Date.parse(x.at);
   const endsAt = at + windowDays * 86_400_000;
-  return { active: at <= now && now < endsAt, endsAt, future: at > now };
+  const future = at > now + CLOCK_SKEW_MS;
+  return { active: !future && now < endsAt, endsAt, future };
 }
 
 /** Pure: a datetime-local value (the viewer's clock) → ISO, or null when empty / unreadable */

@@ -446,6 +446,10 @@ const CORE: Translations = {
   // ── Navigation (navConfig.ts) ──
   "nav.main": { ko: "주 메뉴", en: "Main navigation" },
   "nav.openMenu": { ko: "메뉴 열기", en: "Open menu" },
+  "nav.collapseAll": { ko: "모두 접기", en: "Collapse all" },
+  "nav.expandAll": { ko: "모두 펼치기", en: "Expand all" },
+  "nav.collapseGroup": { ko: "{group} 접기", en: "Collapse {group}" },
+  "nav.expandGroup": { ko: "{group} 펼치기", en: "Expand {group}" },
   "nav.closeMenu": { ko: "메뉴 닫기", en: "Close menu" },
   "nav.brandMeta": { ko: "Azure · AKS 운영 플랫폼", en: "Azure & AKS operations" },
   "nav.group.overview": { ko: "개요", en: "Overview" },
