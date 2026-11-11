@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-11
-covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -146,7 +146,7 @@ Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`T
 | SLI 출처 | Micrometer `http_server_requests_seconds`(Spring) — `/actuator` 제외. **spanmetrics는 안 씀**: 2026-11-05 다시 재 보니 `traces_spanmetrics_calls_total`이 10분에 1,270번 리셋(시계열 732개 — 같은 시계열에 쓰는 곳 둘), Micrometer는 1시간 리셋 0·30일 보관 |
 | 가용성 | 5xx로 답하지 않은 요청 / 전체 |
 | 지연 | 기준 이하 **버킷 경계** 안에 끝난 요청 / 전체(1xx 제외, 보간 없음 — 실제로 센 경계를 표시, 기준이 경계가 아니면 '경계 추가' 안내). stg는 `slo` 버킷 0.1·0.3·0.5·1·3초가 정확히 있음 |
-| 목표 | 연결 파일 `slo`(서비스별 > 위) 또는 기본값 99.9% / 99% ≤ 1초 — 기본값은 '기본값' 표시 + **빨강 없음(주황까지)**. '지난 기간이 지킨 단계'(90·95·99·99.5·99.9·99.95·99.99% 중 가장 높은 것)는 참고값 |
+| 목표 | **SLO › 설정**(플랫폼, 아래) · 연결 파일 `slo` · 기본값 99.9% / 99% ≤ 1초 — 가장 구체적인 값이 이김: 서비스별(플랫폼) › 서비스별(연결 파일) › 클러스터 기본(플랫폼) › 연결 파일 › 기본값 — 기본값은 '기본값' 표시 + **빨강 없음(주황까지)**. '지난 기간이 지킨 단계'(90·95·99·99.5·99.9·99.95·99.99% 중 가장 높은 것)는 참고값 |
 | 오류 예산 | 허용 실패 = (1 − 목표) × 요청 — 화면은 '허용 실패 n건 중 m건 씀' |
 | 소진 경보 | SRE Workbook 5장 다중 창: 1시간·5분 ×14.4 / 6시간·30분 ×6 = 즉시 대응, 3일·6시간 ×1 = 티켓. 긴 창 요청 100건 미만 = 판단 안 함 |
 | 요청 적음 | (1 − 목표) × 요청 < 1(실패 1건이면 바닥) = 비율 SLO 판정 안 함, 합성 점검 권장 |
@@ -156,19 +156,35 @@ Grafana의 시간 선택기 + 새로 고침 선택기와 같은 막대 하나(`T
 
 stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목표 안(gateway 99.956%·예산 44%), 지연은 7개가 기본 목표 미달. 원인이 한 URI에 몰림(workflow-service 웹훅 97%, http-app `POST /actions/make-request` 97%, gateway 웹훅 83%). 요청 적음 4(sap-app 2건, notification-app 0건 …), HTTP 지표 없는 워크로드 6(웹 프런트·fluentd·keycloak 등 — Spring 아님).
 
-## 3d. K8s 이벤트 (AKS 모니터링 › K8s 이벤트)
+### SLO › 설정 — 목표와 에러 버짓 초기화를 화면에서 (2026-11-11)
 
-`kubectl get events -A --field-selector type=Warning`을 화면으로 옮긴 탭입니다(2026-11-11). 같은 API `GET /api/observability/events`를 클러스터 전체로 읽습니다(500개씩 최대 4쪽, 더 있으면 '일부만 읽음'으로 표시).
+`GET /api/observability/slo/settings?clusterId=`(로그인) · `PUT …/slo/settings`(운영자, 본문 `{baseRev, settings}` — 연결 파일 `slo`와 같은 모양·같은 zod) · `POST …/slo/resets`(운영자, `{service: "<ns>/<app>" | "*", reason 3–200자, at?}`) · `DELETE …/slo/resets?id=`(운영자) → `services/sloSettingsStore.ts`(클러스터마다 JSON 하나 — 파일 이름 = 클러스터 ARM ID 해시, `<AUD_ARRANGEMENT_DIR>/slo`, 없으면 메모리 + 화면 경고) → 웹 `SloSettings.tsx` + 순수 `lib/sloSettingsView.ts`.
 
 | 무엇 | 어떻게 |
 |------|--------|
-| 숫자 4칸 | Warning 이벤트 수(대상 수) · **진행 중**(마지막 발생이 읽은 시각 5분 안 — 지금도 되풀이) · 네임스페이스 수(그중 시스템) · 가장 많은 이유 |
+| 목표 | 클러스터 기본(기간 7·14·28·30일 · 가용성 · 지연 기준 ms + 목표 · 세지 않을 URI)과 서비스별 표. **빈 칸 = 따르기** — 칸마다 '따르기 — 99.5% (연결 파일)'처럼 지금 따르는 값과 출처(웹 `inherited` = API `targetsFor`, 테스트로 일치), 지연 기준 칸은 실제로 세는 히스토그램 경계. 지연 기준·목표 중 하나만 바꾸면 다른 하나는 지금 값 |
+| 저장 | 설정 리비전 `rev` — 다른 사람이 먼저 저장 = 409 → 최신 설정을 불러오고 다시 고르게 함. 저장 기록(누가·언제·바뀐 항목 이름 — 값은 안 남김) 30개 |
+| 에러 버짓 초기화 | 서비스 카드의 '예산 초기화' 또는 설정 화면(모든 서비스 `*` 가능) — **사유 필수**, 지금 또는 지난 30일 안 시각. 그 서비스의 SLO 값·예산을 초기화 시각부터 지금까지로 셈(최대 SLO 기간) → 카드 칩 '예산 초기화 후 n시간'(툴팁 = 시각·누가·사유)·꼬리 '초기화 후 n 동안 요청 m건'. 서비스마다 하나(새 것이 대체), 서비스 초기화가 전체 초기화보다 나중이면 그것, 기간을 벗어나면 저절로 끝남, 취소 가능, 클러스터당 20개 |
+| 초기화하지 않는 것 | **소진율 경보**(1시간·6시간·3일 창)는 '지금'을 재므로 그대로 — 장애가 계속되면 초기화 뒤에도 '빠른 소진'. 초기화는 이미 끝난(고치고 회고한) 사고가 남은 기간 내내 '예산 소진'으로 서비스를 묶어 두지 않게 하는 것 |
+| 질의 | 초기화 시각 = 창 끝에서 n분 전 → 그 뒤의 3일 조각은 그대로 쓰고, 조각 경계까지 남은 조각 하나만 `increase(…[<m>m] offset <3k>d)`로 더 묻음(그 서비스로 걸러 작음, 전체 초기화는 거르지 않음 — `resetPlans`·`mergeSloParts`). 그 조각이 실패하면 그 서비스만 '조회 실패'. 설정 버전이 SLO 캐시 키에 있어 저장·초기화가 바로 보임 |
+| 권한 | 읽기 = 로그인, 바꾸기 = 운영자(`AUD.Operator`) 이상 — 보기 전용 사용자에겐 칸이 잠기고 '보기 전용' 안내. 클러스터의 구독은 authorize 미들웨어가 호출자의 연결 권한으로 먼저 확인 |
+
+연결 파일(GitOps)은 그대로 원본입니다. 플랫폼 설정은 그 위에 칸 단위로 덮어쓰고, 화면은 출처를 '플랫폼 설정 / 연결 파일 / 기본값'으로 구분해 보여 줍니다(가이드 표의 출처 칸도).
+
+## 3d. K8s 이벤트 (AKS 모니터링 › 클러스터 · 워크로드 아래)
+
+`kubectl get events -A --field-selector type=Warning`을 화면으로 옮긴 섹션입니다(2026-11-11 탭으로 시작 → 같은 날 **클러스터 · 워크로드 탭의 히트맵·표 아래**로 옮김 — 워크로드 상태와 Kubernetes가 왜 불평하는지를 한 화면에서). 같은 API `GET /api/observability/events`를 클러스터 전체로 읽습니다(500개씩 최대 4쪽, 더 있으면 '일부만 읽음'으로 표시).
+
+| 무엇 | 어떻게 |
+|------|--------|
+| 머리 줄 | 'K8s 이벤트 (Warning)' + `n건 · ▲ 진행 중 m · 네임스페이스 k · 대상 o`(진행 중 = 마지막 발생이 읽은 시각 5분 안 — 지금도 되풀이) · 정렬(최근·횟수) · kubectl 줄 복사. 숫자 카드는 없음(히트맵 위 '클러스터 한눈에 보기'와 겹침) |
 | 거르기 | 네임스페이스(앱/시스템 묶음) · 찾기(대상·이유·메시지·보고자) · 시스템 네임스페이스 포함 · 진행 중만 · **이유 칩**(이벤트의 REASON 그대로, 다른 조건 안에서 셈) |
 | 표 | 마지막 발생(5분 안이면 '▲ 진행 중') · 네임스페이스 · 대상(`Kind/이름` + 보고자) · 이유(누르면 그 이유만) · ×횟수 + '…부터'(처음 발생부터 누적 — 최근 1시간 횟수 아님) · 메시지(운영자만, 민감한 값 가림) |
 | 복사 | 보이는 행을 `네임스페이스  Kind/이름  [이유]  x횟수  메시지` 줄로 |
+| 길이 | 표는 자기 스크롤 상자(높이 560px, 머리 고정), 처음 100행 + '모두 보기' — 페이지가 이벤트로 끝없이 길어지지 않음 |
 
 - **심각도를 만들지 않습니다.** Kubernetes 이벤트에는 Normal·Warning만 있습니다. 대신 자주 나오는 이유 19개(Unhealthy·BackOff·FailedScheduling·FailedMount·Failed·OOMKilling·Evicted …)는 이유 칩을 고르면 '무슨 뜻 · 먼저 볼 곳'을 한 줄로 보여 줍니다(`lib/kubeEventsView.ts` `KNOWN_REASONS`).
-- Kubernetes는 이벤트를 마지막 발생 후 약 1시간만 보관합니다. 시간 범위가 지난 구간이면 '아래는 지금 이벤트' 안내를 띄웁니다. 오래된 기록이 필요하면 이벤트를 Loki 등으로 보내는 고객 파이프라인이 있어야 합니다(이 화면은 가정하지 않음).
+- Kubernetes는 이벤트를 마지막 발생 후 약 1시간만 보관합니다. 시간 범위가 지난 구간이면 꼬리 줄에 '지난 구간을 골라도 지금 이벤트'를 적습니다(알림은 화면당 하나 — 히트맵이 씀). 오래된 기록이 필요하면 이벤트를 Loki 등으로 보내는 고객 파이프라인이 있어야 합니다(이 화면은 가정하지 않음).
 - 새로 고침·자동 새로 고침은 페이지 위 시간 막대를 따릅니다.
 
 ## 4. 연결 파일

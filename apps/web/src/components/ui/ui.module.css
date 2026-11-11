@@ -399,6 +399,24 @@
   font-weight: 500;
 }
 
+.textarea {
+  height: auto;
+  min-height: 64px;
+  max-width: none;
+  padding: 6px 12px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  font-weight: 400;
+}
+
+.fieldHint {
+  color: var(--subtle);
+  font-size: var(--text-caption);
+  line-height: 1.4;
+}
+
 .select:disabled,
 .input:disabled {
   opacity: 0.55;

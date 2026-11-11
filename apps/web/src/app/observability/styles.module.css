@@ -965,14 +965,13 @@
 .nodeDisk { margin-top: 12px; }
 .nodeFoot { font-size: var(--text-small); color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* ── K8s 이벤트 (EventsTab) — kubectl get events as a table ── */
-.ev { display: grid; gap: 12px; min-width: 0; }
-.evTop { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ── K8s 이벤트 (EventsSection, under the heatmap) — kubectl get events as a table in its own scroll box ── */
+.ev { min-width: 0; }
 .evFilters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-bottom: 10px; }
 .evReasons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
 .evN { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
 .evWhy { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-sunken); font-size: var(--text-small); }
-.evScroll { overflow-x: auto; min-width: 0; }
+.evScroll { overflow: auto; max-height: 560px; min-width: 0; }
 .evTable { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
 .evTable th {
   position: sticky; top: 0; z-index: 1; padding: 6px 8px; text-align: left; white-space: nowrap; font-size: var(--text-caption); font-weight: 600;
@@ -991,3 +990,20 @@
 .evMsg { min-width: 280px; overflow-wrap: anywhere; color: var(--ink); }
 .evMore { padding: 10px 8px 0; }
 .evFoot { color: var(--muted); font-size: var(--text-caption); }
+
+/* ── SLO › 설정 (SloSettings) — the platform's targets and error-budget resets ── */
+.sloSetStatus { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--muted); }
+.sloForm { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px 16px; align-items: start; }
+.sloForm > :last-child { grid-column: 1 / -1; }
+.sloResetForm { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 12px; }
+.sloResetActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sloFormErr { font-size: var(--text-small); color: var(--danger-strong); }
+.sloResetList { display: grid; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.sloResetList > li { display: grid; gap: 2px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-small); }
+.sloResetList > li:not([data-active]) { color: var(--muted); background: var(--panel-sunken); }
+.sloResetHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sloResetHead > :last-child:not(:first-child) { margin-left: auto; }
+.sloHistory { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: var(--text-small); }
+.sloHistory > li { display: grid; gap: 2px; }
+.sloCardReset { display: grid; gap: 4px; margin-bottom: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-sunken); }
+.sloCardReset .sloResetForm { margin-top: 4px; }

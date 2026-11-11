@@ -249,6 +249,38 @@ export function SearchInput({ label, value, onChange, placeholder }: { label: st
   );
 }
 
+/** One-line text / number / date-time field — or `rows` lines (a textarea); the same box as SearchInput */
+export function TextInput({
+  label, value, onChange, placeholder, type = "text", disabled, hideLabel, rows, maxLength, hint, width,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: "text" | "number" | "datetime-local";
+  disabled?: boolean;
+  hideLabel?: boolean;
+  rows?: number;
+  maxLength?: number;
+  /** One line under the box (what an empty field means) */
+  hint?: ReactNode;
+  /** px — the box's width (default: the field's) */
+  width?: number;
+}) {
+  const style = width ? { width, maxWidth: "100%" } : undefined;
+  return (
+    <label className={s.field}>
+      <span className={s.fieldLabel} hidden={hideLabel}>{label}</span>
+      {rows
+        ? <textarea className={`${s.input} ${s.textarea}`} rows={rows} value={value} placeholder={placeholder} disabled={disabled} maxLength={maxLength}
+            aria-label={hideLabel ? label : undefined} style={style} onChange={(e) => onChange(e.target.value)} />
+        : <input className={s.input} type={type} value={value} placeholder={placeholder} disabled={disabled} maxLength={maxLength}
+            aria-label={hideLabel ? label : undefined} style={style} onChange={(e) => onChange(e.target.value)} />}
+      {hint ? <span className={s.fieldHint}>{hint}</span> : null}
+    </label>
+  );
+}
+
 /* ── Button / Toggle ── */
 export function Button({
   children, onClick, variant = "secondary", size, disabled, type = "button", title, ariaLabel, ariaPressed,

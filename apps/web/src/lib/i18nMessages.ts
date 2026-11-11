@@ -1032,7 +1032,6 @@ const CORE: Translations = {
   "obs.tab.overview": { ko: "클러스터 · 워크로드", en: "Cluster · workloads" },
   "obs.tab.slo": { ko: "SLO", en: "SLO" },
   "obs.tab.infra": { ko: "노드", en: "Nodes" },
-  "obs.tab.events": { ko: "K8s 이벤트", en: "K8s events" },
   "obs.tab.logs": { ko: "로그", en: "Logs" },
   "obs.tab.hubble": { ko: "네트워크 (Hubble)", en: "Network (Hubble)" },
   "obs.tab.stack": { ko: "수집 상태", en: "Collection health" },

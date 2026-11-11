@@ -22,6 +22,8 @@ import type { Env } from "../env.js";
 const GUID = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a GUID").transform((s) => s.toLowerCase());
 const ROLES = ["viewer", "operator", "admin"] as const;
 
+/** An SLO service key: "<namespace>/<application>" (Micrometer's application tag) */
+export const SLO_SERVICE_KEY = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\/[\w.-]{1,128}$/;
 /** SLO targets (services/workloadSlo.ts) — 0.5 – 0.99999, a latency threshold in ms (counted at a bucket boundary) */
 const sloTarget = z.number().min(0.5).max(0.99999);
 const SloTargetsSchema = {
@@ -29,11 +31,11 @@ const SloTargetsSchema = {
   latency: z.object({ thresholdMs: z.number().int().min(1).max(120_000), target: sloTarget }).strict().optional(),
   excludeUris: z.array(z.string().min(1).max(300)).max(50).optional(),
 };
-const SloSchema = z.object({
+export const SloSchema = z.object({
   windowDays: z.union([z.literal(7), z.literal(14), z.literal(28), z.literal(30)]).optional(),
   ...SloTargetsSchema,
   services: z.record(
-    z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\/[\w.-]{1,128}$/, "\"<namespace>/<application>\""),
+    z.string().regex(SLO_SERVICE_KEY, "\"<namespace>/<application>\""),
     z.object({ ...SloTargetsSchema, exclude: z.boolean().optional() }).strict(),
   ).optional(),
 }).strict();

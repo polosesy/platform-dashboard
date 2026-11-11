@@ -6,14 +6,16 @@
 // a target the team did not set is marked default; low traffic / no data are not judged. The window is fixed (the
 // page's time range sets only its end — said beside it).
 //
-// Two views (design principles v1 — one notice per screen, the explanations live in their own view):
-//   서비스 SLO   — 4 stat cards (3 columns each) · section bar · service cards 2 per row (6 columns — on the stat edges)
+// Three views (design principles v1 — one notice per screen, the explanations live in their own view):
+//   서비스 SLO   — 4 stat cards (3 columns each) · section bar · service cards 2 per row (6 columns — on the stat edges);
+//                  an operator resets a card's error budget in place (a reason, from now or a time)
+//   설정         — the platform's targets over the connection file's + error-budget resets (SloSettings.tsx)
 //   목표 설정 가이드 — 4 steps · what is measured · the window's measured values (a starting point) · where to write the
 //                     targets (on-prem file / Helm values) with a draft filled from the measured tiers · the fields ·
 //                     workloads without HTTP metrics
 
 import { useMemo, useState } from "react";
-import type { SloService, SloSli, WorkloadSloResponse } from "@aud/types";
+import type { SloService, SloSettingsResponse, SloSli, WorkloadSloResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
@@ -22,6 +24,8 @@ import {
 } from "@/components/ui";
 import { atParam, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
+import { spanLabel } from "@/lib/sloSettingsView";
+import { ResetForm, SloSettingsView } from "./SloSettings";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
@@ -34,7 +38,7 @@ const MICROMETER_HINT = `management.metrics.distribution.percentiles-histogram.h
 management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
-type View = "services" | "guide";
+type View = "services" | "settings" | "guide";
 
 export function SloTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
   const { t, locale } = useI18n();
@@ -43,6 +47,13 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
     fetchJsonWithBearer<WorkloadSloResponse>(apiUrl("/api/observability/slo", { clusterId, at: atQ }), token),
   );
   useRangeRefresh("slo", nonce, q.loading, q.reload, report);
+  // The platform's SLO settings (targets + error-budget resets) — read by anyone signed in, changed by operators
+  const sq = useApiQuery(clusterId ? `obs-slo-settings:${clusterId}` : null, (token) =>
+    fetchJsonWithBearer<SloSettingsResponse>(apiUrl("/api/observability/slo/settings", { clusterId }), token),
+  );
+  const settings = sq.data?.clusterId === clusterId ? sq.data : null;
+  // A save or a reset changes the settings version — the SLO numbers' cache key — so both reload
+  const changed = () => { sq.reload(); q.reload(); };
   const [view, setView] = useState<View>("services");
   const dAt = q.data?.at ? String(Math.floor(Date.parse(q.data.at) / 1000)) : undefined;
   const d = q.data?.clusterId === clusterId && dAt === atQ ? q.data : null;
@@ -74,7 +85,7 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
     : !d.configured && view === "services"
       ? (
         <Notice tone="warning" title={t("ob.slo.defaultTitle")}
-          action={<Button size="sm" onClick={() => setView("guide")}>{t("ob.slo.openGuide")}</Button>}>
+          action={<Button size="sm" onClick={() => setView("settings")}>{t("ob.slo.openSettings")}</Button>}>
           {t("ob.slo.defaultShort")}
         </Notice>
       )
@@ -84,20 +95,26 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
     <div className={styles.slo}>
       <Toolbar
         start={<Segmented label={t("ob.slo.view")} value={view} onChange={setView}
-          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "guide", label: t("ob.slo.view.guide") }]} />}
+          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />}
         end={<>
           {t(d.at ? "ob.slo.metaAt" : "ob.slo.metaNow", { days: d.windowDays, at: when })}
           <Chip level="info" glyph={false} title={t("ob.slo.windowFixedHint")}>{t("ob.slo.windowFixed", { days: d.windowDays })}</Chip>
         </>} />
-      {notice}
-      {view === "services" ? <ServicesView d={d} onGuide={() => setView("guide")} /> : <SloGuide d={d} />}
+      {view === "settings" ? null : notice}
+      {view === "services" ? <ServicesView d={d} clusterId={clusterId} canWrite={!!settings?.canWrite} onChanged={changed} onGuide={() => setView("guide")} />
+        : view === "settings" ? (
+          sq.error ? <ErrorNotice error={sq.error} />
+            : settings ? <SloSettingsView key={`${clusterId}:${settings.rev}`} clusterId={clusterId} d={d} r={settings} onChanged={changed} onGuide={() => setView("guide")} />
+            : <LoadingState label={t("ob.slo.set.loading")} />
+        )
+        : <SloGuide d={d} />}
     </div>
   );
 }
 
 /* ── 서비스 SLO ── */
 
-function ServicesView({ d, onGuide }: { d: WorkloadSloResponse; onGuide: () => void }) {
+function ServicesView({ d, clusterId, canWrite, onChanged, onGuide }: { d: WorkloadSloResponse; clusterId: string; canWrite: boolean; onChanged: () => void; onGuide: () => void }) {
   const { t } = useI18n();
   const [show, setShow] = useState<"problems" | "all">("problems");
   const [ns, setNs] = useState("");
@@ -139,7 +156,7 @@ function ServicesView({ d, onGuide }: { d: WorkloadSloResponse; onGuide: () => v
         </Cell>
       ) : shown.map((s) => (
         <Cell span={6} key={`${s.namespace}/${s.application}`}>
-          <SloCard s={s} days={d.windowDays} grafana={d.grafana} promUid={promUid} />
+          <SloCard s={s} days={d.windowDays} grafana={d.grafana} promUid={promUid} clusterId={clusterId} canWrite={canWrite} onChanged={onChanged} />
         </Cell>
       ))}
 
@@ -153,9 +170,13 @@ function ServicesView({ d, onGuide }: { d: WorkloadSloResponse; onGuide: () => v
   );
 }
 
-function SloCard({ s, days, grafana, promUid }: { s: SloService; days: number; grafana: WorkloadSloResponse["grafana"]; promUid: string | undefined }) {
-  const { t } = useI18n();
+function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged }: {
+  s: SloService; days: number; grafana: WorkloadSloResponse["grafana"]; promUid: string | undefined; clusterId: string; canWrite: boolean; onChanged: () => void;
+}) {
+  const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const since = s.reset ? spanLabel(t, s.reset.windowHours) : null;
   const level = serviceLevel(s);
   const name = s.application || t("ob.slo.noAppName");
   const short = s.coverage && s.coverage.hours < s.coverage.windowHours * 0.9 ? t("ob.slo.coverage", { days: Math.round(s.coverage.hours / 2.4) / 10 }) : null;
@@ -164,13 +185,33 @@ function SloCard({ s, days, grafana, promUid }: { s: SloService; days: number; g
     <Panel as="article" level={level === "danger" || level === "warn" ? level : undefined}
       title={<span title={name}>{name}</span>}
       sub={[s.namespace, s.workload ? null : t("ob.slo.noWorkload"), short].filter(Boolean).join(" · ")}
-      actions={<Chip level={CHIP[level]}>{t(`ob.slo.state.${s.state}`)}</Chip>}
+      actions={<>
+        {s.reset && since ? (
+          <Chip level="info" glyph="↺"
+            title={t("ob.slo.resetChipTitle", { at: new Date(s.reset.at).toLocaleString(dateLocale(locale)), by: s.reset.by ?? "—", reason: s.reset.reason ?? "" })}>
+            {t(s.reset.scope === "all" ? "ob.slo.resetChipAll" : "ob.slo.resetChip", { span: since })}
+          </Chip>
+        ) : null}
+        <Chip level={CHIP[level]}>{t(`ob.slo.state.${s.state}`)}</Chip>
+      </>}
       footer={
         <>
           <Button size="sm" variant="ghost" ariaPressed={open} onClick={() => setOpen(!open)}>{open ? t("ob.slo.hideDetail") : t("ob.slo.detail")}</Button>
-          <span className={styles.sloFootNote}>{requests > 0 ? t("ob.slo.cardFoot", { n: requests.toLocaleString(), days }) : "—"}</span>
+          {canWrite && s.application ? (
+            <Button size="sm" variant="ghost" ariaPressed={resetting} onClick={() => setResetting(!resetting)}>{t("ob.slo.resetBudget")}</Button>
+          ) : null}
+          <span className={styles.sloFootNote}>
+            {requests <= 0 ? "—" : s.reset && since ? t("ob.slo.cardFootReset", { n: requests.toLocaleString(), span: since }) : t("ob.slo.cardFoot", { n: requests.toLocaleString(), days })}
+          </span>
         </>
       }>
+      {resetting ? (
+        <div className={styles.sloCardReset}>
+          <p className={styles.sloText}>{t("ob.slo.resetCardHint")}</p>
+          <ResetForm clusterId={clusterId} service={`${s.namespace}/${s.application}`} onCancel={() => setResetting(false)}
+            onDone={() => { setResetting(false); onChanged(); }} />
+        </div>
+      ) : null}
       <div className={styles.sloSlis}>
         {s.slis.map((x) => <SliBlock key={x.kind} s={x} grafana={grafana} promUid={promUid} days={days} />)}
       </div>
@@ -203,7 +244,7 @@ function SliBlock({ s, grafana, promUid, days }: { s: SloSli; grafana: WorkloadS
       <div className={styles.sloVal}>{pctText(s.sli)}</div>
       <div className={styles.sloTarget}>
         {t("ob.slo.targetIs", { v: targetText(s.target) })}
-        {s.targetSource === "default" ? ` (${t("ob.slo.default")})` : ""}
+        {s.targetSource === "default" ? ` (${t("ob.slo.default")})` : s.targetSource === "platform" ? ` (${t("ob.slo.set.src.platform")})` : ""}
         {s.achievable !== null && s.achievable !== s.target ? ` · ${t("ob.slo.achievable", { v: targetText(s.achievable) })}` : ""}
       </div>
       <div className={styles.sloMeter} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={bar ? Math.round(bar.fill) : undefined} aria-label={t("ob.slo.budget")}>
@@ -340,13 +381,13 @@ function SloGuide({ d }: { d: WorkloadSloResponse }) {
                 {d.services.map((s) => {
                   const av = sli(s, "availability");
                   const lat = sli(s, "latency");
-                  const configured = s.slis.some((x) => x.targetSource === "config");
+                  const source = s.slis.some((x) => x.targetSource === "platform") ? "platform" : s.slis.some((x) => x.targetSource === "config") ? "config" : "default";
                   return (
                     <tr key={`${s.namespace}/${s.application}`}>
                       <td><span className={styles.sloCellMain}>{s.application || t("ob.slo.noAppName")}</span><span className={styles.sloCellSub}>{s.namespace}</span></td>
                       <td><span className={styles.sloCellMain}>{pctText(av?.sli ?? null)}</span><span className={styles.sloCellSub}>{metText(av)}</span></td>
                       <td><span className={styles.sloCellMain}>{pctText(lat?.sli ?? null)}</span><span className={styles.sloCellSub}>{lat ? `${t("ob.slo.g.within", sliLabelParams(lat))} · ${metText(lat)}` : "—"}</span></td>
-                      <td><Chip level={configured ? "info" : "plain"} glyph={false}>{t(configured ? "ob.slo.g.source.config" : "ob.slo.g.source.default")}</Chip></td>
+                      <td><Chip level={source === "default" ? "plain" : "info"} glyph={false}>{t(`ob.slo.g.source.${source}`)}</Chip></td>
                     </tr>
                   );
                 })}

@@ -18,6 +18,10 @@
 //   counts every series alive during it (2026-11-09 stg: 501 series now, 6,898 over 30 days as pods are replaced →
 //   cost ≈ 27,900 → 429 "expanding series … Query cost=27939 exceeds max limit=15000" on every try, not a rate limit).
 //   A 3-day part: ≤ 2,500 series, cost ≈ 900–2,000; the parts sum to the single query within 0.005 % (6 d measured).
+// - Platform settings (services/sloSettingsStore.ts, AKS 모니터링 › SLO › 설정) override the connection file field by
+//   field — the most specific wins (`targetsFor`). An error-budget reset counts a service's SLO window from the reset:
+//   the 3-day parts wholly after it plus ONE extra query for the piece between the reset and the next part boundary
+//   (`resetPlans` — filtered to that service, so it is cheap). The burn-rate windows (5 m – 3 d) are not reset.
 
 import type { Env } from "../env.js";
 import type {
@@ -30,6 +34,8 @@ import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
 import { pickScope, promString, scopeMatchers } from "./promScope.js";
 import { runAll } from "./observabilityStack.js";
+import { readSloSettings, resetFor, sloSettingsDir, type SloSettingsDoc } from "./sloSettingsStore.js";
+import type { SloBudgetReset, SloBudgetResetApplied } from "@aud/types";
 
 /** Used when the connection file sets none — marked "default" on every SLI, never presented as the team's */
 export const SLO_DEFAULTS = { availability: 0.999, latency: { thresholdMs: 1000, target: 0.99 } };
@@ -59,18 +65,52 @@ export const SLO_PART_DAYS = 3;
 export type SloTargets = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
 export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean }> };
 
-type Resolved = { availability: { target: number; source: "config" | "default" }; latency: { thresholdMs: number; target: number; source: "config" | "default" }; exclude: Set<string> };
-/** Pure: a service's targets — `services["<ns>/<application>"]` over the file's top level over the defaults */
-export function targetsFor(cfg: SloConfig | undefined, namespace: string, application: string): Resolved & { skip: boolean } {
-  const svc = cfg?.services?.[`${namespace}/${application}`];
-  const av = svc?.availability ?? cfg?.availability;
-  const lat = svc?.latency ?? cfg?.latency;
-  return {
-    availability: { target: av ?? SLO_DEFAULTS.availability, source: av !== undefined ? "config" : "default" },
-    latency: { ...(lat ?? SLO_DEFAULTS.latency), source: lat ? "config" : "default" },
-    exclude: new Set([...(cfg?.excludeUris ?? []), ...(svc?.excludeUris ?? [])]),
-    skip: svc?.exclude === true,
+type Source = "platform" | "config" | "default";
+type Resolved = { availability: { target: number; source: Source }; latency: { thresholdMs: number; target: number; source: Source }; exclude: Set<string> };
+/**
+ * Pure: a service's targets — the most specific wins: the service's platform value › the service's file value
+ * (`services["<ns>/<application>"]`) › the cluster's platform value › the file's top level › the defaults. Excluded URIs
+ * add up; `exclude` (leave the service out) is the service's platform value › its file value.
+ */
+export function targetsFor(cfg: SloConfig | undefined, namespace: string, application: string, platform?: SloConfig): Resolved & { skip: boolean } {
+  const key = `${namespace}/${application}`;
+  const ps = platform?.services?.[key], fs = cfg?.services?.[key];
+  const pick = <T>(f: (x: SloTargets | undefined) => T | undefined): { v: T; source: Source } | null => {
+    for (const [x, source] of [[ps, "platform"], [fs, "config"], [platform, "platform"], [cfg, "config"]] as const) {
+      const v = f(x);
+      if (v !== undefined) return { v, source };
+    }
+    return null;
   };
+  const av = pick((x) => x?.availability);
+  const lat = pick((x) => x?.latency);
+  return {
+    availability: { target: av?.v ?? SLO_DEFAULTS.availability, source: av?.source ?? "default" },
+    latency: { ...(lat?.v ?? SLO_DEFAULTS.latency), source: lat?.source ?? "default" },
+    exclude: new Set([...(cfg?.excludeUris ?? []), ...(fs?.excludeUris ?? []), ...(platform?.excludeUris ?? []), ...(ps?.excludeUris ?? [])]),
+    skip: (ps?.exclude ?? fs?.exclude) === true,
+  };
+}
+
+/** A reset as the queries see it: counted from `ageMin` minutes before the window's end = `full` whole 3-day parts +
+ *  `remMin` minutes of the next part (one extra query, `r<i>:…`) */
+export type SloResetPlan = { reset: SloBudgetReset; ageMin: number; full: number; remMin: number };
+const PART_MIN = SLO_PART_DAYS * 1440;
+/** Pure: the active resets (inside the window, at or before its end) as query plans, newest first */
+export function resetPlans(resets: SloBudgetReset[], endMs: number, windowDays: number): SloResetPlan[] {
+  return resets
+    .filter((r) => { const t = Date.parse(r.at); return Number.isFinite(t) && t <= endMs && t > endMs - windowDays * 86_400_000; })
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    .map((reset) => {
+      const ageMin = Math.max(1, Math.floor((endMs - Date.parse(reset.at)) / 60_000));
+      const full = Math.floor(ageMin / PART_MIN);
+      return { reset, ageMin, full, remMin: ageMin - full * PART_MIN };
+    });
+}
+/** Pure: which plan counts for a service (the latest matching reset) — index into `plans`, -1 = none */
+export function planIndex(plans: SloResetPlan[], namespace: string, application: string): number {
+  const best = resetFor(plans.map((p) => p.reset), namespace, application, Infinity, Infinity);
+  return best ? plans.findIndex((p) => p.reset === best) : -1;
 }
 
 /** Pure: the bucket boundary counted for a threshold — the largest at or under it (null = none) */
@@ -102,11 +142,12 @@ export function sloPartKey(base: string, windowDays: number, i: number): string 
   return i === 0 && base !== "coverage" && first.range === `${SLO_PART_DAYS}d` ? base.replace(`:${windowDays}d`, `:${SLO_PART_DAYS}d`) : `${base}#${i}`;
 }
 
-/** Pure: the queries — counts per window, the good-latency bucket per boundary, coverage and the workload names */
-export function sloQueries(C: string, ksm: string, windowDays: number, les: string[]): Record<string, string> {
-  const sel = (m: string, extra = "") => `${m}{${[C, 'uri!~"/actuator.*"', extra].filter(Boolean).join(",")}}`;
-  const n = (r: string, off = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_count")}[${r}]${off}))`;
-  const g = (le: string, r: string, off = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_bucket", `le=${promString(le)}`)}[${r}]${off}))`;
+/** Pure: the queries — counts per window, the good-latency bucket per boundary, coverage and the workload names;
+ *  per reset plan the piece between the reset and its part boundary (`r<i>:n` · `r<i>:g:<le>` · `r<i>:coverage`) */
+export function sloQueries(C: string, ksm: string, windowDays: number, les: string[], plans: SloResetPlan[] = []): Record<string, string> {
+  const sel = (m: string, ...extra: string[]) => `${m}{${[C, 'uri!~"/actuator.*"', ...extra].filter(Boolean).join(",")}}`;
+  const n = (r: string, off = "", f = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_count", f)}[${r}]${off}))`;
+  const g = (le: string, r: string, off = "", f = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_bucket", `le=${promString(le)}`, f)}[${r}]${off}))`;
   const q: Record<string, string> = {};
   for (const w of BURN_WINDOWS) {
     q[`n:${w}`] = n(w);
@@ -118,16 +159,26 @@ export function sloQueries(C: string, ksm: string, windowDays: number, les: stri
     for (const le of les) q[sloPartKey(`g:${W}:${le}`, windowDays, i)] ??= g(le, p.range, p.offset);
     q[sloPartKey("coverage", windowDays, i)] = `count_over_time((sum by (namespace, application) (${sel("http_server_requests_seconds_count")}))[${p.range}:1h]${p.offset})`;
   });
+  plans.forEach((p, i) => {
+    if (p.remMin <= 0) return;
+    const f = p.reset.service === "*" ? "" : (() => { const [ns, app] = splitService(p.reset.service); return `namespace=${promString(ns)},application=${promString(app)}`; })();
+    const r = `${p.remMin}m`, off = p.full ? ` offset ${p.full * SLO_PART_DAYS}d` : "";
+    q[`r${i}:n`] = n(r, off, f);
+    for (const le of les) q[`r${i}:g:${le}`] = g(le, r, off, f);
+    q[`r${i}:coverage`] = `count_over_time((sum by (namespace, application) (${sel("http_server_requests_seconds_count", f)}))[${r}:1h]${off})`;
+  });
   const k = (m: string) => `${m}{${ksm}}`;
   q.deployments = `max by (namespace, deployment) (${k("kube_deployment_spec_replicas")}) > 0`;
   q.statefulsets = `max by (namespace, statefulset) (${k("kube_statefulset_replicas")}) > 0`;
   return q;
 }
 
-/** Pure: the PromQL shown beside an SLI (one service, the SLO window) */
-export function sliExpr(C: string, kind: SloKind, namespace: string, application: string, windowDays: number, le: string | null): string {
+const splitService = (k: string): [string, string] => { const i = k.indexOf("/"); return [k.slice(0, i), k.slice(i + 1)]; };
+
+/** Pure: the PromQL shown beside an SLI (one service, the SLO window — days, or a range such as `4320m` since a reset) */
+export function sliExpr(C: string, kind: SloKind, namespace: string, application: string, windowDays: number | string, le: string | null): string {
   const m = [C, `namespace=${promString(namespace)}`, `application=${promString(application)}`, 'uri!~"/actuator.*"'].filter(Boolean).join(",");
-  const w = `[${windowDays}d]`;
+  const w = `[${typeof windowDays === "number" ? `${windowDays}d` : windowDays}]`;
   if (kind === "availability") {
     return `1 - sum(increase(http_server_requests_seconds_count{${m},status=~"5.."}${w})) / sum(increase(http_server_requests_seconds_count{${m}}${w}))`;
   }
@@ -138,27 +189,48 @@ export type SloRaw = Record<string, PromRow[]>;
 
 /**
  * Pure: the SLO window's parts summed into `n:<W>` / `g:<W>:<le>` / `coverage` (rows keyed by their whole label set);
- * a value with a part that failed is failed itself (never a partial sum shown as the window)
+ * a value with a part that failed is failed itself (never a partial sum shown as the window). A service with a reset
+ * plan sums only the parts wholly after the reset plus the plan's own piece; a piece that failed = `failedPlans`
+ * (those services say queryFailed — the others are unaffected).
  */
-export function mergeSloParts(raw: SloRaw, failed: Set<string>, windowDays: number, les: string[]): { raw: SloRaw; failed: Set<string> } {
+export function mergeSloParts(raw: SloRaw, failed: Set<string>, windowDays: number, les: string[], plans: SloResetPlan[] = []): { raw: SloRaw; failed: Set<string>; failedPlans: Set<number> } {
   const W = `${windowDays}d`;
   const parts = sloWindowParts(windowDays);
   const out: SloRaw = { ...raw };
   const outFailed = new Set(failed);
-  for (const base of [`n:${W}`, ...les.map((le) => `g:${W}:${le}`), "coverage"]) {
+  const failedPlans = new Set<number>();
+  const assigned = new Map<string, number>();
+  const planOf = (m: Record<string, string>) => {
+    const k = `${m.namespace ?? ""}/${m.application ?? ""}`;
+    let i = assigned.get(k);
+    if (i === undefined) { i = plans.length ? planIndex(plans, m.namespace ?? "", m.application ?? "") : -1; assigned.set(k, i); }
+    return i;
+  };
+  const bases: Array<[string, string]> = [[`n:${W}`, "n"], ...les.map((le): [string, string] => [`g:${W}:${le}`, `g:${le}`]), ["coverage", "coverage"]];
+  for (const [base, piece] of bases) {
     const keys = parts.map((_, i) => sloPartKey(base, windowDays, i));
     if (keys.some((k) => failed.has(k))) { out[base] = []; outFailed.add(base); continue; }
     const sum = new Map<string, PromRow>();
-    for (const k of keys) {
+    const add = (r: PromRow) => {
+      const id = Object.keys(r.metric).sort().map((l) => `${l}=${r.metric[l]}`).join("\u0000");
+      const prev = sum.get(id);
+      sum.set(id, prev ? { metric: prev.metric, value: prev.value + r.value } : { metric: r.metric, value: r.value });
+    };
+    keys.forEach((k, p) => {
       for (const r of raw[k] ?? []) {
-        const id = Object.keys(r.metric).sort().map((l) => `${l}=${r.metric[l]}`).join("\u0000");
-        const prev = sum.get(id);
-        sum.set(id, prev ? { metric: prev.metric, value: prev.value + r.value } : { metric: r.metric, value: r.value });
+        const i = planOf(r.metric);
+        if (i < 0 || p < plans[i]!.full) add(r);
       }
-    }
+    });
+    plans.forEach((plan, i) => {
+      if (plan.remMin <= 0) return;
+      const k = `r${i}:${piece}`;
+      if (failed.has(k)) { failedPlans.add(i); return; }
+      for (const r of raw[k] ?? []) if (planOf(r.metric) === i) add(r);
+    });
     out[base] = [...sum.values()];
   }
-  return { raw: out, failed: outFailed };
+  return { raw: out, failed: outFailed, failedPlans };
 }
 type Counts = { events: number; bad: number; uris: Map<string, { uri: string; method: string; events: number; bad: number }> };
 const RANK: Record<SloState, number> = { fastBurn: 7, exhausted: 6, slowBurn: 5, atRisk: 4, ok: 3, lowTraffic: 2, queryFailed: 1, noData: 0 };
@@ -166,15 +238,17 @@ const round = (v: number) => Math.round(v * 1000) / 1000;
 
 /** Pure: raw query rows → services (sorted: worst first) and the names without an SLI */
 export function aggregateSlo(raw: SloRaw, opts: {
-  cfg?: SloConfig; windowDays: number; les: string[]; C: string; failed?: Set<string>;
+  cfg?: SloConfig; platform?: SloConfig; windowDays: number; les: string[]; C: string; failed?: Set<string>;
+  plans?: SloResetPlan[]; failedPlans?: Set<number>;
 }): { services: SloService[]; uninstrumented: WorkloadSloResponse["uninstrumented"] } {
   const W = `${opts.windowDays}d`;
   const failed = opts.failed ?? new Set<string>();
+  const plans = opts.plans ?? [];
   const keyOf = (r: PromRow) => `${r.metric.namespace ?? ""}\u0000${r.metric.application ?? ""}`;
   const resolved = new Map<string, ReturnType<typeof targetsFor>>();
   const targets = (key: string) => {
     let t = resolved.get(key);
-    if (!t) { const [ns, app] = key.split("\u0000"); t = targetsFor(opts.cfg, ns!, app!); resolved.set(key, t); }
+    if (!t) { const [ns, app] = key.split("\u0000"); t = targetsFor(opts.cfg, ns!, app!, opts.platform); resolved.set(key, t); }
     return t;
   };
   const leFor = (key: string) => effectiveBucket(opts.les, targets(key).latency.thresholdMs);
@@ -242,12 +316,15 @@ export function aggregateSlo(raw: SloRaw, opts: {
   for (const key of keys) {
     const [namespace, application] = key.split("\u0000") as [string, string];
     const t = targets(key);
+    const pi = plans.length ? planIndex(plans, namespace, application) : -1;
+    const plan = pi >= 0 ? plans[pi]! : null;
+    const planFailed = pi >= 0 && (opts.failedPlans?.has(pi) ?? false);
     const slis: SloSli[] = [];
     for (const kind of ["availability", "latency"] as SloKind[]) {
       const target = kind === "availability" ? t.availability.target : t.latency.target;
       const allowed = 1 - target;
       const eff = kind === "latency" ? leFor(key) : null;
-      const winFailed = (w: string) => (kind === "availability" ? failed.has(`n:${w}`) : latencyFailed(w, key));
+      const winFailed = (w: string) => (w === W && planFailed) || (kind === "availability" ? failed.has(`n:${w}`) : latencyFailed(w, key));
       const c = windows[W]![kind].get(key);
       const events = c ? c.events : 0;
       const bad = c ? c.bad : 0;
@@ -284,11 +361,12 @@ export function aggregateSlo(raw: SloRaw, opts: {
         events: state === "queryFailed" ? null : Math.round(events), bad: state === "queryFailed" || !measurable ? null : Math.round(bad),
         sli: state === "queryFailed" ? null : sli, budgetUsed: state === "queryFailed" ? null : budgetUsed, burn, alerts, state,
         achievable: sli === null || state === "lowTraffic" ? null : [...SLO_TIERS].reverse().find((x) => sli >= x) ?? null,
-        topBad, expr: sliExpr(opts.C, kind, namespace, application, opts.windowDays, eff?.le ?? null),
+        topBad, expr: sliExpr(opts.C, kind, namespace, application, plan ? `${plan.ageMin}m` : opts.windowDays, eff?.le ?? null),
       });
     }
-    const hours = coverage.get(key);
-    const windowHours = opts.windowDays * 24;
+    const windowHours = plan ? Math.round((plan.ageMin / 60) * 10) / 10 : opts.windowDays * 24;
+    const measured = coverage.get(key);
+    const hours = measured === undefined ? undefined : Math.min(measured, Math.max(1, Math.ceil(windowHours)));
     const advice: SloAdvice[] = [];
     if (application === "") advice.push({ id: "noApplication" });
     for (const s of slis) {
@@ -305,10 +383,14 @@ export function aggregateSlo(raw: SloRaw, opts: {
         advice.push({ id: "thresholdNotBucket", params: { asked: s.thresholdMs, counted: Math.round(s.effectiveMs) } });
       }
     }
-    if (hours !== undefined && hours < windowHours * SLO_COVERAGE_PARTIAL) advice.push({ id: "partialData", params: { days: Math.round((hours / 24) * 10) / 10, window: opts.windowDays } });
+    if (!plan && hours !== undefined && hours < windowHours * SLO_COVERAGE_PARTIAL) advice.push({ id: "partialData", params: { days: Math.round((hours / 24) * 10) / 10, window: opts.windowDays } });
     const state = slis.reduce<SloState>((w, s) => (RANK[s.state] > RANK[w] ? s.state : w), "noData");
     const workload = names.get(namespace)?.has(application) ? application : null;
-    services.push({ namespace, application, workload, slis, state, coverage: hours === undefined ? null : { hours, windowHours }, advice });
+    const reset: SloBudgetResetApplied | undefined = plan ? {
+      id: plan.reset.id, at: plan.reset.at, scope: plan.reset.service === "*" ? "all" : "service", windowHours,
+      ...(plan.reset.by ? { by: plan.reset.by } : {}), ...(plan.reset.reason ? { reason: plan.reset.reason } : {}),
+    } : undefined;
+    services.push({ namespace, application, workload, slis, state, coverage: hours === undefined ? null : { hours, windowHours }, advice, ...(reset ? { reset } : {}) });
   }
   const worstUse = (s: SloService) => Math.max(...s.slis.map((x) => x.budgetUsed ?? -1));
   services.sort((a, b) => RANK[b.state] - RANK[a.state] || worstUse(b) - worstUse(a) || (a.namespace + a.application < b.namespace + b.application ? -1 : 1));
@@ -338,12 +420,14 @@ const inflight = new Map<string, Promise<WorkloadSloResponse>>();
 
 /** `at` = the window's end (epoch seconds, on a minute) for a view of the past; none = now */
 export async function getWorkloadSlo(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<WorkloadSloResponse> {
-  const key = `${cachePrefix(bearerToken)}:slo:${clusterId.toLowerCase()}:${at ?? "now"}`;
+  // The platform settings' version is part of the key: a save or a reset shows on the next read, not 5 minutes later
+  const settings = await readSloSettings(sloSettingsDir(env), clusterId);
+  const key = `${cachePrefix(bearerToken)}:slo:${clusterId.toLowerCase()}:${at ?? "now"}:v${settings.version}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const running = inflight.get(key);
   if (running) return running;
-  const job = collect(env, bearerToken, clusterId, at).then((r) => {
+  const job = collect(env, bearerToken, clusterId, settings, at).then((r) => {
     if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length ? PARTIAL_TTL_MS : at !== undefined ? PAST_TTL_MS : undefined);
     return r;
   }).finally(() => inflight.delete(key));
@@ -351,13 +435,19 @@ export async function getWorkloadSlo(env: Env, bearerToken: string | undefined, 
   return job;
 }
 
-async function collect(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<WorkloadSloResponse> {
+const setsTargets = (c: SloConfig | undefined) => !!c && (c.availability !== undefined || c.latency !== undefined || !!c.services);
+
+async function collect(env: Env, bearerToken: string | undefined, clusterId: string, settings: SloSettingsDoc, at?: number): Promise<WorkloadSloResponse> {
   const obs = clusterConnection(env, clusterId).connection.aks?.observability;
   const cfg = obs?.slo as SloConfig | undefined;
-  const windowDays = cfg?.windowDays ?? 30;
+  const platform = settings.settings as SloConfig;
+  const windowDays = platform.windowDays ?? cfg?.windowDays ?? 30;
+  const endMs = (at ?? Math.floor(Date.now() / 60_000) * 60) * 1000;
+  const plans = resetPlans(settings.resets, endMs, windowDays);
   const base: WorkloadSloResponse = {
     clusterId, generatedAt: new Date().toISOString(), ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
-    metricsState: "ok", cluster: null, windowDays, configured: !!cfg && (cfg.availability !== undefined || cfg.latency !== undefined || !!cfg.services),
+    metricsState: "ok", cluster: null, windowDays, configured: setsTargets(cfg) || setsTargets(platform),
+    settingsVersion: settings.version, windowSource: platform.windowDays ? "platform" : cfg?.windowDays ? "config" : "default",
     defaults: SLO_DEFAULTS, buckets: [], instrumented: false, services: [], uninstrumented: [],
     grafana: obs?.grafana ? { endpoint: obs.grafana.endpoint.replace(/\/+$/, ""), datasources: obs.grafana.datasources ?? {} } : null,
   };
@@ -377,18 +467,18 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     const les = [...new Set((await ask(`count by (le) (http_server_requests_seconds_bucket{${[C, 'uri!~"/actuator.*"'].filter(Boolean).join(",")}})`)).map((r) => r.metric.le ?? ""))]
       .filter((le) => Number.isFinite(Number(le)));
     // Only the boundaries some service counts with (one per distinct threshold)
-    const thresholds = new Set([SLO_DEFAULTS.latency.thresholdMs, ...(cfg?.latency ? [cfg.latency.thresholdMs] : []),
-      ...Object.values(cfg?.services ?? {}).flatMap((s) => (s.latency ? [s.latency.thresholdMs] : []))]);
+    const thresholds = new Set([SLO_DEFAULTS.latency.thresholdMs, ...[cfg, platform].flatMap((c) => [
+      ...(c?.latency ? [c.latency.thresholdMs] : []), ...Object.values(c?.services ?? {}).flatMap((s) => (s.latency ? [s.latency.thresholdMs] : []))])]);
     const used = [...new Set([...thresholds].map((ms) => effectiveBucket(les, ms)?.le).filter((x): x is string => !!x))];
-    const run = await runAll(fetcher, target.endpoint, sloQueries(C, ksm, windowDays, used), 4, time, SLO_QUERY_TIMEOUT_MS);
-    const merged = mergeSloParts(run.rows, new Set(run.gaps.map((g) => g.query)), windowDays, used);
+    const run = await runAll(fetcher, target.endpoint, sloQueries(C, ksm, windowDays, used, plans), 4, time, SLO_QUERY_TIMEOUT_MS);
+    const merged = mergeSloParts(run.rows, new Set(run.gaps.map((g) => g.query)), windowDays, used, plans);
     const failed = merged.failed;
     if (failed.has(`n:${windowDays}d`)) throw run.firstError;
     const gaps: StackQueryGap[] = run.gaps;
     return {
       ...base, cluster: scope.cluster, instrumented: true,
       buckets: les.map(Number).sort((a, b) => a - b),
-      ...aggregateSlo(merged.raw, { cfg, windowDays, les: used, C, failed }),
+      ...aggregateSlo(merged.raw, { cfg, platform, windowDays, les: used, C, failed, plans, failedPlans: merged.failedPlans }),
       ...(gaps.length ? { gaps } : {}),
     };
   } catch (e) {

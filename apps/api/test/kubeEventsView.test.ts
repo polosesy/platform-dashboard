@@ -1,4 +1,4 @@
-// AKS 모니터링 › K8s 이벤트 (web lib/kubeEventsView + API services/kubeEvents): `kubectl get events -A` Warning rows as a
+// AKS 모니터링 › 클러스터 · 워크로드 › K8s 이벤트 (web lib/kubeEventsView + API services/kubeEvents): `kubectl get events -A` Warning rows as a
 // screen — no invented severity (Kubernetes has Normal · Warning only), the event's own reason, "still happening" =
 // last occurrence within 5 min of the read, counts cumulative, system namespaces filterable, kubectl lines to copy.
 import { test } from "node:test";
@@ -76,12 +76,11 @@ test("ago: seconds → minutes → hours → days; nothing for no time", () => {
   assert.equal(V.agoParts(undefined, NOW), null);
 });
 
-test("every explained reason has ko/en text; the tab is in the page and the menu's tab list", () => {
+test("every explained reason has ko/en text; the section is on the 클러스터 · 워크로드 tab", () => {
   const ops = readFileSync(new URL("../../web/src/lib/i18nOps.ts", import.meta.url), "utf8");
   for (const r of V.KNOWN_REASONS) assert.match(ops, new RegExp(`"ob\\.ev\\.why\\.${r}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), r);
   const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /const TABS: Tab\[\] = \[[^\]]*"events"/);
-  assert.match(page, /<EventsTab /);
+  assert.match(page, /tab === "overview" && <EventsSection /);
 });
 
 test("API: the reporter (kubectl SOURCE) is kept; matching counts all before the limit", () => {

@@ -8,7 +8,11 @@ import {
 } from "../services/observabilityAggregator.js";
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
 import { getObservabilityStack } from "../services/observabilityStack.js";
-import { getWorkloadSlo } from "../services/workloadSlo.js";
+import { SLO_DEFAULTS, getWorkloadSlo } from "../services/workloadSlo.js";
+import {
+  SloResetBody, SloSettingsBody, addSloReset, readSloSettings, removeSloReset, sloSettingsDir, writeSloSettings, type SloSettingsDoc,
+} from "../services/sloSettingsStore.js";
+import { clusterConnection } from "../infra/azureClientFactory.js";
 import { NODE_MAINT_MAX_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
@@ -21,6 +25,8 @@ import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
   ObservabilityStatusResponse,
+  SloSettings,
+  SloSettingsResponse,
   ObservabilityLogsResponse,
   ObservabilityNamespacesResponse,
   PodLogAttempt,
@@ -149,6 +155,71 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getWorkloadSlo(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_slo_failed", "observability");
+    }
+  });
+
+  // SLO settings on the platform (AKS 모니터링 › SLO › 설정): targets over the connection file's, and error-budget
+  // resets. Read = signed-in; change = operator or above. The cluster's subscription is checked against the caller's
+  // connections by the authorize middleware (the clusterId query is an ARM ID) before this runs.
+  const sloDir = sloSettingsDir(env);
+  const sloView = (req: Request, clusterId: string, doc: SloSettingsDoc): SloSettingsResponse => ({
+    clusterId, settings: doc.settings, file: (clusterConnection(env, clusterId).connection.aks?.observability?.slo as SloSettings | undefined) ?? null,
+    defaults: { windowDays: 30, ...SLO_DEFAULTS }, resets: doc.resets, history: doc.history, rev: doc.rev, version: doc.version,
+    ...(doc.updatedAt ? { updatedAt: doc.updatedAt } : {}), ...(doc.updatedBy ? { updatedBy: doc.updatedBy } : {}),
+    durable: !!sloDir, canWrite: roleAtLeast(callerOf(env, req.auth?.bearerToken)?.role ?? null, "operator"),
+  });
+  const signedIn = (req: Request, res: Response) => {
+    if (req.auth?.kind === "user") return true;
+    res.status(401).json({ error: "signin_required" });
+    return false;
+  };
+  router.get("/api/observability/slo/settings", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!signedIn(req, res)) return;
+      res.json(sloView(req, clusterId, await readSloSettings(sloDir, clusterId)));
+    } catch (e: unknown) {
+      sendError(res, e, "slo_settings_read_failed", "observability");
+    }
+  });
+  router.put("/api/observability/slo/settings", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!signedIn(req, res)) return;
+      const body = SloSettingsBody.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: "slo_settings_invalid", message: body.error.issues[0]?.message ?? "" });
+      const r = await writeSloSettings(sloDir, clusterId, body.data, { by: req.auth?.principal?.name });
+      if (r.ok) return res.json(sloView(req, clusterId, r.doc));
+      if (r.error === "conflict" && "doc" in r) return res.status(409).json({ error: "slo_settings_conflict", current: sloView(req, clusterId, r.doc) });
+      res.status(400).json({ error: r.error });
+    } catch (e: unknown) {
+      sendError(res, e, "slo_settings_write_failed", "observability");
+    }
+  });
+  router.post("/api/observability/slo/resets", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!signedIn(req, res)) return;
+      const body = SloResetBody.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: "slo_reset_invalid" });
+      const r = await addSloReset(sloDir, clusterId, body.data, { by: req.auth?.principal?.name });
+      if (r.ok) return res.json(sloView(req, clusterId, r.doc));
+      res.status(400).json({ error: r.error });
+    } catch (e: unknown) {
+      sendError(res, e, "slo_reset_failed", "observability");
+    }
+  });
+  router.delete("/api/observability/slo/resets", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!signedIn(req, res)) return;
+      const id = queryString(req, "id") ?? "";
+      if (!/^[0-9a-f]{12}$/.test(id)) return res.status(400).json({ error: "slo_reset_invalid" });
+      const r = await removeSloReset(sloDir, clusterId, id, { by: req.auth?.principal?.name });
+      if (r.ok) return res.json(sloView(req, clusterId, r.doc));
+      res.status(r.error === "slo_reset_not_found" ? 404 : 400).json({ error: r.error });
+    } catch (e: unknown) {
+      sendError(res, e, "slo_reset_failed", "observability");
     }
   });
 

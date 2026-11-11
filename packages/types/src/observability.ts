@@ -715,7 +715,8 @@ export type SloSli = {
   kind: SloKind;
   /** 0.999 = 99.9 % */
   target: number;
-  targetSource: "config" | "default";
+  /** platform = set on the SLO screen (AKS 모니터링 › SLO › 설정) · config = the connection file · default = SLO_DEFAULTS */
+  targetSource: "platform" | "config" | "default";
   /** Latency: the asked threshold and the bucket boundary actually counted (≤ the asked one); null = no bucket at or under it */
   thresholdMs?: number;
   effectiveMs?: number | null;
@@ -754,7 +755,10 @@ export type SloService = {
   /** Hours of the window with series (a service younger than the window is judged on fewer days) */
   coverage: { hours: number; windowHours: number } | null;
   advice: SloAdvice[];
+  /** The error budget was reset (counted from `at`, not the whole window) — scope `all` = the cluster-wide reset */
+  reset?: SloBudgetResetApplied;
 };
+export type SloBudgetResetApplied = { id: string; at: string; scope: "service" | "all"; by?: string; reason?: string; windowHours: number };
 export type WorkloadSloResponse = {
   clusterId: string;
   generatedAt: string;
@@ -763,8 +767,12 @@ export type WorkloadSloResponse = {
   message?: string;
   cluster: string | null;
   windowDays: number;
-  /** Whether the connection file sets targets (else every target is the marked default) */
+  /** Whether the connection file or the platform settings set targets (else every target is the marked default) */
   configured: boolean;
+  /** The platform settings' version this result was computed with (the SLO screen's settings) */
+  settingsVersion?: number;
+  /** Where the window length came from */
+  windowSource?: "platform" | "config" | "default";
   defaults: { availability: number; latency: { thresholdMs: number; target: number } };
   /** Bucket boundaries found (seconds) — the latency thresholds that can be counted exactly */
   buckets: number[];
@@ -775,4 +783,46 @@ export type WorkloadSloResponse = {
   uninstrumented: { namespace: string; name: string; kind: "Deployment" | "StatefulSet" }[];
   gaps?: StackQueryGap[];
   grafana: { endpoint: string; datasources: Partial<Record<"prometheus" | "loki" | "tempo" | "pyroscope", string>> } | null;
+};
+
+// ── SLO settings on the platform (AKS 모니터링 › SLO › 설정, services/sloSettingsStore.ts) ──
+// The same shape as the connection file's `aks.observability.slo`, kept per cluster on the platform. Per field the
+// most specific wins: a service's platform value › the service's file value › the cluster's platform value › the
+// file's top level › the defaults. Excluded URIs add up. Error-budget resets: the budget is counted from the reset
+// (never before the window's start) — the burn-rate alerts are about now and are not reset.
+
+export type SloTargetsSetting = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
+export type SloSettings = SloTargetsSetting & {
+  windowDays?: 7 | 14 | 28 | 30;
+  services?: Record<string, SloTargetsSetting & { exclude?: boolean }>;
+};
+export type SloBudgetReset = {
+  id: string;
+  /** "<namespace>/<application>" or "*" (every service of the cluster) */
+  service: string;
+  /** Counted from this time */
+  at: string;
+  reason: string;
+  by?: string;
+  createdAt: string;
+};
+export type SloSettingsChange = { at: string; by?: string; action: "settings" | "reset" | "undoReset"; detail?: string };
+export type SloSettingsResponse = {
+  clusterId: string;
+  /** The platform's settings (only what was set here) */
+  settings: SloSettings;
+  /** The connection file's settings for this cluster (read-only here — changed in the file / Helm values) */
+  file: SloSettings | null;
+  defaults: { windowDays: number; availability: number; latency: { thresholdMs: number; target: number } };
+  resets: SloBudgetReset[];
+  history: SloSettingsChange[];
+  /** The settings' revision (a save names the one it edited — 409 when another save came first) */
+  rev: number;
+  /** Changes with any write (settings or resets) — part of the SLO result's cache key */
+  version: number;
+  updatedAt?: string;
+  updatedBy?: string;
+  /** false = kept in memory only (no AUD_ARRANGEMENT_DIR) — gone after a restart */
+  durable: boolean;
+  canWrite: boolean;
 };
