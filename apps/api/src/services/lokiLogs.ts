@@ -11,7 +11,7 @@
 // Never sample lines.
 
 import type { Env } from "../env.js";
-import type { HubbleFlow, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
+import type { HubbleFlow, LogInsightsResponse, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { HttpError, safeMessage } from "../infra/requestParams.js";
@@ -198,6 +198,155 @@ export async function getWorkloadLogs(
   } catch (e) {
     return { ...base, ...(await classify(cfg, e)) };
   }
+}
+
+// ── Log insights (AKS 모니터링 › 로그): counts, not lines ──
+
+/** WARN lines — the customer's ANSI-aware pattern, like ERROR_FILTER */
+export const WARN_FILTER = String.raw`|~ "(^|\\s|\\x1b\\[[0-9;]*m)WARN(\\s|\\x1b)|\\[warn\\]:"`;
+/** Error-ish lines naming an exception class (their "Error & Exception Explorer" query) */
+const EXCEPTION_LINES = String.raw`|~ "(?i)(exception|\\berror\\b)" | regexp "(?P<exc>[A-Z][A-Za-z0-9_$]*(?:Exception|Error))" | exc!=""`;
+const BUCKETS = 30;
+
+/**
+ * Pure: the workload a pod belongs to, from its name — Deployment `<name>-<hash>-<5>`, StatefulSet `<name>-<n>`,
+ * DaemonSet / Job `<name>-<5>`; a name of none of these shapes is its own workload. No site-specific Loki label is
+ * needed (the customer's `service_name` is theirs), and the names match the heatmap's.
+ */
+export function workloadOfPod(pod: string): string {
+  const m = new RegExp(`^(.+)-${R}{6,10}-${R}{5}$`).exec(pod) ?? /^(.+)-[0-9]+$/.exec(pod) ?? new RegExp(`^(.+)-${R}{5}$`).exec(pod);
+  return m ? m[1]! : pod;
+}
+
+/** Pure: the insight queries of a selector — per pod (summed into workloads here), the window as one range */
+export function insightQueries(selector: string, minutes: number): Record<"errors" | "warns" | "exceptions" | "timeline", string> {
+  const step = Math.max(10, Math.round((minutes * 60) / BUCKETS));
+  return {
+    errors: `sum by (pod) (count_over_time(${selector} ${ERROR_FILTER} [${minutes}m]))`,
+    warns: `sum by (pod) (count_over_time(${selector} ${WARN_FILTER} [${minutes}m]))`,
+    exceptions: `sum by (pod, exc) (count_over_time(${selector} ${EXCEPTION_LINES} [${minutes}m]))`,
+    timeline: `sum by (pod) (count_over_time(${selector} ${ERROR_FILTER} [${step}s]))`,
+  };
+}
+
+type VecRow = { metric?: Record<string, string>; value?: [number, string] };
+type MatrixRow = { metric?: Record<string, string>; values?: Array<[number, string]> };
+export type InsightRaw = { errors: VecRow[] | null; warns: VecRow[] | null; exceptions: VecRow[] | null; timeline: MatrixRow[] | null };
+
+/** Pure: Loki's per-pod answers → per-workload numbers; a part that is null (not answered) stays null and is a gap */
+export function summarizeInsights(raw: InsightRaw, opts: { minutes: number; endMs: number }): Pick<LogInsightsResponse, "errors" | "warns" | "services" | "exceptions" | "exceptionClasses" | "timeline" | "gaps"> {
+  const n = (v: VecRow) => Math.round(Number(v.value?.[1] ?? 0)) || 0;
+  const perWorkload = (rows: VecRow[] | null) => {
+    const m = new Map<string, number>();
+    for (const r of rows ?? []) { const w = workloadOfPod(r.metric?.pod ?? ""); if (w) m.set(w, (m.get(w) ?? 0) + n(r)); }
+    return m;
+  };
+  const err = perWorkload(raw.errors), warn = perWorkload(raw.warns);
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+  const names = new Set([...err.keys(), ...warn.keys()]);
+  const services = [...names].map((workload) => ({ workload, errors: err.get(workload) ?? 0, warns: warn.get(workload) ?? 0 }))
+    .filter((x) => x.errors > 0 || x.warns > 0)
+    .sort((a, b) => b.errors - a.errors || b.warns - a.warns || (a.workload < b.workload ? -1 : 1));
+
+  let exceptions: LogInsightsResponse["exceptions"] = null, exceptionClasses: number | null = null;
+  if (raw.exceptions) {
+    const m = new Map<string, { workload: string; cls: string; count: number }>();
+    for (const r of raw.exceptions) {
+      const workload = workloadOfPod(r.metric?.pod ?? ""), cls = r.metric?.exc ?? "";
+      if (!workload || !cls) continue;
+      const k = `${workload}\u0000${cls}`;
+      const x = m.get(k) ?? { workload, cls, count: 0 };
+      x.count += n(r);
+      m.set(k, x);
+    }
+    const all = [...m.values()].filter((x) => x.count > 0);
+    exceptionClasses = new Set(all.map((x) => x.cls)).size;
+    exceptions = all.sort((a, b) => b.count - a.count || (a.cls < b.cls ? -1 : 1)).slice(0, 15);
+  }
+
+  let timeline: LogInsightsResponse["timeline"] = null;
+  if (raw.timeline) {
+    const stepSeconds = Math.max(10, Math.round((opts.minutes * 60) / BUCKETS));
+    const endS = Math.floor(opts.endMs / 1000), startS = endS - opts.minutes * 60;
+    const count = Math.max(1, Math.ceil((endS - startS) / stepSeconds));
+    const by = new Map<string, number[]>();
+    for (const r of raw.timeline) {
+      const w = workloadOfPod(r.metric?.pod ?? "");
+      if (!w) continue;
+      const b = by.get(w) ?? new Array<number>(count).fill(0);
+      for (const [t, v] of r.values ?? []) {
+        // A point at t counts the step ending at t → the bucket that step falls in
+        const i = Math.min(count - 1, Math.max(0, Math.ceil((t - startS) / stepSeconds) - 1));
+        b[i]! += Math.round(Number(v)) || 0;
+      }
+      by.set(w, b);
+    }
+    const buckets = new Array<number>(count).fill(0);
+    for (const b of by.values()) b.forEach((v, i) => { buckets[i]! += v; });
+    const total = (b: number[]) => b.reduce((a, c) => a + c, 0);
+    timeline = {
+      start: new Date(startS * 1000).toISOString(), stepSeconds, buckets,
+      byWorkload: [...by.entries()].map(([workload, b]) => ({ workload, buckets: b })).filter((x) => total(x.buckets) > 0)
+        .sort((a, b) => total(b.buckets) - total(a.buckets) || (a.workload < b.workload ? -1 : 1)).slice(0, 6),
+    };
+  }
+  const gaps = (["errors", "warns", "exceptions", "timeline"] as const).filter((k) => raw[k] === null);
+  return { errors: raw.errors ? sum(err) : null, warns: raw.warns ? sum(warn) : null, services, exceptions, exceptionClasses, timeline, gaps };
+}
+
+const insightCache = new CacheManager<LogInsightsResponse>(40, 30_000);
+const insightInflight = new Map<string, Promise<LogInsightsResponse>>();
+
+/**
+ * A namespace's log counts from Loki (the pod-log gate is the route's): four count queries side by side, each on its
+ * own — one that fails is a gap, all failing is the Loki state (unreachable · busy · failed). Windows = LOG_WINDOWS
+ * (≤ 6 h): a regexp over a day of every pod's lines is the kind of read that overloads a small Loki.
+ */
+export async function getLogInsights(
+  env: Env, bearerToken: string | undefined, clusterId: string,
+  opts: { namespace: string; workload?: string; minutes: number; at?: number },
+): Promise<LogInsightsResponse> {
+  if (!(LOG_WINDOWS as readonly number[]).includes(opts.minutes)) throw new HttpError(400, "invalid_window", `minutes must be one of ${LOG_WINDOWS.join(", ")}`);
+  assertSignedInForCluster(env, bearerToken);
+  if (!NAME.test(opts.namespace)) throw new HttpError(400, "invalid_name", "namespace is not a Kubernetes name");
+  const selector = opts.workload ? workloadSelector(opts.namespace, opts.workload) : `{namespace="${opts.namespace}"}`;
+  const endMs = opts.at === undefined ? Math.floor(Date.now() / 60_000) * 60_000 : opts.at * 1000;
+  const base: LogInsightsResponse = {
+    clusterId, generatedAt: new Date().toISOString(), ...(opts.at !== undefined ? { at: new Date(opts.at * 1000).toISOString() } : {}),
+    state: "ok", namespace: opts.namespace, ...(opts.workload ? { workload: opts.workload } : {}), windowMinutes: opts.minutes,
+    errors: null, warns: null, services: [], exceptions: null, exceptionClasses: null, timeline: null, gaps: [],
+  };
+  const cfg = lokiConfig(env, clusterId);
+  if (!cfg) return { ...base, state: "notConfigured" };
+  const key = `${cachePrefix(bearerToken)}:loki-insights:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${opts.at ?? "now"}`;
+  const hit = insightCache.get(key);
+  if (hit) return hit;
+  const wait = backingOff(cfg);
+  if (wait) return { ...base, ...wait };
+  const running = insightInflight.get(key);
+  if (running) return running;
+  const job = (async (): Promise<LogInsightsResponse> => {
+    const q = insightQueries(selector, opts.minutes);
+    const time = String(BigInt(endMs) * 1_000_000n);
+    const step = Math.max(10, Math.round((opts.minutes * 60) / BUCKETS));
+    let firstError: unknown = null;
+    const vec = (query: string) => lokiGet<{ data?: { result?: VecRow[] } }>(cfg, "/loki/api/v1/query", { query, time })
+      .then((r) => (r.truncated ? null : r.body.data?.result ?? [])).catch((e: unknown) => { firstError ??= e; return null; });
+    const [errors, warns, exceptions, timeline] = await Promise.all([
+      vec(q.errors), vec(q.warns), vec(q.exceptions),
+      lokiGet<{ data?: { result?: MatrixRow[] } }>(cfg, "/loki/api/v1/query_range", {
+        query: q.timeline, start: String(BigInt(endMs - opts.minutes * 60_000) * 1_000_000n), end: time, step: `${step}s`,
+      }).then((r) => (r.truncated ? null : r.body.data?.result ?? [])).catch((e: unknown) => { firstError ??= e; return null; }),
+    ]);
+    // Nothing answered: the Loki state (and its backoff when busy) — not four gaps over empty numbers
+    if (!errors && !warns && !exceptions && !timeline) return { ...base, ...(await classify(cfg, firstError ?? new Error("Loki did not answer"))) };
+    const result: LogInsightsResponse = { ...base, ...summarizeInsights({ errors, warns, exceptions, timeline }, { minutes: opts.minutes, endMs }) };
+    // A partial answer is asked again soon
+    insightCache.set(key, result, result.gaps.length ? 10_000 : undefined);
+    return result;
+  })().finally(() => insightInflight.delete(key));
+  insightInflight.set(key, job);
+  return job;
 }
 
 // ── One pod's lines (AKS 모니터링 › 로그) ──

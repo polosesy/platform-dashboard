@@ -18,7 +18,7 @@ import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
-import { getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
+import { getLogInsights, getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
@@ -96,6 +96,23 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getWorkloadVpa(env, req.auth?.bearerToken, clusterId, { namespace: namespace!, workload: workload!, kind: queryString(req, "kind") }));
     } catch (e: unknown) {
       sendError(res, e, "vpa_failed", "observability");
+    }
+  });
+
+  // Log insights (로그 탭 맨 위): ERROR · WARN counts, workloads, exception classes, errors over time — counted by
+  // Loki. The pod-log gate (operator + the connection's allowed namespaces): class names and counts come from log text
+  router.get("/api/observability/log-insights", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [namespace] = requireQuery(req, ["namespace"]);
+      if (!podLogNamespaceAllowed(env, clusterId, namespace!)) {
+        throw new HttpError(403, "pod_log_namespace_denied", "Logs of this namespace are not read for this connection (aks.podLogNamespaces)");
+      }
+      res.json(await getLogInsights(env, req.auth?.bearerToken, clusterId, {
+        namespace: namespace!, workload: queryString(req, "workload") || undefined, minutes: queryInt(req, "minutes", 60, 1, 1440), at: queryPastTime(req, "at"),
+      }));
+    } catch (e: unknown) {
+      sendError(res, e, "log_insights_failed", "observability");
     }
   });
 

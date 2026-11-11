@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-11
-covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -186,6 +186,24 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 - **심각도를 만들지 않습니다.** Kubernetes 이벤트에는 Normal·Warning만 있습니다. 대신 자주 나오는 이유 19개(Unhealthy·BackOff·FailedScheduling·FailedMount·Failed·OOMKilling·Evicted …)는 이유 칩을 고르면 '무슨 뜻 · 먼저 볼 곳'을 한 줄로 보여 줍니다(`lib/kubeEventsView.ts` `KNOWN_REASONS`).
 - Kubernetes는 이벤트를 마지막 발생 후 약 1시간만 보관합니다. 시간 범위가 지난 구간이면 꼬리 줄에 '지난 구간을 골라도 지금 이벤트'를 적습니다(알림은 화면당 하나 — 히트맵이 씀). 오래된 기록이 필요하면 이벤트를 Loki 등으로 보내는 고객 파이프라인이 있어야 합니다(이 화면은 가정하지 않음).
 - 새로 고침·자동 새로 고침은 페이지 위 시간 막대를 따릅니다.
+
+## 3e. 로그 지표 (AKS 모니터링 › 로그, 뷰어 위)
+
+로그를 한 줄씩 읽기 전에 네임스페이스의 로그를 **숫자로** 먼저 봅니다(2026-11-11). 고객 Grafana의 'Error & Exception Explorer' 대시보드와 같은 질문을 같은 방식(LogQL `count_over_time`)으로 Loki에 묻습니다 — 로그 줄은 Loki 밖으로 나오지 않고 개수만 옵니다.
+
+| 칸 | 무엇 |
+|---|---|
+| ERROR 이벤트 · WARN 이벤트 | 창 안의 ERROR·FATAL / WARN 로그 줄 수 |
+| ERROR 발생 워크로드 | ERROR가 한 줄이라도 있는 워크로드 수 |
+| 예외 클래스 종수 | 오류 줄 본문에 적힌 서로 다른 `…Exception`·`…Error` 이름 수 |
+| ERROR 발생 시각 | 창을 30칸으로 나눈 막대(가장 많은 때 표시) + 워크로드별 ERROR·WARN 줄 |
+| 워크로드 × 예외 클래스 Top 15 | 어느 워크로드에서 어떤 예외가 몇 번 |
+
+- 워크로드는 **파드 이름에서** 구합니다(Deployment `이름-해시-5자` · StatefulSet `이름-번호` · DaemonSet `이름-5자`). Loki 라벨 `service_name` 같은 사이트별 라벨에 기대지 않고, 히트맵의 워크로드 이름과 같습니다.
+- 워크로드 이름을 누르면 그 워크로드만 다시 세고, 아래 로그 뷰어가 그 워크로드의 파드를 엽니다.
+- 권한은 로그와 같습니다: 운영자 이상 + 이 연결이 로그를 읽는 네임스페이스(`aks.podLogNamespaces`).
+- 창은 최대 6시간입니다(더 긴 범위를 고르면 마지막 6시간). 하루치 로그에 정규식을 돌리는 질의는 작은 Loki를 과부하시킵니다.
+- Loki가 답하지 않은 값은 '—'로 두고 '응답 없는 값 n'으로 알립니다(0으로 쓰지 않음). Loki가 바쁘면 로그와 같은 대기(1분)를 따릅니다.
 
 ## 4. 연결 파일
 

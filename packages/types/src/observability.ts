@@ -828,3 +828,34 @@ export type SloSettingsResponse = {
   durable: boolean;
   canWrite: boolean;
 };
+
+// ── Log insights (AKS 모니터링 › 로그 — services/lokiLogs.ts getLogInsights) ──
+// Counts of a namespace's log lines from the cluster's Loki (LogQL count_over_time — no line leaves Loki for these):
+// ERROR / FATAL and WARN lines, per workload (the pod's controller, from the pod name), the exception classes named in
+// error-ish lines, and ERROR lines over time. A part that did not answer is null and named in `gaps` — never 0.
+
+export type LogInsightsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  /** The window's end when it is a past range */
+  at?: string;
+  state: LokiState;
+  message?: string;
+  retryAt?: string;
+  namespace: string;
+  /** One workload only (the filter), else every workload of the namespace */
+  workload?: string;
+  windowMinutes: number;
+  /** ERROR / FATAL lines in the window (null = that query failed) */
+  errors: number | null;
+  warns: number | null;
+  /** Workloads with ERROR or WARN lines, most errors first */
+  services: { workload: string; errors: number; warns: number }[];
+  /** Exception classes named in error-ish lines, per workload — most first (top 15) */
+  exceptions: { workload: string; cls: string; count: number }[] | null;
+  /** Distinct exception classes (over every workload) */
+  exceptionClasses: number | null;
+  /** ERROR lines per bucket, oldest first; `byWorkload` = the same per workload (top 6 by total) */
+  timeline: { start: string; stepSeconds: number; buckets: number[]; byWorkload: { workload: string; buckets: number[] }[] } | null;
+  gaps: ("errors" | "warns" | "exceptions" | "timeline")[];
+};

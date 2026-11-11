@@ -1011,3 +1011,23 @@
 .hmPanelActions { display: inline-flex; align-items: center; gap: 10px; flex: none; }
 .hmPanelLink { font-size: var(--text-caption); font-weight: 500; color: var(--accent-strong); text-decoration: none; white-space: nowrap; }
 .hmPanelLink:hover { text-decoration: underline; }
+
+/* ── 로그 지표 (LogInsights) — counts above the log viewer ── */
+.li { margin: 12px 0 16px; min-width: 0; }
+.liHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.liHeadEnd { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.liBars { display: flex; align-items: flex-end; gap: 2px; height: 96px; padding-bottom: 1px; border-bottom: 1px solid var(--border-strong); }
+.liBar { flex: 1 1 0; min-width: 2px; height: 100%; display: flex; align-items: flex-end; }
+.liBar > span { display: block; width: 100%; border-radius: 0; background: transparent; }
+.liBar > span[data-on] { background: var(--danger); }
+.liBar:hover > span[data-on] { background: var(--danger-strong); }
+.liAxis { display: flex; justify-content: space-between; margin-top: 4px; font-size: var(--text-caption); color: var(--subtle); font-variant-numeric: tabular-nums; }
+.liRows { display: grid; gap: 6px; margin: 16px 0 0; padding: 0; list-style: none; font-size: var(--text-small); }
+.liRows > li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) max-content; align-items: center; gap: 10px; min-width: 0; }
+.liRows > li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.liShare { display: block; height: 6px; border-radius: var(--radius-pill); background: rgba(var(--ink-rgb), 0.08); overflow: hidden; }
+.liShare > span { display: block; height: 100%; background: var(--danger); }
+.liNum { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.liClass { font-family: var(--font-mono); font-size: var(--text-caption); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.liTableWrap { overflow: auto; max-height: 320px; }
+.liPad { margin: 0; padding: 16px; font-size: var(--text-small); color: var(--muted); }

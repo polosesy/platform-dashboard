@@ -1,5 +1,7 @@
 "use client";
 
+import { LogInsights } from "./LogInsights";
+import { firstPodOf } from "@/lib/logInsightsView";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import type { PodLogEntry, PodLogAttempt, PodLogSource, ObservabilityLogsResponse, ObservabilityNamespacesResponse, NamespacePodItem } from "@aud/types";
@@ -260,6 +262,13 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           {t("ob.logs.lines", { n: filteredLogs.length })} {loading && `· ${t("common.loading")}`}
         </span>
       </div>
+
+      {/* The namespace's logs as numbers first (ERROR · WARN · exception classes · over time — counted by Loki); a
+          workload picked there opens one of its pods in the viewer below. Only where this connection reads logs. */}
+      {namespace && canRead(namespace) ? (
+        <LogInsights clusterId={clusterId} namespace={namespace} range={range} nonce={nonce}
+          onPickWorkload={(w) => { const pod = firstPodOf(podOptions, w); if (pod) setPodName(pod); }} />
+      ) : null}
 
       {error && <div className={styles.errorMsg}>{t("ob.error")}: {error}</div>}
 

@@ -131,24 +131,24 @@ function ObservabilityView() {
               items={[{ id: "tiles", label: t("ob.hm.view.heatmap") }, { id: "table", label: t("ob.hm.view.table") }]} />
           )}
 
-          {tab === "overview" && <WorkloadHeatmap key={clusterId} clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
-          {tab === "overview" && <EventsSection key={clusterId} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "overview" && <WorkloadHeatmap key={`heat:${clusterId}`} clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "overview" && <EventsSection key={`events:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
 
-          {tab === "slo" && <SloTab key={clusterId} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
-          {tab === "infra" && <NodeMaintenancePanel key={clusterId} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "slo" && <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "infra" && <NodeMaintenancePanel key={`maint:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && nodesResp && (
             <InfraTab nodes={nodesResp.nodes} past={time.range.to !== null} />
           )}
 
           {tab === "logs" && (
-            <LogsTab key={clusterId} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />
+            <LogsTab key={`logs:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />
           )}
 
           {tab === "hubble" && (
             <HubbleTab clusterId={clusterId} control={{ range: time.range, nonce: time.nonce, report: time.report }} />
           )}
 
-          {tab === "stack" && <StackTab key={clusterId} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "stack" && <StackTab key={`stack:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
         </>
       )}
     </div>
