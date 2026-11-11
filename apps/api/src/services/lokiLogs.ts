@@ -11,7 +11,7 @@
 // Never sample lines.
 
 import type { Env } from "../env.js";
-import type { HubbleFlow, LogInsightsResponse, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
+import type { HubbleFlow, LogContextResponse, LogInsightsResponse, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { HttpError, safeMessage } from "../infra/requestParams.js";
@@ -135,9 +135,9 @@ function backingOff(cfg: { url: string }): { state: "busy"; message: string; ret
 
 /** 25 s: just under Loki's 30 s server write timeout — cutting earlier throws away work Loki already did (499) */
 const READ_TIMEOUT_MS = 25_000;
-async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, params: Record<string, string>, timeoutMs = READ_TIMEOUT_MS): Promise<{ body: T; truncated: boolean }> {
+async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, params: Record<string, string>, timeoutMs = READ_TIMEOUT_MS, headers: Record<string, string> = {}): Promise<{ body: T; truncated: boolean }> {
   const res = await fetch(`${cfg.url}${path}?${new URLSearchParams(params)}`, {
-    headers: { Accept: "application/json", ...(cfg.tenant ? { "X-Scope-OrgID": cfg.tenant } : {}) },
+    headers: { Accept: "application/json", ...(cfg.tenant ? { "X-Scope-OrgID": cfg.tenant } : {}), ...headers },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`Loki ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -351,6 +351,93 @@ export async function getLogInsights(
 
 // ── One pod's lines (AKS 모니터링 › 로그) ──
 
+/**
+ * Ask Loki to keep the kinds of labels apart (Loki ≥ 3.0): the stream then carries the indexed labels only and each
+ * value a third element `{ structuredMetadata, parsed }` — what Grafana's log details show as two groups. An older
+ * Loki ignores the header: everything is in the stream and nothing is claimed to be structured metadata.
+ */
+const CATEGORIZE = { "X-Loki-Response-Encoding-Flags": "categorize-labels" };
+const MAX_LABELS = 30;
+const MAX_LABEL_VALUE = 300;
+
+/** Pure: label pairs for the response — names as Loki has them, values redacted and cut, a bounded number */
+export function safeLabels(src: unknown): { labels: Record<string, string>; redactions: number } {
+  const labels: Record<string, string> = {};
+  let redactions = 0;
+  if (!src || typeof src !== "object" || Array.isArray(src)) return { labels, redactions };
+  for (const [k, v] of Object.entries(src as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, MAX_LABELS)) {
+    if (typeof v !== "string" || !/^[A-Za-z_][\w.-]{0,99}$/.test(k)) continue;
+    const r = redactLogLine(v.length > MAX_LABEL_VALUE ? `${v.slice(0, MAX_LABEL_VALUE)}…` : v);
+    redactions += r.n;
+    labels[k] = r.line;
+  }
+  return { labels, redactions };
+}
+
+/** Pure: a Loki streams answer → pod log entries, oldest first, each with its labels · structured metadata · level */
+export function podEntries(body: LokiStreams, pod: string): { lines: PodLogEntry[]; redactions: number } {
+  let redactions = 0;
+  const lines: PodLogEntry[] = [];
+  for (const st of body.data?.result ?? []) {
+    const indexed = safeLabels(st.stream);
+    for (const v of st.values ?? []) {
+      // With categorize-labels the third element is { structuredMetadata, parsed }; without it, absent (or flat)
+      const extra = (v[2] ?? {}) as { structuredMetadata?: unknown } & Record<string, unknown>;
+      const meta = safeLabels(extra.structuredMetadata);
+      const p = parseLogLine(st.stream ?? {}, v[0], v[1] ?? "", { ...(typeof extra.level === "string" ? { level: extra.level } : {}), ...meta.labels });
+      redactions += p.redactions + meta.redactions;
+      const stream = st.stream?.stream;
+      lines.push({
+        timestamp: p.line.time, podName: st.stream?.pod ?? pod, containerName: st.stream?.container ?? "", logMessage: p.line.text,
+        stream: stream === "stdout" || stream === "stderr" ? stream : "unknown",
+        tsNs: v[0], level: p.line.level, labels: indexed.labels,
+        ...(Object.keys(meta.labels).length ? { metadata: meta.labels } : {}), ...(p.line.traceId ? { traceId: p.line.traceId } : {}),
+      });
+    }
+    redactions += indexed.redactions;
+  }
+  lines.sort((a, b) => (BigInt(a.tsNs ?? "0") < BigInt(b.tsNs ?? "0") ? -1 : BigInt(a.tsNs ?? "0") > BigInt(b.tsNs ?? "0") ? 1 : 0));
+  return { lines, redactions };
+}
+
+/** Lines of context on each side, and how far around the line they are looked for */
+export const CONTEXT_MAX_LINES = 50;
+const CONTEXT_SPAN_NS = 3_600_000_000_000n;
+
+/**
+ * The lines before and after one line of the same pod (the pod-log gate is the route's): two reads around the line's
+ * own timestamp — backward up to it, forward from it — within an hour each side. The line itself is not repeated.
+ */
+export async function getLogContext(
+  env: Env, bearerToken: string | undefined, clusterId: string,
+  opts: { namespace: string; pod: string; container?: string; tsNs: string; lines: number },
+): Promise<LogContextResponse> {
+  assertSignedInForCluster(env, bearerToken);
+  for (const v of [opts.namespace, opts.pod, ...(opts.container ? [opts.container] : [])]) {
+    if (!NAME.test(v)) throw new HttpError(400, "invalid_name", "namespace / pod / container is not a Kubernetes name");
+  }
+  if (!/^\d{16,20}$/.test(opts.tsNs)) throw new HttpError(400, "invalid_time", "ts must be a nanosecond timestamp");
+  const base: LogContextResponse = { clusterId, generatedAt: new Date().toISOString(), state: "ok", before: [], after: [], redactions: 0 };
+  const cfg = lokiConfig(env, clusterId);
+  if (!cfg) return { ...base, state: "notConfigured" };
+  const wait = backingOff(cfg);
+  if (wait) return { ...base, ...wait };
+  const n = String(Math.min(Math.max(opts.lines, 1), CONTEXT_MAX_LINES));
+  const ts = BigInt(opts.tsNs);
+  const selector = `{namespace="${opts.namespace}", pod="${opts.pod}"${opts.container ? `, container="${opts.container}"` : ""}}`;
+  try {
+    const [b, a] = await Promise.all([
+      // Loki's range is [start, end): end = ts leaves the line itself out; start = ts + 1 does the same going forward
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, start: String(ts - CONTEXT_SPAN_NS), end: String(ts), limit: n, direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, start: String(ts + 1n), end: String(ts + CONTEXT_SPAN_NS), limit: n, direction: "forward" }, READ_TIMEOUT_MS, CATEGORIZE),
+    ]);
+    const before = podEntries(b.body, opts.pod), after = podEntries(a.body, opts.pod);
+    return { ...base, before: before.lines.slice(-Number(n)), after: after.lines.slice(0, Number(n)), redactions: before.redactions + after.redactions };
+  } catch (e) {
+    return { ...base, ...(await classify(cfg, e)) };
+  }
+}
+
 const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }>(50, 10_000);
 
 /**
@@ -376,18 +463,8 @@ export async function getPodLogsFromLoki(
   const wait = backingOff(cfg);
   if (wait) return { ...wait, lines: [], redactions: 0, truncated: false };
   try {
-    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes, opts.at), limit: String(limit), direction: "backward" });
-    let redactions = 0;
-    const lines: PodLogEntry[] = [];
-    for (const st of res.body.data?.result ?? []) {
-      for (const v of st.values ?? []) {
-        const p = parseLogLine(st.stream ?? {}, v[0], v[1] ?? "", v[2]);
-        redactions += p.redactions;
-        const stream = st.stream?.stream;
-        lines.push({ timestamp: p.line.time, podName: opts.pod, containerName: st.stream?.container ?? "", logMessage: p.line.text, stream: stream === "stdout" || stream === "stderr" ? stream : "unknown" });
-      }
-    }
-    lines.sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes, opts.at), limit: String(limit), direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE);
+    const { lines, redactions } = podEntries(res.body, opts.pod);
     const out = { state: "ok" as const, lines: lines.slice(-limit), redactions, truncated: res.truncated };
     podLogCache.set(key, out);
     return out;

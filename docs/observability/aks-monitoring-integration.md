@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-11
-covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -204,6 +204,24 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 - 권한은 로그와 같습니다: 운영자 이상 + 이 연결이 로그를 읽는 네임스페이스(`aks.podLogNamespaces`).
 - 창은 최대 6시간입니다(더 긴 범위를 고르면 마지막 6시간). 하루치 로그에 정규식을 돌리는 질의는 작은 Loki를 과부하시킵니다.
 - Loki가 답하지 않은 값은 '—'로 두고 '응답 없는 값 n'으로 알립니다(0으로 쓰지 않음). Loki가 바쁘면 로그와 같은 대기(1분)를 따릅니다.
+
+## 3f. 로그 뷰어와 줄 상세 (AKS 모니터링 › 로그)
+
+로그 목록은 워크로드 패널의 로그 스트림과 같은 모양입니다(2026-11-11): 줄마다 레벨 기호와 색(■ ERROR · ▲ WARN · ● INFO/DEBUG · ○ 알 수 없음), 시각, 첫 줄. 위쪽에서 레벨(전체 / WARN 이상 / ERROR) · 스트림 · 찾기로 거릅니다.
+
+줄을 누르면 Grafana의 log details와 같은 상세가 열립니다.
+
+| 묶음 | 내용 |
+|---|---|
+| 전체 내용 | 여러 줄 메시지(스택 트레이스 포함) 전부 |
+| 줄 정보 | 시각(밀리초) · 레벨 · pod · container · stream · trace ID |
+| Indexed labels | Loki가 색인한 스트림 라벨(namespace · pod · container · job · service_name …) |
+| Structured metadata | 줄마다 붙는 값(detected_level · level …) — 색인하지 않는 값 |
+| 맥락 보기 | 같은 파드의 앞뒤 20줄(최대 50줄), 고른 줄 강조 |
+
+- Indexed labels와 Structured metadata를 나누어 보여 주려고 Loki에 `categorize-labels` 응답을 요청합니다(Loki 3.0 이상). 더 옛 Loki는 이 구분을 주지 않으므로 Structured metadata 묶음이 나오지 않습니다(추측해서 나누지 않음).
+- 라벨 값과 맥락 줄에도 로그와 같은 가림(토큰 · 비밀 값)이 적용됩니다. 권한도 로그와 같습니다(운영자 + 허용 네임스페이스).
+- kubelet이나 Container Insights에서 읽은 줄에는 라벨과 정확한 시각이 없어 상세에 전체 내용과 줄 정보만 나오고, 그 이유를 적습니다.
 
 ## 4. 연결 파일
 

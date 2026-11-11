@@ -8,7 +8,9 @@ import type { PodLogEntry, PodLogAttempt, PodLogSource, ObservabilityLogsRespons
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
-import { Badge, Notice } from "@/components/ui";
+import { Chip, EmptyState, Notice, Panel, SearchInput, Segmented, Select, Toggle } from "@/components/ui";
+import { PodLogList } from "./PodLogList";
+import { levelCounts, passesLevel, type LevelFilter } from "@/lib/podLogView";
 import { atParam, podLogMinutesFor, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 
@@ -35,6 +37,7 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
   const [search, setSearch] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [streamFilter, setStreamFilter] = useState<"all" | "stdout" | "stderr">("all");
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
 
   const [nsPodItems, setNsPodItems] = useState<NamespacePodItem[]>([]);
   const [logs, setLogs] = useState<PodLogEntry[]>([]);
@@ -182,12 +185,16 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     if (hasStreamInfo && streamFilter !== "all") {
       result = result.filter((l) => l.stream === streamFilter);
     }
+    if (levelFilter !== "all") result = result.filter((l) => passesLevel(l, levelFilter));
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((l) => l.logMessage.toLowerCase().includes(q));
     }
     return result;
-  }, [logs, hasStreamInfo, streamFilter, search]);
+  }, [logs, hasStreamInfo, streamFilter, levelFilter, search]);
+  const levels = useMemo(() => levelCounts(logs), [logs]);
+  // Levels are known for Loki lines (its detected level) and for lines that state one — offer the filter when any is
+  const hasLevels = levels.error + levels.warn + levels.info > 0;
 
   function formatTime(ts: string) {
     const d = new Date(ts);
@@ -196,70 +203,26 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
   }
 
   if (nsPodItems.length === 0 && !loading) {
-    return (
-      <div className={styles.noDataBanner}>
-        <strong>{t("ob.logs.unavailable")}</strong>
-        {t("ob.logs.unavailableHint")}
-      </div>
-    );
+    return <EmptyState title={t("ob.logs.unavailable")}>{t("ob.logs.unavailableHint")}</EmptyState>;
   }
 
+  const pastAt = at ? new Date(Number(at) * 1000).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+
   return (
-    <div>
-      {/* Toolbar */}
-      <div className={styles.logsToolbar}>
-        <select value={namespace} onChange={(e) => setNamespace(e.target.value)} aria-label={t("hb.namespace")}>
-          {namespaces.map((ns) => (
-            <option key={ns} value={ns}>{canRead(ns) ? ns : t("ob.logs.nsDenied", { ns })}</option>
-          ))}
-        </select>
-
-        <select value={podName} onChange={(e) => setPodName(e.target.value)}>
-          {podOptions.length === 0 && (
-            <option value="">{t("ob.logs.noPods")}</option>
-          )}
-          {podOptions.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-
-        {/* Multi-container pod인 경우 컨테이너 선택 드롭다운 표시 */}
-        {containerOptions.length > 1 && (
-          <select value={containerName} onChange={(e) => setContainerName(e.target.value)}>
-            {containerOptions.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        )}
-
-        {span.differs ? <Badge tone="info" title={t("ob.logs.rangeMaxHint")}>{t("ob.logs.rangeMax")}</Badge> : null}
-        {at ? <Badge tone="medium" title={t("ob.logs.pastHint")}>{t("ob.logs.past", { at: new Date(Number(at) * 1000).toLocaleString(dateLocale(locale), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) })}</Badge> : null}
-
-        {hasStreamInfo && (
-          <select value={streamFilter} onChange={(e) => setStreamFilter(e.target.value as "all" | "stdout" | "stderr")}>
-            <option value="all">{t("ob.logs.allStreams")}</option>
-            <option value="stdout">stdout</option>
-            <option value="stderr">stderr</option>
-          </select>
-        )}
-
-        <input
-          type="text"
-          placeholder={t("ob.logs.search")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ minWidth: 140 }}
-        />
-
-        <button
-          className={`${styles.logAutoScroll} ${autoScroll ? styles.logAutoScrollActive : ""}`}
-          onClick={() => setAutoScroll(!autoScroll)}
-        >
-          {t("ob.logs.autoScroll")} {autoScroll ? "ON" : "OFF"}
-        </button>
-
-        <span className={styles.logCount}>
-          {t("ob.logs.lines", { n: filteredLogs.length })} {loading && `· ${t("common.loading")}`}
+    <div className={styles.plWrap}>
+      {/* What to read: namespace · pod · container (the page's time range bar sets when) */}
+      <div className={styles.plPick}>
+        <Select label={t("hb.namespace")} value={namespace} onChange={setNamespace}
+          options={namespaces.map((ns) => ({ value: ns, label: canRead(ns) ? ns : t("ob.logs.nsDenied", { ns }) }))} />
+        <Select label="Pod" value={podName} onChange={setPodName} placeholder={t("ob.logs.noPods")}
+          options={podOptions.map((p) => ({ value: p, label: p }))} />
+        {containerOptions.length > 1 ? (
+          <Select label={t("ob.pl.container")} value={containerName} onChange={setContainerName}
+            options={containerOptions.map((c) => ({ value: c, label: c }))} />
+        ) : null}
+        <span className={styles.plPickEnd}>
+          {span.differs ? <Chip level="info" glyph={false} title={t("ob.logs.rangeMaxHint")}>{t("ob.logs.rangeMax")}</Chip> : null}
+          {at ? <Chip level="warn" glyph={false} title={t("ob.logs.pastHint")}>{t("ob.logs.past", { at: pastAt })}</Chip> : null}
         </span>
       </div>
 
@@ -270,18 +233,7 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           onPickWorkload={(w) => { const pod = firstPodOf(podOptions, w); if (pod) setPodName(pod); }} />
       ) : null}
 
-      {error && <div className={styles.errorMsg}>{t("ob.error")}: {error}</div>}
-
-      {/* Where the lines came from — and why the other sources gave none */}
-      {attempts.length > 0 && (
-        <p className={styles.logSourceRow}>
-          {attempts.map((a) => (
-            <span key={a.source} className={styles.logSourceChip} data-state={a.state} title={a.message ?? t(`ob.logs.state.${a.state}`)}>
-              {t(`ob.logs.src.${a.source}`)} · {t(`ob.logs.state.${a.state}`)}
-            </span>
-          ))}
-        </p>
-      )}
+      {error ? <Notice tone="danger" title={t("ob.error")}>{error}</Notice> : null}
       {!source && attempts.length > 0 && !loading && (
         <Notice tone={canRead(namespace) ? "warning" : "info"} title={t(canRead(namespace) ? "ob.logs.noneTitle" : "ob.logs.deniedTitle")}>
           {canRead(namespace)
@@ -290,32 +242,41 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
         </Notice>
       )}
 
-      {/* Log viewer */}
-      <div className={styles.logContainer} ref={containerRef}>
-        {filteredLogs.length === 0 && !loading && (
-          <div className={styles.logEmpty}>
-            {podOptions.length === 0
-              ? t("ob.logs.noRunningPods")
-              : namespace && podName
-                ? t("ob.logs.noLogs")
-                : t("ob.logs.pick")}
-          </div>
-        )}
-        {filteredLogs.map((log, i) => (
-          <div key={i} className={styles.logLine}>
-            <span className={styles.logTime}>{formatTime(log.timestamp)}</span>
-            <span className={styles.logPod} title={log.containerName}>
-              {log.containerName || log.podName}
-            </span>
-            {log.stream !== "unknown" && (
-              <span className={`${styles.logStream} ${log.stream === "stderr" ? styles.logStderr : styles.logStdout}`}>
-                {log.stream}
-              </span>
-            )}
-            <span className={styles.logMsg}>{log.logMessage}</span>
-          </div>
-        ))}
-      </div>
+      {/* The pod's lines — the same list grammar as the workload panel's stream; a row opens its details */}
+      <Panel title={t("ob.pl.title")} sub={podName ? `${podName} · ${t("ob.logs.lines", { n: filteredLogs.length })}${loading ? ` · ${t("common.loading")}` : ""}` : undefined}
+        actions={
+          // Where the lines came from — and why the other sources gave none
+          <span className={styles.plSources}>
+            {attempts.map((a) => (
+              <Chip key={a.source} level={a.state === "ok" ? "ok" : a.state === "empty" || a.state === "notConfigured" || a.state === "pastRange" ? "neutral" : "warn"}
+                title={a.message ?? t(`ob.logs.state.${a.state}`)}>
+                {t(`ob.logs.src.${a.source}`)} · {t(`ob.logs.state.${a.state}`)}
+              </Chip>
+            ))}
+          </span>
+        }
+        footer={<span>{t(source === "loki" ? "ob.pl.footLoki" : "ob.pl.foot")}</span>}>
+        <div className={styles.plFilters}>
+          {hasLevels ? (
+            <Segmented label={t("ob.pl.level")} value={levelFilter} onChange={setLevelFilter}
+              items={[
+                { id: "all", label: t("ob.pl.lv.all", { n: logs.length }) },
+                { id: "warn", label: t("ob.pl.lv.warn", { n: levels.error + levels.warn }) },
+                { id: "error", label: t("ob.pl.lv.error", { n: levels.error }) },
+              ]} />
+          ) : null}
+          {hasStreamInfo ? (
+            <Select label={t("ob.logs.allStreams")} hideLabel value={streamFilter} onChange={(v) => setStreamFilter(v as "all" | "stdout" | "stderr")}
+              options={[{ value: "all", label: t("ob.logs.allStreams") }, { value: "stdout", label: "stdout" }, { value: "stderr", label: "stderr" }]} />
+          ) : null}
+          <SearchInput label={t("ob.pl.search")} value={search} onChange={setSearch} placeholder={t("ob.logs.search")} />
+          <Toggle checked={autoScroll} onChange={setAutoScroll}>{t("ob.logs.autoScroll")}</Toggle>
+        </div>
+        <div className={styles.plScroll} ref={containerRef}>
+          <PodLogList clusterId={clusterId} namespace={namespace} logs={filteredLogs}
+            empty={loading ? t("common.loading") : podOptions.length === 0 ? t("ob.logs.noRunningPods") : namespace && podName ? t("ob.logs.noLogs") : t("ob.logs.pick")} />
+        </div>
+      </Panel>
     </div>
   );
 }

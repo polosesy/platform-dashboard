@@ -18,7 +18,7 @@ import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
-import { getLogInsights, getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
+import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
@@ -96,6 +96,22 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getWorkloadVpa(env, req.auth?.bearerToken, clusterId, { namespace: namespace!, workload: workload!, kind: queryString(req, "kind") }));
     } catch (e: unknown) {
       sendError(res, e, "vpa_failed", "observability");
+    }
+  });
+
+  // The lines around one log line of a pod (Grafana's "show context") — the same gate as the logs themselves
+  router.get("/api/observability/log-context", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [namespace, podName, ts] = requireQuery(req, ["namespace", "podName", "ts"]);
+      if (!podLogNamespaceAllowed(env, clusterId, namespace!)) {
+        throw new HttpError(403, "pod_log_namespace_denied", "Logs of this namespace are not read for this connection (aks.podLogNamespaces)");
+      }
+      res.json(await getLogContext(env, req.auth?.bearerToken, clusterId, {
+        namespace: namespace!, pod: podName!, container: queryString(req, "container") || undefined, tsNs: ts!, lines: queryInt(req, "lines", 20, 1, CONTEXT_MAX_LINES),
+      }));
+    } catch (e: unknown) {
+      sendError(res, e, "log_context_failed", "observability");
     }
   });
 

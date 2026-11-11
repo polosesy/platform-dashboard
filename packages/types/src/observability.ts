@@ -163,6 +163,28 @@ export type PodLogEntry = {
   containerName: string;
   logMessage: string;
   stream: "stdout" | "stderr" | "unknown";
+  /** Loki only — what Grafana's log details show. The line's exact timestamp (ns, as text): the anchor of "context" */
+  tsNs?: string;
+  /** The level Loki detected or the line states (error · warn · info · unknown) */
+  level?: "error" | "warn" | "info" | "unknown";
+  /** Indexed labels of the stream (namespace · pod · container · job …) */
+  labels?: Record<string, string>;
+  /** Structured metadata of the line (detected_level · level · trace_id …) — not indexed */
+  metadata?: Record<string, string>;
+  /** The trace ID in the line (their Spring pattern `[service,traceId,spanId,…]`) */
+  traceId?: string;
+};
+
+/** The lines around one line of the same pod (Grafana's "show context") — oldest first on both sides */
+export type LogContextResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: LokiState;
+  message?: string;
+  retryAt?: string;
+  before: PodLogEntry[];
+  after: PodLogEntry[];
+  redactions: number;
 };
 
 /** Where pod logs can come from, in the order the API tries them (services/podLogSources.ts) */

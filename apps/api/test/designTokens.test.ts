@@ -208,7 +208,7 @@ const RAW_BUTTONS: Record<string, number> = {
   "app/live-diagram/components/FaultTimeline.tsx": 1, "app/live-diagram/components/GroupNode.tsx": 5, "app/live-diagram/components/Legend.tsx": 1,
   "app/live-diagram/components/LiveCanvas.tsx": 1, "app/live-diagram/components/LiveNode.tsx": 3, "app/live-diagram/components/detail/PeeringSection.tsx": 1,
   "app/live-diagram/components/detail/PrivateLinkUsage.tsx": 1, "app/live-diagram/components/detail/primitives.tsx": 4, "app/live-diagram/page.tsx": 4,
-  "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1, "app/observability/components/LogsTab.tsx": 1,
+  "app/network/components/TrafficMapSection.tsx": 1, "app/notifications/page.tsx": 1, "app/observability/components/PodLogList.tsx": 1,
   "app/observability/components/WorkloadHeatmap.tsx": 11, "app/observability/components/WorkloadLogStream.tsx": 1, "app/policies/components/ManagedComponentsPanel.tsx": 1,
   "app/policies/components/NetpolSimPanel.tsx": 1, "app/policies/insights/ExplorePanel.tsx": 1, "app/policies/insights/KbomPanel.tsx": 1,
   "app/policies/insights/RiskCombos.tsx": 2, "app/policies/insights/RiskHeatmap.tsx": 2, "app/policies/page.tsx": 2,

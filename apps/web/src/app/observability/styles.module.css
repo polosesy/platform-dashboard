@@ -1031,3 +1031,24 @@
 .liClass { font-family: var(--font-mono); font-size: var(--text-caption); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .liTableWrap { overflow: auto; max-height: 320px; }
 .liPad { margin: 0; padding: 16px; font-size: var(--text-small); color: var(--muted); }
+
+/* ── 로그 뷰어 (LogsTab + PodLogList) — kit controls, the stream's list grammar, Grafana-like line details ── */
+.plWrap { display: grid; gap: 12px; min-width: 0; }
+.plPick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.plPickEnd { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.plSources { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.plFilters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-bottom: 10px; }
+.plScroll { max-height: 640px; overflow: auto; min-width: 0; }
+.plGroups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px 20px; margin-top: 4px; }
+.plGroupTitle { margin: 0 0 4px; font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
+.plGroupN { font-weight: 400; color: var(--subtle); }
+.plFields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0; font-family: var(--font-mono); font-size: var(--text-caption); line-height: 1.5; }
+.plFields dt { color: var(--muted); }
+.plFields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.plContext { display: grid; gap: 6px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.plContextList { margin: 0; padding: 0; list-style: none; max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-solid); font-family: var(--font-mono); font-size: var(--text-caption); line-height: 1.5; }
+.plContextList > li { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 8px; padding: 2px 8px; color: var(--muted); }
+.plContextList > li > span:last-child { overflow-wrap: anywhere; color: var(--ink); }
+.plContextList > li[data-level="error"] > span:nth-child(2) { color: var(--danger); }
+.plContextList > li[data-level="warn"] > span:nth-child(2) { color: var(--warning-strong); }
+.plContextList > li.plContextHere { background: var(--accent-soft); font-weight: 600; }
