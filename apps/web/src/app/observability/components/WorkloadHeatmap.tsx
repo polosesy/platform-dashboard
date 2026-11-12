@@ -13,6 +13,7 @@
 
 import { parseWorkloadParam } from "@/lib/aksConfigView";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import type { AppColumnId, AppMetricsResponse, AppRuntimeKind } from "@aud/types";
 import type { HeatLevel, HeatMetric, HeatWorkload, WorkloadHeatmapResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -26,6 +27,8 @@ import {
   type HeatView, type TableSort,
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
+import { BLOCKS_STORAGE_KEY, autoBlocks, formatAppValue, kindsOf, parseBlocks, sortByApp, type BlockId } from "@/lib/workloadBlocks";
+import { BlockEditor, KindChips, RuntimeGuide, blockLabel } from "./WorkloadBlocks";
 import styles from "../styles.module.css";
 
 const ATTN_SHOWN = 8;
@@ -101,6 +104,32 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   );
   useRangeRefresh("heatmap", nonce, q.loading, q.reload, report);
   const d = q.data?.clusterId === clusterId && q.data.windowMinutes === win && answersAt(q.data.at, at) ? q.data : null;
+  // What kind of application each workload is + other runtimes' metrics (its own request: the heatmap does not wait for it)
+  const appQ = useApiQuery(clusterId ? `app-metrics:${clusterId}:${at ?? "now"}` : null, (token) =>
+    fetchJsonWithBearer<AppMetricsResponse>(apiUrl("/api/observability/app-metrics", { clusterId, at }), token),
+  );
+  useRangeRefresh("appMetrics", nonce, appQ.loading, appQ.reload, report);
+  const apps = appQ.data?.clusterId === clusterId && appQ.data.metricsState === "ok" ? appQ.data : null;
+  const appsFailed = !!appQ.error || (!!appQ.data && appQ.data.metricsState !== "ok");
+  const appByKey = useMemo(() => new Map<string, AppMetricsResponse["workloads"][number]>((apps?.workloads ?? []).map((w) => [`${w.namespace}/${w.workload}`, w])), [apps]);
+  const appCols = useMemo(() => new Map<string, AppMetricsResponse["columns"][number]>((apps?.columns ?? []).map((c) => [c.id, c])), [apps]);
+  // The viewer's blocks (columns of the table, values a tile can show): automatic until something is chosen; this browser remembers
+  const [stored, setStored] = useState<BlockId[] | null>(null);
+  useEffect(() => {
+    try { setStored(parseBlocks(window.localStorage.getItem(BLOCKS_STORAGE_KEY))); } catch { /* storage blocked: the automatic set */ }
+  }, []);
+  const remember = (next: BlockId[] | null) => {
+    setStored(next);
+    try {
+      if (next) window.localStorage.setItem(BLOCKS_STORAGE_KEY, JSON.stringify(next));
+      else window.localStorage.removeItem(BLOCKS_STORAGE_KEY);
+    } catch { /* not remembered */ }
+  };
+  const [editing, setEditing] = useState(false);
+  const [guide, setGuide] = useState<AppRuntimeKind | null>(null);
+  /** A tile's text when it is not a heatmap signal: the kind or an application metric — the colour stays the overall level */
+  const [lens, setLens] = useState<BlockId | null>(null);
+  const [appSort, setAppSort] = useState<{ id: AppColumnId; dir: "desc" | "asc" } | null>(null);
 
   const ws = d?.workloads ?? [];
   const idleCount = useMemo(() => ws.filter((w) => isIdle(w) && (!ns || w.namespace === ns)).length, [ws, ns]);
@@ -111,11 +140,19 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   const signals = useMemo(() => (d ? signalSummary(d.flags, ws) : null), [d, ws]);
   const glance = useMemo(() => clusterGlance(ws), [ws]);
   const cols = useMemo(() => tableColumns(ws), [ws]);
-  const rows = useMemo(() => (layout === "table" ? tableRows(ws, view, sort, { namespace: ns || undefined, problemsOnly, hideIdle: !showIdle }) : []),
-    [layout, ws, view, sort, ns, problemsOnly, showIdle]);
-  const sortBy = (by: HeatView) => setSort(sort.by === by ? { by, dir: sort.dir === "worse" ? "better" : "worse" } : { by, dir: "worse" });
-  const sortMark = (by: HeatView) => (sort.by === by ? (sort.dir === "worse" ? " ▼" : " ▲") : "");
-  const ariaSort = (by: HeatView) => (sort.by === by ? (sort.dir === "worse" ? "descending" : "ascending") : "none");
+  const blocks = useMemo(() => stored ?? autoBlocks(cols), [stored, cols]);
+  const rows = useMemo(() => {
+    if (layout !== "table") return [];
+    const base = tableRows(ws, view, sort, { namespace: ns || undefined, problemsOnly, hideIdle: !showIdle });
+    return appSort ? sortByApp(base, (w) => appByKey.get(heatKey(w))?.values[appSort.id], appSort.dir) : base;
+  }, [layout, ws, view, sort, ns, problemsOnly, showIdle, appSort, appByKey]);
+  const sortBy = (by: HeatView) => {
+    setAppSort(null);
+    setSort(sort.by === by && !appSort ? { by, dir: sort.dir === "worse" ? "better" : "worse" } : { by, dir: "worse" });
+  };
+  const sortByAppCol = (id: AppColumnId) => setAppSort(appSort?.id === id ? { id, dir: appSort.dir === "desc" ? "asc" : "desc" } : { id, dir: "desc" });
+  const sortMark = (by: HeatView) => (!appSort && sort.by === by ? (sort.dir === "worse" ? " ▼" : " ▲") : "");
+  const ariaSort = (by: HeatView) => (!appSort && sort.by === by ? (sort.dir === "worse" ? "descending" : "ascending") : "none");
   const sel = ws.find((w) => heatKey(w) === selected) ?? null;
 
   const open = (w: HeatWorkload, from: HTMLElement) => {
@@ -158,7 +195,17 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
 
   const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : "0%");
   const gw = glance.workloads;
-  const toggleView = (m: HeatView) => setView(view === m ? "worst" : m);
+  const pickView = (m: HeatView) => { setLens(null); setView(m); };
+  const toggleView = (m: HeatView) => pickView(view === m && !lens ? "worst" : m);
+  // The tile's value list: the heatmap's signals, then the kind and the application metrics this cluster has or the viewer chose
+  const lensBlocks: BlockId[] = ["kind", ...(apps?.columns ?? []).filter((c) => c.state === "measured" || blocks.includes(`a:${c.id}`)).map((c): BlockId => `a:${c.id}`)];
+  const lensText = (w: HeatWorkload): string => {
+    const a = appByKey.get(heatKey(w));
+    if (lens === "kind") return kindsOf(a).map((k) => t(`ob.bl.rt.${k.kind}`)).join(" · ") || "—";
+    const id = (lens ?? "").slice(2) as AppColumnId;
+    const col = appCols.get(id), v = a?.values[id];
+    return col && v !== undefined ? formatAppValue(col.unit, v) : "—";
+  };
 
   return (
     <div className={styles.hm}>
@@ -205,14 +252,19 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
 
       {/* Controls: one signal selector (grouped), namespace, window, problems only — meta and refresh on the right */}
       <div className={styles.hmBar}>
-        <Select label={t("ob.hm.metric")} value={view} onChange={(v) => setView(v as HeatView)}
+        <Select label={t("ob.hm.metric")} value={lens ?? view}
+          onChange={(v) => { if (v === "kind" || v.startsWith("a:")) { setView("worst"); setLens(v as BlockId); } else pickView(v as HeatView); }}
           options={[
             { value: "worst", label: t("ob.hm.metric.worst") },
             ...SIGNAL_GROUPS.flatMap((g) => g.metrics.map((m) => ({ value: m, label: t(`ob.hm.metric.${m}`), group: t(`ob.hm.group.${g.id}`) }))),
+            ...lensBlocks.map((b) => ({ value: b, label: blockLabel(t, b, false), group: t("ob.bl.group.app") })),
           ]} />
         <Select label={t("hb.m.namespace")} value={ns} onChange={setNs}
           options={[{ value: "", label: t("hb.m.allNamespaces") }, ...allGroups.map((g) => ({ value: g.namespace, label: `${g.namespace} (${g.workloads.length})` }))]} />
         <Toggle checked={problemsOnly} onChange={setProblemsOnly}>{t("ob.hm.problemsOnly")}</Toggle>
+        <Button size="sm" variant={editing ? "primary" : undefined} ariaPressed={editing} onClick={() => setEditing(!editing)}>{t(stored ? "ob.bl.customizeOn" : "ob.bl.customize")}</Button>
+        <Button size="sm" ariaPressed={guide !== null} onClick={() => setGuide(guide ? null : "nodejs")}>{t("ob.bl.guideOpen")}</Button>
+        {appsFailed ? <Badge tone="medium" title={appQ.error ?? appQ.data?.message ?? ""}>{t("ob.bl.appsFailed")}</Badge> : null}
         <span className={styles.hmMeta}>
           {/* The picker's range differs from what the heatmap reads — said, never a silent other range */}
           {span.differs === "max" ? <Badge tone="info" title={t("ob.hm.windowMaxHint")}>{t("ob.hm.windowMax")}</Badge> : null}
@@ -224,6 +276,12 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
         </span>
       </div>
 
+      {/* Make it yours: the blocks = the table's columns and the values a tile can show */}
+      {editing && (
+        <BlockEditor blocks={blocks} custom={stored !== null} columns={appCols} onChange={remember} onReset={() => remember(null)} onGuide={setGuide} />
+      )}
+      {lens && <p className={styles.hmThreshold}>{t("ob.bl.lensHint", { name: blockLabel(t, lens, false) })}</p>}
+
       {/* Summary: the verdict (live card glyph), fired signals as chips (click = colour by it), quiet words, legend */}
       <div className={styles.hmSummary}>
         <span className={styles.hmVerdict} data-level={verdict}>
@@ -231,7 +289,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
         </span>
         {signals.active.map((s) => (
           <button key={s.metric} type="button" aria-pressed={view === s.metric} data-level={s.tone}
-            className={styles.hmSignal} onClick={() => setView(view === s.metric ? "worst" : s.metric)}>
+            className={styles.hmSignal} onClick={() => toggleView(s.metric)}>
             <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[s.tone]}</span> {t(`ob.hm.flag.${s.metric}`)} <strong>{s.count}</strong>
           </button>
         ))}
@@ -292,11 +350,21 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
                       <th scope="col" aria-sort={ariaSort("worst")}>
                         <button type="button" onClick={() => sortBy("worst")}>{t("ob.hm.metric.worst")}{sortMark("worst")}</button>
                       </th>
-                      {cols.map((m) => (
-                        <th key={m} scope="col" aria-sort={ariaSort(m)} data-active={view === m || undefined}>
-                          <button type="button" title={t(`ob.hm.metric.${m}`)} onClick={() => sortBy(m)}>{t(`ob.hm.short.${m}`)}{sortMark(m)}</button>
-                        </th>
-                      ))}
+                      {blocks.map((b) => {
+                        if (b === "kind") return <th key={b} scope="col">{t("ob.bl.kind")}</th>;
+                        const m = b.startsWith("h:") ? (b.slice(2) as HeatMetric) : null;
+                        const id = m ? null : (b.slice(2) as AppColumnId);
+                        const on = id !== null && appSort?.id === id;
+                        const state = id ? appCols.get(id)?.state : undefined;
+                        return (
+                          <th key={b} scope="col" aria-sort={m ? ariaSort(m) : on ? (appSort!.dir === "desc" ? "descending" : "ascending") : "none"}
+                            data-active={(m ? view === m : lens === b) || undefined} data-state={state === "absent" ? "absent" : undefined}>
+                            <button type="button" title={state === "absent" ? t("ob.bl.absentHint") : blockLabel(t, b, false)} onClick={() => (m ? sortBy(m) : sortByAppCol(id!))}>
+                              {blockLabel(t, b)}{m ? sortMark(m) : on ? (appSort!.dir === "desc" ? " ▼" : " ▲") : ""}
+                            </button>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -316,11 +384,23 @@ ${t("ob.hm.tileHint")}`}>
                             <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[w.worst]}</span> {t(`ob.hm.level.${w.worst}`)}
                             {probs.length > 1 ? <span className={styles.hmTileMore}> ×{probs.length}</span> : null}
                           </td>
-                          {cols.map((m) => {
-                            const lv = w.cells[m].level;
+                          {blocks.map((b) => {
+                            const a = appByKey.get(k);
+                            if (b === "kind") return <td key={b}><KindChips app={a} loaded={!!apps} /></td>;
+                            if (b.startsWith("h:")) {
+                              const m = b.slice(2) as HeatMetric;
+                              const lv = w.cells[m].level;
+                              return (
+                                <td key={b} data-level={lv}>
+                                  <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[lv]}</span> {formatCell(m, w, t)}
+                                </td>
+                              );
+                            }
+                            const id = b.slice(2) as AppColumnId;
+                            const col = appCols.get(id), v = a?.values[id];
                             return (
-                              <td key={m} data-level={lv}>
-                                <span className={styles.hmGlyph} aria-hidden="true">{GLYPH[lv]}</span> {formatCell(m, w, t)}
+                              <td key={b} data-level={v === undefined ? "notMeasured" : undefined} title={col?.state === "queryFailed" ? t("ob.bl.failedHint") : undefined}>
+                                {!apps ? "…" : col && v !== undefined ? formatAppValue(col.unit, v) : "—"}
                               </td>
                             );
                           })}
@@ -359,6 +439,8 @@ ${t("ob.hm.tileHint")}`}>
                       const probs = problemSignals(w).slice(0, 3);
                       const tip = [
                         k, `${w.kind ?? t("hb.m.kindUnknown")} · ${t(`ob.hm.level.${lv}`)}${w.managed ? ` · ${t("ob.hm.managed")}` : ""}`,
+                        ...(apps ? [`${t("ob.bl.kind")}: ${kindsOf(appByKey.get(k)).map((x) => t(`ob.bl.rt.${x.kind}`) + (x.basis === "image" ? " ?" : "")).join(" · ") || t("ob.bl.kindUnknown")}`] : []),
+                        ...(lens && lens !== "kind" ? [`${blockLabel(t, lens, false)}: ${lensText(w)}`] : []),
                         ...(probs.length ? [reason(w, probs)] : []), t("ob.hm.tileHint"),
                       ].join("\n");
                       return (
@@ -368,8 +450,8 @@ ${t("ob.hm.tileHint")}`}>
                           <span className={styles.hmTileName}>{shortName(w.workload, w.namespace, g.prefix)}</span>
                           <span className={styles.hmTileValue}>
                             <span className={styles.hmGlyph} aria-hidden="true">{tt.glyph}</span>
-                            <span className={styles.hmTileText}>{tt.text}</span>
-                            {tt.more ? <span className={styles.hmTileMore}>+{tt.more}</span> : null}
+                            <span className={styles.hmTileText}>{lens ? lensText(w) : tt.text}</span>
+                            {!lens && tt.more ? <span className={styles.hmTileMore}>+{tt.more}</span> : null}
                           </span>
                         </button>
                       );
@@ -395,6 +477,8 @@ ${t("ob.hm.tileHint")}`}>
           </div>
         )}
       </div>
+      {/* What each kind needs to be measured: feature · configuration · permissions · check */}
+      {guide && <RuntimeGuide apps={apps} blocks={blocks} kind={guide} onKind={setGuide} onClose={() => setGuide(null)} />}
     </div>
   );
 }

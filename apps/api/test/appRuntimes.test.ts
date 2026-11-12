@@ -70,8 +70,14 @@ test("blocks: add · remove · move · presets · the remembered set", () => {
   assert.deepEqual(wb.removeBlock(["kind", "h:ready"], "kind"), ["h:ready"]);
   assert.deepEqual(wb.removeBlock(["h:ready"], "h:ready"), ["h:ready"], "a table keeps one column");
   assert.deepEqual(wb.parseBlocks(JSON.stringify(["h:cpu", "nope", "h:cpu", "a:pyRss"])), ["h:cpu", "a:pyRss"]);
-  assert.deepEqual(wb.parseBlocks("{broken"), basic);
-  assert.deepEqual(wb.parseBlocks(null), basic);
+  assert.equal(wb.parseBlocks("{broken"), null, "unreadable = the automatic set");
+  assert.equal(wb.parseBlocks(null), null);
+  assert.equal(wb.parseBlocks(JSON.stringify(["nope"])), null);
+  // automatic = the kind + what the table showed before blocks (every measured heatmap signal, in the heatmap's order)
+  assert.deepEqual(wb.autoBlocks(["cpu", "ready", "oldGen"]), ["kind", "h:ready", "h:cpu", "h:oldGen"]);
+  const rows = [{ n: "a", v: 3 }, { n: "b", v: undefined }, { n: "c", v: 9 }, { n: "d", v: undefined }];
+  assert.deepEqual(wb.sortByApp(rows, (r) => r.v, "desc").map((r) => r.n), ["c", "a", "b", "d"], "no value goes last, in its order");
+  assert.deepEqual(wb.sortByApp(rows, (r) => r.v, "asc").map((r) => r.n), ["a", "c", "b", "d"]);
   for (const p of wb.PRESET_IDS) assert.ok(wb.PRESETS[p].every((b) => wb.ALL_BLOCKS.includes(b)), p);
 });
 
@@ -93,6 +99,13 @@ test("blocks: every runtime, block and guide step has ko / en strings; the route
   for (const p of wb.PRESET_IDS) assert.ok(ops.includes(`"ob.bl.preset.${p}"`), `preset ${p}`);
   const routes = readFileSync(new URL("../src/routes/observability.ts", import.meta.url), "utf8");
   assert.match(routes, /\/api\/observability\/app-metrics/);
+  // Not a view of its own: the blocks customise the heatmap (tile text) and its table (columns) — one screen, one request each
   const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /key=\{`blocks:\$\{/, "its own key among the sibling tab components");
+  assert.doesNotMatch(page, /WorkloadBlocks|"blocks"/);
+  const heat = readFileSync(new URL("../../web/src/app/observability/components/WorkloadHeatmap.tsx", import.meta.url), "utf8");
+  assert.match(heat, /<BlockEditor /);
+  assert.match(heat, /<RuntimeGuide /);
+  assert.match(heat, /blocks\.map\(\(b\) =>/, "the table's columns are the viewer's blocks");
+  assert.match(heat, /stored \?\? autoBlocks\(cols\)/, "automatic until the viewer chooses");
+  for (const k of ["ob.bl.preset.auto", "ob.bl.customize", "ob.bl.guideOpen", "ob.bl.lensHint"]) assert.ok(ops.includes(`"${k}"`), k);
 });

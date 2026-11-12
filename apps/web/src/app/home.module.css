@@ -76,11 +76,14 @@
   gap: 12px;
 }
 
+/* Every card the same size on every row and in every group: fixed height, the description is two lines (full text in the tooltip) */
 .card {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  height: 96px;
+  overflow: hidden;
   padding: 14px 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -112,7 +115,9 @@
 
 .cardTitle {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
   align-items: baseline;
   gap: 6px;
   font-size: var(--text-body);
@@ -126,6 +131,10 @@
 }
 
 .cardBody {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-size: var(--text-small);
   line-height: 1.5;
   color: var(--muted);
@@ -206,13 +215,15 @@
 .features {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 12px;
 }
 
 .feature {
   display: grid;
+  grid-template-rows: 36px auto 1fr auto;
   gap: 8px;
-  align-content: start;
+  height: 100%;
   padding: 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);

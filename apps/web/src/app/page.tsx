@@ -54,7 +54,7 @@ export default function Home() {
           </h2>
           <div className={styles.cards}>
             {g.items.map((it) => (
-              <Link key={it.href} className={styles.card} href={it.href}>
+              <Link key={it.href} className={styles.card} href={it.href} title={t(it.descKey)}>
                 <span className={styles.cardIcon}><NavIcon name={it.icon} size={20} /></span>
                 <span className={styles.cardText}>
                   <span className={styles.cardTitle}>

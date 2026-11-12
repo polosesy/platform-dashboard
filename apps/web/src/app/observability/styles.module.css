@@ -1054,26 +1054,17 @@
 .plContextList > li.plContextHere { background: var(--accent-soft); font-weight: 600; }
 
 /* ── 조립식 표 (WorkloadBlocks) — columns as blocks, and the per-kind guide ── */
-.bl { display: grid; gap: 16px; min-width: 0; }
+.blEditor { display: grid; gap: 0; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
+.blEditorHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.blEditorTitle { font-size: var(--text-heading); font-weight: 600; }
+.blEditorActions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.blEditorFoot { margin: 0; padding: 8px 16px; font-size: var(--text-caption); color: var(--muted); }
 .blBlocks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 12px 16px; list-style: none; border-bottom: 1px solid var(--border); }
 .blBlock { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--panel-sunken); }
 .blBlock[data-state="absent"] { border-style: dashed; color: var(--subtle); }
 .blBlock[data-state="failed"] { border-color: var(--warning); }
 .blBlockName { padding: 0 4px; font-size: var(--text-small); font-weight: 600; white-space: nowrap; }
-.blFilters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; padding: 12px 16px; }
-.blTableWrap { overflow: auto; max-height: 640px; }
-.blTable { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
-.blTable thead th { position: sticky; top: 0; z-index: 1; padding: 8px 12px; text-align: left; white-space: nowrap; font-size: var(--text-caption); font-weight: 600; color: var(--muted); background: var(--panel-solid); border-bottom: 1px solid var(--border-strong); }
-.blTable tbody th, .blTable td { padding: 6px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.blTable tbody th { font-weight: 400; }
-.blTable td[data-level="danger"] { color: var(--danger-strong); font-weight: 600; }
-.blTable td[data-level="warn"] { color: var(--warning-strong); font-weight: 600; }
-.blTable td[data-level="notInstrumented"], .blTable td[data-level="notMeasured"], .blTable td[data-level="stopped"] { color: var(--subtle); }
-.blName { display: block; font-weight: 600; }
-.blNs { display: block; font-size: var(--text-caption); color: var(--subtle); }
-.blNum { font-variant-numeric: tabular-nums; }
 .blMuted { color: var(--subtle); }
-.blGlyph { font-size: var(--text-caption); }
 .blKinds { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .blGuide { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 .blGuideCode { display: grid; gap: 12px; min-width: 0; }

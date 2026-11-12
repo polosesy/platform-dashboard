@@ -1,6 +1,6 @@
 // AKS 모니터링 › 클러스터 · 워크로드 › 조립식 표 — columns as blocks (pure).
 //
-// A block is one column: the workload's kind, a heatmap signal (`h:<metric>` — Kubernetes and Java / Spring), or an
+// A block is one column of the workload table and one value a heatmap tile can show: the workload's kind, a heatmap signal (`h:<metric>` — Kubernetes and Java / Spring), or an
 // application metric of another runtime (`a:<id>` — API services/appRuntimes.ts). The viewer snaps blocks together —
 // add, remove, move — and the set is remembered in this browser (`aud.workload.blocks`). Presets are starting sets.
 // Each runtime has a guide: what says a workload is of that kind, which library / exporter exposes the metrics, the
@@ -37,16 +37,31 @@ export const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
 export const BLOCKS_STORAGE_KEY = "aud.workload.blocks";
 export const MAX_BLOCKS = 16;
 
-/** Pure: the remembered set — known blocks only, no repeats, at most MAX_BLOCKS; anything unreadable = the basic set */
-export function parseBlocks(raw: string | null): BlockId[] {
+/** Pure: the remembered set — known blocks only, no repeats, at most MAX_BLOCKS; nothing readable = null (the automatic set) */
+export function parseBlocks(raw: string | null): BlockId[] | null {
   try {
     const v: unknown = raw ? JSON.parse(raw) : null;
-    if (!Array.isArray(v)) return PRESETS.basic;
+    if (!Array.isArray(v)) return null;
     const out = [...new Set(v.filter((x): x is BlockId => typeof x === "string" && KNOWN.has(x)))].slice(0, MAX_BLOCKS);
-    return out.length ? out : PRESETS.basic;
+    return out.length ? out : null;
   } catch {
-    return PRESETS.basic;
+    return null;
   }
+}
+
+/**
+ * Pure: the automatic set (nothing chosen yet) — the kind, then every heatmap signal measured in this cluster (what
+ * the table showed before blocks), in the heatmap's order. Choosing anything makes it the viewer's own set.
+ */
+export function autoBlocks(measured: HeatMetric[]): BlockId[] {
+  return ["kind", ...HEAT_BLOCKS.filter((m) => measured.includes(m)).map((m): BlockId => `h:${m}`)];
+}
+
+/** Pure: rows by one application metric — rows with a value first (higher first, or lower first), the rest keep their order */
+export function sortByApp<R>(rows: R[], valueOf: (r: R) => number | undefined, dir: "desc" | "asc"): R[] {
+  return rows.map((r, i) => ({ r, i, v: valueOf(r) })).sort((x, y) =>
+    Number(x.v === undefined) - Number(y.v === undefined) || (x.v !== undefined && y.v !== undefined ? (dir === "desc" ? y.v - x.v : x.v - y.v) : 0) || x.i - y.i,
+  ).map((x) => x.r);
 }
 
 /** Pure: add at the end (no repeats, bounded) */
