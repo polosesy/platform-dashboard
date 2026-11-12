@@ -257,7 +257,7 @@ export function InstanceHealthPanel({
               {selected.location ? <span>{selected.location}</span> : null}
               {selected.occurredTime && selected.availabilityState !== "Available" ? <span>{t("health.occurred")}: {new Date(selected.occurredTime).toLocaleString(dateLocale(locale))}</span> : null}
             </div>
-            {selected.summary ? <div className={styles.selectedSummary}><span className={styles.resSummaryLabel}>{t("health.azureSummary")}</span> {selected.summary}</div> : null}
+            {selected.summary ? <div className={styles.selectedSummary}><span className={styles.resSummaryLabel}>{t("health.azureSummary")}</span> <SummaryText r={selected} /></div> : null}
             {!filtered.some((r) => r.resourceId === selected.resourceId) ? <div className={styles.statSub}>{t("health.selected.hidden")}</div> : null}
           </div>
         ) : null}
@@ -296,7 +296,7 @@ export function InstanceHealthPanel({
                   </div>
                   {r.summary && (
                     <div className={styles.resSummary}>
-                      <span className={styles.resSummaryLabel}>{t("health.azureSummary")}</span> {r.summary}
+                      <span className={styles.resSummaryLabel}>{t("health.azureSummary")}</span> <SummaryText r={r} />
                     </div>
                   )}
                   {r.occurredTime && r.availabilityState !== "Available" && (
@@ -334,5 +334,23 @@ export function InstanceHealthPanel({
         </Panel>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Azure's summary. When Azure answered in English although Korean was asked (Load Balancer · NAT gateway …) the API
+ * translates the known sentences (or the configured Translator does): marked, with Azure's own text in the tooltip.
+ * English left as it is in a Korean screen says so — it is Azure's wording, not a missing translation of ours.
+ */
+function SummaryText({ r }: { r: { summary?: string; summaryTranslated?: "platform" | "machine"; summaryOriginal?: string } }) {
+  const { t, locale } = useI18n();
+  if (!r.summary) return null;
+  const english = locale === "ko" && !r.summaryTranslated && !/[\uac00-\ud7a3]/.test(r.summary) && /[A-Za-z]{3}/.test(r.summary);
+  return (
+    <>
+      <span title={r.summaryOriginal}>{r.summary}</span>
+      {r.summaryTranslated ? <span className={styles.summaryMark} title={r.summaryOriginal}> · {t(`health.summary.${r.summaryTranslated}`)}</span> : null}
+      {english ? <span className={styles.summaryMark}> · {t("health.summary.englishOnly")}</span> : null}
+    </>
   );
 }

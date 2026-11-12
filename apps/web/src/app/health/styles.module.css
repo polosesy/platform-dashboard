@@ -1659,3 +1659,4 @@ button.heatTileSelected:focus-visible {
 .eventStats {
   grid-column: span 12;
 }
+.summaryMark { color: var(--subtle); font-size: var(--text-caption); white-space: nowrap; }

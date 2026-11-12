@@ -17,6 +17,7 @@ import { getArmFetcherAuto, type ArmFetcher, defaultSubscriptions } from "../inf
 import { parseSubscriptionIds } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import type { Lang } from "../infra/lang.js";
+import { hasHangul, koreanSummary } from "./rhSummaryKo.js";
 
 const ACCEPT_LANGUAGE: Record<Lang, string> = { ko: "ko-KR", en: "en-US" };
 
@@ -170,6 +171,8 @@ async function _fetchHealthSummaryCore(
       failed++;
     }
   }
+  if (lang === "ko") await koreanSummaries(env, resources);
+
   // No subscription could be read: an error, not "0 available · 0 unavailable" (which was also cached)
   if (failed && failed === perSubResults.length) throw (perSubResults[0] as PromiseRejectedResult).reason;
 
@@ -186,6 +189,30 @@ async function _fetchHealthSummaryCore(
   // A partial read (some subscription failed) is asked again on the next request rather than kept as the answer
   if (!failed) healthCache.set(cacheKey, summary, env.AZURE_HEALTH_CACHE_TTL_MS);
   return summary;
+}
+
+/**
+ * Korean for the summaries Azure answered in English although ko-KR was asked (services/rhSummaryKo.ts): the known
+ * fixed sentences from the table; what is left goes to Azure Translator when a key is configured (never the keyless
+ * public endpoint from here — one slow call would hold the whole tab). Azure's text is kept in `summaryOriginal`.
+ */
+export async function koreanSummaries(env: Env, resources: ResourceHealthStatus[], doFetch: typeof fetch = fetch): Promise<void> {
+  const rest = new Map<string, ResourceHealthStatus[]>();
+  for (const r of resources) {
+    if (!r.summary || hasHangul(r.summary)) continue;
+    const ko = koreanSummary(r.summary);
+    if (ko) { r.summaryOriginal = r.summary; r.summary = ko; r.summaryTranslated = "platform"; continue; }
+    rest.set(r.summary, [...(rest.get(r.summary) ?? []), r]);
+  }
+  if (!rest.size || !env.AZURE_TRANSLATOR_KEY) return;
+  const texts = [...rest.keys()].slice(0, 100);
+  const out = await translateTexts(env, texts, "ko", "en", doFetch).catch(() => null);
+  if (!out?.ok) return;
+  texts.forEach((t, i) => {
+    const ko = out.translations[i];
+    if (!ko || ko === t || !hasHangul(ko)) return;
+    for (const r of rest.get(t) ?? []) { r.summaryOriginal = t; r.summary = ko; r.summaryTranslated = "machine"; }
+  });
 }
 
 function mapAvailability(state?: string): ResourceHealthStatus["availabilityState"] {

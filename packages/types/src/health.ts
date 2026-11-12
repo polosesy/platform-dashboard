@@ -7,6 +7,13 @@ export type ResourceHealthStatus = {
   location?: string;
   availabilityState: "Available" | "Degraded" | "Unavailable" | "Unknown";
   summary?: string;
+  /**
+   * Set when `summary` is not Azure's own wording: Azure answers some types' summaries in English only (Load
+   * Balancer · NAT gateway …) — "platform" = this dashboard's translation of a known fixed sentence, "machine" = the
+   * configured Translator. `summaryOriginal` keeps Azure's text.
+   */
+  summaryTranslated?: "platform" | "machine";
+  summaryOriginal?: string;
   reasonType?: string;
   reasonChronicity?: string;
   occurredTime?: string;

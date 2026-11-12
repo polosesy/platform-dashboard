@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./styles.module.css";
 import type {
   HealthCoverage,
@@ -54,6 +54,9 @@ const EVENT_TYPE_COLORS: Record<ServiceHealthEventType, string> = {
 // ── Helpers ──
 
 /** "3시간 전" / "3h ago" in the app's language (was English-only text on the Korean page) */
+/** Service Health event levels (Azure's words) that have a translation */
+const EVENT_LEVELS = new Set(["Warning", "Error", "Informational"]);
+
 function fmtRelative(iso: string, locale: Locale): string {
   const diff = new Date(iso).getTime() - Date.now();
   const abs = Math.abs(diff);
@@ -333,7 +336,7 @@ function EventCard({
           <Chip level={EVENT_TYPE_LEVEL[evt.eventType]}>
             {t(`health.eventType.${evt.eventType}`)}
           </Chip>
-          <Chip level="plain" glyph={false}>{evt.level}</Chip>
+          <Chip level="plain" glyph={false}>{EVENT_LEVELS.has(evt.level) ? t(`health.level.${evt.level}`) : evt.level}</Chip>
           {evt.isResolved && <Chip level="ok">{t("health.incident.Resolved")}</Chip>}
           {showTranslation && translation && <Badge tone="info">KO</Badge>}
         </div>
@@ -450,7 +453,7 @@ function ServiceStatusPanel({
   loading: boolean;
   error: string | null;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const getApiToken = useApiToken();
 
   // ── Translation state ──
@@ -505,6 +508,15 @@ function ServiceStatusPanel({
       setTranslating(false);
     }
   }, [data, translationMap, getApiToken, t]);
+
+  // Korean screen: the events are translated without asking (Azure writes them in English only). Once per data set —
+  // when no translator is configured the note says so and the English stays, the toggle still works by hand
+  const autoFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (locale !== "ko" || !data?.events.length || autoFor.current === data.generatedAt) return;
+    autoFor.current = data.generatedAt;
+    void handleTranslateToggle(true);
+  }, [locale, data, handleTranslateToggle]);
 
   const eventTypeCounts = [
     { type: "ServiceIssue" as const, key: "serviceIssue" as const, glyph: "■", tone: "high" as const },
