@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-web
-last-verified: 2026-11-10
+last-verified: 2026-11-12
 covers: [apps/web/src/app/globals.css, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
 ---
 # 디자인 시스템 — 원칙 v1과 토큰
@@ -93,14 +93,17 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/ui/index.tsx, app
      - 화면마다 무엇을 보여 줄지는 `navConfig` `PAGE_SCOPE`가 정합니다.
      - 선택은 모든 화면이 함께 씁니다(`lib/scopeStore`, 탭마다 sessionStorage).
      - 화면마다 있던 선택 상자는 지웠습니다. 범위가 바뀔 때 비워야 하는 화면 상태는 `useOnChange`로 비웁니다(VNet 트래픽의 VNet, AKS 보안 점검의 선택, AKS 클러스터의 필터).
-4. **왼쪽 메뉴 + Ctrl+K 빠른 이동 + '오늘의 상태' 첫 화면** — 2026-11-10 완료.
+4. **왼쪽 메뉴 + Ctrl+K 빠른 이동 + 브리핑 첫 화면** — 2026-11-10 완료.
    - **왼쪽 메뉴**: 1100px 이상에서는 왼쪽에 고정하고(`--rail-width` 248), 위쪽 막대에는 찾기와 계정만 둡니다. 좁은 화면은 ☰ 서랍입니다.
    - **Ctrl+K**: 어디서나 화면을 찾습니다.
      - 화면 목록은 `navConfig`에서 오며, 동작은 언어·화면 밝기·간격 바꾸기입니다.
      - 입력한 단어가 모두 들어 있는 화면만 남기고, 이름에 걸린 화면을 먼저 보여 줍니다(`lib/commandPalette`).
-   - **오늘의 상태**: 개요 맨 위에 둡니다.
-     - 확인 안 한 알림·리소스 상태·보안 권고에서 손볼 곳을 한 문장으로 보여 줍니다(`lib/todayStatus`).
-     - 읽지 못한 출처는 0으로 세지 않고 '확인 못 함'으로 표시합니다.
+   - **브리핑**(2026-11-12 — '오늘의 상태'를 바꿈): 개요 맨 위에 둡니다.
+     - 이 환경에서 지금 중요한 것을 문장으로 말합니다(`lib/briefing`): 확인 안 한 알림·리소스 상태·보안 권고 + 고른 클러스터의 워크로드 위험 신호·SLO 오류 예산·지금도 나오는 Warning 이벤트·Kubernetes 버전.
+     - 세 묶음: 지금 손볼 것(위험·주의) · 알아 둘 것(패치가 나옴, 확인 못 함, 읽는 중) · 정상. 머리 문장은 손볼 것만 셉니다.
+     - 출처마다 따로 답합니다. 아직 읽는 중이면 '읽는 중', 읽지 못하면 '확인 못 함' — 둘 다 0이나 '정상'이 아닙니다(예전엔 읽는 중인 출처가 '읽지 못했습니다'로 보였고 머리 문장은 끝까지 '읽는 중'이었습니다).
+     - '브리핑 복사'로 같은 문장을 글자로 가져갑니다.
+   - **핵심 기능 카드**: 브리핑 아래 여섯 장 — 화면 이름이 아니라 그 화면이 답하는 질문('지금 어디가 아픈가요?')을 크게 씁니다. 그 아래 '모든 화면'은 메뉴와 같은 구성 그대로입니다.
 5. **다크 모드 · 조밀 보기** — 2026-11-10 완료(켜는 방식).
    - 메뉴 › 설정에서 화면(밝게 · 어둡게 · 시스템)과 간격(편안함 · 조밀)을 고르고, 이 브라우저에 저장합니다(`lib/displayPrefs`).
      - `<head>` 스크립트가 첫 화면이 그려지기 전에 적용해, 밝은 화면이 잠깐 비치지 않습니다.

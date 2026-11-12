@@ -16,6 +16,7 @@ import { clusterConnection } from "../infra/azureClientFactory.js";
 import { NODE_MAINT_MAX_DAYS, getNodeMaintenance } from "../services/nodeMaintenance.js";
 import { getObservabilitySources } from "../services/observabilitySources.js";
 import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
+import { getAppMetrics } from "../services/appRuntimes.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
 import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
@@ -178,6 +179,17 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_stack_failed", "observability");
+    }
+  });
+
+  // Application kinds (JVM · Node.js · Python · Go · .NET · NGINX · Redis · PostgreSQL) and their representative
+  // metrics per workload — the columns of the build-your-own table (services/appRuntimes.ts)
+  router.get("/api/observability/app-metrics", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getAppMetrics(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "app_metrics_failed", "observability");
     }
   });
 

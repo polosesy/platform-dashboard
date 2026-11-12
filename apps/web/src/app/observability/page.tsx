@@ -19,6 +19,7 @@ import { StackTab } from "./components/StackTab";
 import { SloTab } from "./components/SloTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
+import { WorkloadBlocks } from "./components/WorkloadBlocks";
 import { EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useTimeRange } from "@/lib/useTimeRange";
@@ -50,7 +51,8 @@ function ObservabilityView() {
   // 워크로드: the heatmap's cells as tiles or as a sortable table — one source (the Azure Monitor workspace). The old
   // Container Insights list is gone: empty whenever the DCR collects only Perf · Syslog, and its pod states repeated
   // the AKS 클러스터 browser
-  const [wlView, setWlView] = useState<"tiles" | "table">("tiles");
+  // "blocks" = the table built from blocks (columns of any runtime the viewer snaps together — WorkloadBlocks)
+  const [wlView, setWlView] = useState<"tiles" | "table" | "blocks">("tiles");
 
   const clusterName = clusters.find((c) => c.id === clusterId)?.name ?? clusterId;
   const query = useApiQuery(clusterId ? `observability:${clusterId}` : null, async (token) => {
@@ -128,10 +130,11 @@ function ObservabilityView() {
 
           {tab === "overview" && (
             <Segmented label={t("ob.hm.view")} value={wlView} onChange={setWlView}
-              items={[{ id: "tiles", label: t("ob.hm.view.heatmap") }, { id: "table", label: t("ob.hm.view.table") }]} />
+              items={[{ id: "tiles", label: t("ob.hm.view.heatmap") }, { id: "table", label: t("ob.hm.view.table") }, { id: "blocks", label: t("ob.hm.view.blocks") }]} />
           )}
 
-          {tab === "overview" && <WorkloadHeatmap key={`heat:${clusterId}`} clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "overview" && wlView !== "blocks" && <WorkloadHeatmap key={`heat:${clusterId}`} clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "overview" && wlView === "blocks" && <WorkloadBlocks key={`blocks:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "overview" && <EventsSection key={`events:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
 
           {tab === "slo" && <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}

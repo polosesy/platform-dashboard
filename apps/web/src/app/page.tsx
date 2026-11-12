@@ -6,7 +6,8 @@ import { PageHeader } from "@/components/ui";
 import { NAV_GROUPS } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import styles from "./home.module.css";
-import { TodayStatus } from "./TodayStatus";
+import { Briefing } from "./Briefing";
+import { CORE_FEATURES } from "@/lib/briefing";
 
 /** 개요 — every screen of the dashboard, grouped exactly like the menu (cards are generated from navConfig). */
 export default function Home() {
@@ -24,8 +25,25 @@ export default function Home() {
           </div>
         }
       />
-      {/* The one big thing on the first screen: is anything wrong right now (design draft ⑦) */}
-      <TodayStatus />
+      {/* The one big thing on the first screen: what matters in this environment right now */}
+      <Briefing />
+
+      {/* What the platform is for — six questions and the screen that answers each */}
+      <section className={styles.group} aria-labelledby="home-core">
+        <h2 id="home-core" className={styles.groupTitle}>{t("home.core.title")}</h2>
+        <div className={styles.features}>
+          {CORE_FEATURES.map((f) => (
+            <Link key={f.id} className={styles.feature} href={f.href}>
+              <span className={styles.cardIcon}><NavIcon name={f.icon} size={20} /></span>
+              <span className={styles.featureAsk}>{t(`home.feat.${f.id}.ask`)}</span>
+              <span className={styles.cardBody}>{t(`home.feat.${f.id}.body`)}</span>
+              <span className={styles.featureGo}>{t(`home.feat.${f.id}.go`)} →</span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <h2 className={styles.allTitle}>{t("home.all.title")}</h2>
       <p className={styles.intro}>{t("home.intro")}</p>
 
       {groups.map((g) => (

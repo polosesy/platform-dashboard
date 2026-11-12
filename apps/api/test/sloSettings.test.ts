@@ -254,7 +254,8 @@ test("routes: read signed-in, change operator-only; every key built at runtime e
 test("K8s events are a section of 클러스터 · 워크로드 (under the heatmap), not a tab of their own", () => {
   const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /const TABS: Tab\[\] = \[[^\]]*"events"/);
-  assert.match(page, /tab === "overview" && <WorkloadHeatmap [^\n]+\n\s+\{tab === "overview" && <EventsSection /);
+  // the heatmap (or the 조립식 표 in its place), then the events section — on the same tab
+  assert.match(page, /tab === "overview" && wlView !== "blocks" && <WorkloadHeatmap [^\n]+\n[^\n]+<WorkloadBlocks [^\n]+\n\s+\{tab === "overview" && <EventsSection /);
   const msgs = readFileSync(new URL("../../web/src/lib/i18nMessages.ts", import.meta.url), "utf8");
   assert.doesNotMatch(msgs, /"obs\.tab\.events"/);
 });

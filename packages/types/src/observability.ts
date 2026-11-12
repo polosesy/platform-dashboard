@@ -881,3 +881,25 @@ export type LogInsightsResponse = {
   timeline: { start: string; stepSeconds: number; buckets: number[]; byWorkload: { workload: string; buckets: number[] }[] } | null;
   gaps: ("errors" | "warns" | "exceptions" | "timeline")[];
 };
+
+// ── Application kinds and their representative metrics (services/appRuntimes.ts — 조립식 표) ──
+// What each workload runs (JVM · Node.js · Python · Go · .NET · NGINX · Redis · PostgreSQL) and that kind's values.
+// basis: metrics = its detection metric is in the workspace (a fact) · image = only the image name says so (a hint).
+
+export type AppRuntimeKind = "jvm" | "nodejs" | "python" | "go" | "dotnet" | "nginx" | "redis" | "postgres";
+export type AppColumnId =
+  | "nodeEventLoopLag" | "nodeHeapUsed" | "pyRss" | "goGoroutines" | "goHeapInuse" | "dotnetMemory"
+  | "nginxConnections" | "nginxRequests" | "redisClients" | "redisMemory" | "pgConnections" | "openFds";
+/** measured = series exist · absent = the metric is not in the workspace · queryFailed = the query did not answer */
+export type AppMetricState = "measured" | "absent" | "queryFailed";
+export type AppMetricsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadHeatmapResponse["metricsState"];
+  message?: string;
+  runtimes: { kind: AppRuntimeKind; state: AppMetricState; /** workloads whose metrics say so */ workloads: number; /** workloads only the image name says so */ hinted: number }[];
+  columns: { id: AppColumnId; runtime: AppRuntimeKind | "any"; unit: "ms" | "bytes" | "count" | "perSec" | "ratio"; state: AppMetricState; workloads: number }[];
+  workloads: { namespace: string; workload: string; kinds: { kind: AppRuntimeKind; basis: "metrics" | "image" }[]; values: Partial<Record<AppColumnId, number>> }[];
+  gaps?: StackQueryGap[];
+};

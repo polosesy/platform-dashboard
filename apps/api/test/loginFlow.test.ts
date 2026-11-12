@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 // Pure web modules (no React) — the web package is CommonJS-typed, so read the namespace
@@ -53,25 +54,80 @@ test("quick open: every screen once, words must all match, label hits first, ↑
   assert.equal(cp.moveIndex(3, 1, 0), 0);
 });
 
-import * as todayNs from "../../web/src/lib/todayStatus.ts";
-const td = ((todayNs as unknown as { default?: typeof todayNs }).default ?? todayNs) as typeof todayNs;
+import * as briefNs from "../../web/src/lib/briefing.ts";
+const bf = ((briefNs as unknown as { default?: typeof briefNs }).default ?? briefNs) as typeof briefNs;
 
-test("today: problems first, a source that did not answer is 'not checked' (never zero), sample is said", () => {
-  const all = td.todayStatus({
-    alerts: { failed: false, data: { firingUnacked: 3, sev1: 1, sev2: 0 } },
-    health: { failed: false, data: { unavailable: 0, degraded: 2, total: 40 } },
-    security: { failed: true, data: null },
+const OFF = { state: "off" as const };
+test("briefing: worst first, loading is 'reading' and failed is 'not checked' (never zero or OK), sample is said", () => {
+  const all = bf.briefing({
+    alerts: { state: "ok", data: { firingUnacked: 3, high: 1 } },
+    health: { state: "ok", data: { unavailable: 0, degraded: 2, total: 40 } },
+    security: { state: "failed" },
+    workloads: OFF, slo: OFF, events: OFF, version: OFF,
   });
   assert.deepEqual(all.rows.map((r) => [r.id, r.level]), [["alerts", "danger"], ["health", "warn"], ["security", "unknown"]]);
-  assert.equal(all.problems, 2);
+  assert.equal(all.act, 2);
   assert.equal(all.unchecked, 1);
-  const calm = td.todayStatus({
-    alerts: { failed: false, data: { firingUnacked: 0, sev1: 0, sev2: 0 } },
-    health: { failed: false, data: { unavailable: 0, degraded: 0, total: 12 }, sample: true },
-    security: { failed: false, data: { high: 0, medium: 0 } },
+  assert.equal(bf.headlineKey(all), "brief.head.act");
+
+  const calm = bf.briefing({
+    alerts: { state: "ok", data: { firingUnacked: 0, high: 0 } },
+    health: { state: "ok", data: { unavailable: 0, degraded: 0, total: 12 }, sample: true },
+    security: { state: "ok", data: { high: 0, medium: 0 } },
+    workloads: OFF, slo: OFF, events: OFF, version: OFF,
   });
-  assert.equal(calm.problems, 0);
-  assert.ok(calm.rows.every((r) => r.level === "ok"));
+  assert.equal(calm.act, 0);
+  assert.ok(calm.rows.every((r) => r.level === "ok" && r.group === "fine"));
   assert.equal(calm.sample, true);
-  assert.equal(td.todayStatus({ alerts: { failed: false, data: null }, health: { failed: false, data: null }, security: { failed: false, data: null } }).unchecked, 3, "no data = not checked");
+  assert.equal(bf.headlineKey(calm), "brief.head.ok");
+
+  // The defect this replaces: a source that had not answered yet read "could not be read" and the headline stayed "reading"
+  const reading = bf.briefing({
+    alerts: { state: "loading" }, health: { state: "ok", data: { unavailable: 1, degraded: 0, total: 5 } }, security: { state: "loading" },
+    workloads: OFF, slo: OFF, events: OFF, version: OFF,
+  });
+  assert.equal(reading.unchecked, 0, "loading is not 'not checked'");
+  assert.equal(reading.loading, 2);
+  assert.equal(bf.headlineKey(reading), "brief.head.actSoFar", "what arrived is said at once");
+  assert.equal(bf.headlineKey({ act: 0, unchecked: 0, loading: 1 }), "brief.head.reading");
+  assert.equal(bf.headlineKey({ act: 0, unchecked: 2, loading: 0 }), "brief.head.unchecked");
+  const none = bf.briefing({ alerts: { state: "ok" }, health: { state: "failed" }, security: { state: "failed" }, workloads: OFF, slo: OFF, events: OFF, version: OFF });
+  assert.equal(none.unchecked, 3, "ok without data = not checked");
+});
+
+test("briefing: the cluster's rows — danger workloads, SLO burn, events still occurring, version", () => {
+  const b = bf.briefing({
+    cluster: "aks-a",
+    alerts: OFF, health: OFF, security: OFF,
+    workloads: { state: "ok", data: { danger: 2, warn: 1, total: 30, worst: "shop/api" } },
+    slo: { state: "ok", data: { burning: 0, exhausted: 1, total: 8, worst: "shop/api" } },
+    events: { state: "ok", data: { recent: 4, total: 60, topReason: "BackOff" } },
+    version: { state: "ok", data: { state: "patch", current: "1.33.2", to: "1.33.5", poolsBehind: 0 } },
+  });
+  assert.deepEqual(b.rows.map((r) => [r.id, r.level, r.group]), [
+    ["workloads", "danger", "now"], ["slo", "warn", "now"], ["events", "warn", "now"], ["version", "info", "know"],
+  ]);
+  assert.equal(b.act, 3, "an available patch is good to know, not something to act on now");
+  assert.equal(b.rows[0]!.params.worst, "shop/api");
+  const quiet = bf.briefing({
+    alerts: OFF, health: OFF, security: OFF,
+    workloads: { state: "ok", data: { danger: 0, warn: 0, total: 30 } },
+    slo: { state: "ok", data: { burning: 0, exhausted: 0, total: 0 } },
+    events: { state: "ok", data: { recent: 0, total: 3 } },
+    version: { state: "ok", data: { state: "upToDate", current: "1.33.5", to: null, poolsBehind: 1 } },
+  });
+  assert.ok(!quiet.rows.some((r) => r.id === "slo"), "no service with request metrics = no SLO line (not an OK)");
+  assert.equal(quiet.rows.find((r) => r.id === "version")!.level, "warn", "a pool on another version comes before 'latest'");
+  assert.equal(bf.briefing({ alerts: OFF, health: OFF, security: OFF, workloads: OFF, slo: OFF, events: OFF, version: { state: "ok", data: { state: "unknown", current: "", to: null, poolsBehind: 0 } } }).unchecked, 1);
+});
+
+test("briefing: every row key and core feature has ko / en strings; the home page uses the briefing", () => {
+  const msgs = readFileSync(new URL("../../web/src/lib/i18nMessages.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../web/src/lib/briefing.ts", import.meta.url), "utf8");
+  for (const k of new Set([...src.matchAll(/"(brief\.[a-zA-Z.]+)"/g)].map((m) => m[1]!))) assert.ok(msgs.includes(`"${k}"`), k);
+  for (const id of ["alerts", "health", "security", "workloads", "slo", "events", "version"]) for (const x of ["loading", "unknown"]) assert.ok(msgs.includes(`"brief.${id}.${x}"`), `${id}.${x}`);
+  for (const l of ["danger", "warn", "info", "ok", "unknown", "loading"]) assert.ok(msgs.includes(`"brief.level.${l}"`), l);
+  for (const f of bf.CORE_FEATURES) for (const x of ["ask", "body", "go"]) assert.ok(msgs.includes(`"home.feat.${f.id}.${x}"`), `${f.id}.${x}`);
+  const page = readFileSync(new URL("../../web/src/app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /<Briefing \/>/);
 });

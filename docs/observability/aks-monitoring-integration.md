@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-11
-covers: [apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+last-verified: 2026-11-12
+covers: [apps/api/src/services/appRuntimes.ts, apps/web/src/lib/workloadBlocks.ts, apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -222,6 +222,51 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 - Indexed labels와 Structured metadata를 나누어 보여 주려고 Loki에 `categorize-labels` 응답을 요청합니다(Loki 3.0 이상). 더 옛 Loki는 이 구분을 주지 않으므로 Structured metadata 묶음이 나오지 않습니다(추측해서 나누지 않음).
 - 라벨 값과 맥락 줄에도 로그와 같은 가림(토큰 · 비밀 값)이 적용됩니다. 권한도 로그와 같습니다(운영자 + 허용 네임스페이스).
 - kubelet이나 Container Insights에서 읽은 줄에는 라벨과 정확한 시각이 없어 상세에 전체 내용과 줄 정보만 나오고, 그 이유를 적습니다.
+
+## 3g. 조립식 표와 앱 종류 (AKS 모니터링 › 클러스터 · 워크로드 › 조립식 표)
+
+히트맵과 표의 애플리케이션 신호(Old Gen·JVM 여유·5xx·커넥션 풀)는 Java / Spring(Micrometer)만 잽니다. 다른 앱은 '계측 안 됨'으로만 보였습니다. 조립식 표는 **앱이 무엇인지** 먼저 말하고, 그 종류의 대표 지표를 열(블록)로 끼워 넣게 합니다.
+
+### 앱 종류를 어떻게 아나요
+
+| 근거 | 뜻 | 화면 |
+|------|----|------|
+| 메트릭 (사실) | 그 파드가 런타임 고유 메트릭을 내보냄 | 실선 칩 |
+| 이미지 이름 (힌트) | 이미지의 마지막 이름이 `nginx`·`redis`·`postgres(ql)` 등 | 점선 칩 + '추정' |
+| 없음 | 둘 다 없음 — 종류를 지어내지 않음 | '—' + 가이드의 '종류를 모르는 워크로드' |
+
+| 종류 | 판별 메트릭 | 보통 내보내는 것 | 블록(열) |
+|------|-------------|------------------|----------|
+| Java / Spring | `jvm_memory_used_bytes` | Micrometer (Actuator) | 히트맵 신호: Old Gen · JVM 여유 · 5xx · 커넥션 풀 |
+| Node.js | `nodejs_version_info` | prom-client | 이벤트 루프 지연 p99 · 힙 사용 |
+| Python | `python_info` | prometheus_client | RSS 메모리 |
+| Go | `go_info` | client_golang | 고루틴 · 힙 사용 |
+| .NET | `dotnet_total_memory_bytes` | prometheus-net | 관리 메모리 |
+| NGINX | `nginx_up` | nginx-prometheus-exporter | 활성 연결 · 요청/초 |
+| Redis | `redis_up` | redis_exporter | 연결 클라이언트 · 메모리 |
+| PostgreSQL | `pg_up` | postgres_exporter | 연결 수 |
+| 공통 | `process_open_fds` | 위 라이브러리 대부분 | 열린 파일 비율 |
+
+- API `GET /api/observability/app-metrics?clusterId[&at]` (`services/appRuntimes.ts`): 클러스터의 Azure Monitor 작업 영역에 이미 있는 시계열만 읽습니다. 파드별 값 → 워크로드(가장 나쁜 파드 또는 합).
+- 시계열이 없으면 값은 '—'입니다(0 아님). 질의가 실패하면 '조회 실패'이고 '없음'이 아닙니다.
+- 이미지 힌트는 이미지의 **자기 이름**만 봅니다(`my-nginx-proxy-app`은 NGINX가 아님). 앱 이미지는 추측하지 않습니다.
+
+### 블록 조립
+
+- 블록 = 열 하나: 종류 · 히트맵 신호(`h:<신호>`) · 앱 지표(`a:<지표>`).
+- 시작 묶음(프리셋): 기본 · Java · 여러 런타임 · 데이터/프록시 · 전체. 블록을 더하고(+), 빼고(✕), 옮깁니다(◀ ▶). 최대 16개, 마지막 하나는 남습니다.
+- 고른 묶음은 이 브라우저에만 기억합니다(`aud.workload.blocks`).
+
+### 가이드 — 종류마다 필요한 것
+
+화면 아래 가이드는 종류마다 '이 클러스터에서 지금 보이는지'와 네 단계를 보여 줍니다.
+
+1. **기능**: 앱에 메트릭 라이브러리를 넣거나(Node.js·Python·Go·.NET·Java) exporter 사이드카를 붙입니다(NGINX·Redis·PostgreSQL). 복사용 예시가 있습니다.
+2. **환경 설정**: 수집기(Alloy 또는 ama-metrics)가 그 엔드포인트를 긁게 합니다 — 파드 주석 `prometheus.io/scrape`·`port`·`path` 또는 PodMonitor.
+3. **권한**: 대시보드는 새 권한이 필요 없습니다. 히트맵과 같은 권한(클러스터의 Azure Monitor 작업 영역 `Monitoring Data Reader`)으로 읽습니다. 클러스터 안 권한도 추가되지 않습니다.
+4. **확인**: 판별 메트릭이 작업 영역에 보이면 칩이 실선으로 바뀌고 블록에 값이 찹니다(수집 간격 1~2분).
+
+테스트 `apps/api/test/appRuntimes.test.ts`.
 
 ## 4. 연결 파일
 
