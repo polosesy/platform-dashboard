@@ -1,5 +1,6 @@
 // ── Global error guards — a dropped socket (ECONNRESET …) never stops the server; in production (container) any
 // other uncaught exception exits so the orchestrator restarts a clean process (infra/lifecycle.ts) ──
+import { createSampleGuard } from "./middleware/sampleGuard.js";
 import { SHUTDOWN, canKillPortHolder, healthBody, onUncaught } from "./infra/lifecycle.js";
 process.on("uncaughtException", (err: Error) => {
   if (onUncaught(err, process.env.NODE_ENV) === "exit") {
@@ -67,6 +68,8 @@ registerNotifyHooks(app, env);
 app.use("/api", createAuthMiddleware(verifierFromEnv(env)));
 // Platform role + connection access (403 before routes), audit line per signed-in request
 app.use("/api", createAuthorizeMiddleware(env));
+// Facts only: a sample (mock) body reaches an anonymous caller in sample mode — never a signed-in one
+app.use("/api", createSampleGuard(env));
 if (env.AUD_ANONYMOUS_SP) {
   console.warn("[auth] AUD_ANONYMOUS_SP=true — anonymous callers read Azure with the platform credential (local development only)");
   app.use("/api", (req, res, next) => {

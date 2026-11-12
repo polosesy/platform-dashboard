@@ -153,7 +153,11 @@ test("a signed-in caller never gets sample numbers for a failed live read; sampl
   assert.equal(denied.status, 403);
   assert.equal((denied.body as { error: string }).error, "azure_forbidden");
   assert.equal((await call(async () => { throw new Error("socket hang up"); }, "tok")).status, 502);
-  assert.deepEqual((await call(async () => null, "tok")).body, { items: [42], source: "mock", note: "mock data" }, "feature off: labelled sample");
+  // Nothing live for a signed-in caller (feature off / nothing readable): said — never the sample (2026-11-12: a
+  // sample outage went out with note "mock data" and was read as real)
+  const none = await call(async () => null, "tok");
+  assert.equal(none.status, 503);
+  assert.equal((none.body as { error: string }).error, "live_data_unavailable");
   assert.deepEqual((await call(async () => null)).body, { items: [42], source: "mock", note: "signin_required" });
   assert.deepEqual((await call(async () => ({ items: [1] }), "tok")).body, { items: [1] });
 });

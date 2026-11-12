@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./AppShell.module.css";
 import { TopNav } from "./TopNav";
@@ -9,6 +10,8 @@ import { CommandPalette } from "./CommandPalette";
 import { ScopeBar } from "./ScopeBar";
 import { DOCK_QUERY, useMediaQuery } from "@/lib/useMediaQuery";
 import { NAV_EXEMPT_ROUTES } from "@/lib/navConfig";
+import { clearSampleMode, sampleModeStore } from "@/lib/sampleMode";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * The page frame (design draft ⑦): on wide screens (≥ 1100 px) the menu is docked on the left and the top bar keeps
@@ -23,6 +26,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const sidebarOpen = !docked && openedAt === pathname;
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [palette, setPalette] = useState(false);
+  const { t } = useI18n();
+  // Sample mode (any response on this screen was sample data): a ribbon that stays + a watermark over the content,
+  // so a crop or a screenshot of one card still says it. A new path starts clean.
+  const sample = useSyncExternalStore(sampleModeStore.subscribe, sampleModeStore.get, sampleModeStore.getServer);
+  useEffect(() => clearSampleMode, [pathname]);
 
   // Ctrl+K / ⌘K anywhere opens quick open (Esc closes it — inside the dialog)
   useEffect(() => {
@@ -49,7 +57,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar open={sidebarOpen} docked={docked} onClose={closeSidebar} />
       <div className={styles.frame}>
         <TopNav onMenuClick={toggleSidebar} menuOpen={sidebarOpen} menuBtnRef={menuBtnRef} docked={docked} onSearch={() => setPalette(true)} />
-        <main className={styles.main}>
+        {sample ? (
+          <div className={styles.sampleRibbon} role="status">
+            <strong>{t("sample.ribbon.title")}</strong>
+            <span>{t("sample.ribbon.body")}</span>
+            <Link href="/login">{t("sample.ribbon.signin")}</Link>
+          </div>
+        ) : null}
+        <main className={styles.main} data-sample={sample || undefined}>
           <div className={styles.container}>
             <ScopeBar />
             {children}

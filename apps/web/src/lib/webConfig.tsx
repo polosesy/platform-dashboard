@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import type { WebRuntimeConfig } from "./runtimeConfig";
 
 /** The sign-in settings the server read for this page (lib/runtimeConfig.ts) */
-const WebConfigContext = createContext<WebRuntimeConfig>({ tenantId: "", clientId: "", apiScope: "" });
+const WebConfigContext = createContext<WebRuntimeConfig>({ tenantId: "", clientId: "", apiScope: "", sampleData: false });
 
 export const WebConfigProvider = WebConfigContext.Provider;
 export const useWebConfig = () => useContext(WebConfigContext);

@@ -12,7 +12,7 @@ test("runtime settings win over build-time ones; an empty runtime value falls ba
     AUD_WEB_API_SCOPE: " api://aud/Azure.Read.All ",
     NEXT_PUBLIC_AZURE_AD_TENANT_ID: "t-build", NEXT_PUBLIC_AZURE_AD_CLIENT_ID: "c-build",
   });
-  assert.deepEqual(cfg, { tenantId: "t-runtime", clientId: "c-runtime", redirectUri: "https://aud.example.internal/", apiScope: "api://aud/Azure.Read.All" });
+  assert.deepEqual(cfg, { tenantId: "t-runtime", clientId: "c-runtime", redirectUri: "https://aud.example.internal/", apiScope: "api://aud/Azure.Read.All", sampleData: true });
   assert.equal(C.webRuntimeConfig({ AUD_WEB_CLIENT_ID: "  ", NEXT_PUBLIC_AZURE_AD_CLIENT_ID: "c-build" }).clientId, "c-build");
   assert.ok(C.signInConfigured(cfg));
   assert.ok(!C.signInConfigured(C.webRuntimeConfig({})));

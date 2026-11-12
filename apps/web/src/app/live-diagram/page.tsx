@@ -828,7 +828,8 @@ export default function LiveDiagramPage() {
             <Button onClick={() => void handleGenerate()} disabled={generating}>
               {generating ? t("live.generating") : t("live.generateFromAzure")}
             </Button>
-            <Button onClick={() => setDiagramId(SAMPLE_DIAGRAM_ID)}>{t("ld.empty.sample")}</Button>
+            {/* The example diagram is sample data: only while signed out (the API refuses it to a signed-in user) */}
+            {!signedIn ? <Button onClick={() => setDiagramId(SAMPLE_DIAGRAM_ID)}>{t("ld.empty.sample")}</Button> : null}
           </div>
         </EmptyState>
       )}

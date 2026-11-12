@@ -2,6 +2,8 @@
    Light theme only for now; dark mode adds a second set of the same names later.
    Enforced by apps/api/test/designTokens.test.ts (type scale, weights, radius) and palette.test.ts (colours). */
 :root {
+  /* Sample-mode watermark (AppShell): the words tiled across the content — no colour of its own, low opacity */
+  --sample-watermark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='200'%3E%3Ctext x='24' y='120' transform='rotate(-24 160 100)' font-family='sans-serif' font-size='22' font-weight='700' fill='gray' fill-opacity='0.16'%3E%EC%98%88%EC%8B%9C %C2%B7 SAMPLE%3C/text%3E%3C/svg%3E");
   /* Page-level sticky panels sit under the sticky top bar */
   --sticky-top: 72px;
   /* The docked left menu (≥ 1100 px) */

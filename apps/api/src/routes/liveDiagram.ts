@@ -85,7 +85,7 @@ export function registerLiveDiagramRoutes(router: Router, env: Env) {
 
       if (!graph) {
         // Azure Resource Graph not available — fall back to mock diagram with demo traffic
-        const spec: DiagramSpec = { ...mockDiagramSpec, id: "auto-demo", name: "Demo Infrastructure", updatedAt: new Date().toISOString() };
+        const spec: DiagramSpec = { ...mockDiagramSpec, id: "auto-demo", name: "[예시] Sample Infrastructure", updatedAt: new Date().toISOString() };
         saveDiagramSpec(spec, diagramOwner(req.auth?.bearerToken));
         res.status(201).json({ ok: true, diagram: spec, _source: "mock" });
         return;

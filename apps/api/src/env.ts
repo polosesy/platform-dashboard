@@ -29,6 +29,13 @@ const EnvSchema = z.object({
   // the platform's own credential of each connection (infra/connectionRegistry.ts) — not with the user's Azure
   // permissions, unless a connection is "delegated" (OBO). Anonymous callers get sample data or 401.
   /** Local development only: anonymous callers read Azure with the service principal (loopback bind required) */
+  /**
+   * Sample (mock) data for anonymous callers — the "look around" mode. Unset = on in development, off in production
+   * (anonymous callers get 401 `signin_required`). A signed-in caller never receives sample data either way
+   * (middleware/sampleGuard.ts).
+   */
+  AUD_SAMPLE_DATA: z.union([z.boolean(), z.string()]).optional()
+    .transform((v) => (v === undefined || (typeof v === "string" && v.trim() === "") ? undefined : typeof v === "boolean" ? v : ["1", "true", "yes", "on"].includes(v.trim().toLowerCase()))),
   AUD_ANONYMOUS_SP: envBool(false),
   /** …and may also reach AKS (kubeconfig, pod logs, Hubble exec). Ignored unless AUD_ANONYMOUS_SP is on */
   AUD_ANONYMOUS_K8S: envBool(false),

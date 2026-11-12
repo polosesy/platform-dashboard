@@ -10,6 +10,8 @@ export type WebRuntimeConfig = {
   redirectUri?: string;
   /** The API scope to request (api://<aud-api>/Azure.Read.All) — empty = sign-in without API tokens */
   apiScope: string;
+  /** The 'look around with sample data' way in is offered (AUD_WEB_SAMPLE_DATA; unset = development only — the API's AUD_SAMPLE_DATA decides what is actually served) */
+  sampleData: boolean;
 };
 
 type Source = Record<string, string | undefined>;
@@ -24,7 +26,15 @@ export function webRuntimeConfig(env: Source): WebRuntimeConfig {
     clientId: pick(env, "AUD_WEB_CLIENT_ID", "NEXT_PUBLIC_AZURE_AD_CLIENT_ID"),
     ...(redirect && validRedirect(redirect) ? { redirectUri: redirect } : {}),
     apiScope: pick(env, "AUD_WEB_API_SCOPE", "NEXT_PUBLIC_AZURE_AD_API_SCOPE"),
+    sampleData: sampleDataOffered(env),
   };
+}
+
+/** Pure: AUD_WEB_SAMPLE_DATA true / false; unset = on outside production */
+export function sampleDataOffered(env: Source): boolean {
+  const v = (env.AUD_WEB_SAMPLE_DATA ?? "").trim().toLowerCase();
+  if (v) return ["1", "true", "yes", "on"].includes(v);
+  return (env.NODE_ENV ?? "") !== "production";
 }
 
 /** Entra accepts SPA redirect URIs over https, or http only for localhost */

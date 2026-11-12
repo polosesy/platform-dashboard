@@ -54,8 +54,8 @@ export function upstreamError(e: unknown): HttpError {
 }
 
 /**
- * Live Azure data; sample data only when there is nothing live to show and the response says so
- * (`source:"mock"` + `note`): the loader returns null (feature off, or not signed in) or the caller must sign in.
+ * Live Azure data; sample data only for an anonymous caller (`source:"mock"`, `note:"signin_required"`). The loader
+ * returning null for a signed-in caller (feature off, nothing readable) is 503 `live_data_unavailable`.
  * A failure of a live read is an error response (`upstreamError`) — never sample numbers dressed as the
  * caller's (the cost page showed sample totals under an Azure 429). Guards against an already-closed response.
  */
@@ -70,9 +70,12 @@ export async function respondWithFallback<T extends object>(
     const live = await load();
     if (live) body = live;
     else {
-      const signedIn = !!(res.req as Request | undefined)?.auth?.bearerToken;
-      const note = (fallback as { note?: unknown }).note;
-      body = { ...fallback, source: "mock", note: signedIn ? (typeof note === "string" && note ? note : "mock data") : "signin_required" };
+      // Nothing live (feature off / nothing readable): a signed-in caller is told so — the sample is for anonymous
+      // callers only (it used to go out to signed-in users with note "mock data": a sample outage read as real)
+      if ((res.req as Request | undefined)?.auth?.bearerToken) {
+        return sendError(res, new HttpError(503, "live_data_unavailable", "No live data for this request (the feature is turned off, or no subscription is readable)"), logTag);
+      }
+      body = { ...fallback, source: "mock", note: "signin_required" };
     }
   } catch (e: unknown) {
     if (isSigninRequired(e)) body = { ...fallback, source: "mock", note: "signin_required" };

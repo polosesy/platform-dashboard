@@ -73,9 +73,8 @@ test("no key: the keyless endpoint; when it refuses (429) the reason says so", a
   assert.deepEqual(await translateTexts(env(), ["event-f"], "ko", "en", offline.fetch), { ok: false, reason: "not_configured", freeStatus: "network" });
 });
 
-test("no key: the sample events use the built-in table without any request", async () => {
-  const f = fakeFetch(() => { throw new Error("must not be called"); });
-  const r = await translateTexts(env(), ["Azure SQL Database — Planned Maintenance Window"], "ko", "en", f.fetch);
-  assert.deepEqual(r, { ok: true, translations: ["Azure SQL Database — 계획된 유지 관리 기간"], provider: "builtin" });
-  assert.equal(f.calls.length, 0);
+test("no key: sample sentences are not translated by a built-in table (they read like Azure's own)", async () => {
+  const f = fakeFetch(() => new Response("", { status: 429 }));
+  const r = await translateTexts(env(), ["[예시] Azure SQL Database — Planned Maintenance Window"], "ko", "en", f.fetch);
+  assert.equal(r.ok, false);
 });

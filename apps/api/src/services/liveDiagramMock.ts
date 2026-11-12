@@ -57,7 +57,7 @@ const APP_SUBNET_ABS_X = 40 + VNET_PAD + GW_SUB_W + 24; // Absolute X of app-sub
 export const mockDiagramSpec: DiagramSpec = {
   version: "1.0",
   id: "prod-infra",
-  name: "Production Infrastructure",
+  name: "[예시] Sample Infrastructure",
   createdAt: "2026-02-23T00:00:00Z",
   updatedAt: "2026-02-23T00:00:00Z",
   nodes: [
@@ -674,7 +674,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
     alerts.push({
       id: "alert-001",
       severity: "warning",
-      title: "AKS CPU usage elevated",
+      title: "[예시] AKS CPU usage elevated",
       resourceId: "/subscriptions/mock/.../aks-prod",
       firedAt: new Date(Date.now() - 180_000).toISOString(),
       summary: "Node CPU usage has exceeded 80% for 3+ minutes. Consider scaling node pool.",
@@ -687,7 +687,7 @@ export function generateMockSnapshot(): LiveDiagramSnapshot {
     alerts.push({
       id: "alert-002",
       severity: "critical",
-      title: "SQL Database latency spike",
+      title: "[예시] SQL Database latency spike",
       resourceId: "/subscriptions/mock/.../sql-prod",
       firedAt: new Date(Date.now() - 60_000).toISOString(),
       summary: "P95 query latency exceeded 500ms. DTU usage at 95%. Possible deadlock on orders table.",

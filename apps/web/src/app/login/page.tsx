@@ -116,8 +116,10 @@ export default function LoginPage() {
               <>
                 <div className={s.or}><span>{t("login.or")}</span></div>
                 <div className={s.actions}>
-                  <Link href="/" className={s.secondaryLink}>{t("login.sample")}</Link>
-                  <p className={s.hint}>{t("login.sampleHint")}</p>
+                  {config.sampleData ? (<>
+                    <Link href="/" className={s.secondaryLink}>{t("login.sample")}</Link>
+                    <p className={s.hint}>{t("login.sampleHint")}</p>
+                  </>) : null}
                 </div>
               </>
             ) : null}

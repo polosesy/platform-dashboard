@@ -1,3 +1,4 @@
+import { noteResponse } from "./sampleMode";
 import { T, type Locale } from "./i18nMessages";
 export function apiBaseUrl() {
   // In the browser, use same-origin relative path (Next.js rewrites /api/* → API server).
@@ -51,7 +52,9 @@ export const isPermanentApiError = (e: unknown): boolean => e instanceof ApiErro
 export type AuthState = "signin" | "reauth" | "consent" | "blocked" | "denied" | "norole" | "connection" | "aksCredential"
   // AKS sign-in and reach (API services/aksAccess.ts, docs/integrations/azure/aks.md)
   | "aksPrivateDns" | "aksUnreachable" | "aksStopped" | "aksLocalAccount" | "aksRbac" | "aksUnauthorized" | "aksCrossTenant"
-  | "aksLegacyEntra" | "aksKubeconfig" | "hubbleExec" | "podLogNamespace";
+  | "aksLegacyEntra" | "aksKubeconfig" | "hubbleExec" | "podLogNamespace"
+  // Nothing live to show (feature off / nothing readable) — said; sample data is never shown to a signed-in user
+  | "noLiveData";
 
 export function authStateOf(e: unknown): AuthState | null {
   if (!(e instanceof ApiError)) return null;
@@ -62,6 +65,7 @@ export function authStateOf(e: unknown): AuthState | null {
 export function authStateOfCode(code: string | null | undefined): AuthState | null {
   switch (code) {
     case "signin_required": return "signin";
+    case "live_data_unavailable": return "noLiveData";
     case "token_expired": case "invalid_token": case "interaction_required": return "reauth";
     case "consent_required": return "consent";
     case "access_blocked": return "blocked";
@@ -112,7 +116,10 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
     const auth = authStateOf(probe);
     throw auth ? new ApiError(res.status, body.error, authText(auth), body.claims) : probe;
   }
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  // Sample data marks the whole screen (ribbon + watermark) wherever it came from — lib/sampleMode.ts
+  noteResponse(data);
+  return data;
 }
 
 export async function fetchJsonWithBearer<T>(

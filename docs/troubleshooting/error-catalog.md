@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-09
-covers: [apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
+last-verified: 2026-11-12
+covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 에러 카탈로그
 
@@ -117,6 +117,15 @@ covers: [apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCred
 - **증상**: 화면에 '예시 데이터 — 로그인하면 실제 데이터', API 응답 `note:"signin_required"` 또는 401 `signin_required`
 - **원인**: 익명 호출은 실제 Azure를 읽지 않음(정책). 예전에는 서비스 주체로 실제 인벤토리·kubeconfig까지 읽었음
 - **해결**: 로그인. 로컬 개발에서만 `AUD_ANONYMOUS_SP=true`(루프백 바인드 필수, 다른 테넌트가 레지스트리에 있으면 시작 실패), AKS까지는 `AUD_ANONYMOUS_K8S=true`. 응답 헤더 `x-aud-principal: sp-anonymous`로 표시
+
+### AUTH-010: 예시 데이터가 실제 장애처럼 보임 / 503 `live_data_unavailable`
+- **증상(2026-11-12 이전)**: 리소스 상태 › 서비스 이벤트에 "Azure Kubernetes Service — Connectivity Issue in Korea Central" 같은 사건이 떠 실제 Azure 장애로 오해. 실제로는 내장 예시(`mockData.ts`)
+- **원인**: 로더가 값을 못 낼 때(기능 꺼짐·읽을 구독 없음) `respondWithFallback`이 **로그인 사용자에게도** 예시를 `note:"mock data"`로 보냄 + 예시 문장이 실제 Azure 문장 모양 + 내장 한국어 번역 + 카드에는 표시 없음
+- **지금 동작**(`middleware/sampleGuard.ts` — 모든 `/api` 응답 앞):
+  - 로그인 사용자에게 예시 응답이 나가려 하면 **503 `live_data_unavailable`** — 화면은 '보여 줄 실제 데이터가 없습니다 — 기능이 꺼져 있거나 읽을 수 있는 구독이 없습니다'
+  - 익명 + 예시 모드 꺼짐(운영 기본) → 401 `signin_required`
+  - 익명 + 예시 모드 켜짐 → 예시(항상 `source:"mock"`·`sample:true`), 화면은 리본 '예시 데이터' + 내용 전체 워터마크(카드만 캡처해도 남음), 사건·경고·권고 제목은 `[예시]`로 시작
+- **해결**: 503이 보이면 그 기능 스위치(`AZURE_HEALTH_ENABLED`·`AZURE_COST_MANAGEMENT_ENABLED` …)와 연결이 읽는 구독을 확인. 예시 둘러보기를 운영에서 켜려면 API `AUD_SAMPLE_DATA=true` + 웹 `AUD_WEB_SAMPLE_DATA=true`(권장하지 않음)
 
 ### AUTH-008: `consent_required` / `interaction_required` / `access_blocked`
 - **에러**: OBO 교환 실패 — AADSTS65001(동의 없음) · 50076/50079/50158(MFA·추가 인증) · 53003(조건부 액세스 차단)

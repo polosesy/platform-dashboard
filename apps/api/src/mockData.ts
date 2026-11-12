@@ -195,7 +195,7 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
   alerts: [
     {
       id: "sa-001",
-      alertName: "Suspicious sign-in from anonymous IP",
+      alertName: "[예시] Suspicious sign-in from anonymous IP",
       severity: "High",
       status: "Active",
       compromisedEntity: "user@contoso.com",
@@ -205,7 +205,7 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
     },
     {
       id: "sa-002",
-      alertName: "Unusual resource deployment in subscription",
+      alertName: "[예시] Unusual resource deployment in subscription",
       severity: "Medium",
       status: "Active",
       compromisedEntity: "sub-prod-01",
@@ -215,7 +215,7 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
     },
     {
       id: "sa-003",
-      alertName: "SQL injection attempt detected",
+      alertName: "[예시] SQL injection attempt detected",
       severity: "Medium",
       status: "Active",
       compromisedEntity: "sql-orders",
@@ -225,7 +225,7 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
     },
     {
       id: "sa-004",
-      alertName: "Network Security Group rule modified",
+      alertName: "[예시] Network Security Group rule modified",
       severity: "Low",
       status: "Active",
       compromisedEntity: "nsg-app-subnet",
@@ -235,7 +235,7 @@ export const mockSecurityAlerts: SecurityAlertsResponse = {
     },
     {
       id: "sa-005",
-      alertName: "Key Vault access from unusual location",
+      alertName: "[예시] Key Vault access from unusual location",
       severity: "Informational",
       status: "Active",
       compromisedEntity: "kv-prod-secrets",
@@ -254,28 +254,28 @@ export const mockSecurityPosture: SecurityPostureResponse = {
   controls: mockSecureScore.controlScores,
   recommendations: [
     {
-      key: "mock-priv-roles", title: "Privileged roles should not have permanent access at the subscription and resource group level",
+      key: "mock-priv-roles", title: "[예시] Privileged roles should not have permanent access at the subscription and resource group level",
       severity: "High", domain: "identity", threats: ["AccountBreach", "ElevationOfPrivilege"], unhealthy: 6, healthy: 2,
       samples: [{ name: "sub-prod-01", type: "subscription", resourceGroup: "" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
       remediation: "Use Entra PIM to make privileged role assignments eligible instead of permanent.",
     },
     {
-      key: "mock-mgmt-ports", title: "Management ports should be closed on your virtual machines",
+      key: "mock-mgmt-ports", title: "[예시] Management ports should be closed on your virtual machines",
       severity: "Medium", domain: "network", threats: ["ThreatResistance"], unhealthy: 4, healthy: 12,
       samples: [{ name: "vm-jump-01", type: "virtualMachines", resourceGroup: "rg-core" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
     },
     {
-      key: "mock-storage-public", title: "Storage accounts should restrict network access",
+      key: "mock-storage-public", title: "[예시] Storage accounts should restrict network access",
       severity: "Medium", domain: "data", threats: ["DataExfiltration", "DataSpillage"], unhealthy: 3, healthy: 5,
       samples: [{ name: "stlogs01", type: "storageAccounts", resourceGroup: "rg-data" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
     },
     {
-      key: "mock-host-encryption", title: "Virtual machines and virtual machine scale sets should have encryption at host enabled",
+      key: "mock-host-encryption", title: "[예시] Virtual machines and virtual machine scale sets should have encryption at host enabled",
       severity: "Medium", domain: "compute", threats: ["DataSpillage"], unhealthy: 8, healthy: 0,
       samples: [{ name: "vm-app-01", type: "virtualMachines", resourceGroup: "rg-app" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
     },
     {
-      key: "mock-aks-rbac", title: "Azure Kubernetes Service clusters should have Defender profile enabled",
+      key: "mock-aks-rbac", title: "[예시] Azure Kubernetes Service clusters should have Defender profile enabled",
       severity: "High", domain: "container", threats: ["MissingCoverage"], unhealthy: 1, healthy: 0,
       samples: [{ name: "aks-platform", type: "managedClusters", resourceGroup: "rg-aks" }], portalUrl: "https://portal.azure.com/#blade/Microsoft_Azure_Security/RecommendationsBlade",
     },
@@ -342,7 +342,7 @@ export const mockServiceHealthEvents: ServiceHealthEventsResponse = {
     {
       id: "mock-evt-001",
       eventType: "ServiceIssue",
-      title: "Azure Kubernetes Service — Connectivity Issue in Korea Central",
+      title: "[예시] Azure Kubernetes Service — Connectivity Issue in Korea Central",
       summary: "Some customers using AKS in Korea Central may experience intermittent connectivity issues. Engineering teams are actively investigating the root cause.",
       status: "Active",
       level: "Error",
@@ -355,7 +355,7 @@ export const mockServiceHealthEvents: ServiceHealthEventsResponse = {
     {
       id: "mock-evt-002",
       eventType: "PlannedMaintenance",
-      title: "Azure SQL Database — Planned Maintenance Window",
+      title: "[예시] Azure SQL Database — Planned Maintenance Window",
       summary: "Routine maintenance for Azure SQL Database in East US 2. Expected duration: 2 hours. Minimal impact is anticipated with automatic failover enabled.",
       status: "Active",
       level: "Informational",
@@ -369,7 +369,7 @@ export const mockServiceHealthEvents: ServiceHealthEventsResponse = {
     {
       id: "mock-evt-003",
       eventType: "HealthAdvisory",
-      title: "Azure App Service — Managed Certificate Rotation Advisory",
+      title: "[예시] Azure App Service — Managed Certificate Rotation Advisory",
       summary: "Managed SSL certificates for Azure App Service will undergo routine rotation. Action required for customers using certificate pinning in their applications.",
       status: "Active",
       level: "Warning",
@@ -402,7 +402,7 @@ export const mockRegionalStatus: RegionalStatusResponse = {
         {
           id: "mock-evt-001",
           eventType: "ServiceIssue",
-          title: "Azure Kubernetes Service — Connectivity Issue in Korea Central",
+          title: "[예시] Azure Kubernetes Service — Connectivity Issue in Korea Central",
           summary: "Some customers using AKS in Korea Central may experience intermittent connectivity issues.",
           status: "Active",
           level: "Error",
@@ -425,7 +425,7 @@ export const mockRegionalStatus: RegionalStatusResponse = {
         {
           id: "mock-evt-002",
           eventType: "PlannedMaintenance",
-          title: "Azure SQL Database — Planned Maintenance Window",
+          title: "[예시] Azure SQL Database — Planned Maintenance Window",
           summary: "Routine maintenance for Azure SQL Database in East US 2.",
           status: "Active",
           level: "Informational",

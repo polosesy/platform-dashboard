@@ -543,24 +543,6 @@ const FREE_MAX_CHARS = 1_800;
 const translationCache = new CacheManager<string>(5_000, 24 * 60 * 60_000);
 const cacheKey = (from: string, to: string, text: string) => `${from}>${to}:${createHash("sha256").update(text).digest("base64url")}`;
 
-/**
- * Built-in Korean translations for mock event strings.
- * Last-resort fallback when no translation API is available.
- */
-const BUILTIN_KO: Record<string, string> = {
-  "Azure Kubernetes Service — Connectivity Issue in Korea Central":
-    "Azure Kubernetes Service — Korea Central 리전 연결 문제",
-  "Some customers using AKS in Korea Central may experience intermittent connectivity issues. Engineering teams are actively investigating the root cause.":
-    "Korea Central에서 AKS를 사용하는 일부 고객에게 간헐적인 연결 문제가 발생할 수 있습니다. 엔지니어링 팀이 근본 원인을 적극적으로 조사 중입니다.",
-  "Azure SQL Database — Planned Maintenance Window":
-    "Azure SQL Database — 계획된 유지 관리 기간",
-  "Routine maintenance for Azure SQL Database in East US 2. Expected duration: 2 hours. Minimal impact is anticipated with automatic failover enabled.":
-    "East US 2의 Azure SQL Database에 대한 정기 유지 관리입니다. 예상 소요 시간: 2시간. 자동 장애 조치가 활성화된 상태에서 최소한의 영향이 예상됩니다.",
-  "Azure App Service — Managed Certificate Rotation Advisory":
-    "Azure App Service — 관리형 인증서 교체 권고",
-  "Managed SSL certificates for Azure App Service will undergo routine rotation. Action required for customers using certificate pinning in their applications.":
-    "Azure App Service의 관리형 SSL 인증서가 정기 교체됩니다. 인증서 고정(certificate pinning)을 사용하는 고객은 조치가 필요합니다.",
-};
 
 /** Indices of `texts` grouped so that no group has more than `maxItems` texts or `maxChars` characters (pure) */
 export function chunkTexts(texts: readonly string[], maxItems: number, maxChars: number): number[][] {
@@ -666,12 +648,9 @@ export async function translateTexts(
     }
   }
 
-  // ── 3 first when it covers everything: the sample events need no network ──
-  if (to === "ko" && missing.every((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t]!), "builtin");
 
   // ── 2. Keyless endpoint (off in production unless AUD_TRANSLATOR_KEYLESS=true) ──
   if (!translatorKeyless(env)) {
-    if (to === "ko" && missing.some((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t] ?? t), "builtin");
     return { ok: false, reason: "not_configured" };
   }
   let freeStatus: number | "network" = "network";
@@ -682,7 +661,6 @@ export async function translateTexts(
     if (e instanceof TranslatorHttpError) freeStatus = e.status;
     debug(`[health] keyless translation failed: ${freeStatus}`);
   }
-  if (to === "ko" && missing.some((t) => BUILTIN_KO[t])) return fill(missing.map((t) => BUILTIN_KO[t] ?? t), "builtin");
   return { ok: false, reason: "not_configured", freeStatus };
 }
 

@@ -25,3 +25,41 @@
     padding: 16px 16px 32px;
   }
 }
+
+
+/* Sample mode: a ribbon that stays under the top bar, and a watermark over the whole content area (above cards and
+   canvases, clicks pass through) — a cropped card or a screenshot still says "sample" */
+.sampleRibbon {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 16px;
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--warning);
+  color: var(--ink);
+  font-size: var(--text-small);
+}
+
+.sampleRibbon a {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.main[data-sample] {
+  position: relative;
+}
+
+.main[data-sample]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background-image: var(--sample-watermark);
+  background-repeat: repeat;
+}
