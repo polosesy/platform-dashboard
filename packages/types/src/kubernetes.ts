@@ -77,6 +77,8 @@ export type KubernetesClusterOverview = {
     serviceCount: number;
   };
   objects: KubernetesObject[];
+  /** Kinds whose list failed (forbidden, timeout …) — their objects and counts are missing, not zero */
+  gaps?: string[];
   note?: string;
 };
 

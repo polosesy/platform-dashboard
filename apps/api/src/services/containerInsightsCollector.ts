@@ -434,7 +434,7 @@ ${clusterFilter}
             diskCapacityGB: null,
             networkRxBytesPerSec: null,
             networkTxBytesPerSec: null,
-            podCount: 0,
+            podCount: null, // until the pod count query answers
             conditions: [],
           });
         }
@@ -487,6 +487,8 @@ ${clusterFilter}
       const resp = podCountResult.value as LaQueryResponse;
       const table = resp.tables?.[0];
       if (table) {
+        // The query answered: a node without a row has no pods (0 is a fact here)
+        for (const n of nodeMap.values()) n.podCount = 0;
         for (const row of tableToObjects(table)) {
           const node = nodeMap.get(asString(row.Computer));
           if (node) node.podCount = asNumber(row.PodCount) ?? 0;

@@ -222,15 +222,16 @@ export async function tryGetBudgets(
   const budgets: BudgetStatus[] = (json.value ?? []).map((b) => {
     const props = b.properties ?? {};
     const amount = props.amount ?? 0;
-    const currentSpend = props.currentSpend?.amount ?? 0;
+    // Azure leaves currentSpend / forecastSpend out until it has evaluated the budget — that is not 0
+    const currentSpend = props.currentSpend?.amount ?? null;
     return {
       budgetName: b.name ?? "unknown",
       amount,
       currentSpend,
-      forecastedSpend: props.forecastSpend?.amount ?? 0,
-      currency: props.currentSpend?.unit ?? "USD",
+      forecastedSpend: props.forecastSpend?.amount ?? null,
+      currency: props.currentSpend?.unit ?? props.forecastSpend?.unit ?? "USD",
       timeGrain: (props.timeGrain ?? "Monthly") as BudgetStatus["timeGrain"],
-      usedPercentage: amount > 0 ? Math.round((currentSpend / amount) * 1000) / 10 : 0,
+      usedPercentage: amount > 0 && currentSpend !== null ? Math.round((currentSpend / amount) * 1000) / 10 : null,
     };
   });
 

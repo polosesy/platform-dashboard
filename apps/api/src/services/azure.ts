@@ -849,8 +849,9 @@ async function fetchTopologyFromResourceGraph(env: Env, bearerToken: string | un
           osType: safeString(ap.osType) || "Linux",
           osSKU: safeString(ap.osSKU),
           orchestratorVersion: safeString(ap.orchestratorVersion),
-          powerState: safeString((ap.powerState as Record<string, unknown>)?.code) || "Running",
-          provisioningState: safeString(ap.provisioningState) || "Succeeded",
+          // As ARM answered — absent stays empty (a default "Running" / "Succeeded" read as a checked state)
+          powerState: safeString((ap.powerState as Record<string, unknown>)?.code) || "",
+          provisioningState: safeString(ap.provisioningState) || "",
           availabilityZones: Array.isArray(ap.availabilityZones) ? ap.availabilityZones.map(String) : undefined,
           vnetSubnetId: safeString(ap.vnetSubnetID),
         }));

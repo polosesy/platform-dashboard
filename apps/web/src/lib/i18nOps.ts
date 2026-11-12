@@ -797,6 +797,7 @@ export const OPS_T: Translations = {
   "ob.noNodes": { ko: "노드 데이터 없음", en: "No node data" },
   "ob.noNodesHint": { ko: "Container Insights가 연결되어 있지 않거나 노드를 수집하지 않습니다.", en: "Container Insights is not connected, or nodes are not collected." },
   "ob.podsN": { ko: "파드 {n}개", en: "{n} pods" },
+  "ob.podsUnread": { ko: "파드 수 확인 못 함", en: "Pod count not read" },
   "ob.podsTotal": { ko: "파드 합계", en: "Pods in total" },
 
   // ── live diagram ──

@@ -116,6 +116,7 @@ export default function KubernetesPage() {
   const rows = useMemo(() => filterObjects(objects ?? [], f), [objects, f]);
   const shown = all ? rows : rows.slice(0, FIRST_ROWS);
   const count = (kindsOf: KubernetesObjectKind[]) => (objects ?? []).filter((o) => kindsOf.includes(o.kind)).length;
+  const unread = (kindsOf: string[]) => kindsOf.some((k) => overview?.gaps?.includes(k));
   const filtered = f.group || f.kind || f.namespace || f.query.trim();
 
   const selectedCluster = clusters.find((c) => c.id === selectedClusterId);
@@ -146,10 +147,12 @@ export default function KubernetesPage() {
           {overviewLoading ? <Cell span={12}><LoadingState /></Cell> : null}
           {overview && (
             <>
-              <Cell span={3}><Stat label={t("k8s.nodes")} value={overview.summary.nodeCount} hint={t("k8s.res.nsHint", { n: overview.summary.namespaceCount })} /></Cell>
-              <Cell span={3}><Stat label={t("k8s.group.workloads")} value={count(["Deployment", "StatefulSet", "DaemonSet"])} hint={t("k8s.res.workloadsHint", { n: overview.summary.podTotal })} /></Cell>
-              <Cell span={3}><Stat label={t("k8s.group.network")} value={count(["Service", "Ingress"])} hint={t("k8s.res.networkHint", { n: count(["Ingress"]) })} /></Cell>
-              <Cell span={3}><Stat label={t("k8s.group.batch")} value={count(["Job", "CronJob"])} hint={t("k8s.res.batchHint", { n: count(["CronJob"]) })} /></Cell>
+              {/* Kinds whose list failed: their rows are missing, so a card built on them shows a dash — never a smaller number */}
+              {overview.gaps?.length ? <Cell span={12}><Notice tone="warning" title={t("k8s.res.gapsTitle", { n: overview.gaps.length })}>{t("k8s.res.gapsHint", { kinds: overview.gaps.join(" · ") })}</Notice></Cell> : null}
+              <Cell span={3}><Stat label={t("k8s.nodes")} value={unread(["Node"]) ? "—" : overview.summary.nodeCount} hint={unread(["Node", "Namespace"]) ? t("k8s.res.unread") : t("k8s.res.nsHint", { n: overview.summary.namespaceCount })} /></Cell>
+              <Cell span={3}><Stat label={t("k8s.group.workloads")} value={unread(["Deployment", "StatefulSet", "DaemonSet"]) ? "—" : count(["Deployment", "StatefulSet", "DaemonSet"])} hint={unread(["Deployment", "StatefulSet", "DaemonSet", "Pod"]) ? t("k8s.res.unread") : t("k8s.res.workloadsHint", { n: overview.summary.podTotal })} /></Cell>
+              <Cell span={3}><Stat label={t("k8s.group.network")} value={unread(["Service", "Ingress"]) ? "—" : count(["Service", "Ingress"])} hint={unread(["Service", "Ingress"]) ? t("k8s.res.unread") : t("k8s.res.networkHint", { n: count(["Ingress"]) })} /></Cell>
+              <Cell span={3}><Stat label={t("k8s.group.batch")} value={unread(["Job", "CronJob"]) ? "—" : count(["Job", "CronJob"])} hint={unread(["Job", "CronJob"]) ? t("k8s.res.unread") : t("k8s.res.batchHint", { n: count(["CronJob"]) })} /></Cell>
 
               <Cell span={12}>
                 <Panel flush title={t("k8s.objects")} sub={`${rows.length} / ${overview.objects.length}`}

@@ -59,7 +59,7 @@ async function nodesFromKubernetesApi(
         diskCapacityGB: null,
         networkRxBytesPerSec: null,
         networkTxBytesPerSec: null,
-        podCount: podsPerNode.get(name) ?? 0,
+        podCount: podsResult ? (podsPerNode.get(name) ?? 0) : null, // pod list not read ≠ no pods
         conditions: n.conditions.map((c) => ({ type: c.type, status: c.status })),
       };
     });

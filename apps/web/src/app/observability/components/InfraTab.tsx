@@ -39,7 +39,8 @@ export function InfraTab({ nodes, past = false }: { nodes: NodeResourceSummary[]
 
   const ready = nodes.filter((n) => n.status === "Ready").length;
   const notReady = nodes.filter((n) => n.status === "NotReady").length;
-  const pods = nodes.reduce((n, x) => n + x.podCount, 0);
+  // A node whose pods were not read makes the total unknown (a sum that skips it would read as measured)
+  const pods = nodes.some((x) => x.podCount === null) ? null : nodes.reduce((n, x) => n + (x.podCount as number), 0);
 
   return (
     <div className={styles.stack}>
@@ -48,14 +49,14 @@ export function InfraTab({ nodes, past = false }: { nodes: NodeResourceSummary[]
         <Cell span={3}><Stat label={t("ob.allNodes")} value={nodes.length} /></Cell>
         <Cell span={3}><Stat label={<><span aria-hidden="true">●</span> Ready</>} value={ready} tone="success" /></Cell>
         <Cell span={3}><Stat label={<><span aria-hidden="true">■</span> NotReady</>} value={notReady} tone={notReady ? "high" : undefined} /></Cell>
-        <Cell span={3}><Stat label={t("ob.podsTotal")} value={pods} /></Cell>
+        <Cell span={3}><Stat label={t("ob.podsTotal")} value={pods === null ? "—" : pods} hint={pods === null ? t("ob.podsUnread") : undefined} /></Cell>
         {nodes.map((node) => (
           <Cell span={3} key={node.name}>
             <Panel as="article" level={node.status === "NotReady" ? "danger" : undefined}
               title={<span title={node.name}>{node.name}</span>}
               actions={<Chip level={NODE_CHIP[node.status] ?? "unknown"}>{node.status}</Chip>}
               footer={<span className={styles.nodeFoot}>
-                {t("ob.podsN", { n: node.podCount })}
+                {node.podCount === null ? t("ob.podsUnread") : t("ob.podsN", { n: node.podCount })}
                 {node.cpuCapacityMillicores != null ? ` · CPU ${node.cpuCapacityMillicores}m` : ""}
                 {node.memoryCapacityMiB != null ? ` · Mem ${Math.round(node.memoryCapacityMiB / 1024)}Gi` : ""}
               </span>}>

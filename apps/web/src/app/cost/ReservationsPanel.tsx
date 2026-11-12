@@ -32,19 +32,19 @@ export function ReservationsPanel({ subscriptionId, subscriptions }: { subscript
       }
     >
       <ErrorNotice error={error} />
-      {data ? (
+      {data && data.reservedHours > 0 ? (
         <div className={styles.riBody}>
           <div className={styles.riStats}>
-            <Stat label={t("cost.ri.utilization")} value={`${data.utilizedPercentage.toFixed(1)}%`} />
+            <Stat label={t("cost.ri.utilization")} value={data.utilizedPercentage === null ? "—" : `${data.utilizedPercentage.toFixed(1)}%`} />
             <Stat label={t("cost.ri.hours")} value={`${Math.round(data.usedHours).toLocaleString()} / ${Math.round(data.reservedHours).toLocaleString()}`} />
           </div>
           {data.source === "mock" ? <SampleDataNotice note={data.note ?? "mock data"} /> : null}
           {data.subscriptions.length ? (
             <ul className={styles.riList}>
-              {[...data.subscriptions].sort((a, b) => b.reservedHours - a.reservedHours).slice(0, 6).map((s) => (
+              {[...data.subscriptions].filter((s) => s.reservedHours > 0).sort((a, b) => b.reservedHours - a.reservedHours).slice(0, 6).map((s) => (
                 <li key={s.subscriptionId}>
                   <span>{nameOf(s.subscriptionId)}</span>
-                  <b>{s.utilizedPercentage.toFixed(1)}%</b>
+                  <b>{s.utilizedPercentage === null ? "—" : `${s.utilizedPercentage.toFixed(1)}%`}</b>
                 </li>
               ))}
             </ul>
@@ -52,7 +52,7 @@ export function ReservationsPanel({ subscriptionId, subscriptions }: { subscript
             <EmptyState title={t("cost.ri.none")} />
           )}
         </div>
-      ) : loading ? null : !error ? <EmptyState title={t("cost.ri.none")} /> : null}
+      ) : loading ? null : !error ? <>{data?.source === "mock" ? <SampleDataNotice note={data.note ?? "mock data"} /> : null}<EmptyState title={t("cost.ri.none")} /></> : null}
     </Panel>
   );
 }

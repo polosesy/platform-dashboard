@@ -1924,8 +1924,8 @@ export async function generateDiagramSpec(
                 aksPlaneMetadata.nodepoolName = String(matchedPool.name ?? "");
                 aksPlaneMetadata.nodepoolMode = String(matchedPool.mode ?? "User");
                 aksPlaneMetadata.nodepoolVmSize = String(matchedPool.vmSize ?? "");
-                aksPlaneMetadata.nodepoolCount = String(matchedPool.count ?? 0);
-                aksPlaneMetadata.nodepoolPowerState = String(matchedPool.powerState ?? "Running");
+                if (typeof matchedPool.count === "number") aksPlaneMetadata.nodepoolCount = String(matchedPool.count);
+                if (matchedPool.powerState) aksPlaneMetadata.nodepoolPowerState = String(matchedPool.powerState);
                 if (matchedPool.enableAutoScaling) {
                   aksPlaneMetadata.nodepoolAutoScale = `${matchedPool.minCount ?? 0}-${matchedPool.maxCount ?? 0}`;
                 }

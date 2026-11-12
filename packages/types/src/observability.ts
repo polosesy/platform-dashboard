@@ -22,7 +22,8 @@ export type NodeResourceSummary = {
   diskCapacityGB: number | null;
   networkRxBytesPerSec: number | null;
   networkTxBytesPerSec: number | null;
-  podCount: number;
+  /** null = the pod list was not read (never 0) */
+  podCount: number | null;
   conditions: NodeConditionSummary[];
 };
 

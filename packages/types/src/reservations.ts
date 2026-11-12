@@ -10,7 +10,8 @@ export type ReservationUtilizationRow = {
 export type SubscriptionReservationUtilization = {
   subscriptionId: string;
   grain: "daily" | "monthly";
-  utilizedPercentage: number;
+  /** null = no reserved hours in the period (no reservation — not 0 % used) */
+  utilizedPercentage: number | null;
   usedHours: number;
   reservedHours: number;
   topReservations: ReservationUtilizationRow[];
@@ -19,7 +20,8 @@ export type SubscriptionReservationUtilization = {
 export type ReservationUtilizationResponse = {
   generatedAt: string;
   grain: "daily" | "monthly";
-  utilizedPercentage: number;
+  /** null = no reserved hours in the period (no reservation — not 0 % used) */
+  utilizedPercentage: number | null;
   usedHours: number;
   reservedHours: number;
   subscriptions: SubscriptionReservationUtilization[];

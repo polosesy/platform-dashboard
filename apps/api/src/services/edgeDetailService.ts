@@ -689,7 +689,7 @@ export async function fetchVmssInstances(
       return {
         instanceId,
         computerName,
-        provisioningState: String(instProps.provisioningState ?? "Succeeded"),
+        provisioningState: String(instProps.provisioningState ?? ""), // absent = not said (the panel shows nothing), never "Succeeded"
         powerState,
         privateIp: k8sNode?.privateIp || instanceIpMap.get(instanceId) || undefined,
         nodePoolName,
@@ -811,8 +811,8 @@ export async function fetchAksPlaneDetail(
         osSKU: ap.osSKU ? String(ap.osSKU) : undefined,
         orchestratorVersion: ap.orchestratorVersion ? String(ap.orchestratorVersion) : undefined,
         nodeImageVersion: ap.nodeImageVersion ? String(ap.nodeImageVersion) : undefined,
-        powerState: String((ap.powerState as Record<string, unknown>)?.code ?? "Running"),
-        provisioningState: String(ap.provisioningState ?? "Succeeded"),
+        powerState: String((ap.powerState as Record<string, unknown>)?.code ?? "unknown"),
+        provisioningState: String(ap.provisioningState ?? ""),
         availabilityZones: Array.isArray(ap.availabilityZones) ? ap.availabilityZones.map(String) : undefined,
         vnetSubnetId: ap.vnetSubnetID ? String(ap.vnetSubnetID) : undefined,
         vmssResourceId: vmssId,
@@ -869,7 +869,7 @@ export async function fetchAksPlaneDetail(
                 return {
                   instanceId,
                   computerName: String(osProfile.computerName ?? inst.name ?? ""),
-                  provisioningState: String(instProps.provisioningState ?? "Succeeded"),
+                  provisioningState: String(instProps.provisioningState ?? ""), // absent = not said (the panel shows nothing), never "Succeeded"
                   powerState,
                   privateIp: instanceIpMap.get(instanceId) || undefined,
                   nodePoolName: pool.name,

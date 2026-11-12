@@ -315,6 +315,10 @@ export async function getClusterOverview(
   const firstFailure = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
   if (firstFailure && settled.every((r) => r.status === "rejected")) throw k8sError(firstFailure.reason);
 
+  // Some lists failed: say which — their rows and counts are missing below, not zero
+  const LISTED = ["Node", "Namespace", "Pod", "Service", "Deployment", "StatefulSet", "DaemonSet", "Ingress", "Job", "CronJob"];
+  const gaps = LISTED.filter((_, i) => settled[i]?.status === "rejected");
+
   const objects: KubernetesObject[] = [];
 
   // Nodes
@@ -494,6 +498,7 @@ export async function getClusterOverview(
     cluster: clusterInfo,
     summary,
     objects,
+    ...(gaps.length ? { gaps } : {}),
   };
 
   overviewCache.set(cacheKey, overview);

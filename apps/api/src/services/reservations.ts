@@ -30,8 +30,9 @@ function safeNum(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
-function pct(used: number, reserved: number): number {
-  if (!Number.isFinite(used) || !Number.isFinite(reserved) || reserved <= 0) return 0;
+/** Pure: null when nothing was reserved — "0 %" would read as a reservation nobody uses */
+export function pct(used: number, reserved: number): number | null {
+  if (!Number.isFinite(used) || !Number.isFinite(reserved) || reserved <= 0) return null;
   return Math.max(0, Math.min(100, (used / reserved) * 100));
 }
 
@@ -45,7 +46,7 @@ function fetchReservationSummariesForSubscription(fetcher: ArmFetcher, subscript
 function aggregateLatestPeriod(items: ReservationSummaryItem[], grain: Grain): {
   usedHours: number;
   reservedHours: number;
-  utilizedPercentage: number;
+  utilizedPercentage: number | null;
   rows: ReservationUtilizationRow[];
 } {
   const rows: ReservationUtilizationRow[] = [];

@@ -161,7 +161,7 @@ function NodePools({ pools }: { pools: AksNodePoolInfo[] }) {
       {pools.map((p) => (
         <Group key={p.name} title={<>{p.name}{modeKey(p.mode) ? ` · ${t(modeKey(p.mode)!)}` : ""} · {t(powerKey(p.powerState))}</>}>
           <KV label={t("ld.pool.vmSize")}>{p.vmSize} · {p.osType}{p.osSKU ? ` (${p.osSKU})` : ""}{p.orchestratorVersion ? ` · v${p.orchestratorVersion}` : ""}</KV>
-          <KV label={t("ld.pool.nodes")}>{p.nodeCount}{p.enableAutoScaling ? ` ${t("ld.vmss.auto", { min: p.minCount ?? 0, max: p.maxCount ?? 0 })}` : ""}</KV>
+          <KV label={t("ld.pool.nodes")}>{p.nodeCount}{p.enableAutoScaling && p.minCount != null && p.maxCount != null ? ` ${t("ld.vmss.auto", { min: p.minCount, max: p.maxCount })}` : ""}</KV>
           {p.availabilityZones?.length ? <KV label={t("ld.panel.zones")}>{p.availabilityZones.join(", ")}</KV> : null}
           {p.vmssInstances?.length ? <InstanceList instances={p.vmssInstances} /> : null}
         </Group>

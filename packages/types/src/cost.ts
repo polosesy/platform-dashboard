@@ -40,11 +40,14 @@ export type CostTrendResponse = {
 export type BudgetStatus = {
   budgetName: string;
   amount: number;
-  currentSpend: number;
-  forecastedSpend: number;
+  /** null = Azure gave no value (never 0) */
+  currentSpend: number | null;
+  /** Azure's own forecast for the budget — null = Azure gave none */
+  forecastedSpend: number | null;
   currency: string;
   timeGrain: "Monthly" | "Quarterly" | "Annually";
-  usedPercentage: number;
+  /** null = no amount or no spend value to divide */
+  usedPercentage: number | null;
 };
 
 export type BudgetsResponse = {

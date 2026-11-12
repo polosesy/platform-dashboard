@@ -81,8 +81,9 @@ export default function CostPage() {
           <Stat label={t("cost.previousMonth")} value={summary ? fmtCurrency(summary.previousMonthTotal, summary.currency) : "—"} hint={summary ? t("cost.previousMonthHint") : undefined} />
         </Cell>
         <Cell span={3}>
-          <Stat label={t("cost.forecast")} value={summary ? fmtCurrency(summary.forecastedTotal, summary.currency) : "—"}
-            hint={summary && summary.previousMonthTotal > 0 ? t("cost.vsPreviousFull", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : undefined} />
+          {/* This platform's own arithmetic (daily average × days of the month) — said so: it is not Azure's forecast */}
+          <Stat label={t("cost.projected")} value={summary ? fmtCurrency(summary.forecastedTotal, summary.currency) : "—"}
+            hint={!summary ? undefined : [t("cost.projectedHint"), summary.previousMonthTotal > 0 ? t("cost.vsPreviousFull", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : null].filter(Boolean).join(" · ")} />
         </Cell>
         <Cell span={3}>
           <Stat label={t("cost.budgetUsed")} value={summary?.budgetUsedPercentage != null ? `${summary.budgetUsedPercentage.toFixed(1)}%` : "—"}
@@ -111,7 +112,7 @@ export default function CostPage() {
             {budgets && budgets.budgets.length > 0 ? (
               budgets.budgets.map((b) => (
                 <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.usedPercentage}
-                  left={`${fmtCurrency(b.currentSpend, b.currency)} / ${fmtCurrency(b.amount, b.currency)}`} right={b.timeGrain} />
+                  left={`${b.currentSpend === null ? t("cost.spendNone") : fmtCurrency(b.currentSpend, b.currency)} / ${fmtCurrency(b.amount, b.currency)}`} right={b.timeGrain} />
               ))
             ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
           </Panel>
@@ -121,8 +122,8 @@ export default function CostPage() {
           <Panel title={t("cost.forecastVsBudget")}>
             {budgets && budgets.budgets.length > 0 ? (
               budgets.budgets.map((b) => (
-                <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.amount > 0 ? (b.forecastedSpend / b.amount) * 100 : 0}
-                  left={`${t("cost.forecast")}: ${fmtCurrency(b.forecastedSpend, b.currency)}`} right={`${t("cost.budget")}: ${fmtCurrency(b.amount, b.currency)}`} />
+                <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.amount > 0 && b.forecastedSpend !== null ? (b.forecastedSpend / b.amount) * 100 : null}
+                  left={b.forecastedSpend === null ? t("cost.forecastNone") : `${t("cost.forecastAzure")}: ${fmtCurrency(b.forecastedSpend, b.currency)}`} right={`${t("cost.budget")}: ${fmtCurrency(b.amount, b.currency)}`} />
               ))
             ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
           </Panel>
@@ -139,18 +140,21 @@ export default function CostPage() {
 const STAT_TONE = { Safe: "success", Warn: "medium", Danger: "high" } as const;
 
 /** One budget: name · percent (glyph + colour) · the bar · two facts — the same row in both budget panels */
-function BudgetRow({ name, pct, left, right }: { name: string; pct: number; left: string; right: string }) {
-  const tone = budgetTone(pct);
+function BudgetRow({ name, pct, left, right }: { name: string; pct: number | null; left: string; right: string }) {
+  // null = Azure gave no value to divide: a dash and an empty bar — no colour, no "0 %"
+  const tone = pct === null ? null : budgetTone(pct);
   return (
     <div className={styles.budgetRow}>
       <div className={styles.budgetHeader}>
         <div className={styles.budgetName}>{name}</div>
-        <div className={`${styles.budgetPct} ${styles[`budget${tone}`]}`}>
-          <span aria-hidden="true">{tone === "Danger" ? "■" : tone === "Warn" ? "▲" : "●"}</span> {pct.toFixed(1)}%
-        </div>
+        {pct === null || tone === null ? <div className={styles.budgetPct}>—</div> : (
+          <div className={`${styles.budgetPct} ${styles[`budget${tone}`]}`}>
+            <span aria-hidden="true">{tone === "Danger" ? "■" : tone === "Warn" ? "▲" : "●"}</span> {pct.toFixed(1)}%
+          </div>
+        )}
       </div>
       <div className={styles.budgetBar}>
-        <div className={styles[`budgetFill${tone}`]} style={{ width: `${Math.min(100, pct)}%` }} />
+        {pct === null || tone === null ? null : <div className={styles[`budgetFill${tone}`]} style={{ width: `${Math.min(100, pct)}%` }} />}
       </div>
       <div className={styles.budgetMeta}>
         <span>{left}</span>
