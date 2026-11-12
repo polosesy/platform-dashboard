@@ -9,6 +9,7 @@
 #   scripts/onprem.sh tunnel            http://localhost:3000 → the server's 127.0.0.1:3000 (Ctrl-C to close)
 #   scripts/onprem.sh build | up [tag] | down | restart [service] | status | logs [service] [lines] [-f]
 #                     rollback [tag] | images | version | cleanup-source (one time: old ~/aud-dashboard)
+#   scripts/onprem.sh save <tag> > image.tar     the built image as a tar (scripts/aks-test.sh deploy uses it)
 #   on the server itself:  sudo ~/aud-runtime/audctl status | up | down | restart | logs | rollback | images | version
 #
 # Connection settings (environment, or the gitignored .secrets/onprem.env):
@@ -112,6 +113,8 @@ case "$cmd" in
   env) env_files "$@" ;;
   tunnel) tunnel ;;
   up|down|restart|status|logs|rollback|images|version) ctl "$cmd" "$@" ;;
+  save) [[ "${1:-}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "usage: scripts/onprem.sh save <tag> > image.tar"; exit 2; }
+        as_root "docker save aud-dashboard:$1" ;;   # the image as a tar on stdout (for a registry this server cannot reach)
   cleanup-source) cleanup_source ;;
   push) echo "removed: the source no longer stays on the server — use: scripts/onprem.sh deploy"; exit 2 ;;
   *) sed -n '2,18p' "$0"; exit 2 ;;

@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-03
+last-verified: 2026-11-12
 covers: [deploy/helm/aud-dashboard, deploy/kubernetes, docs/integrations/azure/templates/aks]
 ---
 # Kubernetes(AKS) 배포 — 클러스터 안 네임스페이스
@@ -109,8 +109,30 @@ kubectl auth can-i get secrets --as <connection-object-id>        # no
 3. **클러스터 적용**: PC가 프라이빗 API에 못 닿으면 `az aks command invoke --file`(관리자 그룹 멤버)로 `namespace.yaml` → `aud-dashboard-reader.yaml`(주체 = 관리 ID의 **principalId**) → `helm template … -f values-test.yaml` 결과(`--dry-run=server` 먼저). command invoke의 실행 계정은 impersonate 권한이 없어 `kubectl auth can-i --as`는 4번의 kubectl로 확인.
 4. **로컬 포트 포워딩**: Bastion의 IP 연결 터널은 22·3389만 허용 → **점프박스를 SSH 경유지로**: `az network bastion tunnel --target-resource-id <점프박스> --resource-port 22 --port 2222` → `az ssh vm --ip 127.0.0.1 --port 2222 -- -N -L 8443:<API 서버 PE IP>:443`(VM Administrator/User Login) → kubeconfig 서버 `https://127.0.0.1:8443` + `--tls-server-name=<privateFQDN>` + `kubelogin convert-kubeconfig -l azurecli` → `kubectl -n aud-dashboard port-forward svc/aud-dashboard 3000:80`. 점프박스에는 아무것도 설치하지 않음.
    - 이 과정은 `scripts/aks-test.sh connect`(PowerShell: `.\scripts\aks-test.ps1 connect` — PowerShell은 `.sh`를 직접 못 돌려 Git for Windows bash로 실행)가 한 번에 함. `check` = 같은 터널로 `/readyz` 한 번 보고 닫음. 이름은 gitignore된 `.secrets/aks-test.env`(`AUD_AKS_RG`·`AUD_AKS_NAME`·`AUD_BASTION_NAME`·`AUD_BASTION_RG`·`AUD_JUMPBOX_VM` …, 스크립트 머리 주석), 작업 파일(kubeconfig·known_hosts·로그·렌더링한 values)은 `.secrets/aks-test/`. 3000번을 쓰는 온프렘 터널·개발 서버를 먼저 끔. Ctrl-C로 닫을 때 Windows 프로세스 트리째 끝냄(`kill`만으로는 az·ssh가 남아 포트를 쥠). Bastion이 가끔 SSH 세션을 끊으면(`ssh.log` `client_loop: send disconnect: Connection reset` → `lost connection to pod`) `connect`가 세 구간을 다시 엶 — 1분 안에 5번 연속 끊기면 멈춤. 조건부 액세스가 몇 시간 뒤 `az` 로그인을 끝내면(`bastion.log` AADSTS70043) 다시 열 수 없어 'Azure 로그인 만료 — az login' 한 줄로 멈춤 → `az login` 후 `connect`.
+   - **새 이미지로 바꿀 때**(시험 배포 재배포): `scripts/aks-test.sh deploy`(`connect`가 열려 있어야 함) 한 번 — 빌드(`onprem.sh build`) → `onprem.sh save` → 푸시(`scripts/oci-push.mjs`, 레지스트리 v2 API·`az acr login --expose-token` 토큰은 stdin) → 값의 `tag`·`digest` 한 줄 → `helm template` → `kubectl apply` → 롤아웃 → `/healthz` 버전 → `scripts/smoke.mjs`. 아래 함정마다 스크립트가 검사하고 틀리면 멈춤. 함정 세 가지(2026-11-12 실제로 겪음): ① **푸시 전에 풀어 둔 이미지가 방금 빌드한 것인지 확인** — 작업 폴더에 지난 이미지가 남아 있으면 옛 이미지가 새 태그로 올라가고 롤아웃도 '성공'으로 끝남(이미지 설정의 `AUD_VERSION`이 빌드 태그와 같은지 비교, 폴더는 매번 비우고 시작) ② **롤아웃 뒤 `/healthz`의 `version`이 새 빌드인지 확인** — 파드 이미지 태그만 보면 ①을 못 잡음 ③ 레지스트리 푸시가 중간에 끊기면 같은 명령을 다시 실행(이미 올라간 레이어는 건너뜀). 시험용 태그는 매번 새로(같은 태그 덮어쓰기 금지 — `digest` 고정이라 값이 어긋남). 잘못 올린 태그는 정리 때 함께 삭제.
+   - 운영 모드라 **예시 데이터는 꺼져 있음** — 로그인 전에는 로그인 안내만 보이는 것이 정상(차트에 `AUD_SAMPLE_DATA` 값은 아직 없음, 데모가 필요하면 온프렘 문서 9절).
 5. **로그인**: 값 `publicUrl: "http://localhost:3000"`(등록된 SPA 리디렉션과 정확히 같게) — 리디렉션·CORS 둘 다. 운영 모드라 테스트 사용자에게 앱 역할(`AUD.*`) 필요.
 6. **정리**: 네임스페이스·ClusterRole/Binding → 역할 할당 → FIC → 관리 ID → 시험 이미지 경로. `scripts/aks-test.sh cleanup`('yes' 확인 후, 이름은 `AUD_TEST_IDENTITY`·`AUD_TEST_FIC`·`AUD_TEST_ACR`). GitOps 밖 수동 객체라 ArgoCD가 지우지 않음 — 시험 당일 정리.
+
+### 배포 뒤 확인 — `scripts/smoke.mjs`
+
+```bash
+node scripts/smoke.mjs http://localhost:3000 --version <빌드 태그>     # 익명: 버전·준비 상태·닫혀 있어야 할 것
+AUD_SMOKE_TOKEN=<API 액세스 토큰> node scripts/smoke.mjs http://localhost:3000   # + 로그인 상태의 주요 API
+```
+
+- 토큰 없이: `/healthz` 버전, `/readyz`, `/metrics`가 밖으로 안 나오는지(404), 로그인 설정이 실렸는지, 익명 API 6개가 401인지(예시 모드 배포는 `--sample` — 예시 표시가 있어야 통과).
+- 토큰과 함께: 내 역할·구독·비용·리소스 상태·보안·구성도·알림·클러스터(구성·히트맵·앱 런타임·SLO·이벤트·관측 스택·노드·정책)를 GET으로 한 번씩 — 200이 아니거나 **예시 데이터가 로그인 사용자에게 오면 실패**, 403·429·501은 경고, 걸린 시간과 `gaps`·상태를 한 줄씩.
+- 토큰은 브라우저가 보내는 것과 같은 것(`Authorization: Bearer`, 범위 `Azure.Read.All`)이고 환경 변수로만 읽습니다(출력·저장 안 함). 로그인 앱이 다른 테넌트에 있으면 `az account get-access-token`으로는 못 받습니다(AADSTS500011) — 그 테넌트로 로그인하거나 브라우저 세션의 토큰을 씁니다. **토큰이 없으면 로그인 부분은 '건너뜀'으로 적히고 통과로 세지 않습니다.**
+- 화면이 실제로 그려지는지(브라우저 테스트)는 아직 없습니다 — [platform-roadmap.md](../architecture/platform-roadmap.md) 1절.
+
+### 플랫폼 자체 지표 — `/metrics`
+
+API가 자기 상태를 Prometheus 형식으로 냅니다: `aud_http_requests_total{route, method, status}`·`aud_http_request_duration_seconds`(경로는 패턴 — ID 없음), `aud_upstream_requests_total{target, result}`·`aud_upstream_request_duration_seconds`(Azure 호출 — `result` = HTTP 상태·`timeout`·`error`, 스로틀 429가 여기서 보임), `aud_build_info{version}`, 프로세스·이벤트 루프(`nodejs_version_info`가 있어 AKS 모니터링의 앱 런타임에 Node.js로 잡힘). 테넌트 데이터는 없습니다.
+
+- API 포트(파드 안 루프백)의 `GET /metrics`는 `/api` 밖이라 웹을 통해 나가지 않습니다.
+- 수집하려면 값 `metrics.enabled: true` → 지표만 답하는 포트(기본 9464)·`prometheus.io/*` 파드 주석·`AUD_METRICS_PORT`. 네트워크 정책을 쓰면 `metrics.fromNamespaces: ["<수집기 네임스페이스>"]`로 그 포트만 엽니다. 기본은 꺼짐(렌더 결과 변화 없음).
+- 온프렘 Docker는 `api.env`에 `AUD_METRICS_PORT`(파드 공간 안에서만 열림 — 밖으로 내보내려면 compose 포트를 따로 엽니다).
 
 ## 9. 문제 해결
 

@@ -24,6 +24,11 @@ spec:
       annotations:
         azure.workload.identity/skip-containers: web     # the web never calls Azure
         checksum/connections: {{ .Values.connections | sha256sum | trunc 16 }}   # a new connections file restarts the pod
+        {{- if .Values.metrics.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metrics.port | quote }}
+        prometheus.io/path: /metrics
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -82,6 +87,10 @@ spec:
           image: {{ include "aud.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["node", "/app/apps/api/dist/index.js"]
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - { name: metrics, containerPort: {{ .Values.metrics.port }} }   # /metrics only — the API stays on loopback
+          {{- end }}
           env:
             - { name: NODE_ENV, value: production }
             - { name: PORT, value: "4000" }
@@ -101,6 +110,9 @@ spec:
             - { name: AZURE_LIVE_DIAGRAM_ENABLED, value: {{ .Values.features.liveDiagram | quote }} }
             - { name: AZURE_SECURITY_ENABLED, value: {{ .Values.features.security | quote }} }
             - { name: AUD_ADVISORY_FEEDS, value: {{ .Values.features.advisoryFeeds | quote }} }
+            {{- if .Values.metrics.enabled }}
+            - { name: AUD_METRICS_PORT, value: {{ .Values.metrics.port | quote }} }
+            {{- end }}
             {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

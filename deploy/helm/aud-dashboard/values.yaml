@@ -66,6 +66,13 @@ replicas: 1                        # caches and live diagrams are in memory
 podDisruptionBudget:
   enabled: true                    # maxUnavailable 1 — never blocks node drains with one replica
 podAnnotations: {}
+# The platform's own metrics (requests by route, Azure calls by status, process) on a port of its own that answers
+# only /metrics. enabled adds the port, the prometheus.io/* pod annotations the usual collectors read, and — with
+# fromNamespaces — a network policy rule for the collector's namespace (e.g. ["monitor"])
+metrics:
+  enabled: false
+  port: 9464
+  fromNamespaces: []
 nodeSelector: {}
 tolerations: []
 # Pod DNS. Every name the API calls is external with >= 2 dots (management.azure.com, login.microsoftonline.com …):

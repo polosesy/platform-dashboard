@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-ops
-last-verified: 2026-11-09
+last-verified: 2026-11-12
 covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts, apps/api/test/runtimeSecurity.test.ts]
 ---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
@@ -212,6 +212,8 @@ Host aud-onprem
 | AKS 화면 `cluster_dns_unresolved` | 프라이빗 클러스터 API 서버에 경로·DNS 없음 | S2S/ExpressRoute + privatelink DNS 전달이 있어야 함. 없으면 정상 응답(클러스터 안 기능은 AKS 배포 후) — 쿠버네티스 클라이언트는 프록시를 쓰지 않음 |
 | `EACCES` 인증서 읽기 | 파일 권한 | `chgrp 65532` + `g+r` |
 | Service Health 번역 실패 | 키 없는 번역기는 운영에서 꺼짐 | `AZURE_TRANSLATOR_KEY`(+ 지역) |
+| 로그인 전 화면이 예시 대신 로그인 안내만 나옴 | 운영 모드는 예시 데이터가 꺼져 있음(2026-11-12 — 예시가 실제 장애로 읽힌 일이 있어 기본을 바꿈) | 정상. 데모 서버에서만 `api.env`의 `AUD_SAMPLE_DATA=true` + `web.env`의 `AUD_WEB_SAMPLE_DATA=true`(둘 다 — 한쪽만 켜면 버튼만 보이거나 401). 로그인한 사용자에게는 어느 설정에서도 예시가 나가지 않음(error-catalog AUTH-010) |
+| 위협 탐지·리소스 상태 문구 일부가 영어 | Azure가 그 문구를 영어로만 줌, 대시보드 문장 표에 없는 유형 | `AZURE_TRANSLATOR_KEY`를 넣으면 '기계 번역' 표시와 함께 번역, 없으면 'Azure가 영어로만 제공' 표시로 남음 |
 
 ## 10. 교체
 

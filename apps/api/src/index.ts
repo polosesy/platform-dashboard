@@ -1,6 +1,7 @@
 // ── Global error guards — a dropped socket (ECONNRESET …) never stops the server; in production (container) any
 // other uncaught exception exits so the orchestrator restarts a clean process (infra/lifecycle.ts) ──
 import { createSampleGuard } from "./middleware/sampleGuard.js";
+import { recordHttp, renderMetrics, routeLabel } from "./infra/selfMetrics.js";
 import { SHUTDOWN, canKillPortHolder, healthBody, onUncaught } from "./infra/lifecycle.js";
 process.on("uncaughtException", (err: Error) => {
   if (onUncaught(err, process.env.NODE_ENV) === "exit") {
@@ -49,6 +50,18 @@ app.disable("x-powered-by");
 app.get("/healthz", (_req, res) => {
   res.setHeader("cache-control", "no-store");
   res.json(healthBody(env.AUD_VERSION));
+});
+// The platform's own metrics: route patterns and status codes only (infra/selfMetrics.ts) — outside /api, so the
+// web's rewrite never exposes it; in a pod this port is loopback and AUD_METRICS_PORT is the scrape target
+const metricsHandler = (_req: express.Request, res: express.Response) => {
+  res.setHeader("cache-control", "no-store");
+  res.type("text/plain; version=0.0.4").send(renderMetrics(env.AUD_VERSION));
+};
+app.get("/metrics", metricsHandler);
+app.use((req, res, next) => {
+  const t0 = process.hrtime.bigint();
+  res.on("finish", () => recordHttp(routeLabel(req.baseUrl, req.route?.path), req.method, res.statusCode, Number(process.hrtime.bigint() - t0) / 1e9));
+  next();
 });
 app.use(requestIdMiddleware);
 app.use(express.json({ limit: "1mb" }));
@@ -107,6 +120,15 @@ function killPortHolder(port: number): boolean {
 
 const MAX_RETRIES = 2;
 let retryCount = 0;
+
+if (env.AUD_METRICS_PORT) {
+  // A listener that answers /metrics and nothing else — the API itself stays on loopback
+  const metricsApp = express();
+  metricsApp.disable("x-powered-by");
+  metricsApp.get("/metrics", metricsHandler);
+  metricsApp.listen(env.AUD_METRICS_PORT, env.AUD_METRICS_BIND_HOST, () => console.log(`[metrics] http://${env.AUD_METRICS_BIND_HOST}:${env.AUD_METRICS_PORT}/metrics`))
+    .on("error", (e) => console.error(`[metrics] listener failed: ${e.message}`));
+}
 
 function startServer() {
   const server = app.listen(env.PORT, env.API_BIND_HOST, () => {

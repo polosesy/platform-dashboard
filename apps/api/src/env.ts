@@ -68,6 +68,9 @@ const EnvSchema = z.object({
   AZURE_CLIENT_ID: z.string().optional(),
   /** Build / image version shown by /healthz and the startup log */
   AUD_VERSION: z.string().max(64).optional(),
+  // The platform's own metrics on a port of their own (unset = only GET /metrics on the API port)
+  AUD_METRICS_PORT: z.coerce.number().int().min(1024).max(65535).optional(),
+  AUD_METRICS_BIND_HOST: z.string().default("0.0.0.0"),
   /**
    * Workload identity federation (servicePrincipal connections with `federation: {kind: "kubernetes"}`): the projected
    * service-account token file of the pod the API runs in (audience api://AzureADTokenExchange). Falls back to

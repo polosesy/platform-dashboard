@@ -1,3 +1,4 @@
+import { recordUpstream } from "./selfMetrics.js";
 import type { TokenCredential } from "@azure/identity";
 import { decodeJwt } from "jose";
 import type { Env } from "../env.js";
@@ -352,8 +353,11 @@ async function fetchJsonWithTimeout<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const t0 = Date.now();
+  let result: number | "timeout" | "error" = "error";
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
+    result = res.status;
     if (!res.ok) {
       const text = await res.text();
       let code = "error";
@@ -369,8 +373,12 @@ async function fetchJsonWithTimeout<T>(
       throw err;
     }
     return (await res.json()) as T;
+  } catch (e) {
+    if (result === "error" && controller.signal.aborted) result = "timeout";
+    throw e;
   } finally {
     clearTimeout(timer);
+    recordUpstream(label, result, (Date.now() - t0) / 1000);
   }
 }
 

@@ -4,6 +4,7 @@
 #
 #   scripts/aks-test.sh connect    http://localhost:3000 → svc/aud-dashboard (Ctrl-C closes every tunnel)
 #   scripts/aks-test.sh check      the same tunnels, one /readyz through them, then close
+#   scripts/aks-test.sh deploy     build → push → roll out → check the running version (needs `connect` open)
 #   scripts/aks-test.sh cleanup    delete everything the test created (asks "yes" first)
 #
 #   PC :2222 ─Bastion─▶ jumpbox :22          (Bastion IP tunnels allow only 22/3389 → SSH is the hop)
@@ -108,6 +109,45 @@ tunnels() {   # $1 = connect | check
   done
 }
 
+# build on the on-prem Docker server → docker save → push from this PC (the registry allows this IP) → values tag +
+# digest → helm template → kubectl apply → rollout → /healthz must report the build. Every step that went wrong
+# silently once has a check: the saved image's AUD_VERSION must be the build (a stale folder pushed the previous
+# image under a new tag — 2026-11-12), and the running pod must report it.
+deploy() {
+  local ACR="${AUD_TEST_ACR:?set AUD_TEST_ACR}" REPO="${AUD_TEST_REPO:-test/aud-dashboard}" V="$WORK/values-test.yaml"
+  local IMG="$WORK/image" BUILT TAG REG DIGEST HAVE v=""
+  [ -f "$V" ] || { echo "no $V (the test values — docs/deployment/kubernetes.md)"; exit 1; }
+  open_port "$LOCAL_PORT" || { echo "open the tunnel first: scripts/aks-test.sh connect"; exit 1; }
+  BUILT=$(bash scripts/onprem.sh build | tee "$WORK/build.log" | sed -n 's/^built \([^ ]*\) .*/\1/p' | tail -1)
+  [ -n "$BUILT" ] || { echo "the build did not report a tag — see $WORK/build.log"; exit 1; }
+  TAG="0.1.0-${BUILT%%-*}-$(date -u +%m%d%H%M)"          # a new tag every time: the digest is pinned in the values
+  rm -rf "${IMG:?}" "$IMG.tar"; mkdir -p "$IMG"
+  bash scripts/onprem.sh save "$BUILT" > "$IMG.tar"
+  tar --force-local -xf "$IMG.tar" -C "$IMG"; rm -f "$IMG.tar"
+  HAVE=$(node -e 'const fs=require("fs"),p=require("path"),d=process.argv[1];const m=JSON.parse(fs.readFileSync(p.join(d,"manifest.json"),"utf8"))[0];const c=JSON.parse(fs.readFileSync(p.join(d,m.Config),"utf8"));console.log(((c.config.Env||[]).find(e=>e.startsWith("AUD_VERSION="))||"").slice(12))' "$IMG")
+  [ "$HAVE" = "$BUILT" ] || { echo "the saved image is '$HAVE', not the build '$BUILT' — nothing pushed"; exit 1; }
+  REG="$ACR.azurecr.io"
+  for try in 1 2; do     # a push cut mid-way resumes: layers already there are skipped
+    DIGEST=$(az acr login -n "$ACR" --expose-token --query accessToken -o tsv 2>/dev/null | tr -d '\r' \
+      | node scripts/oci-push.mjs "$IMG" "$REG" "$REPO" "$TAG" 2>"$WORK/push.log" | sed -n 's/^DIGEST //p' | tail -1) || true
+    case "$DIGEST" in sha256:*) break ;; esac
+    [ "$try" = 2 ] && { echo "push failed — see $WORK/push.log (az login expired?)"; exit 1; }
+  done
+  sed -i -E "1s/tag: \"[^\"]+\"/tag: \"$TAG\"/; 1s/digest: \"sha256:[0-9a-f]+\"/digest: \"$DIGEST\"/" "$V"
+  grep -q "tag: \"$TAG\".*digest: \"$DIGEST\"" "$V" || { echo "line 1 of $V is not the image line (tag · digest) — values not updated"; exit 1; }
+  [ -f "$WORK/aud.yaml" ] && cp "$WORK/aud.yaml" "$WORK/aud.prev.yaml"
+  helm template aud-dashboard deploy/helm/aud-dashboard -n "$NS" -f "$V" > "$WORK/aud.yaml"
+  KUBECONFIG="$WORK/kubeconfig" kubectl apply -f "$WORK/aud.yaml" >/dev/null
+  KUBECONFIG="$WORK/kubeconfig" kubectl -n "$NS" rollout status deploy/aud-dashboard --timeout=300s | tail -1
+  for _ in $(seq 1 60); do      # the port-forward reattaches to the new pod after the old one goes
+    v=$(curl -s --max-time 3 "http://localhost:$LOCAL_PORT/healthz" || true)
+    case "$v" in *"$BUILT"*) break ;; esac
+    ping -n 4 127.0.0.1 >/dev/null
+  done
+  case "$v" in *"$BUILT"*) echo "running $BUILT ($TAG)" ;; *) echo "rolled out, but /healthz says: ${v:-no answer} (expected $BUILT)"; exit 1 ;; esac
+  node scripts/smoke.mjs "http://localhost:$LOCAL_PORT" --version "$BUILT"
+}
+
 cleanup() {   # order: cluster objects → role assignments → federated credential → identity → test image repository
   local MI="${AUD_TEST_IDENTITY:?set AUD_TEST_IDENTITY}" FIC="${AUD_TEST_FIC:?set AUD_TEST_FIC}"
   local ACR="${AUD_TEST_ACR:?set AUD_TEST_ACR}" REPO="${AUD_TEST_REPO:-test/aud-dashboard}" SUB PID ok
@@ -132,6 +172,7 @@ cleanup() {   # order: cluster objects → role assignments → federated creden
 case "${1:-}" in
   connect) tunnels connect ;;
   check) tunnels check ;;
+  deploy) deploy ;;
   cleanup) cleanup ;;
-  *) sed -n '2,7p' "$SELF" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,8p' "$SELF" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -19,6 +19,13 @@ spec:
   ingress:
     - fromCIDR: [{{ range $i, $c := $np.ingressCidrs }}{{ if $i }}, {{ end }}{{ $c | quote }}{{ end }}]
       toPorts: [{ ports: [{ port: "3000", protocol: TCP }] }]
+    {{- if and .Values.metrics.enabled .Values.metrics.fromNamespaces }}
+    - fromEndpoints:
+        {{- range .Values.metrics.fromNamespaces }}
+        - matchLabels: { "k8s:io.kubernetes.pod.namespace": {{ . | quote }} }
+        {{- end }}
+      toPorts: [{ ports: [{ port: {{ .Values.metrics.port | quote }}, protocol: TCP }] }]
+    {{- end }}
   egress:
     - toEndpoints:
         - matchLabels: { "k8s:io.kubernetes.pod.namespace": kube-system, "k8s:k8s-app": kube-dns }

@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-10-30
+last-verified: 2026-11-12
 ---
 # 문서 목록
 
@@ -29,6 +29,7 @@ last-verified: 2026-10-30
 - [multi-cloud.md](architecture/multi-cloud.md) — 멀티클라우드(Azure·AWS·GCP) 분석·단계별 계획 (초안, Phase 0 구현) · 참고 그림 [`image/aws-azure-gcp-system.gif`](image/aws-azure-gcp-system.gif)
 - [design-system.md](architecture/design-system.md) — 디자인 원칙 v1(애플 관점 검토)과 토큰: Pretendard · 글자 6단계(12px 미만 금지) · 굵기 4 · 모서리 3 · 그림자 2 · 움직임 · 바꾸는 순서
 - [kubernetes-ia.md](architecture/kubernetes-ia.md) — AKS 클러스터 · AKS 모니터링 메뉴 구조 검토(다른 플랫폼 비교, 구성·리소스 / 상태·신호로 역할 분리 + 워크로드로 서로 연결 — 2026-11-11 구현, 남은 것 6절)
+- [platform-roadmap.md](architecture/platform-roadmap.md) — 플랫폼 고도화 방향(권장 순서: 검증·배포 기반 → 변경 타임라인 → 비용 배분 → 이미지 공급망 → 이중화)과 백로그(결정 대기·확인 대기·미완성·보류) — 초안
 - [security-roadmap.md](architecture/security-roadmap.md) — 보안 기능 고도화 계획(CNAPP 데모 비교 · P0~P3·P4a 배포 출처·P5 그래프 탐색 구현, P4b OCI 라벨 보류)
 - [azure-resource-relationships.md](architecture/azure-resource-relationships.md) — 리소스 관계 사전 핵심(코드가 쓰는 행)
 - 영역별 관계 사전: [network-core.md](architecture/relationships/network-core.md) · [network-edge.md](architecture/relationships/network-edge.md) · [compute-containers.md](architecture/relationships/compute-containers.md) · [app-integration.md](architecture/relationships/app-integration.md) · [data.md](architecture/relationships/data.md) · [identity-security-monitoring.md](architecture/relationships/identity-security-monitoring.md) (+ `relationships/catalog.json`)

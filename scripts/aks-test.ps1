@@ -1,6 +1,6 @@
 # PowerShell entry for scripts/aks-test.sh (PowerShell cannot run a .sh file itself). Runs it with Git for Windows'
 # bash - never C:\Windows\System32\bash.exe (that is WSL: another filesystem, no Windows az / kubectl login).
-#   scripts\aks-test.ps1 connect | check | cleanup
+#   scripts\aks-test.ps1 connect | check | deploy | cleanup
 # Names come from the gitignored .secrets\aks-test.env. Guide: docs/deployment/kubernetes.md (test deployment)
 $ErrorActionPreference = 'Stop'
 $candidates = @(
