@@ -38,6 +38,9 @@ features:
   # AKS 보안 점검 › AKS 관리 부품 reads cve-api.prod-aks.azure.com and releases.aks.azure.com (GET, Microsoft image names only)
   # (turn just that off with api.extraEnv AUD_ADVISORY_OSV=false). false = air-gapped: Defender findings and own runtime only
   advisoryFeeds: true
+  # 앱 런타임: read image configs from the connection's Azure Container Registries (also needs the connection file's
+  # aks.imageConfig: true and AcrPull for the identity). Here it only opens the registry FQDNs in the network policy
+  imageConfig: false
 
 # Azure connections file (AUD_CONNECTIONS_FILE) — IDs and names only. A customer connection reads with its own app
 # or managed identity via federation (no secret): docs/integrations/azure/connect-tenant.md

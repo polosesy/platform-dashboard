@@ -60,6 +60,11 @@ spec:
         - matchName: cve-api.prod-aks.azure.com         # AKS 관리 부품 — Microsoft's CVE scan per AKS image / release
         - matchName: releases.aks.azure.com             # AKS release tracker (the release each region runs)
         {{- end }}
+        {{- if .Values.features.imageConfig }}
+        - matchPattern: "*.azurecr.io"                  # 앱 런타임 — image configs (config blob only; AcrPull)
+        - matchPattern: "*.*.data.azurecr.io"           # the registry's data endpoint (blob redirect)
+        - matchPattern: "*.blob.core.windows.net"       # … or its storage account when data endpoints are off
+        {{- end }}
         {{- range $np.extraFqdns }}
         - matchName: {{ . | quote }}
         {{- end }}

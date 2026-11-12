@@ -142,7 +142,7 @@ export function formatAppValue(unit: AppMetricsResponse["columns"][number]["unit
 }
 
 /** Evidence order: the runtime's own metrics first, then what else said so (every one a fact with its source) */
-export const BASIS_ORDER: AppRuntimeBasis[] = ["metrics", "telemetry", "spec", "scan", "image"];
+export const BASIS_ORDER: AppRuntimeBasis[] = ["metrics", "telemetry", "config", "spec", "scan", "image"];
 /** Pure: the kinds of a workload as the cell shows them — strongest evidence first */
 export function kindsOf(w: AppMetricsResponse["workloads"][number] | undefined): AppRuntimeEvidence[] {
   return [...(w?.kinds ?? [])].sort((a, b) => BASIS_ORDER.indexOf(a.basis) - BASIS_ORDER.indexOf(b.basis) || (a.kind < b.kind ? -1 : 1));

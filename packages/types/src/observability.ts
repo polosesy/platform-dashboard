@@ -889,7 +889,8 @@ export type LogInsightsResponse = {
 // basis (strongest first, never a guess): metrics = its detection metric is in the workspace · telemetry = the
 // OpenTelemetry SDK reports its language (target_info) · spec = the manifest declares it (the executable, a variable
 // only that runtime reads, the Operator's inject annotation) · scan = Defender's image scan found that language's
-// packages in the image · image = a Docker Hub official image.
+// packages in the image · image = a Docker Hub official image · config = the image's own configuration read from
+// the registry (Env JAVA_VERSION … · Entrypoint) — it also gives the version to a kind the metrics named without one.
 
 export type AppRuntimeKind = "jvm" | "nodejs" | "python" | "go" | "dotnet" | "nginx" | "redis" | "postgres";
 export type AppColumnId =
@@ -897,7 +898,7 @@ export type AppColumnId =
   | "nginxConnections" | "nginxRequests" | "redisClients" | "redisMemory" | "pgConnections" | "openFds";
 /** measured = series exist · absent = the metric is not in the workspace · queryFailed = the query did not answer */
 export type AppMetricState = "measured" | "absent" | "queryFailed";
-export type AppRuntimeBasis = "metrics" | "telemetry" | "spec" | "scan" | "image";
+export type AppRuntimeBasis = "metrics" | "telemetry" | "config" | "spec" | "scan" | "image";
 export type AppRuntimeEvidence = {
   kind: AppRuntimeKind; basis: AppRuntimeBasis;
   /** The runtime's version as it reports it (metrics · telemetry only) */
@@ -916,5 +917,9 @@ export type AppMetricsResponse = {
   workloads: { namespace: string; workload: string; kinds: AppRuntimeEvidence[]; values: Partial<Record<AppColumnId, number>> }[];
   gaps?: StackQueryGap[];
   /** The non-metric sources this answer could use: spec (Kubernetes API) · scan (Defender; empty = no scanned image matched) */
-  evidence?: { spec: "ok" | "unavailable"; scan: "ok" | "empty" | "unavailable" };
+  evidence?: {
+    spec: "ok" | "unavailable"; scan: "ok" | "empty" | "unavailable";
+    /** Image configs from the registry: off = the connection did not opt in · none = no registry image · forbidden = no AcrPull */
+    imageConfig?: { state: "ok" | "off" | "forbidden" | "unreachable" | "failed" | "none"; read: number; pending: number };
+  };
 };

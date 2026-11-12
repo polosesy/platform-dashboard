@@ -233,6 +233,7 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 |------|----|------|
 | 메트릭 | 그 파드가 런타임 고유 메트릭을 내보냄 — 버전도 그 메트릭에서 읽음(`jvm_info`·`nodejs_version_info`·`python_info`·`go_info`·`redis_instance_info`) | 파란 칩 + 버전 (예: Java · JVM 17) |
 | OpenTelemetry | SDK가 `target_info`로 언어(`telemetry_sdk_language`)를 보고 | 회색 칩 |
+| 이미지 설정 | 레지스트리에서 읽은 이미지 자신의 설정 — `Env`의 `JAVA_VERSION`·`NODE_VERSION`·`PYTHON_VERSION`·`DOTNET_VERSION`·`NGINX_VERSION`·`REDIS_VERSION`…, `Entrypoint`의 실행 파일 (연결별 선택 기능, 아래) | 회색 칩 + 버전. 지표로 이미 확인된 종류에 버전이 없으면 버전만 채움 |
 | 매니페스트 | 워크로드가 선언한 실행 파일(`command`)·런타임이 직접 읽는 환경 변수 이름(`JAVA_TOOL_OPTIONS`·`NODE_OPTIONS` …)·OTel Operator `inject-<언어>` 주석 | 회색 칩 |
 | 이미지 스캔 | Defender for Containers가 그 이미지에서 해당 언어의 패키지를 찾음 | 회색 칩 |
 | 공식 이미지 | Docker Hub 공식 이미지(`redis:7`, `docker.io/library/nginx`) | 회색 칩 |
@@ -242,7 +243,11 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 
 - 매니페스트: `args`만 있고 `command`가 없으면 읽지 않습니다(이미지의 ENTRYPOINT로 가는 인자라 무엇이 실행되는지 매니페스트로는 알 수 없음). `JAVA_OPTS`·`NODE_ENV` 같은 팀 관례 변수는 근거가 아닙니다. 추가 권한 없음(VPA 절과 같은 워크로드 목록).
 - 이미지 스캔: Defender는 **발견 사항이 있는 패키지만** 나열합니다 → 결과가 없다고 그 언어가 아니라는 뜻이 아니고, 여러 언어가 나오면 모두 표시합니다('이미지에 들어 있음'이라는 뜻). Defender for Containers 플랜과 레지스트리 스캔 결과가 있어야 합니다(시험 환경은 하위 평가 0건이라 이 경로는 실측 전).
-- 다음 단계(미구현): 레지스트리에서 이미지 설정(OCI config의 `Env` — `JAVA_VERSION`·`NODE_VERSION`·`PYTHON_VERSION`·`DOTNET_VERSION`, `Entrypoint`)을 읽으면 지표가 없는 이미지도 런타임과 버전을 정확히 알 수 있습니다. 연결 신원에 그 레지스트리의 `AcrPull`이 필요해 고객 승인 뒤 진행합니다.
+- **이미지 설정**(2026-11-12 구현, `services/imageConfig.ts`): 연결 파일에 `aks.imageConfig: true` + 그 연결 신원에 레지스트리의 `AcrPull`이 있을 때만 읽습니다. Azure Container Registry(`<이름>.azurecr.io`)만, **설정 blob(몇 KB)만** 읽고 레이어는 받지 않습니다. `Env`에서는 위 변수 이름만 보고 다른 변수의 이름·값은 밖으로 나가지 않습니다. 다이제스트별 하루 캐시(한 번에 80개·10초까지, 나머지는 다음 새로 고침). 응답 `evidence.imageConfig` = `ok`·`off`(선택 안 함)·`forbidden`(AcrPull 없음)·`unreachable`·`none`(레지스트리 이미지 없음) + 읽은 수·남은 수.
+  - 시험 환경 실측(2026-11-12): 레지스트리 이미지 36개 중 **24개가 런타임과 정확한 버전**을 밝힘(Java 21 계열 18 · Node.js 4 · nginx 1 · redis 1), 12개는 설정에 표시 없음(정적 바이너리 등 — '알 수 없음'으로 남음). 36개 순차 읽기 11초.
+  - 함정: 다이제스트로 고정한 파드는 Kubernetes가 이미지를 `sha256:…`로만 보고합니다(36개 중 30개). 저장소 경로는 `imageID`(`kube_pod_container_info`의 `image_id`)에만 있어 그 값을 씁니다.
+  - 네트워크 정책을 강제하면 차트 `features.imageConfig: true`로 `*.azurecr.io`·데이터 엔드포인트 FQDN을 엽니다. 레지스트리가 사설 엔드포인트 전용이면 파드가 그 경로로 닿아야 합니다(`unreachable`).
+  - 출처 라벨(`org.opencontainers.image.source`·`revision`)도 같은 설정에 있지만 시험 환경은 36개 중 1개뿐이라 화면에는 아직 쓰지 않습니다.
 
 | 종류 | 판별 메트릭 | 보통 내보내는 것 | 블록(열) |
 |------|-------------|------------------|----------|

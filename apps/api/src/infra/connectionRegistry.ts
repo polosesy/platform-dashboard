@@ -109,6 +109,9 @@ const ConnectionSchema = z.object({
     hubbleExec: z.boolean().optional(),
     podLogNamespaces: z.array(z.string().regex(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/, "a namespace name")).optional(),
     // Registry path prefixes the team mirrors upstream images into (<registry>/<path>) — their CVEs are the upstream's
+    // Read image configs (runtime · version · source labels) from the connection's Azure Container Registries —
+    // the identity needs AcrPull there; only the config blob, never a layer (services/imageConfig.ts)
+    imageConfig: z.boolean().optional(),
     imageMirrors: z.array(z.string().regex(/^[a-z0-9.-]+(:\d+)?\/[\w./-]+$/i, "<registry>/<path>")).max(20).optional(),
     observability: z.object({
       grafana: z.object({

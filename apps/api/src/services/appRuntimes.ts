@@ -9,7 +9,8 @@
 // Rules:
 // - "what it is" has a basis, strongest first — never a guess from a name (2026-11-12: the image-name hint is gone):
 //   `metrics` = its detection metric is in the workspace for a pod of the workload (+ the version it reports) ·
-//   `telemetry` = the OpenTelemetry SDK's target_info · `spec` = the manifest declares it · `scan` = Defender's image
+//   `telemetry` = the OpenTelemetry SDK's target_info · `spec` = the manifest declares it · `config` = the image's own
+//   configuration from the registry (services/imageConfig.ts — Env JAVA_VERSION …, Entrypoint; opt-in) · `scan` = Defender's image
 //   scan found that language's packages · `image` = a Docker Hub official image (services/runtimeEvidence.ts).
 // - a value is the workload's worst pod (max) or the sum where the unit adds up (requests · connections).
 // - no series = no value (never 0); a query that did not answer is a gap and its column says so.
@@ -27,6 +28,7 @@ import { runAll } from "./observabilityStack.js";
 import { ownerIndex, resolveWorkload, type OwnerRow } from "./workloadOwners.js";
 import { collectScanRows, officialImageRuntime, runtimesOfScan, runtimesOfSpec, type RuntimeEvidence, type ScanRow, type SpecContainer } from "./runtimeEvidence.js";
 import { workloadTemplates } from "./workloadVpa.js";
+import { collectImageConfigs, type ImageConfigFacts } from "./imageConfig.js";
 
 /** The metric that says "this pod runs that" — exposed by default by the runtime's standard library / exporter */
 export const RUNTIME_DETECT: Record<AppRuntimeKind, string> = {
@@ -97,7 +99,11 @@ const owner = (r: PromRow): OwnerRow => ({ namespace: r.metric.namespace ?? "", 
 export type AppEvidenceInput = {
   templates?: { containers: Map<string, unknown[]>; annotations: Map<string, Record<string, string>> } | null;
   scan?: ScanRow[] | null;
+  /** Image config facts by `imageKey(image, image_id)` (services/imageConfig.ts) */
+  configs?: Map<string, ImageConfigFacts> | null;
 };
+/** The key one container image is known by: the status image + its imageID (a digest-pinned pod's image is a bare sha256) */
+export const imageKey = (image: string, imageId: string) => `${image}|${imageId}`;
 const TEMPLATE_KINDS = ["Deployment", "StatefulSet", "DaemonSet"];
 
 /** Pure: the answers → per workload its kinds (with basis) and values; per runtime / column whether it is measured */
@@ -140,6 +146,22 @@ export function aggregateApps(raw: Record<string, PromRow[]>, failed: Set<string
     const version = cleanVersion(r.metric.process_runtime_version);
     add(w, { kind, basis: "telemetry", evidence: `telemetry.sdk.language: ${r.metric.telemetry_sdk_language}`, ...(version ? { version } : {}) });
   }
+  const podImages = (raw.images ?? []).map((r) => {
+    const image = r.metric.image ?? "", imageId = (r.metric.image_id ?? "").replace(/^[a-z-]+:\/\//, "");
+    // a pod pinned by digest reports its image as a bare "sha256:…" — its repository is only in image_id
+    return { r, image, imageId, named: image.includes("/") && !/^sha256:/.test(image) ? image : imageId || image, digest: /sha256:[0-9a-f]{64}/.exec(imageId)?.[0] };
+  });
+  // the image's own configuration (registry): names a kind, and gives the version to a kind already named without one
+  if (extra.configs) {
+    for (const { r, image, imageId } of podImages) {
+      const w = at(r);
+      for (const c of extra.configs.get(imageKey(image, imageId))?.runtimes ?? []) {
+        const hit = w?.kinds.find((x) => x.kind === c.kind);
+        if (hit) { if (!hit.version && c.version) hit.version = c.version; }
+        else add(w, { kind: c.kind, basis: "config", evidence: c.evidence, ...(c.version ? { version: c.version } : {}) });
+      }
+    }
+  }
   if (extra.templates) {
     for (const w of by.values()) {
       for (const tk of TEMPLATE_KINDS) {
@@ -150,13 +172,12 @@ export function aggregateApps(raw: Record<string, PromRow[]>, failed: Set<string
       }
     }
   }
-  const podImages = (raw.images ?? []).map((r) => ({ r, image: r.metric.image ?? "", digest: /sha256:[0-9a-f]{64}/.exec(r.metric.image_id ?? "")?.[0] }));
   if (extra.scan?.length) {
-    const found: Map<string, RuntimeEvidence[]> = runtimesOfScan(podImages.map(({ image, digest }) => ({ image, ...(digest ? { digest } : {}) })), extra.scan);
-    for (const { r, image } of podImages) for (const e of found.get(image) ?? []) add(at(r), { kind: e.kind, basis: "scan", evidence: e.evidence });
+    const found: Map<string, RuntimeEvidence[]> = runtimesOfScan(podImages.map(({ named, digest }) => ({ image: named, ...(digest ? { digest } : {}) })), extra.scan);
+    for (const { r, named } of podImages) for (const e of found.get(named) ?? []) add(at(r), { kind: e.kind, basis: "scan", evidence: e.evidence });
   }
-  for (const { r, image } of podImages) {
-    const k = officialImageRuntime(image);
+  for (const { r, named } of podImages) {
+    const k = officialImageRuntime(named);
     if (k) add(at(r), { kind: k, basis: "image", evidence: "Docker Hub official image" });
   }
   for (const id of APP_COLUMN_IDS) {
@@ -202,7 +223,7 @@ export async function getAppMetrics(env: Env, bearerToken: string | undefined, c
   const running = inflight.get(key);
   if (running) return running;
   const job = collect(env, bearerToken, clusterId, at).then((r) => {
-    if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length || r.evidence?.spec === "unavailable" ? 15_000 : undefined);
+    if (r.metricsState === "ok") cache.set(key, r, r.gaps?.length || r.evidence?.spec === "unavailable" || r.evidence?.imageConfig?.pending ? 15_000 : undefined);
     return r;
   }).finally(() => inflight.delete(key));
   inflight.set(key, job);
@@ -232,8 +253,16 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     if (APP_CORE_QUERIES.some((q) => failed.has(q))) throw run.firstError;
     // the optional evidence queries are not gaps of the table (a workspace without target_info is normal)
     const gaps: StackQueryGap[] = run.gaps.filter((g) => g.query !== "otel" && !g.query.startsWith("ver:"));
-    const evidence = { spec: templates ? ("ok" as const) : ("unavailable" as const), scan: scan === null ? ("unavailable" as const) : scan.length ? ("ok" as const) : ("empty" as const) };
-    return { ...base, ...aggregateApps(run.rows, failed, { templates, scan }), evidence, ...(gaps.length ? { gaps } : {}) };
+    // The registry's image configs for the images the metrics list (opt-in per connection; cached by digest for a day)
+    const cfg = await collectImageConfigs(env, bearerToken, clusterId, (run.rows.images ?? []).map((r) => {
+      const image = r.metric.image ?? "", imageId = (r.metric.image_id ?? "").replace(/^[a-z-]+:\/\//, "");
+      return { key: imageKey(image, imageId), image, imageId };
+    }));
+    const evidence = {
+      spec: templates ? ("ok" as const) : ("unavailable" as const), scan: scan === null ? ("unavailable" as const) : scan.length ? ("ok" as const) : ("empty" as const),
+      imageConfig: { state: cfg.state, read: cfg.read, pending: cfg.pending },
+    };
+    return { ...base, ...aggregateApps(run.rows, failed, { templates, scan, configs: cfg.byImage }), evidence, ...(gaps.length ? { gaps } : {}) };
   } catch (e) {
     if (e instanceof HttpError && e.code === "signin_required") throw e;
     const { state, message } = metricsStateOf(e);
