@@ -79,6 +79,23 @@ function resolveSubscription(env: Env, requested: string | undefined, bearerToke
   return requested ?? defaultSubscriptions(env, bearerToken)[0];
 }
 
+/**
+ * Pure: the previous month's same stretch — day 1 to the same day of the month (the last day when that month is
+ * shorter). Month-to-date against the whole previous month always read as a big drop early in the month
+ * (day 12 of 30 = "−60 %" with unchanged spend).
+ */
+export function previousSamePeriod(now: Date): { from: Date; to: Date; days: number } {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const days = Math.min(now.getUTCDate(), lastDay);
+  return { from: new Date(Date.UTC(y, m - 1, 1)), to: new Date(Date.UTC(y, m - 1, days)), days };
+}
+
+/** Pure: change in percent (one decimal) — null when there is nothing to compare with (never "0 %") */
+export function costChange(current: number, previous: number): number | null {
+  return previous > 0 ? Math.round(((current - previous) / previous) * 1000) / 10 : null;
+}
+
 // ---------- Summary ----------
 export async function tryGetCostSummary(
   env: Env,
@@ -101,22 +118,27 @@ export async function tryGetCostSummary(
   const prevMonthStart = utcDate(y, m - 1, 1);
   const prevMonthEnd = utcDate(y, m, 0);
 
-  const [currentRows, prevRows] = await Promise.all([
+  const same = previousSamePeriod(now);
+  const [currentRows, prevRows, sameRows] = await Promise.all([
     queryCostManagement(fetcher, subId, actualCostQuery("None", monthStart, now)),
     queryCostManagement(fetcher, subId, actualCostQuery("None", prevMonthStart, prevMonthEnd)),
+    queryCostManagement(fetcher, subId, actualCostQuery("None", same.from, same.to)),
   ]);
 
   const currentTotal = rowCost(currentRows[0]);
   const previousTotal = rowCost(prevRows[0]);
   const currency = rowCurrency(currentRows[0]) ?? rowCurrency(prevRows[0]) ?? "USD";
-  const changePercentage = previousTotal > 0 ? ((currentTotal - previousTotal) / previousTotal) * 100 : 0;
+  const previousPeriodTotal = rowCost(sameRows[0]);
 
   const summary: CostSummary = {
     generatedAt: new Date().toISOString(),
     currency,
     currentMonthTotal: currentTotal,
     previousMonthTotal: previousTotal,
-    changePercentage: Math.round(changePercentage * 10) / 10,
+    // Month-to-date against the same days of the previous month (not the whole month)
+    previousPeriodTotal,
+    comparedDays: same.days,
+    changePercentage: costChange(currentTotal, previousPeriodTotal),
     // Linear projection of month-to-date spend over the full month
     forecastedTotal: currentTotal * (daysInUtcMonth(now) / now.getUTCDate()),
   };

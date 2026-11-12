@@ -80,6 +80,8 @@ export default function SecurityThreatsPage() {
                     </button>
                     {isOpen && (
                       <div className={s.alertBody}>
+                        {a0.textTranslated ? <p className={s.dim} title={a0.original ? `${a0.original.title}\n\n${a0.original.description}` : undefined}>{t(`health.summary.${a0.textTranslated}`)} · {t("sec.alert.originalHint")}</p>
+                          : locale === "ko" && a0.description && !/[\uac00-\ud7a3]/.test(a0.description) ? <p className={s.dim}>{t("health.summary.englishOnly")}</p> : null}
                         {a0.description ? <p className={s.alertFull}>{a0.description}</p>
                           : a0.descriptionHidden ? <p className={s.dim}>{t("sec.alert.descHidden")}</p> : null}
                         {a0.remediation?.length ? (

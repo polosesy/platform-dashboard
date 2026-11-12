@@ -9,6 +9,7 @@
 //
 // Cached a day per (connection scope, language); a read that fails leaves the English text and says so
 // (`textLanguage: "en"`) — retried after a minute, never cached as "no Korean".
+import { alertTranslator, localizeAlerts } from "./alertTextsKo.js";
 import type { Env } from "../env.js";
 import type { PostureRecommendation, SecurityPostureResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
@@ -97,9 +98,12 @@ export async function getAssessmentTexts(env: Env, bearerToken: string | undefin
 export async function localizePosture(
   env: Env, bearerToken: string | undefined, posture: SecurityPostureResponse, subscriptionId: string | undefined, lang: string,
 ): Promise<SecurityPostureResponse> {
-  if (!TEXT_LANGUAGES[lang] || posture.source !== "azure" || !posture.recommendations.length) return posture;
+  if (!TEXT_LANGUAGES[lang] || posture.source !== "azure") return posture;
+  // Alerts: Azure has no Korean for them (services/alertTextsKo.ts) — the platform's table, then the translator if configured
+  const alerts = lang === "ko" && posture.alerts.length ? (await localizeAlerts(posture.alerts, alertTranslator(env))).alerts : posture.alerts;
+  if (!posture.recommendations.length) return { ...posture, alerts };
   const texts = subscriptionId ? await getAssessmentTexts(env, bearerToken, subscriptionId, lang) : null;
-  if (!texts) return { ...posture, textLanguage: "en" };
+  if (!texts) return { ...posture, alerts, textLanguage: "en" };
   const { recommendations, localized } = localizeRecommendations(posture.recommendations, texts);
-  return { ...posture, recommendations, textLanguage: lang as "ko", textLocalized: localized };
+  return { ...posture, alerts, recommendations, textLanguage: lang as "ko", textLocalized: localized };
 }

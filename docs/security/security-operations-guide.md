@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-security
-last-verified: 2026-11-11
+last-verified: 2026-11-12
 covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 보안 기능 운영 가이드 — 이슈 목록 · 위험 조합 · 워크로드 ID
@@ -297,3 +297,17 @@ stg 실측(2026-11-03, 리전 릴리스 v20260925 · 최신 v20261025 미도착)
 - 출처: Defender for Cloud의 평가 메타데이터 목록(`Microsoft.Security/assessmentMetadata`)을 `Accept-Language: ko-KR`로 읽어 권고의 평가 키로 맞춥니다(`apps/api/src/services/assessmentTexts.ts`). 하루 동안 캐시합니다.
 - Microsoft가 한국어를 제공하지 않는 권고(사용자 지정 권고, 일부 새 권고)는 영어 그대로이고, 목록 아래에 'n개는 영어로 표시'라고 적습니다. 한국어 목록을 읽지 못하면 전체가 영어로 나오고 그 사실을 적습니다(1분 뒤 다시 시도).
 - 조치 방법의 하위 단계(a. b.) 앞에 `&emsp;`가 글자 그대로 보이던 문제는 Defender HTML의 들여쓰기 기호를 풀지 않아 생긴 버그였고, 지금은 들여쓰기로 보입니다. 1,200자에서 잘리던 조치 방법도 끝까지 나옵니다.
+
+## 11. 위협 탐지 문구의 한국어 (2026-11-12)
+
+Azure는 Defender 경고의 제목·설명·조치 단계를 **영어로만** 줍니다(`Accept-Language: ko-KR`로 물어도 같은 영어 — 실측). 보안 권고는 Microsoft 공식 한국어가 있지만 경고는 없습니다.
+
+| 순서 | 방법 | 화면 표시 |
+|------|------|-----------|
+| 1 | 대시보드가 가진 문장 표(문장 전체가 같을 때만) | '대시보드 번역' + 원문은 마우스를 올리면 |
+| 2 | Azure Translator(`AZURE_TRANSLATOR_KEY`가 있을 때만) | '기계 번역' + 원문 |
+| 3 | 그대로 영어 | 'Azure가 영어로만 제공' |
+
+- 표에 있는 유형: kubelet kubeconfig 파일 액세스(`K8S.NODE_KubeConfigAccess`), 중요한 볼륨 탑재 컨테이너(`K8S_SensitiveMount`). 새 유형이 보이면 `services/alertTextsKo.ts`에 문장을 더합니다.
+- 리소스 이름·네임스페이스·Pod 같은 대상 정보는 번역하지 않습니다.
+- 검색은 화면에 보이는 문구(한국어)로 합니다.

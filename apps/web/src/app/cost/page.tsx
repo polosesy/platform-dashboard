@@ -74,14 +74,15 @@ export default function CostPage() {
       <Grid>
         <Cell span={3}>
           <Stat label={t("cost.currentMonth")} value={summary ? fmtCurrency(summary.currentMonthTotal, summary.currency) : "—"}
-            hint={summary ? t("cost.vsPrevious", { pct: fmtPct(summary.changePercentage) }) : undefined} />
+            hint={!summary ? undefined : summary.changePercentage === null ? t("cost.vsSamePeriodNone")
+              : t("cost.vsSamePeriod", { pct: fmtPct(summary.changePercentage), days: summary.comparedDays ?? 0, amount: fmtCurrency(summary.previousPeriodTotal ?? 0, summary.currency) })} />
         </Cell>
         <Cell span={3}>
-          <Stat label={t("cost.previousMonth")} value={summary ? fmtCurrency(summary.previousMonthTotal, summary.currency) : "—"} />
+          <Stat label={t("cost.previousMonth")} value={summary ? fmtCurrency(summary.previousMonthTotal, summary.currency) : "—"} hint={summary ? t("cost.previousMonthHint") : undefined} />
         </Cell>
         <Cell span={3}>
           <Stat label={t("cost.forecast")} value={summary ? fmtCurrency(summary.forecastedTotal, summary.currency) : "—"}
-            hint={summary && summary.previousMonthTotal > 0 ? t("cost.vsPrevious", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : undefined} />
+            hint={summary && summary.previousMonthTotal > 0 ? t("cost.vsPreviousFull", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : undefined} />
         </Cell>
         <Cell span={3}>
           <Stat label={t("cost.budgetUsed")} value={summary?.budgetUsedPercentage != null ? `${summary.budgetUsedPercentage.toFixed(1)}%` : "—"}

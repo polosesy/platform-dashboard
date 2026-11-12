@@ -129,6 +129,8 @@ export const mockCostSummary: CostSummary = {
   currency: "USD",
   currentMonthTotal: 12_450.82,
   previousMonthTotal: 11_230.50,
+  previousPeriodTotal: 4_120.40,
+  comparedDays: 12,
   changePercentage: 10.9,
   forecastedTotal: 14_120.00,
   budgetTotal: 15_000,

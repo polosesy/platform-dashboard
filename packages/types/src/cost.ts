@@ -3,7 +3,12 @@ export type CostSummary = {
   currency: string;
   currentMonthTotal: number;
   previousMonthTotal: number;
-  changePercentage: number;
+  /** The previous month's day 1 to the same day of the month — what month-to-date is compared with */
+  previousPeriodTotal?: number;
+  /** How many days that comparison covers (day 1 – N) */
+  comparedDays?: number;
+  /** Month-to-date vs `previousPeriodTotal`, percent — null = nothing to compare with (not 0) */
+  changePercentage: number | null;
   forecastedTotal: number;
   budgetTotal?: number;
   budgetUsedPercentage?: number;

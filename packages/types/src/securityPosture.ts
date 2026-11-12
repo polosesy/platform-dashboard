@@ -67,6 +67,12 @@ export type PostureAlert = {
   firstAt?: string;
   /** Defender portal link of this alert */
   portalUrl?: string;
+  /**
+   * Azure answers alert texts in English only: the title / description / remediation were put into Korean by the
+   * platform's own table ("platform") or Azure Translator ("machine") — `original` keeps Azure's English
+   */
+  textTranslated?: "platform" | "machine";
+  original?: { title: string; description: string; remediation?: string[] };
 };
 
 export type PostureSection = "recommendations" | "affected" | "score" | "controls" | "compliance" | "plans" | "alerts";
