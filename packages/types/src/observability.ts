@@ -418,9 +418,10 @@ export type HeatCell = {
    * jvmHeadroom configDeficit (a full heap crosses the limit by more than the band) / imminent (short, and memory,
    * Old Gen or an OOM in the window says it is happening) / marginal (inside the band) · cpu belowFloor (over the
    * request but under 100m — no verdict) / warmingUp (only started containers in the window) · http5xx lowTraffic ·
+   * oldGen noMajorGc (live data is 0 until the first major GC — no ratio, not 0 %) ·
    * queryFailed (a query this signal needs did not answer this time — `gaps`; not "not measured", not OK)
    */
-  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods" | "configDeficit" | "imminent" | "marginal" | "belowFloor" | "warmingUp" | "lowTraffic" | "queryFailed";
+  code?: "noLimit" | "noRequest" | "noNodes" | "scaledToZero" | "noPods" | "configDeficit" | "imminent" | "marginal" | "belowFloor" | "warmingUp" | "lowTraffic" | "queryFailed" | "noMajorGc";
   /** Memory: working-set bytes · CPU: p95 cores — of the pod that set the value (or the busiest pod when there is no ratio) */
   abs?: number;
   /**

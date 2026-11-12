@@ -27,7 +27,7 @@ const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (app
   toPorts: [{ ports: [{ port: "3100", protocol: TCP }] }]`;
 
 // Why a cell has its level, said under the value (the idle codes have their own notice)
-const CELL_NOTE_CODES = new Set(["noLimit", "noRequest", "configDeficit", "imminent", "marginal", "belowFloor", "warmingUp", "lowTraffic", "queryFailed"]);
+const CELL_NOTE_CODES = new Set(["noLimit", "noRequest", "configDeficit", "imminent", "marginal", "belowFloor", "warmingUp", "lowTraffic", "queryFailed", "noMajorGc"]);
 const bytesOrDash = (v: number | null) => (v === null ? "—" : formatBytes(v));
 const coresOrDash = (v: number | null) => (v === null ? "—" : formatCores(v));
 const pctOrDash = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);

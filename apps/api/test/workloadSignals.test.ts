@@ -11,7 +11,7 @@ const LE = { metric: "loki_process_custom_app_log_errors_total", podLabel: "expo
 
 function raw(over: Partial<HeatRaw> = {}): HeatRaw {
   return {
-    "family:jvm_memory_usage_after_gc": [r({}, 17)], "family:http_server_requests_seconds_count": [r({}, 40)],
+    "family:jvm_gc_max_data_size_bytes": [r({}, 17)], "family:http_server_requests_seconds_count": [r({}, 40)],
     "family:hikaricp_connections_active": [r({}, 9)], "family:hikaricp_connections_pending": [r({}, 9)],
     "family:jvm_memory_max_bytes": [r({}, 34)],
     active: [r({ namespace: "app", pod: "api-7d9f8c6b5-bcdfg" }, 1), r({ namespace: "app", pod: "api-7d9f8c6b5-hjklm" }, 1), r({ namespace: "kube-system", pod: "coredns-6c9f5d8b7-xzrtq" }, 1)],
@@ -147,6 +147,20 @@ test("heatmap: Serial / Parallel heap max counts the second survivor space; G1 (
   assert.equal(g1.jvm!.heapMax / Mi, 545, "no survivor series (G1 reports max -1) — nothing added");
   const q = heatmapQueries('cluster="a"', 60);
   assert.match(q.jvmSurvivorMax!, /id=~"\(\?i\)\(ps \)\?survivor space"/, "anchored regex — G1 Survivor Space does not match");
+});
+
+test("heatmap: Old Gen = live after major GC / max — never jvm_memory_usage_after_gc; live 0 = no major GC yet, not 0 %", () => {
+  const q = heatmapQueries('cluster="a"', 60);
+  // stg 2026-11-12: after_gc 93.6 % (tenured now, garbage included) vs live 41.4 % on the same SerialGC pod
+  assert.ok(Object.values(q).every((e) => !e.includes("jvm_memory_usage_after_gc")), "after_gc counts promoted garbage");
+  assert.match(q.oldGen!, /jvm_gc_live_data_size_bytes\{cluster="a"\}\) > 0\) \/ on \(namespace, pod\)/);
+  assert.match(q.oldGenNoMajorGc!, /== 0$/);
+  const p = "api-7d9f8c6b5-hjklm";
+  const s = aggregateHeatmap(raw({ oldGen: [], oldGenNoMajorGc: [r({ namespace: "app", pod: p }, 0)] }), {});
+  const c = s.workloads.find((x) => x.workload === "api")!.cells.oldGen;
+  assert.deepEqual([c.value, c.level, c.code, c.worstPod], [null, "noBaseline", "noMajorGc", p]);
+  const both = aggregateHeatmap(raw({ oldGenNoMajorGc: [r({ namespace: "app", pod: p }, 0)] }), {});
+  assert.equal(both.workloads.find((x) => x.workload === "api")!.cells.oldGen.value, 0.5, "a pod with a ratio wins over one without");
 });
 
 test("heatmap: JVM headroom short while memory ≥ 80%, Old Gen ≥ 70% or OOMKilled in the window = danger (imminent)", () => {

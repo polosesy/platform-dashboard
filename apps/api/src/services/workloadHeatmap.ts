@@ -94,7 +94,7 @@ const PRESENCE: Partial<Record<HeatMetric, string>> = { oldGen: "oldGen", jvmHea
 
 /** Families whose absence makes a metric "notMeasured" for everyone (cAdvisor/KSM ones are always expected) */
 const FAMILY: Partial<Record<HeatMetric, string>> = {
-  oldGen: "jvm_memory_usage_after_gc", jvmHeadroom: "jvm_memory_max_bytes", http5xx: "http_server_requests_seconds_count",
+  oldGen: "jvm_gc_max_data_size_bytes", jvmHeadroom: "jvm_memory_max_bytes", http5xx: "http_server_requests_seconds_count",
   poolUsage: "hikaricp_connections_active", poolPending: "hikaricp_connections_pending",
 };
 
@@ -150,7 +150,13 @@ export function heatmapQueries(C: string, windowMinutes: number, logErrors?: Log
     stsDesired: `max by (namespace, statefulset) (${sel("kube_statefulset_replicas")})`,
     dsReady: `max by (namespace, daemonset) (${sel("kube_daemonset_status_number_ready")})`,
     dsDesired: `max by (namespace, daemonset) (${sel("kube_daemonset_status_desired_number_scheduled")})`,
-    oldGen: `max by (namespace, pod) (${sel("jvm_memory_usage_after_gc")})`,
+    // Old Gen = live data after the last major GC / its max (Micrometer JvmGcMetrics) — the Grafana Java Deep-Dive and
+    // container map use the same ratio (2026-11-11). Not jvm_memory_usage_after_gc: it is rewritten after minor GCs too,
+    // so under SerialGC it is the tenured occupancy now, promoted garbage included (stg 2026-11-12: azure-app 93.6% —
+    // frozen there while idle, no promotion and no major GC — against a live 41.4%; G1 apps 0 – 0.5 points apart).
+    // live 0 = no major GC since the JVM started: left out here, marked by oldGenNoMajorGc (not a 0 % green)
+    oldGen: `(max by (namespace, pod) (${sel("jvm_gc_live_data_size_bytes")}) > 0) / on (namespace, pod) (max by (namespace, pod) (${sel("jvm_gc_max_data_size_bytes")}) > 0)`,
+    oldGenNoMajorGc: `max by (namespace, pod) (${sel("jvm_gc_live_data_size_bytes")}) == 0`,
     // JVM headroom: heap max = the pools with a defined maximum (G1 eden/survivor report -1), the pod's largest
     // container memory limit (JVM pods measured had one container with a limit), non-heap = metaspace + code cache …,
     // direct = NIO buffers (mapped ones are file pages); `max by … id` where two collectors could double a pool
@@ -355,6 +361,11 @@ export function aggregateHeatmap(raw: HeatRaw, opts: { logErrors?: LogErrorsConf
     if (c.value === null || v > c.value) w.cells[metric] = { value: v, level: levelOf(metric, v), worstPod: pod, ...(pool ? { pool } : {}) };
   };
   worstBy(raw.oldGen, raise("oldGen"));
+  // Pods with no major GC yet (live 0): no ratio to judge — say so on a workload none of whose pods has one
+  for (const r of raw.oldGenNoMajorGc ?? []) {
+    const x = podOf(r.metric.namespace, r.metric.pod);
+    if (x && x.w.cells.oldGen.value === null) x.w.cells.oldGen = { value: null, level: "noBaseline", code: "noMajorGc", worstPod: r.metric.pod! };
+  }
   worstBy(raw.poolUsage, raise("poolUsage"));
   worstBy(raw.poolPending, raise("poolPending"));
 
