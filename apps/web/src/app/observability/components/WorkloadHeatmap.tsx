@@ -27,7 +27,10 @@ import {
   type HeatView, type TableSort,
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
-import { BLOCKS_STORAGE_KEY, autoBlocks, formatAppValue, kindsOf, parseBlocks, sortByApp, type BlockId } from "@/lib/workloadBlocks";
+import {
+  BLOCKS_STORAGE_KEY, SETS_STORAGE_KEY, autoBlocks, deleteSet, formatAppValue, kindsOf, parseBlocks, parseSets, sameBlocks, saveSet, sortByApp,
+  type BlockId, type BlockSet,
+} from "@/lib/workloadBlocks";
 import { BlockEditor, KindChips, RuntimeGuide, blockLabel } from "./WorkloadBlocks";
 import styles from "../styles.module.css";
 
@@ -113,17 +116,31 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   const appsFailed = !!appQ.error || (!!appQ.data && appQ.data.metricsState !== "ok");
   const appByKey = useMemo(() => new Map<string, AppMetricsResponse["workloads"][number]>((apps?.workloads ?? []).map((w) => [`${w.namespace}/${w.workload}`, w])), [apps]);
   const appCols = useMemo(() => new Map<string, AppMetricsResponse["columns"][number]>((apps?.columns ?? []).map((c) => [c.id, c])), [apps]);
-  // The viewer's blocks (columns of the table, values a tile can show): automatic until something is chosen; this browser remembers
+  // The viewer's blocks (columns of the table, values a tile can show): automatic until something is chosen. Changes
+  // are a draft (shown at once) until "저장" keeps them in this browser; named sets are kept beside them.
   const [stored, setStored] = useState<BlockId[] | null>(null);
+  const [draft, setDraft] = useState<BlockId[] | null | undefined>(undefined);
+  const [sets, setSets] = useState<BlockSet[]>([]);
   useEffect(() => {
-    try { setStored(parseBlocks(window.localStorage.getItem(BLOCKS_STORAGE_KEY))); } catch { /* storage blocked: the automatic set */ }
-  }, []);
-  const remember = (next: BlockId[] | null) => {
-    setStored(next);
     try {
-      if (next) window.localStorage.setItem(BLOCKS_STORAGE_KEY, JSON.stringify(next));
+      setStored(parseBlocks(window.localStorage.getItem(BLOCKS_STORAGE_KEY)));
+      setSets(parseSets(window.localStorage.getItem(SETS_STORAGE_KEY)));
+    } catch { /* storage blocked: the automatic set */ }
+  }, []);
+  const chosen = draft === undefined ? stored : draft;
+  const dirty = draft !== undefined && !sameBlocks(draft, stored);
+  const keepSets = (next: BlockSet[]) => {
+    setSets(next);
+    try { window.localStorage.setItem(SETS_STORAGE_KEY, JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const save = (name: string) => {
+    setStored(chosen);
+    setDraft(undefined);
+    try {
+      if (chosen) window.localStorage.setItem(BLOCKS_STORAGE_KEY, JSON.stringify(chosen));
       else window.localStorage.removeItem(BLOCKS_STORAGE_KEY);
     } catch { /* not remembered */ }
+    if (name && chosen) keepSets(saveSet(sets, name, chosen));
   };
   const [editing, setEditing] = useState(false);
   const [guide, setGuide] = useState<AppRuntimeKind | null>(null);
@@ -140,7 +157,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   const signals = useMemo(() => (d ? signalSummary(d.flags, ws) : null), [d, ws]);
   const glance = useMemo(() => clusterGlance(ws), [ws]);
   const cols = useMemo(() => tableColumns(ws), [ws]);
-  const blocks = useMemo(() => stored ?? autoBlocks(cols), [stored, cols]);
+  const blocks = useMemo(() => chosen ?? autoBlocks(cols), [chosen, cols]);
   const rows = useMemo(() => {
     if (layout !== "table") return [];
     const base = tableRows(ws, view, sort, { namespace: ns || undefined, problemsOnly, hideIdle: !showIdle });
@@ -262,8 +279,9 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
         <Select label={t("hb.m.namespace")} value={ns} onChange={setNs}
           options={[{ value: "", label: t("hb.m.allNamespaces") }, ...allGroups.map((g) => ({ value: g.namespace, label: `${g.namespace} (${g.workloads.length})` }))]} />
         <Toggle checked={problemsOnly} onChange={setProblemsOnly}>{t("ob.hm.problemsOnly")}</Toggle>
-        <Button size="sm" variant={editing ? "primary" : undefined} ariaPressed={editing} onClick={() => setEditing(!editing)}>{t(stored ? "ob.bl.customizeOn" : "ob.bl.customize")}</Button>
-        <Button size="sm" ariaPressed={guide !== null} onClick={() => setGuide(guide ? null : "nodejs")}>{t("ob.bl.guideOpen")}</Button>
+        <Button size="sm" variant={editing ? "primary" : undefined} ariaPressed={editing} onClick={() => setEditing(!editing)}>
+          {t(dirty ? "ob.bl.customizeDirty" : chosen ? "ob.bl.customizeOn" : "ob.bl.customize")}
+        </Button>
         {appsFailed ? <Badge tone="medium" title={appQ.error ?? appQ.data?.message ?? ""}>{t("ob.bl.appsFailed")}</Badge> : null}
         <span className={styles.hmMeta}>
           {/* The picker's range differs from what the heatmap reads — said, never a silent other range */}
@@ -278,8 +296,11 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
 
       {/* Make it yours: the blocks = the table's columns and the values a tile can show */}
       {editing && (
-        <BlockEditor blocks={blocks} custom={stored !== null} columns={appCols} onChange={remember} onReset={() => remember(null)} onGuide={setGuide} />
+        <BlockEditor blocks={blocks} custom={chosen !== null} dirty={dirty} sets={sets} columns={appCols} guideOpen={guide !== null}
+          onChange={setDraft} onReset={() => setDraft(null)} onSave={save} onDeleteSet={(n) => keepSets(deleteSet(sets, n))} onGuide={setGuide} />
       )}
+      {/* The guide belongs to the editor: what each kind needs to be measured (feature · configuration · permissions · check) */}
+      {editing && guide && <RuntimeGuide apps={apps} blocks={blocks} kind={guide} onKind={setGuide} onClose={() => setGuide(null)} />}
       {lens && <p className={styles.hmThreshold}>{t("ob.bl.lensHint", { name: blockLabel(t, lens, false) })}</p>}
 
       {/* Summary: the verdict (live card glyph), fired signals as chips (click = colour by it), quiet words, legend */}
@@ -351,7 +372,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
                         <button type="button" onClick={() => sortBy("worst")}>{t("ob.hm.metric.worst")}{sortMark("worst")}</button>
                       </th>
                       {blocks.map((b) => {
-                        if (b === "kind") return <th key={b} scope="col">{t("ob.bl.kind")}</th>;
+                        if (b === "kind") return <th key={b} scope="col" className={styles.hmKindCol} title={t("ob.bl.kindHint")}>{t("ob.bl.kind")} ⓘ</th>;
                         const m = b.startsWith("h:") ? (b.slice(2) as HeatMetric) : null;
                         const id = m ? null : (b.slice(2) as AppColumnId);
                         const on = id !== null && appSort?.id === id;
@@ -386,7 +407,7 @@ ${t("ob.hm.tileHint")}`}>
                           </td>
                           {blocks.map((b) => {
                             const a = appByKey.get(k);
-                            if (b === "kind") return <td key={b}><KindChips app={a} loaded={!!apps} /></td>;
+                            if (b === "kind") return <td key={b} className={styles.hmKindCol}><KindChips app={a} loaded={!!apps} /></td>;
                             if (b.startsWith("h:")) {
                               const m = b.slice(2) as HeatMetric;
                               const lv = w.cells[m].level;
@@ -477,8 +498,6 @@ ${t("ob.hm.tileHint")}`}>
           </div>
         )}
       </div>
-      {/* What each kind needs to be measured: feature · configuration · permissions · check */}
-      {guide && <RuntimeGuide apps={apps} blocks={blocks} kind={guide} onKind={setGuide} onClose={() => setGuide(null)} />}
     </div>
   );
 }

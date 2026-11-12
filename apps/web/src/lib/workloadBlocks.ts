@@ -64,6 +64,49 @@ export function sortByApp<R>(rows: R[], valueOf: (r: R) => number | undefined, d
   ).map((x) => x.r);
 }
 
+// Saved sets: the viewer names a set and keeps it (this browser) — changes are a draft until "저장"
+export const SETS_STORAGE_KEY = "aud.workload.blockSets";
+export const MAX_SETS = 10;
+export const SET_NAME_MAX = 30;
+export type BlockSet = { name: string; blocks: BlockId[] };
+
+/** Pure: same blocks in the same order (null = the automatic set) */
+export function sameBlocks(a: BlockId[] | null, b: BlockId[] | null): boolean {
+  return a === b || (!!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]));
+}
+/** Pure: a set's name as stored — trimmed, inner spaces single, bounded; "" = no name */
+export function setName(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, SET_NAME_MAX);
+}
+/** Pure: the saved sets — named, known blocks only, no repeated name, at most MAX_SETS; unreadable = none */
+export function parseSets(raw: string | null): BlockSet[] {
+  try {
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(v)) return [];
+    const out: BlockSet[] = [];
+    for (const x of v as { name?: unknown; blocks?: unknown }[]) {
+      const name = typeof x?.name === "string" ? setName(x.name) : "";
+      const blocks = parseBlocks(JSON.stringify(x?.blocks ?? null));
+      if (name && blocks && !out.some((s) => s.name === name)) out.push({ name, blocks });
+      if (out.length >= MAX_SETS) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+/** Pure: save under a name — the same name is replaced in place, a new one goes last; full or no name = unchanged */
+export function saveSet(sets: BlockSet[], rawName: string, blocks: BlockId[]): BlockSet[] {
+  const name = setName(rawName);
+  if (!name || !blocks.length) return sets;
+  if (sets.some((s) => s.name === name)) return sets.map((s) => (s.name === name ? { name, blocks } : s));
+  return sets.length >= MAX_SETS ? sets : [...sets, { name, blocks }];
+}
+/** Pure: take a saved set out */
+export function deleteSet(sets: BlockSet[], name: string): BlockSet[] {
+  return sets.filter((s) => s.name !== name);
+}
+
 /** Pure: add at the end (no repeats, bounded) */
 export function addBlock(blocks: BlockId[], id: BlockId): BlockId[] {
   return blocks.includes(id) || blocks.length >= MAX_BLOCKS || !KNOWN.has(id) ? blocks : [...blocks, id];

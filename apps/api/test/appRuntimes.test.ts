@@ -106,6 +106,34 @@ test("blocks: every runtime, block and guide step has ko / en strings; the route
   assert.match(heat, /<BlockEditor /);
   assert.match(heat, /<RuntimeGuide /);
   assert.match(heat, /blocks\.map\(\(b\) =>/, "the table's columns are the viewer's blocks");
-  assert.match(heat, /stored \?\? autoBlocks\(cols\)/, "automatic until the viewer chooses");
+  assert.match(heat, /chosen \?\? autoBlocks\(cols\)/, "automatic until the viewer chooses");
+  // the guide lives inside the editor (not a button of its own on the bar), and changes are kept only by "저장"
+  assert.match(heat, /\{editing && guide && <RuntimeGuide /);
+  assert.doesNotMatch(heat, /setItem\(BLOCKS_STORAGE_KEY[^\n]+\n?[^\n]*onChange/);
+  assert.match(heat, /onChange=\{setDraft\}/, "a change is a draft");
+  assert.match(heat, /className=\{styles\.hmKindCol\}/, "the runtime column is centred");
+  for (const k of ["ob.bl.save", "ob.bl.unsaved", "ob.bl.sets", "ob.bl.kindHint", "ob.bl.kindLong"]) assert.ok(ops.includes(`"${k}"`), k);
   for (const k of ["ob.bl.preset.auto", "ob.bl.customize", "ob.bl.guideOpen", "ob.bl.lensHint"]) assert.ok(ops.includes(`"${k}"`), k);
+});
+
+test("blocks: saved sets — named, replaced by name, bounded; unsaved = differs from what is kept", () => {
+  assert.equal(wb.setName("  내   세트  "), "내 세트");
+  assert.equal(wb.setName("x".repeat(80)).length, wb.SET_NAME_MAX);
+  let sets = wb.saveSet([], "Go 서비스", ["kind", "a:goGoroutines"]);
+  sets = wb.saveSet(sets, "데이터", ["kind", "a:redisClients"]);
+  assert.deepEqual(sets.map((s) => s.name), ["Go 서비스", "데이터"]);
+  sets = wb.saveSet(sets, " Go 서비스 ", ["kind", "a:goHeapInuse"]);
+  assert.deepEqual(sets[0], { name: "Go 서비스", blocks: ["kind", "a:goHeapInuse"] }, "the same name is replaced in place");
+  assert.equal(wb.saveSet(sets, "  ", ["kind"]), sets, "no name = not a named set");
+  let full = sets;
+  for (let i = 0; i < 20; i++) full = wb.saveSet(full, `s${i}`, ["kind"]);
+  assert.equal(full.length, wb.MAX_SETS);
+  assert.deepEqual(wb.deleteSet(sets, "데이터").map((s) => s.name), ["Go 서비스"]);
+  const round = wb.parseSets(JSON.stringify([...sets, { name: "Go 서비스", blocks: ["kind"] }, { name: "bad", blocks: ["nope"] }, { blocks: ["kind"] }, 7]));
+  assert.deepEqual(round, sets, "repeated names, unknown blocks and nameless entries are dropped");
+  assert.deepEqual(wb.parseSets("{broken"), []);
+  assert.ok(wb.sameBlocks(null, null));
+  assert.ok(wb.sameBlocks(["kind", "h:cpu"], ["kind", "h:cpu"]));
+  assert.ok(!wb.sameBlocks(["kind", "h:cpu"], ["h:cpu", "kind"]), "order counts");
+  assert.ok(!wb.sameBlocks(null, ["kind"]), "automatic is not a chosen set");
 });

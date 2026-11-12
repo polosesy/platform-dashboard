@@ -10,52 +10,71 @@
 
 import type { AppMetricsResponse, AppRuntimeKind } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
-import { Button, Chip, CodeBlock, Panel, Segmented, Select } from "@/components/ui";
+import { useState } from "react";
+import { Button, Chip, CodeBlock, Panel, Segmented, Select, TextInput } from "@/components/ui";
 import {
   ALL_BLOCKS, BLOCK_RUNTIME, MAX_BLOCKS, PRESETS, PRESET_IDS, RUNTIME_GUIDE, RUNTIME_ORDER, SCRAPE_SNIPPET, addBlock,
-  kindsOf, moveBlock, presetOf, removeBlock, unidentified, type BlockId, type PresetId,
+  MAX_SETS, SET_NAME_MAX, kindsOf, moveBlock, presetOf, removeBlock, sameBlocks, setName, unidentified, type BlockId, type BlockSet, type PresetId,
 } from "@/lib/workloadBlocks";
 import styles from "../styles.module.css";
 
 type T = (k: string, v?: Record<string, string | number>) => string;
 type AppColumn = AppMetricsResponse["columns"][number];
 export const blockLabel = (t: T, b: BlockId, short = true): string =>
-  b === "kind" ? t("ob.bl.kind") : b.startsWith("h:") ? t(`ob.hm.${short ? "short" : "metric"}.${b.slice(2)}`) : t(`ob.bl.col.${b.slice(2)}`);
+  b === "kind" ? t(short ? "ob.bl.kind" : "ob.bl.kindLong") : b.startsWith("h:") ? t(`ob.hm.${short ? "short" : "metric"}.${b.slice(2)}`) : t(`ob.bl.col.${b.slice(2)}`);
 /** The group a block is listed under: Kubernetes · a runtime · any runtime */
 export const blockGroup = (t: T, b: BlockId): string => {
   const r = BLOCK_RUNTIME[b];
   return b === "kind" || (b.startsWith("h:") && !r) ? t("ob.bl.group.k8s") : r === "any" ? t("ob.bl.group.any") : t(`ob.bl.rt.${r}`);
 };
 
-export function BlockEditor({ blocks, custom, columns, onChange, onReset, onGuide }: {
+export function BlockEditor({ blocks, custom, dirty, sets, columns, guideOpen, onChange, onReset, onSave, onDeleteSet, onGuide }: {
   blocks: BlockId[];
-  /** false = the automatic set (nothing chosen yet) */
+  /** false = the automatic set (nothing chosen) */
   custom: boolean;
+  /** The blocks differ from what is saved — shown, and "저장" keeps them */
+  dirty: boolean;
+  /** The viewer's named sets (this browser) */
+  sets: BlockSet[];
   columns: Map<string, AppColumn>;
+  guideOpen: boolean;
   onChange: (next: BlockId[]) => void;
   onReset: () => void;
-  /** A block whose metric is not in this cluster opens its kind's guide */
-  onGuide: (kind: AppRuntimeKind) => void;
+  /** Keep the blocks as they are now; with a name, also as a named set */
+  onSave: (name: string) => void;
+  onDeleteSet: (name: string) => void;
+  /** Open the guide (a kind) or close it (null) — a block whose metric is not in this cluster opens its kind's */
+  onGuide: (kind: AppRuntimeKind | null) => void;
 }) {
   const { t } = useI18n();
+  const [name, setNameText] = useState("");
   const preset = custom ? presetOf(blocks) : null;
+  const named = custom ? sets.find((x) => sameBlocks(x.blocks, blocks)) : undefined;
   const addable = ALL_BLOCKS.filter((b) => !blocks.includes(b));
+  const clean = setName(name);
+  const full = !!clean && sets.length >= MAX_SETS && !sets.some((x) => x.name === clean);
   return (
     <section className={styles.blEditor} aria-label={t("ob.bl.title")}>
       <div className={styles.blEditorHead}>
         <span className={styles.blEditorTitle}>{t("ob.bl.title")}</span>
         <span className={styles.blMuted}>{t("ob.bl.sub", { n: blocks.length, max: MAX_BLOCKS })}</span>
+        <Chip level={dirty ? "warn" : "ok"}>{t(dirty ? "ob.bl.unsaved" : "ob.bl.saved")}</Chip>
         <span className={styles.blEditorActions}>
-          <Select label={t("ob.bl.preset")} hideLabel value={!custom ? "auto" : (preset ?? "custom")}
-            onChange={(v) => { if (v === "auto") onReset(); else if (v !== "custom") onChange(PRESETS[v as PresetId]); }}
+          <Select label={t("ob.bl.preset")} hideLabel value={!custom ? "auto" : named ? `s:${named.name}` : (preset ?? "custom")}
+            onChange={(v) => {
+              if (v === "auto") onReset();
+              else if (v.startsWith("s:")) { const hit = sets.find((x) => x.name === v.slice(2)); if (hit) onChange(hit.blocks); }
+              else if (v !== "custom") onChange(PRESETS[v as PresetId]);
+            }}
             options={[
               { value: "auto", label: t("ob.bl.preset.auto") },
-              ...(custom && !preset ? [{ value: "custom", label: t("ob.bl.preset.custom") }] : []),
-              ...PRESET_IDS.map((p) => ({ value: p, label: t(`ob.bl.preset.${p}`) })),
+              ...(custom && !preset && !named ? [{ value: "custom", label: t("ob.bl.preset.custom") }] : []),
+              ...sets.map((x) => ({ value: `s:${x.name}`, label: x.name, group: t("ob.bl.sets") })),
+              ...PRESET_IDS.map((p) => ({ value: p, label: t(`ob.bl.preset.${p}`), group: t("ob.bl.preset") })),
             ]} />
           <Select label={t("ob.bl.add")} hideLabel value="" disabled={addable.length === 0 || blocks.length >= MAX_BLOCKS} onChange={(v) => { if (v) onChange(addBlock(blocks, v as BlockId)); }}
             options={[{ value: "", label: t("ob.bl.add") }, ...addable.map((b) => ({ value: b, label: blockLabel(t, b, false), group: blockGroup(t, b) }))]} />
-          <Button size="sm" disabled={!custom} onClick={onReset}>{t("ob.bl.reset")}</Button>
+          <Button size="sm" ariaPressed={guideOpen} onClick={() => onGuide(guideOpen ? null : "nodejs")}>{t("ob.bl.guideOpen")}</Button>
         </span>
       </div>
       <ol className={styles.blBlocks} aria-label={t("ob.bl.blocks")}>
@@ -75,6 +94,17 @@ export function BlockEditor({ blocks, custom, columns, onChange, onReset, onGuid
           );
         })}
       </ol>
+      {/* Keep it: "저장" keeps the blocks as they are (this browser); a name also keeps them as a set to come back to */}
+      <div className={styles.blSave}>
+        <TextInput label={t("ob.bl.setName")} hideLabel value={name} onChange={setNameText} placeholder={t("ob.bl.setNamePh")} maxLength={SET_NAME_MAX} width={220} disabled={!custom} />
+        <Button size="sm" variant="primary" disabled={full || (!dirty && (!clean || !custom))} title={full ? t("ob.bl.setsFull", { max: MAX_SETS }) : undefined}
+          onClick={() => { onSave(custom ? clean : ""); setNameText(""); }}>
+          {t(clean && custom ? "ob.bl.saveAs" : "ob.bl.save")}
+        </Button>
+        <Button size="sm" disabled={!custom} onClick={onReset}>{t("ob.bl.reset")}</Button>
+        {named ? <Button size="sm" onClick={() => onDeleteSet(named.name)}>{t("ob.bl.deleteSet", { name: named.name })}</Button> : null}
+        <span className={styles.blMuted}>{t("ob.bl.saveHint", { n: sets.length, max: MAX_SETS })}</span>
+      </div>
       <p className={styles.blEditorFoot}>{t("ob.bl.foot")}</p>
     </section>
   );
