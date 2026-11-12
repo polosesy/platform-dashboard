@@ -1,10 +1,11 @@
-// AKS 모니터링 › 클러스터 · 워크로드 › 조립식 표: what kind of application a workload is (metrics = fact, image = hint),
+// AKS 모니터링 › 클러스터 · 워크로드 › 조립식 표: what kind of application a workload is (evidence only — metrics, OpenTelemetry, the manifest, the image scan, an official image; never a name guess),
 // the representative metrics of runtimes other than Java, and the block (column) set the viewer snaps together.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as ar from "../src/services/appRuntimes.js";
+import * as ev from "../src/services/runtimeEvidence.js";
 import * as blocksNs from "../../web/src/lib/workloadBlocks.ts";
 const wb = ((blocksNs as unknown as { default?: typeof blocksNs }).default ?? blocksNs) as typeof blocksNs;
 
@@ -25,13 +26,61 @@ test("app runtimes: the kind comes from the metrics (fact); the image only hints
   const a = ar.aggregateApps(RAW);
   const by = Object.fromEntries(a.workloads.map((w) => [w.workload, w]));
   assert.deepEqual(by.web!.kinds, [{ kind: "nodejs", basis: "metrics" }]);
-  assert.deepEqual(by.cache!.kinds, [{ kind: "redis", basis: "image" }], "redis by image name: a hint until redis_up is scraped");
-  assert.deepEqual(by.job!.kinds, [], "no metrics, unknown image = no kind (not guessed)");
+  assert.deepEqual(by.cache!.kinds, [{ kind: "redis", basis: "image", evidence: "Docker Hub official image" }], "a Docker Hub official image states what it is");
+  assert.deepEqual(by.job!.kinds, [], "no evidence = no kind (never guessed)");
   assert.equal(by.web!.values.nodeEventLoopLag, 40, "the worst pod");
   assert.equal(by.cache!.values.redisClients, undefined, "no series = no value (never 0)");
-  assert.equal(ar.runtimeOfImage("registry.example/team/my-nginx-proxy-app:1"), null, "only the image's own name counts");
-  assert.equal(ar.runtimeOfImage("mirror.example/bitnami/postgresql:16"), "postgres");
-  assert.equal(ar.runtimeOfImage("nginx"), "nginx");
+  assert.equal(ev.officialImageRuntime("registry.example/team/my-nginx-proxy-app:1"), null);
+  assert.equal(ev.officialImageRuntime("mirror.example/redis:7"), null, "a mirror or a look-alike name is not claimed (2026-11-12: no name guessing)");
+  assert.equal(ev.officialImageRuntime("mirror.example/bitnami/postgresql:16"), null);
+  assert.equal(ev.officialImageRuntime("nginx"), "nginx");
+  assert.equal(ev.officialImageRuntime("docker.io/library/postgres:16"), "postgres");
+});
+
+test("app runtimes: the version the runtime reports; OpenTelemetry, the manifest and the image scan name a kind only when nothing stronger did", () => {
+  const raw = {
+    ...RAW,
+    podOwners: [...RAW.podOwners, owner("api-6f7c8d9b5-q1w2e", "api-6f7c8d9b5"), owner("worker-0", "worker", "StatefulSet"), owner("batch-0", "batch", "StatefulSet")],
+    rsOwners: [...RAW.rsOwners, rs("api-6f7c8d9b5", "api")],
+    "ver:nodejs": [row({ namespace: "shop", pod: "web-7d9f8c6b5-abcde", version: "v20.11.0" })],
+    otel: [row({ k8s_namespace_name: "shop", k8s_pod_name: "api-6f7c8d9b5-q1w2e", telemetry_sdk_language: "java", process_runtime_version: "17.0.9+9" }), row({ namespace: "shop", pod: "web-7d9f8c6b5-abcde", telemetry_sdk_language: "nodejs" })],
+    images: [...RAW.images, row({ namespace: "shop", pod: "batch-0", image: "acr.example/shop/batch:3", image_id: "acr.example/shop/batch@sha256:" + "a".repeat(64) })],
+  };
+  const templates = {
+    containers: new Map<string, unknown[]>([
+      ["StatefulSet/shop/worker", [{ name: "app", command: ["/bin/sh", "-c", "exec python3 -m worker --role node"], env: [{ name: "PYTHONUNBUFFERED", value: "do-not-read" }] }]],
+      ["Deployment/shop/job", [{ name: "app", args: ["java", "-jar", "x.jar"] }]],
+      ["Deployment/shop/web", [{ name: "app", command: ["dotnet", "x.dll"] }]],
+    ]),
+    annotations: new Map<string, Record<string, string>>(),
+  };
+  const scan = [{ registry: "acr.example", repo: "shop/batch", digest: "sha256:" + "a".repeat(64), tags: "[\"3\"]", langs: ["java", "python"] }];
+  const a = ar.aggregateApps(raw, new Set(), { templates, scan });
+  const by = Object.fromEntries(a.workloads.map((w) => [w.workload, w]));
+  assert.deepEqual(by.web!.kinds[0], { kind: "nodejs", basis: "metrics", version: "20.11.0" }, "metrics win; OpenTelemetry does not repeat the kind");
+  assert.deepEqual(by.web!.kinds[1], { kind: "dotnet", basis: "spec", evidence: "command: dotnet" }, "another runtime the manifest starts is added, as declared");
+  assert.deepEqual(by.api!.kinds, [{ kind: "jvm", basis: "telemetry", evidence: "telemetry.sdk.language: java", version: "17.0.9" }]);
+  assert.deepEqual(by.worker!.kinds, [{ kind: "python", basis: "spec", evidence: "command: python3" }], "the executable behind sh -c; an argument called node is not a runtime");
+  assert.deepEqual(by.job!.kinds, [], "args alone go to the image's entrypoint — not read");
+  assert.deepEqual(by.batch!.kinds.map((k) => [k.kind, k.basis, k.evidence]), [["jvm", "scan", "scan: java"], ["python", "scan", "scan: python"]], "the scan says what the image contains — every language it found");
+  assert.ok(!JSON.stringify(a).includes("do-not-read"), "values of variables never leave");
+  const rt = Object.fromEntries(a.runtimes.map((r) => [r.kind, r]));
+  assert.deepEqual([rt.jvm!.workloads, rt.jvm!.hinted], [0, 2]);
+});
+
+test("runtime evidence: the executable of a command, runtime-read variables only, the Operator's annotation", () => {
+  assert.equal(ev.executableOf(["/usr/bin/tini", "--", "/opt/java/openjdk/bin/java", "-jar", "app.jar"]), "java");
+  assert.equal(ev.executableOf(["env", "TZ=UTC", "node", "server.js"]), "node");
+  assert.equal(ev.executableOf(["/app/server"]), "server");
+  assert.equal(ev.executableOf(undefined), null);
+  assert.deepEqual(ev.runtimesOfSpec([{ env: [{ name: "JAVA_OPTS" }, { name: "NODE_ENV" }] }]), [], "team conventions are not evidence");
+  assert.deepEqual(ev.runtimesOfSpec([{ env: [{ name: "JAVA_TOOL_OPTIONS" }] }]), [{ kind: "jvm", evidence: "env: JAVA_TOOL_OPTIONS" }]);
+  assert.deepEqual(ev.runtimesOfSpec([{}], { "instrumentation.opentelemetry.io/inject-python": "true", "instrumentation.opentelemetry.io/inject-java": "false" }), [{ kind: "python", evidence: "annotation: inject-python" }]);
+  assert.match(ev.RUNTIME_SCAN_QUERY, /softwareDetails/);
+  assert.equal(ar.cleanVersion("go1.22.3"), "1.22.3");
+  assert.equal(ar.cleanVersion("n/a"), null);
+  assert.equal(wb.shortVersion("jvm", "17.0.9"), "17");
+  assert.equal(wb.shortVersion("python", "3.11.4"), "3.11");
 });
 
 test("app runtimes: runtimes and columns say measured · absent · queryFailed — a failed query is not 'absent'", () => {

@@ -6,7 +6,7 @@
 // Each runtime has a guide: what says a workload is of that kind, which library / exporter exposes the metrics, the
 // configuration, and what the platform needs to read them.
 
-import type { AppColumnId, AppMetricsResponse, AppRuntimeKind, HeatMetric } from "@aud/types";
+import type { AppColumnId, AppMetricsResponse, AppRuntimeBasis, AppRuntimeEvidence, AppRuntimeKind, HeatMetric } from "@aud/types";
 
 export const HEAT_BLOCKS: HeatMetric[] = ["ready", "memory", "cpu", "cpuNow", "restarts", "oldGen", "jvmHeadroom", "http5xx", "logErrors", "poolUsage", "poolPending"];
 export const APP_BLOCKS: AppColumnId[] = [
@@ -141,9 +141,17 @@ export function formatAppValue(unit: AppMetricsResponse["columns"][number]["unit
   return `${x >= 100 || i === 0 ? Math.round(x) : x.toFixed(1)}${UNITS[i]}`;
 }
 
-/** Pure: the kinds of a workload as the "종류" cell shows them — measured kinds first, then image hints */
-export function kindsOf(w: AppMetricsResponse["workloads"][number] | undefined): { kind: AppRuntimeKind; basis: "metrics" | "image" }[] {
-  return [...(w?.kinds ?? [])].sort((a, b) => Number(a.basis === "image") - Number(b.basis === "image") || (a.kind < b.kind ? -1 : 1));
+/** Evidence order: the runtime's own metrics first, then what else said so (every one a fact with its source) */
+export const BASIS_ORDER: AppRuntimeBasis[] = ["metrics", "telemetry", "spec", "scan", "image"];
+/** Pure: the kinds of a workload as the cell shows them — strongest evidence first */
+export function kindsOf(w: AppMetricsResponse["workloads"][number] | undefined): AppRuntimeEvidence[] {
+  return [...(w?.kinds ?? [])].sort((a, b) => BASIS_ORDER.indexOf(a.basis) - BASIS_ORDER.indexOf(b.basis) || (a.kind < b.kind ? -1 : 1));
+}
+/** Pure: "17.0.9" → "17" · "3.11.4" → "3.11" · "1.22.3" → "1.22" — the part people name a runtime by */
+export function shortVersion(kind: AppRuntimeKind, version: string | undefined): string {
+  const p = (version ?? "").split(".");
+  if (!p[0]) return "";
+  return kind === "jvm" || kind === "nodejs" || kind === "redis" ? p[0] : p.slice(0, 2).join(".");
 }
 
 /** What each runtime's guide shows: the library / exporter, its detection metric, and how to expose it (code, not prose) */
@@ -186,7 +194,7 @@ export const RUNTIME_ORDER: AppRuntimeKind[] = ["jvm", "nodejs", "python", "go",
 /** The pod annotations the usual collectors (Alloy · ama-metrics pod-annotation scraping) read to find the endpoint */
 export const SCRAPE_SNIPPET = "# pod template annotations\nprometheus.io/scrape: \"true\"\nprometheus.io/port: \"<metrics port>\"\nprometheus.io/path: \"/metrics\"";
 
-/** Pure: workloads of no measured kind — the ones the guide is for (image-hinted ones first, then by name) */
+/** Pure: workloads of no measured kind — the ones the guide is for (those known by other evidence first, then by name) */
 export function unidentified(apps: AppMetricsResponse["workloads"]): AppMetricsResponse["workloads"] {
   return apps.filter((w) => !w.kinds.some((k) => k.basis === "metrics"))
     .sort((a, b) => Number(b.kinds.length > 0) - Number(a.kinds.length > 0) || (`${a.namespace}/${a.workload}` < `${b.namespace}/${b.workload}` ? -1 : 1));

@@ -13,7 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { useState } from "react";
 import { Button, Chip, CodeBlock, Panel, Segmented, Select, TextInput } from "@/components/ui";
 import {
-  ALL_BLOCKS, BLOCK_RUNTIME, MAX_BLOCKS, PRESETS, PRESET_IDS, RUNTIME_GUIDE, RUNTIME_ORDER, SCRAPE_SNIPPET, addBlock,
+  ALL_BLOCKS, BLOCK_RUNTIME, MAX_BLOCKS, PRESETS, PRESET_IDS, RUNTIME_GUIDE, RUNTIME_ORDER, SCRAPE_SNIPPET, addBlock, shortVersion,
   MAX_SETS, SET_NAME_MAX, kindsOf, moveBlock, presetOf, removeBlock, sameBlocks, setName, unidentified, type BlockId, type BlockSet, type PresetId,
 } from "@/lib/workloadBlocks";
 import styles from "../styles.module.css";
@@ -110,7 +110,7 @@ export function BlockEditor({ blocks, custom, dirty, sets, columns, guideOpen, o
   );
 }
 
-/** The kinds of one workload: confirmed by metrics (solid) or guessed from the image name ('?'); none = said, not guessed */
+/** The kinds of one workload — each with what said so (metrics · telemetry · manifest · image scan · official image); none = said, never guessed */
 export function KindChips({ app, loaded }: { app: AppMetricsResponse["workloads"][number] | undefined; loaded: boolean }) {
   const { t } = useI18n();
   if (!loaded) return <span className={styles.blMuted}>…</span>;
@@ -119,9 +119,9 @@ export function KindChips({ app, loaded }: { app: AppMetricsResponse["workloads"
   return (
     <span className={styles.blKinds}>
       {ks.map((k) => (
-        <Chip key={k.kind} level={k.basis === "metrics" ? "info" : "unknown"} glyph={k.basis === "metrics" ? false : "?"}
-          title={t(k.basis === "metrics" ? "ob.bl.basis.metrics" : "ob.bl.basis.image", { metric: RUNTIME_GUIDE[k.kind].detect })}>
-          {t(`ob.bl.rt.${k.kind}`)}
+        <Chip key={k.kind} level={k.basis === "metrics" ? "info" : "neutral"} glyph={false}
+          title={[t(`ob.bl.basis.${k.basis}`, { metric: RUNTIME_GUIDE[k.kind].detect, evidence: k.evidence ?? "" }), k.version ? t("ob.bl.version", { v: k.version }) : ""].filter(Boolean).join(" · ")}>
+          {t(`ob.bl.rt.${k.kind}`)}{shortVersion(k.kind, k.version) ? ` ${shortVersion(k.kind, k.version)}` : ""}
         </Chip>
       ))}
     </span>
@@ -185,8 +185,8 @@ export function RuntimeGuide({ apps, blocks, kind, onKind, onClose }: {
           <p className={styles.sloText}>{t("ob.bl.noneTitle", { n: none.length })}</p>
           <div className={styles.blKinds}>
             {none.slice(0, 40).map((w) => (
-              <Chip key={`${w.namespace}/${w.workload}`} level={w.kinds.length ? "unknown" : "neutral"} glyph={w.kinds.length ? "?" : false}
-                title={w.kinds.length ? t("ob.bl.noneHinted", { kind: t(`ob.bl.rt.${w.kinds[0]!.kind}`) }) : t("ob.bl.kindUnknownHint")}>
+              <Chip key={`${w.namespace}/${w.workload}`} level={w.kinds.length ? "info" : "neutral"} glyph={false}
+                title={w.kinds.length ? t("ob.bl.noneHinted", { kind: t(`ob.bl.rt.${w.kinds[0]!.kind}`), basis: t(`ob.bl.basisShort.${w.kinds[0]!.basis}`) }) : t("ob.bl.kindUnknownHint")}>
                 {w.namespace}/{w.workload}
               </Chip>
             ))}

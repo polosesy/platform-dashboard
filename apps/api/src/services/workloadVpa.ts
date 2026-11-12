@@ -76,7 +76,7 @@ export function vpaForWorkload(vpas: VpaObject[], target: { namespace: string; k
     });
 }
 
-type Snapshot = { vpas: VpaObject[] | null; templates: Map<string, TemplateContainer[]>; managed: Set<string> };
+type Snapshot = { vpas: VpaObject[] | null; templates: Map<string, TemplateContainer[]>; managed: Set<string>; podAnnotations: Map<string, Record<string, string>> };
 const cache = new CacheManager<Snapshot>(20, 60_000);
 const inflight = new Map<string, Promise<Snapshot>>();
 const KINDS = ["Deployment", "StatefulSet", "DaemonSet"] as const;
@@ -105,14 +105,17 @@ async function snapshot(env: Env, bearerToken: string | undefined, clusterId: st
     ]);
     const templates = new Map<string, TemplateContainer[]>();
     const managed = new Set<string>();
+    const podAnnotations = new Map<string, Record<string, string>>();
     for (const [kind, list] of [["Deployment", deps], ["StatefulSet", sts], ["DaemonSet", dss]] as const) {
       for (const o of list.items) {
         const key = `${kind}/${o.metadata?.namespace}/${o.metadata?.name}`;
         templates.set(key, (o.spec?.template?.spec?.containers ?? []) as TemplateContainer[]);
         if (isAksManaged(o.metadata?.labels)) managed.add(key);
+        const ann = o.spec?.template?.metadata?.annotations;
+        if (ann) podAnnotations.set(key, ann);
       }
     }
-    const snap = { vpas, templates, managed };
+    const snap = { vpas, templates, managed, podAnnotations };
     cache.set(key, snap);
     return snap;
   })().finally(() => inflight.delete(key));
@@ -130,6 +133,22 @@ export async function aksManagedWorkloads(env: Env, bearerToken: string | undefi
   const late = new Promise<null>((res) => { timer = setTimeout(() => res(null), waitMs); });
   try {
     return await Promise.race([snapshot(env, bearerToken, clusterId).then((s) => s.managed), late]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The workload templates' containers and pod annotations as "Kind/namespace/name" (앱 런타임's manifest evidence) —
+ * null = not read within `waitMs` or not allowed (the list keeps loading into the cache)
+ */
+export async function workloadTemplates(env: Env, bearerToken: string | undefined, clusterId: string, waitMs: number): Promise<{ containers: Map<string, unknown[]>; annotations: Map<string, Record<string, string>> } | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((res) => { timer = setTimeout(() => res(null), waitMs); });
+  try {
+    return await Promise.race([snapshot(env, bearerToken, clusterId).then((s) => ({ containers: s.templates as Map<string, unknown[]>, annotations: s.podAnnotations })), late]);
   } catch {
     return null;
   } finally {

@@ -460,7 +460,7 @@ ${t("ob.hm.tileHint")}`}>
                       const probs = problemSignals(w).slice(0, 3);
                       const tip = [
                         k, `${w.kind ?? t("hb.m.kindUnknown")} · ${t(`ob.hm.level.${lv}`)}${w.managed ? ` · ${t("ob.hm.managed")}` : ""}`,
-                        ...(apps ? [`${t("ob.bl.kind")}: ${kindsOf(appByKey.get(k)).map((x) => t(`ob.bl.rt.${x.kind}`) + (x.basis === "image" ? " ?" : "")).join(" · ") || t("ob.bl.kindUnknown")}`] : []),
+                        ...(apps ? [`${t("ob.bl.kind")}: ${kindsOf(appByKey.get(k)).map((x) => t(`ob.bl.rt.${x.kind}`) + (x.version ? ` ${x.version}` : "") + ` (${t(`ob.bl.basisShort.${x.basis}`)})`).join(" · ") || t("ob.bl.kindUnknown")}`] : []),
                         ...(lens && lens !== "kind" ? [`${blockLabel(t, lens, false)}: ${lensText(w)}`] : []),
                         ...(probs.length ? [reason(w, probs)] : []), t("ob.hm.tileHint"),
                       ].join("\n");

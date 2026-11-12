@@ -886,7 +886,10 @@ export type LogInsightsResponse = {
 
 // ── Application kinds and their representative metrics (services/appRuntimes.ts — 조립식 표) ──
 // What each workload runs (JVM · Node.js · Python · Go · .NET · NGINX · Redis · PostgreSQL) and that kind's values.
-// basis: metrics = its detection metric is in the workspace (a fact) · image = only the image name says so (a hint).
+// basis (strongest first, never a guess): metrics = its detection metric is in the workspace · telemetry = the
+// OpenTelemetry SDK reports its language (target_info) · spec = the manifest declares it (the executable, a variable
+// only that runtime reads, the Operator's inject annotation) · scan = Defender's image scan found that language's
+// packages in the image · image = a Docker Hub official image.
 
 export type AppRuntimeKind = "jvm" | "nodejs" | "python" | "go" | "dotnet" | "nginx" | "redis" | "postgres";
 export type AppColumnId =
@@ -894,14 +897,24 @@ export type AppColumnId =
   | "nginxConnections" | "nginxRequests" | "redisClients" | "redisMemory" | "pgConnections" | "openFds";
 /** measured = series exist · absent = the metric is not in the workspace · queryFailed = the query did not answer */
 export type AppMetricState = "measured" | "absent" | "queryFailed";
+export type AppRuntimeBasis = "metrics" | "telemetry" | "spec" | "scan" | "image";
+export type AppRuntimeEvidence = {
+  kind: AppRuntimeKind; basis: AppRuntimeBasis;
+  /** The runtime's version as it reports it (metrics · telemetry only) */
+  version?: string;
+  /** What said so: "command: java" · "env: NODE_OPTIONS" · "scan: java" … (names only, never a value) */
+  evidence?: string;
+};
 export type AppMetricsResponse = {
   clusterId: string;
   generatedAt: string;
   at?: string;
   metricsState: WorkloadHeatmapResponse["metricsState"];
   message?: string;
-  runtimes: { kind: AppRuntimeKind; state: AppMetricState; /** workloads whose metrics say so */ workloads: number; /** workloads only the image name says so */ hinted: number }[];
+  runtimes: { kind: AppRuntimeKind; state: AppMetricState; /** workloads whose metrics say so */ workloads: number; /** workloads known by other evidence only (telemetry · spec · scan · official image) */ hinted: number }[];
   columns: { id: AppColumnId; runtime: AppRuntimeKind | "any"; unit: "ms" | "bytes" | "count" | "perSec" | "ratio"; state: AppMetricState; workloads: number }[];
-  workloads: { namespace: string; workload: string; kinds: { kind: AppRuntimeKind; basis: "metrics" | "image" }[]; values: Partial<Record<AppColumnId, number>> }[];
+  workloads: { namespace: string; workload: string; kinds: AppRuntimeEvidence[]; values: Partial<Record<AppColumnId, number>> }[];
   gaps?: StackQueryGap[];
+  /** The non-metric sources this answer could use: spec (Kubernetes API) · scan (Defender; empty = no scanned image matched) */
+  evidence?: { spec: "ok" | "unavailable"; scan: "ok" | "empty" | "unavailable" };
 };
