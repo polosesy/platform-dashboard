@@ -25,12 +25,6 @@
   letter-spacing: -0.01em;
 }
 
-.mark {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-}
 
 .main {
   flex: 1;

@@ -87,3 +87,29 @@ test("RED route: the windows the API answers are the web's", () => {
   assert.deepEqual([...view.RED_WINDOWS], [5, 15, 60, 360, 1440]);
   assert.match(readFileSync(new URL("../src/routes/observability.ts", import.meta.url), "utf8"), /router\.get\("\/api\/observability\/red"/);
 });
+
+test("RED view (2026-11-13 stg screen): /actuator-only services apart, whole counts, route regexes folded", () => {
+  // 13 of 17 services had only /actuator server spans in the hour → "—" for duration: no request, not a missing value
+  const r = aggregateRed({ calls: [
+    row({ service_name: "api", span_name: "http get /x", status_code: "status_code_unset" }, 3),
+    row({ service_name: "worker", span_name: "http get /actuator/health/**", status_code: "status_code_unset" }, 1440),
+  ] }, 60);
+  const idle = r.services.find((s) => s.service === "worker")!;
+  assert.equal(idle.requests, 0);
+  assert.equal(idle.lowTraffic, false, "no user request is not 'low traffic'");
+  assert.equal(idle.p95, null);
+  assert.equal(r.services.find((s) => s.service === "api")!.lowTraffic, true);
+  const split = view.splitByTraffic(r.services);
+  assert.deepEqual([split.active.map((s) => s.service), split.idle.map((s) => s.service)], [["api"], ["worker"]]);
+  assert.equal(view.redTotals(r.services).active, 1);
+  // increase() extrapolates — 753.55 requests is shown whole
+  assert.equal(view.countText(753.55, "en"), "754");
+  assert.equal(view.countText(0.3, "en"), "< 1");
+  assert.equal(view.countText(0, "en"), "0");
+  // Spring route templates carry the variable's regex (nested braces included)
+  const uuid = "[0-9a-fa-f]{8}-[0-9a-fa-f]{4}-[0-9a-fa-f]{4}-[0-9a-fa-f]{4}-[0-9a-fa-f]{12}";
+  assert.equal(view.endpointLabel(`http get /applications/{applicationid:${uuid}}/actions/{actionid:${uuid}}/parameters`), "http get /applications/{applicationid}/actions/{actionid}/parameters");
+  assert.equal(view.endpointLabel("http get /{tenantid}/scenarios/{scenarionanoid:[0-9a-za-z]{16}}"), "http get /{tenantid}/scenarios/{scenarionanoid}");
+  assert.equal(view.endpointLabel("http get /api/workflow/**"), "http get /api/workflow/**");
+  assert.equal(view.endpointLabel("http get /x/{id:[0-9]{3}"), "http get /x/{id:[0-9]{3}", "unbalanced: unchanged");
+});

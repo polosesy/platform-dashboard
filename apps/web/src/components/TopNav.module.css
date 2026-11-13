@@ -60,14 +60,6 @@
   color: inherit;
 }
 
-.mark {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  background: conic-gradient(from 210deg, rgb(var(--accent-rgb)), rgb(var(--accent-2-rgb)), rgb(var(--accent-rgb)));
-  box-shadow: none;
-  flex: none;
-}
 
 .brandName {
   font-weight: 700;

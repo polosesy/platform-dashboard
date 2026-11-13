@@ -7,6 +7,7 @@ import { NAV_GROUPS, activeGroupKey, isItemActive, sectionBefore, type NavGroup 
 import { useI18n } from "@/lib/i18n";
 import { AuthControls } from "./AuthControls";
 import { NavIcon } from "./navIcons";
+import { BrandMark } from "./BrandMark";
 import styles from "./TopNav.module.css";
 
 type TopNavProps = {
@@ -117,7 +118,7 @@ export function TopNav({ onMenuClick, menuOpen = false, menuBtnRef, docked = fal
           </button>
 
           <Link href="/" className={styles.brand}>
-            <div className={styles.mark} aria-hidden="true" />
+            <BrandMark />
             <div>
               <div className={styles.brandName}>Azure Unified Dashboard</div>
               <div className={styles.brandMeta}>{t("nav.brandMeta")}</div>

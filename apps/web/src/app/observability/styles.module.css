@@ -948,6 +948,9 @@
 .sloTable th.redNum { text-align: right; }
 .redSubRow td { background: var(--panel-sunken); font-size: var(--text-caption); }
 .redEndpoint { display: block; padding-left: 16px; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.redAction { white-space: nowrap; }
+.redIdleHead td { padding-top: 12px; padding-bottom: 12px; }
+.redIdleHead td .sloCellSub { display: inline; }
 .sloWhere { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 @media (max-width: 1100px) { .sloWhere { grid-template-columns: minmax(0, 1fr); } }
 .sloWhereStack { display: grid; gap: 16px; }

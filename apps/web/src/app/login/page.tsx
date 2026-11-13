@@ -10,6 +10,7 @@ import Link from "next/link";
 import { InteractionStatus } from "@azure/msal-browser";
 import { useMsal } from "@azure/msal-react";
 import { Button, Notice, Segmented } from "@/components/ui";
+import { BrandMark } from "@/components/BrandMark";
 import { useI18n } from "@/lib/i18n";
 import { LOGIN_KEYS, loginReason, safeNext, type LoginReason } from "@/lib/loginFlow";
 import { loginErrorMessage, loginRequestFor } from "@/lib/msal";
@@ -76,7 +77,7 @@ export default function LoginPage() {
     <div className={s.page}>
       <header className={s.top}>
         <span className={s.brand}>
-          <span className={s.mark} aria-hidden="true" />
+          <BrandMark size="sm" />
           <span>Azure Unified Dashboard</span>
         </span>
         <Segmented label={t("login.language")} value={locale} onChange={setLocale}

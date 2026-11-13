@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-web
-last-verified: 2026-11-12
-covers: [apps/web/src/app/globals.css, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
+last-verified: 2026-11-13
+covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, scripts/gen-icons.mjs, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
 ---
 # 디자인 시스템 — 원칙 v1과 토큰
 
@@ -74,6 +74,17 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/ui/index.tsx, app
 - **그림자** — 면은 평평하게 두고 1px 테두리로 구분합니다. 떠 있는 것만 `--shadow-raise`(호버·끌기)와 `--shadow-pop`(메뉴·서랍·대화 상자)을 씁니다. 선택은 빛번짐 대신 고리 `--ring-accent`로 표시합니다.
 - **움직임** — `--motion-fast` 150ms(눌림·호버), `--motion-base` 200ms(펼침·탭), `--motion-slow` 250ms(서랍)이고 모두 `--ease-out`입니다. 상태가 바뀔 때만 움직이고, `prefers-reduced-motion`이면 0입니다.
 - **포커스** — 키보드 포커스는 공통으로 2px 파란 테두리(`:focus-visible`)입니다.
+
+## 5a. 플랫폼 마크 · 브라우저 아이콘 (2026-11-13)
+
+예전 파비콘은 create-next-app 기본 아이콘(Vercel 삼각형)이었고, 화면의 마크는 그라데이션 상자뿐이었습니다(상단·왼쪽 메뉴·로그인이 서로 달랐음).
+
+| 무엇 | 규칙 |
+|------|------|
+| 그림 | 둥근 정사각형(파랑 `--accent` → 청록 `--accent-2`, 135°) 위 흰 선 하나가 점 4개를 지남 — **연결된 리소스**(구성도)이자 **시간에 따른 신호**(모니터링). 플랫폼의 두 축(구성·상태)을 한 그림에 |
+| 피한 것 | Azure·Kubernetes·Grafana 같은 다른 제품의 로고 모양(상표), 글자 'AUD'(16px에서 안 읽힘), 3색 이상 |
+| 한 원본 | `scripts/gen-icons.mjs`가 `app/icon.svg`·`favicon.ico`(16/32/48)·`apple-icon.png`(180, iOS가 모서리를 깎으므로 네모)를 만들고, 화면은 `components/BrandMark.tsx`(같은 점 `MARK_POINTS`, 색은 토큰) — `brandIcons.test.ts`가 일치·Next 기본 파비콘 아님을 검사 |
+| 바꿀 때 | 생성기의 `MARK`와 `BrandMark`의 점을 함께 바꾸고 `node scripts/gen-icons.mjs` |
 
 ## 6. 바꾸는 순서
 

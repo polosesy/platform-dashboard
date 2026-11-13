@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { NAV_COLLAPSE_KEY, NAV_GROUPS, isCollapsible, isItemActive, parseCollapsed, sectionBefore, shownItems } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import { NavIcon } from "./navIcons";
+import { BrandMark } from "./BrandMark";
 import { LinkButton, Segmented } from "@/components/ui";
 import { useDisplayPrefs } from "@/lib/displayPrefs";
 import styles from "./Sidebar.module.css";
@@ -68,7 +69,7 @@ export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
       >
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarBrand}>
-            <div className={styles.sidebarMark} aria-hidden="true" />
+            <BrandMark size="sm" />
             <span className={styles.sidebarTitle}>Azure Unified Dashboard</span>
           </div>
           {docked ? null : (

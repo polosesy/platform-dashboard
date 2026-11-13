@@ -64,14 +64,6 @@
   gap: 10px;
 }
 
-.sidebarMark {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  background: conic-gradient(from 210deg, rgb(var(--accent-rgb)), rgb(var(--accent-2-rgb)), rgb(var(--accent-rgb)));
-  box-shadow: none;
-  flex: none;
-}
 
 .sidebarTitle {
   font-size: var(--text-body);

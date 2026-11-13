@@ -32,10 +32,43 @@ export function errorRateText(r: number | null): string {
   return p < 0.01 ? "< 0.01%" : `${p < 1 ? p.toFixed(2) : p.toFixed(1)}%`;
 }
 
+/** A count from increase() — extrapolated to the window's edges, so not whole (753.55): shown rounded; above 0 but under ½ = "< 1" */
+export function countText(n: number, locale: string): string {
+  return n > 0 && n < 0.5 ? "< 1" : Math.round(n).toLocaleString(locale);
+}
+
+/**
+ * An endpoint as people read it: Spring route templates carry the path variable's regular expression
+ * (`/applications/{applicationid:[0-9a-f]{8}-…{12}}`) — keep the variable's name only (`/applications/{applicationid}`).
+ * The full name stays in the tooltip.
+ */
+export function endpointLabel(name: string): string {
+  let out = "", i = 0;
+  while (i < name.length) {
+    const m = name[i] === "{" ? /^\{([A-Za-z_][\w.-]*):/.exec(name.slice(i)) : null;
+    if (!m) { out += name[i++]; continue; }
+    let depth = 0, j = i;
+    for (; j < name.length; j++) {
+      if (name[j] === "{") depth++;
+      else if (name[j] === "}" && --depth === 0) break;
+    }
+    if (j >= name.length) { out += name.slice(i); break; } // unbalanced: leave as it is
+    out += `{${m[1]}}`;
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Services with user requests in the window, and those whose server spans were only /actuator (no request to judge) */
+export function splitByTraffic(services: RedService[]): { active: RedService[]; idle: RedService[] } {
+  return { active: services.filter((s) => s.requests > 0), idle: services.filter((s) => !(s.requests > 0)) };
+}
+
 /** Totals for the summary line (only services with requests outside /actuator count toward the error share) */
-export function redTotals(services: RedService[]): { services: number; requests: number; errors: number; actuatorRate: number; withErrors: number } {
+export function redTotals(services: RedService[]): { services: number; active: number; requests: number; errors: number; actuatorRate: number; withErrors: number } {
   return {
     services: services.length,
+    active: services.filter((s) => s.requests > 0).length,
     requests: services.reduce((a, s) => a + s.requests, 0),
     errors: services.reduce((a, s) => a + s.errors, 0),
     actuatorRate: services.reduce((a, s) => a + s.actuatorRate, 0),

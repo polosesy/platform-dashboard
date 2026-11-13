@@ -14,7 +14,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Chip, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel } from "@/components/ui";
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
-import { RED_WINDOWS, errorRateText, quantileText, rateText, redTotals } from "@/lib/redView";
+import { RED_WINDOWS, countText, endpointLabel, errorRateText, quantileText, rateText, redTotals, splitByTraffic } from "@/lib/redView";
 import styles from "../styles.module.css";
 
 export function RedView({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
@@ -26,6 +26,7 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
   );
   useRangeRefresh("red", nonce, q.loading, q.reload, report);
   const [open, setOpen] = useState<string | null>(null);
+  const [showIdle, setShowIdle] = useState(false);
   const d = q.data?.clusterId === clusterId && q.data.windowMinutes === fit.value && answersAt(q.data.at, atQ) ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
@@ -40,6 +41,11 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
   if (!d.instrumented) return <EmptyState title={t("ob.red.notInstrumented")}>{t("ob.red.notInstrumentedHint")}</EmptyState>;
 
   const tot = redTotals(d.services);
+  const { active, idle } = splitByTraffic(d.services);
+  const lc = dateLocale(locale);
+  const workloadOf = (s: (typeof d.services)[number]) => s.workload
+    ? <Link href={`/observability?wl=${encodeURIComponent(`${s.workload.namespace}/${s.workload.name}`)}`} title={t("ob.red.workloadHint")}>{s.workload.namespace}/{s.workload.name} →</Link>
+    : t(s.sameName > 1 ? "ob.red.workloadMany" : "ob.red.workloadNone", { n: s.sameName });
   const win = t(`ob.hm.window.${fit.value}`);
   const rate = (n: number) => { const r = rateText(n); return t(r.key, { n: r.n }); };
   return (
@@ -54,7 +60,7 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
         </>}
         footer={<span>{t("ob.red.foot", { at: new Date(d.at ?? d.generatedAt).toLocaleString(dateLocale(locale)), actuator: rate(tot.actuatorRate) })}</span>}>
         <p className={styles.sloText}>
-          {t("ob.red.summary", { n: tot.services, req: tot.requests.toLocaleString(dateLocale(locale)), w: win, err: tot.errors.toLocaleString(dateLocale(locale)), sv: tot.withErrors })}
+          {t("ob.red.summary", { n: tot.services, active: tot.active, req: countText(tot.requests, lc), w: win, err: countText(tot.errors, lc), sv: tot.withErrors })}
         </p>
         {d.services.length === 0 ? <EmptyState title={t("ob.red.empty", { w: win })} /> : (
           <div className={styles.sloTableWrap}>
@@ -71,30 +77,28 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                 </tr>
               </thead>
               <tbody>
-                {d.services.map((s) => (
+                {active.map((s) => (
                   <Fragment key={s.service}>
                     <tr>
                       <td>
                         <span className={styles.sloCellMain}>{s.service}</span>
                         <span className={styles.sloCellSub}>
-                          {s.workload
-                            ? <Link href={`/observability?wl=${encodeURIComponent(`${s.workload.namespace}/${s.workload.name}`)}`} title={t("ob.red.workloadHint")}>{s.workload.namespace}/{s.workload.name} →</Link>
-                            : t(s.sameName > 1 ? "ob.red.workloadMany" : "ob.red.workloadNone", { n: s.sameName })}
+                          {workloadOf(s)}
                           {s.lowTraffic ? <> · <span title={t("ob.red.lowHint")}>{t("ob.red.low")}</span></> : null}
                         </span>
                       </td>
                       <td className={styles.redNum}>
                         <span className={styles.sloCellMain}>{rate(s.rate)}</span>
-                        <span className={styles.sloCellSub}>{t("ob.red.requestsIn", { n: s.requests.toLocaleString(dateLocale(locale)) })}</span>
+                        <span className={styles.sloCellSub} title={t("ob.red.countHint")}>{t("ob.red.requestsIn", { n: countText(s.requests, lc) })}</span>
                       </td>
                       <td className={styles.redNum}>
                         <span className={styles.sloCellMain}>{errorRateText(s.errorRate)}</span>
-                        <span className={styles.sloCellSub}>{t("ob.red.errorsN", { n: s.errors.toLocaleString(dateLocale(locale)) })}</span>
+                        <span className={styles.sloCellSub}>{t("ob.red.errorsN", { n: countText(s.errors, lc) })}</span>
                       </td>
                       <td className={styles.redNum}>{quantileText(s.p50, d.buckets)}</td>
                       <td className={styles.redNum}>{quantileText(s.p95, d.buckets)}</td>
                       <td className={styles.redNum}>{quantileText(s.p99, d.buckets)}</td>
-                      <td>
+                      <td className={styles.redAction}>
                         {s.endpoints.length ? (
                           <LinkButton ariaExpanded={open === s.service} onClick={() => setOpen(open === s.service ? null : s.service)}>
                             {t(open === s.service ? "ob.red.hideEndpoints" : "ob.red.showEndpoints", { n: s.endpoints.length })}
@@ -104,9 +108,9 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                     </tr>
                     {open === s.service && s.endpoints.map((e) => (
                       <tr key={`${s.service}:${e.name}`} className={styles.redSubRow}>
-                        <td><span className={styles.redEndpoint}>{e.name}</span></td>
-                        <td className={styles.redNum}>{t("ob.red.requestsIn", { n: e.requests.toLocaleString(dateLocale(locale)) })}</td>
-                        <td className={styles.redNum}>{t("ob.red.errorsN", { n: e.errors.toLocaleString(dateLocale(locale)) })}</td>
+                        <td><span className={styles.redEndpoint} title={e.name}>{endpointLabel(e.name)}</span></td>
+                        <td className={styles.redNum}>{t("ob.red.requestsIn", { n: countText(e.requests, lc) })}</td>
+                        <td className={styles.redNum}>{t("ob.red.errorsN", { n: countText(e.errors, lc) })}</td>
                         <td />
                         <td className={styles.redNum}>{quantileText(e.p95, d.buckets)}</td>
                         <td />
@@ -114,6 +118,25 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                       </tr>
                     ))}
                   </Fragment>
+                ))}
+                {idle.length ? (
+                  <tr className={styles.redIdleHead}>
+                    <td colSpan={7}>
+                      <LinkButton ariaExpanded={showIdle} onClick={() => setShowIdle(!showIdle)}>
+                        {t(showIdle ? "ob.red.idleHide" : "ob.red.idleShow", { n: idle.length, w: win })}
+                      </LinkButton>
+                      <span className={styles.sloCellSub}>{t("ob.red.idleHint")}</span>
+                    </td>
+                  </tr>
+                ) : null}
+                {showIdle && idle.map((s) => (
+                  <tr key={s.service} className={styles.redSubRow}>
+                    <td>
+                      <span className={styles.sloCellMain}>{s.service}</span>
+                      <span className={styles.sloCellSub}>{workloadOf(s)}</span>
+                    </td>
+                    <td colSpan={6} className={styles.sloCellSub}>{t("ob.red.idleRow", { w: win, actuator: rate(s.actuatorRate) })}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>

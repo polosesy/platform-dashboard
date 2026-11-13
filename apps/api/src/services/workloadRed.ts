@@ -121,7 +121,8 @@ export function aggregateRed(raw: Record<string, PromRow[]>, minutes: number, fa
         errorRate: a.requests > 0 ? round(a.errors / a.requests, 5) : null,
         p50: q(0.5), p95: q(0.95), p99: q(0.99),
         actuatorRate: round(a.actuator / (minutes * 60), 4),
-        endpoints, lowTraffic: a.requests < RED_MIN_REQUESTS,
+        // no user request at all is not "low traffic": the view lists those apart (only /actuator in the window)
+        endpoints, lowTraffic: a.requests > 0 && a.requests < RED_MIN_REQUESTS,
       };
     })
     // busiest first, then by name — a service with errors is not reordered: there is no threshold to rank by

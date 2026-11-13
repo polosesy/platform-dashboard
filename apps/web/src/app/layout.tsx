@@ -13,7 +13,7 @@ import { PREFS_BOOT_SCRIPT } from "@/lib/displayPrefsBoot";
 
 export const metadata: Metadata = {
   title: "Azure Unified Dashboard",
-  description: "Unified Azure architecture, network, and delivery visibility",
+  description: "Azure & AKS operations — architecture, monitoring and security in one place",
 };
 
 export default async function RootLayout({
