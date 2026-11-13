@@ -20,7 +20,7 @@ export const OPS_T: Translations = {
   "hb.nm.search": { ko: "워크로드·네임스페이스 이름", en: "Workload or namespace name" },
   "hb.nm.close": { ko: "닫기", en: "Close" },
   "hb.nm.live": { ko: "실시간 (30초)", en: "Live (30 s)" },
-  "hb.nm.liveHint": { ko: "켜면 30초마다 새 표본을 더합니다(보이는 탭에서만). 그림은 카드·선이 새로 생기거나 사라질 때만 다시 배치됩니다.", en: "Adds a new sample every 30 s (visible tab only). The picture is re-laid out only when a card or line appears or goes." },
+  "hb.nm.liveHint": { ko: "켜면 30초마다 새 표본을 더합니다(보이는 탭에서만). 그림은 카드·선이 새로 생기거나 사라질 때만 다시 배치됩니다. 출처가 Hubble UI이면 클러스터의 표본을 2분에 한 번만 새로 읽어 모든 사용자가 함께 씁니다(Hubble UI 백엔드 메모리 보호) — '마지막 표본' 시각을 보세요.", en: "Adds a new sample every 30 s (visible tab only). The picture is re-laid out only when a card or line appears or goes. With Hubble UI as the source a cluster's sample is read anew once every 2 minutes and shared by every user (to spare the Hubble UI backend's memory) — see 'Last sample'." },
   "hb.nm.sample": { ko: "새 표본", en: "New sample" },
   "hb.nm.summary": { ko: "워크로드 {w} · 네임스페이스 {ns} · 연결 {l}", en: "{w} workloads · {ns} namespaces · {l} links" },
   "hb.nm.dropLinks": { ko: "정책 차단 연결 {n}", en: "{n} links with policy drops" },

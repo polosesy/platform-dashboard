@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { HubbleServiceEdge, HubbleServiceNode } from "@aud/types";
 import { dropClass } from "../src/services/hubbleDrops.js";
-import { HUBBLE_UI_SAMPLE, gated, nonJsonAnswer, pollDelay, sampleHubbleUi, streamOf } from "../src/services/hubbleUiSource.js";
+import { HUBBLE_UI_SAMPLE, HUBBLE_UI_TTL_MS, gated, nonJsonAnswer, pollDelay, sampleHubbleUi, streamOf } from "../src/services/hubbleUiSource.js";
 import { parseHubbleJsonOutput } from "../src/services/hubbleClient.js";
 import * as netMap from "../../web/src/lib/k8sNetMap.ts";
 
@@ -40,12 +40,14 @@ test("a 200 answer that is not JSON: cut off (empty / half an object) = failed, 
   assert.equal(nonJsonAnswer("text/html", "<!doctype html><html>").state, "unsupported");
 });
 
-test("requests share backend streams: one 'requests + drops' stream for every view, own streams only for an event type or DROPPED", () => {
+test("requests share backend streams: one 'requests + drops' stream for every view, its own only for policy-verdict events", () => {
   assert.equal(streamOf({}).key, "all");
-  assert.equal(streamOf({ verdict: "FORWARDED" }).key, "all", "FORWARDED is filtered from the shared stream");
-  assert.deepEqual(streamOf({ verdict: "dropped" }), { key: "dropped", verdict: "DROPPED" });
-  assert.deepEqual(streamOf({ type: "policy-verdict" }), { key: "type:policy-verdict:", type: "policy-verdict" });
+  assert.equal(streamOf({ verdict: "FORWARDED" }).key, "all", "a verdict is filtered from the shared stream");
+  assert.equal(streamOf({ verdict: "dropped" }).key, "all", "a DROPPED-only stream reached no further back (stg) — one channel less");
+  assert.equal(streamOf({ type: "l7" }).key, "all", "other event types are filtered from the shared stream");
+  assert.deepEqual(streamOf({ type: "policy-verdict" }), { key: "type:policy-verdict", type: "policy-verdict" });
   assert.equal(HUBBLE_UI_SAMPLE, 10_000);
+  assert.ok(HUBBLE_UI_TTL_MS >= 120_000, "one sample per cluster for two minutes, for every user");
 });
 
 test("one Hubble UI channel per cluster at a time — a failed job does not block the next", async () => {

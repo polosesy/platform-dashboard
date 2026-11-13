@@ -15,7 +15,7 @@
 
 import type { Env } from "../env.js";
 import type { HubbleCoverage, HubbleFlow, HubbleFlowSet } from "@aud/types";
-import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
+import { CacheManager } from "../infra/cacheManager.js";
 import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { safeMessage } from "../infra/requestParams.js";
 import { parseHubbleJsonOutput } from "./hubbleClient.js";
@@ -312,19 +312,25 @@ export const HUBBLE_UI_SAMPLE = 10_000;
 
 /**
  * Pure: which backend stream answers a request. Every channel makes the backend replay up to 10,000 flows and build
- * its service map (tens of Mi each — the stg backend has 256Mi), so requests share streams: an event type, or the
- * DROPPED verdict (few flows, a longer reach than the mixed stream), get their own; everything else — the service
- * map, the summaries, a FORWARDED filter, any limit — reads the one "requests + drops" stream and filters here.
+ * its service map (tens of Mi at once — the stg backend has 256Mi), and hubble-ui v0.13.6 keeps a little of every
+ * channel for good (its per-channel data_throttler is never stopped — infra session's reading of the upstream source:
+ * ≈ 3.5 MiB a channel; the stg backend's floor rose 12 → 150 MiB over four days of dashboard use). So channels are
+ * few: one "requests + drops" stream serves the service map, the summaries, the flow table (any limit), a verdict or
+ * an event-type filter — all filtered here. Only policy-verdict events keep their own stream: the shared stream holds
+ * about two thirds of them (stg 2026-11-13, same 0.7 min: 654 vs 1,008), and the enforce-readiness counts are the
+ * point of reading them. A DROPPED-only stream reached no further back than the shared one (0.85 vs 0.89 min).
  */
-export function streamOf(opts: { verdict?: string; type?: string }): { key: string; verdict?: string; type?: string } {
-  const type = opts.type?.toLowerCase() || undefined;
-  const verdict = opts.verdict?.toUpperCase() || undefined;
-  if (type) return { key: `type:${type}:${verdict ?? ""}`, type, ...(verdict ? { verdict } : {}) };
-  if (verdict === "DROPPED") return { key: "dropped", verdict };
-  return { key: "all" };
+export function streamOf(opts: { verdict?: string; type?: string }): { key: string; type?: string } {
+  return opts.type?.toLowerCase() === "policy-verdict" ? { key: "type:policy-verdict", type: "policy-verdict" } : { key: "all" };
 }
 
-const cache = new CacheManager<HubbleFlowSet>(30, 30_000);
+/**
+ * How long a cluster's sample is reused — for every user (a sample does not depend on who asks: the platform reads
+ * the cluster's own Hubble UI; access to the cluster was checked before this). Two minutes keeps it to at most two
+ * channels per cluster per two minutes, however many people have the views open or press "new sample".
+ */
+export const HUBBLE_UI_TTL_MS = 120_000;
+const cache = new CacheManager<HubbleFlowSet>(30, HUBBLE_UI_TTL_MS);
 const inflight = new Map<string, Promise<HubbleFlowSet>>();
 const stateCache = new CacheManager<{ state: HubbleUiState; message?: string }>(20, 60_000);
 /** One channel per cluster at a time — the views ask together (the security tab alone asked for two at once) */
@@ -340,7 +346,7 @@ export function gated<T>(key: string, job: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Flows for the Hubble views (cached 30 s, one channel per cluster at a time); verdict / namespace / limit applied here */
+/** Flows for the Hubble views (one sample per cluster for HUBBLE_UI_TTL_MS, one channel per cluster at a time); verdict / type / namespace / limit applied here */
 export async function getFlowsFromHubbleUi(
   env: Env, bearerToken: string | undefined, clusterId: string,
   opts: { limit: number; namespace?: string; verdict?: string; type?: string },
@@ -350,12 +356,13 @@ export async function getFlowsFromHubbleUi(
   if (!cfg) throw new HubbleUiError("notConfigured", "aks.observability.hubbleUi is not set for this connection");
   const cluster = clusterId.toLowerCase();
   const stream = streamOf(opts);
-  const key = `${cachePrefix(bearerToken)}:hubble-ui:${cluster}:${stream.key}`;
+  // No user prefix: the same sample for everyone who may see this cluster (a per-user key opened a channel per user)
+  const key = `hubble-ui:${cluster}:${stream.key}`;
   const set = cache.get(key) ?? await (inflight.get(key) ?? (() => {
     const job = gated(cluster, async () => {
       const again = cache.get(key); // a job queued before this one may have read the same stream
       if (again) return again;
-      const read = () => sampleHubbleUi(cfg.url, { limit: HUBBLE_UI_SAMPLE, ...(stream.verdict ? { verdict: stream.verdict } : {}), ...(stream.type ? { type: stream.type } : {}) });
+      const read = () => sampleHubbleUi(cfg.url, { limit: HUBBLE_UI_SAMPLE, ...(stream.type ? { type: stream.type } : {}) });
       // An answer that broke off (the backend restarted under memory pressure) is worth one more try a moment later
       const flows = await read().catch(async (e) => {
         if (!(e instanceof HubbleUiError) || e.state !== "failed" || !/broke off/.test(e.message)) throw e;
@@ -371,10 +378,11 @@ export async function getFlowsFromHubbleUi(
     return job;
   })());
   const verdict = opts.verdict?.toUpperCase();
+  const type = stream.type ? undefined : opts.type?.toLowerCase();
   const ns = opts.namespace;
-  if (!ns && (!verdict || stream.verdict) && set.flows.length <= opts.limit) return set;
+  if (!ns && !verdict && !type && set.flows.length <= opts.limit) return set;
   const flows = set.flows
-    .filter((f) => (!verdict || stream.verdict || f.verdict === verdict) && (!ns || f.source.namespace === ns || f.destination.namespace === ns))
+    .filter((f) => (!verdict || f.verdict === verdict) && (!type || f.eventKind === type) && (!ns || f.source.namespace === ns || f.destination.namespace === ns))
     .slice(0, opts.limit);
   return { flows, coverage: { ...set.coverage, rawEvents: flows.length } };
 }

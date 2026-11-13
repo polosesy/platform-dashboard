@@ -237,7 +237,8 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
         {map.totals.ipv6DropLinks > 0 && <span className={styles.nmAt} title={t("hb.nm.ipv6Hint")}>ⓘ {t("hb.nm.ipv6DropLinks", { n: map.totals.ipv6DropLinks })}</span>}
         {map.totals.stale > 0 && <span data-status="stale" title={t("hb.nm.staleHint")}>{NET_GLYPH.stale} {t("hb.nm.stale", { n: map.totals.stale })}</span>}
         <span className={styles.nmAt} title={t("hb.nm.hubNote")}>ⓘ {t("hb.nm.hubShortNote")}</span>
-        {last && <span className={styles.nmAt}>{t("hb.nm.at", { at: new Date(mem.current.at).toLocaleTimeString(dateLocale(locale)) })}</span>}
+        {/* The sample's own newest flow — a sample reused for a while (Hubble UI: 2 min per cluster) must not look new */}
+        {last && <span className={styles.nmAt}>{t("hb.nm.at", { at: new Date(last.coverage?.newest ?? mem.current.at).toLocaleTimeString(dateLocale(locale)) })}</span>}
         <ul className={styles.nmLegend} aria-label={t("ob.hm.legend")}>
           {(["ok", "warn", "danger", "stale"] as const).map((s) => <li key={s} data-status={s}><span aria-hidden="true">{NET_GLYPH[s]}</span>{t(`hb.nm.status.${s}`)}</li>)}
           <li><span className={styles.nmLine} data-tone="forward" />{t("hb.nm.line.forward")}</li>
