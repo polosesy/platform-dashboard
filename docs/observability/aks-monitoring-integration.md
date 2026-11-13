@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-12
+last-verified: 2026-11-13
 covers: [apps/api/src/services/appRuntimes.ts, apps/web/src/lib/workloadBlocks.ts, apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
@@ -245,6 +245,7 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 - 이미지 스캔: Defender는 **발견 사항이 있는 패키지만** 나열합니다 → 결과가 없다고 그 언어가 아니라는 뜻이 아니고, 여러 언어가 나오면 모두 표시합니다('이미지에 들어 있음'이라는 뜻). Defender for Containers 플랜과 레지스트리 스캔 결과가 있어야 합니다(시험 환경은 하위 평가 0건이라 이 경로는 실측 전).
 - **이미지 설정**(2026-11-12 구현, `services/imageConfig.ts`): 연결 파일에 `aks.imageConfig: true` + 그 연결 신원에 레지스트리의 `AcrPull`이 있을 때만 읽습니다. Azure Container Registry(`<이름>.azurecr.io`)만, **설정 blob(몇 KB)만** 읽고 레이어는 받지 않습니다. `Env`에서는 위 변수 이름만 보고 다른 변수의 이름·값은 밖으로 나가지 않습니다. 다이제스트별 하루 캐시(한 번에 80개·10초까지, 나머지는 다음 새로 고침). 응답 `evidence.imageConfig` = `ok`·`off`(선택 안 함)·`forbidden`(AcrPull 없음)·`unreachable`·`none`(레지스트리 이미지 없음) + 읽은 수·남은 수.
   - 시험 환경 실측(2026-11-12): 레지스트리 이미지 36개 중 **24개가 런타임과 정확한 버전**을 밝힘(Java 21 계열 18 · Node.js 4 · nginx 1 · redis 1), 12개는 설정에 표시 없음(정적 바이너리 등 — '알 수 없음'으로 남음). 36개 순차 읽기 11초.
+  - 파드에서 확인(2026-11-13): 대시보드 파드 자신의 워크로드 ID(AcrPull은 클러스터 이미지 36개가 모두 있는 레지스트리 하나에 부여됨)로, 배포된 `readImageConfig`가 같은 결과(24/36·10.1초)를 냈습니다. 레지스트리는 기본 거부 + 사설 엔드포인트였고, 노드가 이미지를 받는 경로와 같은 경로로 닿았습니다(시험 배포는 네트워크 정책 꺼짐 — 정책을 강제하면 `features.imageConfig` 필요).
   - 함정: 다이제스트로 고정한 파드는 Kubernetes가 이미지를 `sha256:…`로만 보고합니다(36개 중 30개). 저장소 경로는 `imageID`(`kube_pod_container_info`의 `image_id`)에만 있어 그 값을 씁니다.
   - 네트워크 정책을 강제하면 차트 `features.imageConfig: true`로 `*.azurecr.io`·데이터 엔드포인트 FQDN을 엽니다. 레지스트리가 사설 엔드포인트 전용이면 파드가 그 경로로 닿아야 합니다(`unreachable`).
   - 출처 라벨(`org.opencontainers.image.source`·`revision`)도 같은 설정에 있지만 시험 환경은 36개 중 1개뿐이라 화면에는 아직 쓰지 않습니다.
