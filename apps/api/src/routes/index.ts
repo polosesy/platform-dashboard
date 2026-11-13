@@ -12,6 +12,7 @@ import { registerLiveDiagramRoutes } from "./liveDiagram.js";
 import { registerObservabilityRoutes } from "./observability.js";
 import { registerHubbleRoutes } from "./hubble.js";
 import { registerNotifyRoutes } from "./notify.js";
+import { registerOpsRoutes } from "./ops.js";
 
 export function registerAllRoutes(router: Router, env: Env) {
   // Health check
@@ -32,4 +33,5 @@ export function registerAllRoutes(router: Router, env: Env) {
   registerObservabilityRoutes(router, env);
   registerHubbleRoutes(router, env);
   registerNotifyRoutes(router, env);
+  registerOpsRoutes(router, env);
 }

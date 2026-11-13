@@ -35,7 +35,7 @@ test("every page route appears in the menu exactly once (the sign-in page is the
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 20);
+  assert.equal(routes.length, 21); // + /runbooks (사례·런북, 2026-11-13)
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -60,7 +60,8 @@ test("each route activates exactly one item (longest match) and its group", () =
 
 test("group order and shape: 7 slots, single-item groups are direct links", () => {
   assert.deepEqual(NAV_GROUPS.map((g) => g.key), ["overview", "azure", "network", "kubernetes", "security", "cost", "notify", "settings"]);
-  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview", "cost", "notify"]);
+  // 알림·대응 = 알림 센터 + 사례·런북 (2026-11-13) — no longer a single link
+  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview", "cost"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "settings")!.items.map((i) => i.href), ["/settings/connections", "/settings/features"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "azure")!.items.map((i) => i.href), ["/architecture", "/live-diagram", "/health"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble"]);

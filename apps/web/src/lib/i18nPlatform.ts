@@ -316,6 +316,8 @@ export const PLATFORM_T: Translations = {
   "feat.resourceHealth.desc": { ko: "Service Health·Resource Health", en: "Service Health and Resource Health" },
   "feat.costManagement.name": { ko: "비용 관리", en: "Cost management" },
   "feat.alertCenter.name": { ko: "알림 센터", en: "Alert center" },
+  "feat.opsKnowledge.name": { ko: "사례·런북", en: "Cases & runbooks" },
+  "feat.opsKnowledge.desc": { ko: "장애를 고친 경험(사례)과 대응 절차(런북)를 팀이 남기고, 새 오류에 비슷한 경험과 그때 쓴 런북을 바로 찾기", en: "The team keeps how incidents were fixed (cases) and its procedures (runbooks); a new error finds similar experience and the runbooks used" },
   "feat.alertCenter.desc": { ko: "Azure Monitor·Grafana 알림을 대시보드가 직접 받아 장애·보안·모니터링·변경별로 — 메신저 웹훅 불필요", en: "Azure Monitor and Grafana alerts received by the dashboard, by incident · security · monitoring · change — no messenger webhook" },
   "feat.costManagement.desc": { ko: "비용 추이·예산·예측", en: "Cost trend, budgets, forecast" },
   "feat.vnetTraffic.name": { ko: "VNet 트래픽", en: "VNet traffic" },

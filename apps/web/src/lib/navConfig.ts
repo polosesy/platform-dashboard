@@ -15,7 +15,7 @@ export type NavIcon =
   | "home" | "cloud" | "waypoints" | "helm" | "lock" | "coins"
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
-  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox";
+  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -61,7 +61,8 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   { key: "cost", labelKey: "nav.group.cost", icon: "coins", items: [item("/cost", "costManagement", "wallet")] },
   // Alerts received from Azure Monitor and Grafana (the dashboard is the receiver — no messenger webhook needed)
-  { key: "notify", labelKey: "nav.group.notify", icon: "inbox", items: [item("/notifications", "notifications", "bell")] },
+  // …and what the team learned answering them: cases (how it was fixed) and runbooks (what to do) — docs/architecture/ops-knowledge.md
+  { key: "notify", labelKey: "nav.group.notify", icon: "inbox", items: [item("/notifications", "notifications", "bell"), item("/runbooks", "runbooks", "book")] },
   // How the platform reaches Azure (connections, permission check) — last, like other platforms' settings
   { key: "settings", labelKey: "nav.group.settings", icon: "settings", items: [
     item("/settings/connections", "connections", "plug"),

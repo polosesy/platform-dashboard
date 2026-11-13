@@ -15,6 +15,7 @@ import { usePolling } from "@/lib/usePolling";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, Panel, Segmented, Select, Stat, Tabs, Toggle } from "@/components/ui";
 import { CATEGORIES, DEFAULT_FILTER, MAPPING, SEVERITIES, azureSnippet, filterInbox, grafanaSnippet, pullSnippet, receiverUrls, targetText, teamsOf, type InboxFilter } from "@/lib/notifyView";
+import { alertFindHref } from "@/lib/opsKnowledge";
 import { DesktopToggle } from "./DesktopToggle";
 import { Channels } from "./Channels";
 import s from "./notifications.module.css";
@@ -149,6 +150,8 @@ function Detail({ a, canWrite, reload }: { a: NotifyAlert; canWrite: boolean; re
           {a.description && a.description !== a.summary ? <pre className={s.desc}>{a.description}</pre> : null}
           {a.values ? <div className={s.kv}>{Object.entries(a.values).map(([k, v]) => <span key={k} className={s.chip}>{k} = {v}</span>)}</div> : null}
           <div className={s.links}>
+            {/* Has the team seen this before? — the cases & runbooks find view, with this alert's text and scope */}
+            <Link href={alertFindHref(a)} className={s.link}>{t("notify.findSimilar")} →</Link>
             {a.links.map((l) => l.url.startsWith("/")
               ? <Link key={l.url} href={l.url} className={s.link}>{linkLabel(l)} →</Link>
               : <a key={l.url} href={l.url} target="_blank" rel="noreferrer noopener" className={s.link} title={l.url}>{linkLabel(l)} ↗</a>)}

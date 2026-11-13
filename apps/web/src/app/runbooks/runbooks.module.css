@@ -1,0 +1,35 @@
+/* 사례·런북 — docs/architecture/ops-knowledge.md */
+.stack { display: grid; gap: 14px; margin-top: 14px; }
+.row2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.list { list-style: none; margin: 0; padding: 0; }
+.item { display: grid; gap: 4px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: none; }
+.item[data-selected] { background: var(--accent-soft); }
+.itemHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.itemHead strong { min-width: 0; overflow-wrap: anywhere; }
+.sub { font-size: var(--text-caption); color: var(--muted); }
+.muted { font-size: var(--text-small); color: var(--muted); margin: 0; }
+.fix { font-size: var(--text-small); margin: 0; }
+.fix b { font-weight: 600; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.side { position: sticky; top: var(--sticky-top); }
+.field { display: grid; gap: 4px; }
+.section { display: grid; gap: 6px; margin-top: 12px; }
+.section h3 { margin: 0; font-size: var(--text-small); font-weight: 600; color: var(--muted); }
+.prose { margin: 0; white-space: pre-wrap; font-size: var(--text-body); overflow-wrap: anywhere; }
+.steps { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+.steps li { padding-left: 4px; }
+.stepTitle { font-weight: 600; }
+.stepEdit { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-sunken); }
+.stepHead { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: var(--text-small); font-weight: 600; }
+.problems { margin: 0; padding-left: 18px; font-size: var(--text-small); color: var(--danger-strong); }
+.helper { display: grid; gap: 12px; }
+.helperCard { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.facts { display: grid; gap: 6px; margin: 0; font-size: var(--text-small); }
+.facts div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }

@@ -74,6 +74,8 @@ export const FEATURES: FeatureDef[] = [
   { id: "podTraffic", tier: "enterprise", routes: ["/hubble"], requires: ["aksCredential", "hubbleExec"], optional: [], preconditions: AKS_PRE },
   // The dashboard is the receiver (Azure action groups · Grafana contact points push to it) — no Azure read permission
   { id: "alertCenter", tier: "core", routes: ["/notifications"], requires: [], optional: [] },
+  // The team's cases and runbooks, kept by the platform — no Azure read permission (docs/architecture/ops-knowledge.md)
+  { id: "opsKnowledge", tier: "pro", routes: ["/runbooks"], requires: [], optional: [] },
   { id: "multiTenantConnections", tier: "enterprise", routes: ["/settings/connections"], requires: [], optional: [] },
 ];
 
