@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-10-22
-covers: [apps/api/src/services/hubbleClient.ts, apps/api/src/services/hubbleMerge.ts]
+last-verified: 2026-11-13
+covers: [apps/api/src/services/hubbleClient.ts, apps/api/src/services/hubbleMerge.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/services/hubbleDrops.ts]
 ---
 # Hubble 트러블슈팅 가이드
 
@@ -83,15 +83,62 @@ covers: [apps/api/src/services/hubbleClient.ts, apps/api/src/services/hubbleMerg
 
   | Identity | 이름 | 의미 |
   |----------|------|------|
-  | 0 | init | 아직 identity 미할당 |
+  | 0 | unknown | `reserved:unknown` — Cilium이 주소를 엔드포인트로 못 바꿈(예: IPv6 멀티캐스트 `ff02::2`). 화면 '식별자 없음' (2026-11-13 전에는 init으로 잘못 표시) |
   | 1 | host | 노드 자체 (kubelet, kube-proxy 등) |
   | 2 | world | 클러스터 외부 트래픽 |
   | 3 | unmanaged | Cilium 미관리 엔드포인트 |
   | 4 | health | Cilium 헬스체크 |
-  | 6 | kube-apiserver | API 서버 |
-  | 7 | remote-node | 다른 노드 |
+  | 5 | init | 아직 identity를 받는 중인 엔드포인트 |
+  | 6 | remote-node | 다른 노드 (Cilium numericidentity.go) |
+  | 7 | kube-apiserver | API 서버 |
 
 - **해결**: `parseEndpoint`에서 `reserved:*` 라벨과 identity 숫자를 의미 있는 이름으로 매핑. Cilium 1.17+ `workloads` 배열 활용 (`{"workloads":[{"name":"konnectivity-agent","kind":"Deployment"}]}`).
+
+### ERR-007: `HTTP 502 hubble_ui_unsupported — Hubble UI answered something other than the JSON envelope`
+
+- **증상**: Pod 트래픽(Hubble) › 보안(정책 판정)에 `보안 오류: HTTP 502 … hubble_ui_unsupported`. 다시 열면 대개 정상.
+- **원인 (2026-11-13 stg 실측)**: 오류 시각(06:37:39Z)에 kube-system `hubble-ui`의 **backend 컨테이너가 OOMKilled**(한도 256Mi, exit 137). 응답 도중 죽어 본문이 끊겼고, 대시보드는 '본문이 JSON이 아님'을 프로토콜 불일치(`unsupported`)로 잘못 분류했다.
+  - Hubble UI 채널 하나마다 백엔드가 relay에서 **최근 10,000건을 다시 받아 서비스 맵을 만든다**(`GET_FLOWS_LAST` 기본, 50 ms·500건씩 내보냄). 실측: 채널 둘(전체 + 정책 판정)을 읽자 backend 132Mi → 209Mi, 1분 뒤 145Mi.
+  - 대시보드가 채널을 동시에 여럿 열었다: 보안 탭 혼자 둘(전체·정책 판정), 출처 확인(`/api/hubble/sources`)의 별도 '작은' 표본(백엔드에는 똑같이 10,000건), 흐름 탭의 limit·verdict마다 다른 채널.
+  - backend 작업 메모리는 대시보드를 쓴 날마다 계단식으로 올랐다(4일: 12 → 38 → 51 → 85 → 130 → 150Mi → 06:37 OOM).
+- **해결 (`hubbleUiSource.ts`)**:
+  - 클러스터마다 **한 번에 채널 하나**(`gated`)만 연다.
+  - 스트림을 공유한다(`streamOf`). 서비스 맵·요약·흐름 표(어떤 limit이든)·FORWARDED 거르기는 '요청 + 드롭' 스트림 하나를 쓰고, 정책 판정 같은 이벤트 유형과 DROPPED만 따로 연다.
+  - 출처 확인은 그 공유 스트림을 읽어 캐시를 채운다.
+  - 200인데 본문이 비었거나 JSON이 반쯤 끊겼으면 `failed`('응답이 중간에 끊김 — 백엔드 재시작(메모리 한도?)')로 분류하고 1.5초 뒤 한 번 다시 시도한다. HTML 같은 다른 형식일 때만 `unsupported`다(`nonJsonAnswer`).
+- **고객 쪽 권장 (대시보드가 바꾸지 않음)**: hubble-ui backend 메모리 한도 256Mi → 512Mi 이상. Hubble UI 화면을 여러 사람이 함께 써도 같은 비용이 든다.
+
+### ERR-008: 서비스 맵의 빨간 '차단'이 `UNSUPPORTED_L3_PROTOCOL` → 대상 `unknown`
+
+- **증상**: 서비스 맵 '차단' 필터에 여러 워크로드가 각각 드롭 1건으로 '클러스터 밖 · 구성 요소'의 `unknown`(초기화 중 엔드포인트) 카드에 빨간 점선으로 이어진다. 네트워크 탭 '차단 상위 플로우'의 목적지는 `/unknown`, 사유는 `UNSUPPORTED_L3_PROTOCOL`. 보안 탭은 '지금 정책이 차단 0'.
+- **원인 (2026-11-13 stg 실측)**:
+  - Hubble UI DROPPED 45초 표본의 11건이 모두 `UNSUPPORTED_L3_PROTOCOL`·ICMPv6·INGRESS였다. 대상은 identity 0(`reserved:unknown`, 멀티캐스트 주소)이거나 파드였다.
+  - AMW `hubble_drop_total` 1시간 동안 `unsupported_l3_protocol` 308건, `policy_denied` 0건.
+  - 정체: **IPv4 전용 Cilium 데이터 경로가 버리는 IPv6 패킷**(파드의 이웃 탐색·라우터 요청)이다. 연결도 정책 결정도 아니다. 'Hubble이 버렸다'는 사실은 맞지만, '차단된 연결'(빨강)이라는 표시와 identity 0 = '초기화 중'은 틀렸다.
+- **해결 (`hubbleDrops.ts`)**:
+  - 드롭을 셋으로 나눈다.
+    - **policy**: POLICY_DENIED·POLICY_DENY·AUTH_REQUIRED
+    - **ipv6**: UNSUPPORTED_L3_PROTOCOL이면서 IPv6 주소
+    - **datapath**: 그 밖
+  - 맵 표시
+    - 빨간 점선 ■ = 정책 차단만
+    - 주황 점선 ▲ = 기타 데이터 경로 드롭
+    - 회색 점선 = IPv6 패킷. 카드 상태는 바꾸지 않고 툴팁으로 설명한다.
+  - 보안 탭의 '거부'는 정책 드롭만 센다(나머지는 `nonPolicyDrops` 안내).
+  - 네트워크 탭은 사유 옆에 분류를 보인다.
+  - identity 0 = '식별자 없음'.
+- **IPv6 드롭이 많아 보기 싫다면**: 고객 클러스터의 IPv6 커널 설정(파드 `net.ipv6.conf.all.disable_ipv6`)은 플랫폼이 바꾸지 않는다. 숫자는 그대로 보이고 분류만 바르게 한다.
+
+### ERR-009: 서비스 맵 1·5·15·30분을 바꿔도 차단이 보였다 안 보였다 함
+
+- **증상**: 기간을 바꾸면 드롭이 사라지거나 다른 기간과 똑같다. 1분이 빈 경우도 있다.
+- **원인**:
+  1. **표본이 잘렸다.** Hubble UI는 10,000건을 오래된 것부터 50 ms마다 내보내는데, 대시보드는 10 ms 간격 빈 응답 두 번에 멈췄다. 그래서 표본은 179~4,500건(실측)의 **가장 오래된 부분**뿐이었다. 최근 1분이 빠져 1분 창이 비곤 했고, 드문 드롭이 표본마다 들쭉날쭉했다.
+  2. **실시간 표본은 원래 약 1분이다**(노드 링 버퍼, '공통 관측 0.8분'). 5·15·30분은 같은 1분을 보였다.
+- **해결**:
+  - 표본기는 백엔드의 `poll_delay_ms`(약 200 ms)를 기다리고, 채널을 연 시각까지 따라잡으면(+1번 더) 멈춘다. 데이터 없이 1.5초가 지나도, 상한(10,000건·12초)에 닿아도 멈춘다. 이제 표본에 최신 1분이 들어 있다.
+  - 표본보다 오래된 구간의 드롭은 **Loki의 hubble-flow-exporter 기록**(`getLokiDropFlows`, `{job="hubble-flows"}`)에서 채운다. 표본의 가장 오래된 흐름보다 이전 것만 가져와 같은 드롭을 두 번 세지 않고, 화면에 '{w}분 중 … Loki에서 n건'으로 알린다.
+  - Loki에 있는 것은 exporter가 보내는 드롭뿐이다. stg는 **정책 차단만** 보낸다(24시간 652줄, 전부 POLICY_DENIED, 4시간마다 :56–:57에 몰림 — 실측). IPv6 패킷 드롭은 실시간 표본에만 있다.
 
 ---
 

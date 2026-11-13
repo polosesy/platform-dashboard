@@ -99,6 +99,8 @@ export function SecurityTab({ clusterId, live = false, nonce = 0 }: Props) {
         )}
       </div>
 
+      {(data.nonPolicyDrops ?? 0) > 0 && <p className={styles.nmWindowNote}>{t("hb.sec.nonPolicyDrops", { n: data.nonPolicyDrops ?? 0 })}</p>}
+
       {/* Top Denied Flows */}
       {data.topDenied.length > 0 && (
         <>

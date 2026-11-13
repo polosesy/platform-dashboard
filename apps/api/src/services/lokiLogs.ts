@@ -496,6 +496,42 @@ export function summarizeLokiDrops(lines: string[]): { drops: LokiDropsResponse[
   return { drops: [...map.values()].sort((a, b) => b.count - a.count).slice(0, 50), flowLines: flowLines.length };
 }
 
+type DropFlows = { state: LokiState | "notConfigured"; flows: HubbleFlow[]; truncated: boolean; message?: string };
+const dropFlowCache = new CacheManager<DropFlows>(20, 30_000);
+
+/**
+ * The exporter's DROPPED flows between two times (the service map's window older than its live sample — a live
+ * Hubble sample holds about a minute). What is in Loki is what the exporter ships: its own filter decides (stg:
+ * policy drops only). Cached 30 s per window, whole minutes (one read for every map refresh of that minute).
+ */
+export async function getLokiDropFlows(env: Env, bearerToken: string | undefined, clusterId: string, fromMs: number, toMs: number): Promise<DropFlows> {
+  assertSignedInForCluster(env, bearerToken);
+  const cfg = lokiConfig(env, clusterId);
+  if (!cfg) return { state: "notConfigured", flows: [], truncated: false };
+  if (toMs <= fromMs) return { state: "ok", flows: [], truncated: false };
+  const from = Math.floor(fromMs / 60_000) * 60_000;
+  const key = `${cachePrefix(bearerToken)}:loki-dropflows:${clusterId.toLowerCase()}:${from}:${Math.ceil(toMs / 1000)}`;
+  const hit = dropFlowCache.get(key);
+  if (hit) return hit;
+  const wait = backingOff(cfg);
+  if (wait) return { ...wait, flows: [], truncated: false };
+  try {
+    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", {
+      query: '{job="hubble-flows"} |= "\\"flow\\":"', start: String(BigInt(fromMs) * 1_000_000n), end: String(BigInt(toMs) * 1_000_000n),
+      limit: String(DROP_LINE_LIMIT), direction: "backward",
+    });
+    if (res.truncated) return { state: "failed", flows: [], truncated: true, message: `more than ${MAX_BODY / 1_000_000} MB of drop lines` };
+    const lines = (res.body.data?.result ?? []).flatMap((s) => (s.values ?? []).map((v) => v[1] ?? ""));
+    const flows = parseHubbleJsonOutput(lines.filter((l) => l.includes('"flow"')).join("\n"))
+      .filter((f) => f.verdict === "DROPPED" && Date.parse(f.time) >= fromMs && Date.parse(f.time) < toMs);
+    const out: DropFlows = { state: "ok", flows, truncated: lines.length >= DROP_LINE_LIMIT };
+    dropFlowCache.set(key, out);
+    return out;
+  } catch (e) {
+    return { ...(await classify(cfg, e)), flows: [], truncated: false };
+  }
+}
+
 const dropCache = new CacheManager<LokiDropsResponse>(20, 30_000);
 /** Flow lines read per window (newest first) — more than this and the response says `truncated` */
 export const DROP_LINE_LIMIT = 2000;

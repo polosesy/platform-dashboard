@@ -727,7 +727,7 @@ function policyFields(flow: Record<string, unknown>): Pick<HubbleFlow, "eventKin
 
 // Cilium reserved identity → 사람이 읽을 수 있는 이름 매핑
 const RESERVED_IDENTITY_NAMES: Record<number, string> = {
-  0: "init",
+  0: "unknown",       // reserved:unknown — an address Cilium could not map (was shown as init)
   1: "host",
   2: "world",
   3: "unmanaged",

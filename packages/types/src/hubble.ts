@@ -155,8 +155,21 @@ export type HubbleFlowSet = {
 
 // ── Service Dependency Map ──
 
-/** Cilium reserved identity 또는 워크로드 유형 */
-export type HubbleServiceType = "workload" | "world" | "host" | "health" | "dns" | "init" | "unmanaged" | "kube-apiserver" | "remote-node";
+/**
+ * Cilium reserved identity 또는 워크로드 유형 — `unknown` = identity 0 (`reserved:unknown`: Cilium could not map
+ * the address, e.g. an IPv6 multicast destination; it is not `init` = 5, an endpoint still being set up)
+ */
+export type HubbleServiceType = "workload" | "world" | "host" | "health" | "dns" | "init" | "unknown" | "unmanaged" | "kube-apiserver" | "remote-node";
+
+/**
+ * Why Hubble dropped a packet, in three groups (services/hubbleDrops.ts):
+ * policy = a network policy denied it (POLICY_DENIED · POLICY_DENY · AUTH_REQUIRED) ·
+ * ipv6 = an IPv6 packet an IPv4-only datapath does not carry (UNSUPPORTED_L3_PROTOCOL with an IPv6 address —
+ *        pods' neighbour discovery / router solicitation; a packet, not a connection) ·
+ * datapath = any other drop reason (conntrack, routing, missing backend …)
+ */
+export type HubbleDropClass = "policy" | "ipv6" | "datapath";
+export type HubbleDropCounts = Record<HubbleDropClass, number>;
 
 /** K8s Service에 연결된 Pod 엔드포인트 */
 export type HubbleEndpointPod = {
@@ -202,6 +215,8 @@ export type HubbleServiceNode = {
     dnsQueryCount: number;
     /** DNS 에러 수 */
     dnsErrorCount: number;
+    /** droppedFlows by why (absent from older APIs) */
+    dropsByClass?: HubbleDropCounts;
   };
 };
 
@@ -222,6 +237,9 @@ export type HubbleServiceEdge = {
     avgLatencyMs: number | null;
     /** 초당 플로우 (rate) */
     flowsPerSecond: number | null;
+    /** droppedCount by why, and Hubble's drop reasons on this link (most frequent first) */
+    dropsByClass?: HubbleDropCounts;
+    dropReasons?: string[];
   };
   /** 대표 verdict */
   verdict: HubbleFlowVerdict;
@@ -243,6 +261,20 @@ export type HubbleServiceMapResponse = {
   /** 관측된 네임스페이스 목록 */
   namespaces: string[];
   coverage: HubbleCoverage;
+  /**
+   * Drops of the chosen window older than the live sample, from the hubble-flow-exporter lines in Loki
+   * (`aks.observability.loki`) — a live sample holds about the last minute only, so without them the 5 / 15 / 30
+   * minute windows showed the same minute. Only what the exporter ships (its filter decides — stg: policy drops).
+   */
+  windowDrops?: {
+    state: "ok" | "notConfigured" | "unreachable" | "busy" | "failed";
+    /** Drop flows added from Loki (between `from` and the sample's oldest flow) */
+    added: number;
+    from: string;
+    to: string | null;
+    /** The newest DROP lines only — more in the window than were read */
+    truncated?: boolean;
+  };
 };
 
 // ── Flows (raw flow table) ──
@@ -270,7 +302,11 @@ export type HubbleNetworkSummary = {
     destination: string;
     count: number;
     dropReason: string;
+    /** policy · ipv6 (an IPv6 packet the IPv4-only datapath does not carry) · datapath */
+    dropClass?: HubbleDropClass;
   }[];
+  /** droppedFlows by why */
+  dropsByClass?: HubbleDropCounts;
   dnsErrors: {
     query: string;
     rcode: number;
@@ -297,11 +333,14 @@ export type HubbleSecuritySummary = {
   clusterId: string;
   generatedAt: string;
   timeWindowMinutes: number;
+  /** denied = policy drops only (a drop for another reason — an IPv6 packet, conntrack … — is not a denial) */
   policyVerdicts: {
     allowed: number;
     denied: number;
     audit: number;
   };
+  /** Drops in the window that were not policy decisions (the network tab lists them with their reason) */
+  nonPolicyDrops?: number;
   topDenied: {
     source: string;
     destination: string;

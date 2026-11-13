@@ -11,10 +11,13 @@ import type {
   HubbleEndpointPod,
   HubbleNetworkSummary,
   HubbleSecuritySummary,
+  HubbleDropCounts,
 } from "@aud/types";
 import { getHubbleFlows } from "./hubbleClient.js";
 import { loadKubeConfig } from "./kubernetes.js";
 import { summarizeEnforceReadiness } from "./hubbleAudit.js";
+import { countDrop, dropClass, noDrops } from "./hubbleDrops.js";
+import { getLokiDropFlows } from "./lokiLogs.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 
 // ──────────────────────────────────────────────────────────────
@@ -27,7 +30,7 @@ import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 // ── Cilium Reserved Identities ──
 
 const CILIUM_RESERVED: Record<number, HubbleServiceType> = {
-  0: "init",       // identity unknown
+  0: "unknown",    // reserved:unknown — Cilium could not map the address (an IPv6 multicast, …), not init
   1: "host",       // local host
   2: "world",      // external traffic
   3: "unmanaged",  // unmanaged endpoints
@@ -61,6 +64,11 @@ function resolveServiceType(identity: number, labels: Record<string, string>): H
  * returns the newest N flows regardless of age, so without this the time
  * window selected in the UI had no effect.
  */
+/** `namespace/workload`, or the reserved identity's name for an endpoint with no namespace (was "/unknown") */
+export function endpointName(e: HubbleFlow["source"]): string {
+  return e.namespace ? `${e.namespace}/${e.workloadName}` : e.workloadName || `identity-${e.identity}`;
+}
+
 function withinTimeWindow(flows: HubbleFlow[], minutes: number): HubbleFlow[] {
   const cutoff = Date.now() - minutes * 60_000;
   return flows.filter((f) => {
@@ -80,11 +88,23 @@ export async function collectServiceMap(
   const timeWindowMinutes = opts?.timeWindowMinutes ?? 5;
   const nsFilter = opts?.namespace ?? "";
 
-  const { flows, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
+  const { flows: sampled, coverage } = await getHubbleFlows(env, bearerToken, clusterId, {
     last: Math.min(env.HUBBLE_FLOW_LIMIT, 10_000),
     ...(nsFilter ? { namespace: nsFilter } : {}),
     lang: opts?.lang,
   });
+
+  // A live sample holds about the last minute: the window's older drops come from the exporter lines in Loki (only
+  // older than the sample's oldest flow — never the same drop twice). Without them 5 / 15 / 30 minutes were one minute.
+  const now = Date.now();
+  const from = now - timeWindowMinutes * 60_000;
+  const oldest = sampled.reduce((m, f) => { const t = Date.parse(f.time); return Number.isNaN(t) ? m : Math.min(m, t); }, now);
+  const loki = await getLokiDropFlows(env, bearerToken, clusterId, from, oldest).catch(() => null);
+  const lokiFlows = (loki?.flows ?? []).filter((f) => !nsFilter || f.source.namespace === nsFilter || f.destination.namespace === nsFilter);
+  const windowDrops: HubbleServiceMapResponse["windowDrops"] = loki && loki.state !== "notConfigured"
+    ? { state: loki.state, added: lokiFlows.length, from: new Date(from).toISOString(), to: oldest > from ? new Date(oldest).toISOString() : null, ...(loki.truncated ? { truncated: true } : {}) }
+    : undefined;
+  const flows = lokiFlows.length ? [...sampled, ...lokiFlows] : sampled;
 
   // reply 플로우 제외 (중복 방지)
   const filtered = withinTimeWindow(flows, timeWindowMinutes).filter((f) => !f.isReply);
@@ -117,6 +137,7 @@ export async function collectServiceMap(
     latencyCount: number;
     dnsQueryCount: number;
     dnsErrorCount: number;
+    drops: HubbleDropCounts;
   };
   const nodeMap = new Map<string, NodeAcc>();
 
@@ -140,6 +161,7 @@ export async function collectServiceMap(
         latencyCount: 0,
         dnsQueryCount: 0,
         dnsErrorCount: 0,
+        drops: noDrops(),
       });
     }
     const n = nodeMap.get(id)!;
@@ -160,6 +182,8 @@ export async function collectServiceMap(
     latencySum: number;
     latencyCount: number;
     verdictCounts: Map<string, number>;
+    drops: HubbleDropCounts;
+    dropReasons: Map<string, number>;
     httpMethods: Set<string>;
     topUrls: Map<string, number>;
     dnsQueries: Map<string, number>;
@@ -190,6 +214,8 @@ export async function collectServiceMap(
     } else if (flow.verdict === "DROPPED") {
       srcNode.droppedFlows++;
       dstNode.droppedFlows++;
+      countDrop(srcNode.drops, flow);
+      countDrop(dstNode.drops, flow);
     }
 
     // HTTP L7 집계
@@ -239,6 +265,8 @@ export async function collectServiceMap(
         latencySum: 0,
         latencyCount: 0,
         verdictCounts: new Map(),
+        drops: noDrops(),
+        dropReasons: new Map(),
         httpMethods: new Set(),
         topUrls: new Map(),
         dnsQueries: new Map(),
@@ -246,7 +274,12 @@ export async function collectServiceMap(
     }
     const edge = edgeMap.get(edgeKey)!;
     edge.flowCount++;
-    if (flow.verdict === "DROPPED") edge.droppedCount++;
+    if (flow.verdict === "DROPPED") {
+      edge.droppedCount++;
+      countDrop(edge.drops, flow);
+      const r = flow.dropReasonDesc || "unknown";
+      edge.dropReasons.set(r, (edge.dropReasons.get(r) ?? 0) + 1);
+    }
     edge.verdictCounts.set(flow.verdict, (edge.verdictCounts.get(flow.verdict) ?? 0) + 1);
 
     if (flow.l7?.http) {
@@ -298,6 +331,7 @@ export async function collectServiceMap(
         avgLatencyMs: n.latencyCount > 0 ? Math.round(n.latencySum / n.latencyCount) : null,
         dnsQueryCount: n.dnsQueryCount,
         dnsErrorCount: n.dnsErrorCount,
+        ...(n.droppedFlows ? { dropsByClass: n.drops } : {}),
       },
     };
   });
@@ -343,6 +377,7 @@ export async function collectServiceMap(
         httpErrorRate: e.httpRequestCount > 0 ? e.httpErrorCount / e.httpRequestCount : 0,
         avgLatencyMs: e.latencyCount > 0 ? Math.round(e.latencySum / e.latencyCount) : null,
         flowsPerSecond: timeRangeSec > 1 ? Math.round((e.flowCount / timeRangeSec) * 100) / 100 : null,
+        ...(e.droppedCount ? { dropsByClass: e.drops, dropReasons: [...e.dropReasons].sort((a, b) => b[1] - a[1]).map(([r]) => r).slice(0, 4) } : {}),
       },
       verdict: topVerdict,
       ...(Object.keys(l7Summary).length > 0 ? { l7Summary } : {}),
@@ -382,6 +417,7 @@ export async function collectServiceMap(
     totalFlowsAnalyzed: filtered.length,
     namespaces: Array.from(allNamespaces).sort(),
     coverage,
+    ...(windowDrops ? { windowDrops } : {}),
   };
 }
 
@@ -402,23 +438,23 @@ export async function collectNetworkSummary(
 
   const forwarded = flows.filter((f) => f.verdict === "FORWARDED").length;
   const dropped = flows.filter((f) => f.verdict === "DROPPED").length;
+  const dropsByClass = noDrops();
+  for (const f of flows) countDrop(dropsByClass, f);
 
-  // Top dropped
-  const dropMap = new Map<string, { count: number; reason: string }>();
+  // Top dropped — per source → destination and reason (one row used to take the first reason it met)
+  const dropMap = new Map<string, { source: string; destination: string; count: number; reason: string; cls: ReturnType<typeof dropClass> }>();
   for (const f of flows) {
     if (f.verdict !== "DROPPED") continue;
-    const key = `${f.source.namespace}/${f.source.workloadName}→${f.destination.namespace}/${f.destination.workloadName}`;
-    const entry = dropMap.get(key) ?? { count: 0, reason: f.dropReasonDesc };
+    const source = endpointName(f.source), destination = endpointName(f.destination);
+    const key = `${source}→${destination}|${f.dropReasonDesc}`;
+    const entry = dropMap.get(key) ?? { source, destination, count: 0, reason: f.dropReasonDesc, cls: dropClass(f) };
     entry.count++;
     dropMap.set(key, entry);
   }
-  const topDropped = Array.from(dropMap.entries())
-    .sort((a, b) => b[1].count - a[1].count)
+  const topDropped = Array.from(dropMap.values())
+    .sort((a, b) => Number(b.cls === "policy") - Number(a.cls === "policy") || b.count - a.count)
     .slice(0, 10)
-    .map(([key, val]) => {
-      const [source, destination] = key.split("→");
-      return { source: source!, destination: destination!, count: val.count, dropReason: val.reason };
-    });
+    .map((v) => ({ source: v.source, destination: v.destination, count: v.count, dropReason: v.reason, ...(v.cls ? { dropClass: v.cls } : {}) }));
 
   // DNS errors
   const dnsErrorMap = new Map<string, { rcode: number; count: number }>();
@@ -475,6 +511,7 @@ export async function collectNetworkSummary(
     forwardedFlows: forwarded,
     droppedFlows: dropped,
     topDropped,
+    dropsByClass,
     dnsErrors,
     protocolBreakdown,
     namespaceTraffic,
@@ -502,7 +539,10 @@ export async function collectSecuritySummary(
   const enforceReadiness = verdictSet ? summarizeEnforceReadiness(verdictSet.flows) : undefined;
 
   const allowed = flows.filter((f) => f.verdict === "FORWARDED").length;
-  const denied = flows.filter((f) => f.verdict === "DROPPED").length;
+  // Denied = what a policy decided; other drops (IPv6 packets, conntrack …) are not denials — the network tab lists them
+  const isDenied = (f: HubbleFlow) => dropClass(f) === "policy";
+  const denied = flows.filter(isDenied).length;
+  const nonPolicyDrops = flows.filter((f) => f.verdict === "DROPPED").length - denied;
   const audit = flows.filter((f) => f.verdict === "AUDIT").length;
 
   // Top denied
@@ -512,9 +552,9 @@ export async function collectSecuritySummary(
     count: number; direction: HubbleFlow["trafficDirection"];
   }>();
   for (const f of flows) {
-    if (f.verdict !== "DROPPED") continue;
-    const src = `${f.source.namespace}/${f.source.workloadName}`;
-    const dst = `${f.destination.namespace}/${f.destination.workloadName}`;
+    if (!isDenied(f)) continue;
+    const src = endpointName(f.source);
+    const dst = endpointName(f.destination);
     const key = `${src}→${dst}:${f.destinationPort}`;
     if (!denyMap.has(key)) {
       denyMap.set(key, {
@@ -553,7 +593,7 @@ export async function collectSecuritySummary(
     }
     const entry = idMap.get(key)!;
     if (f.verdict === "FORWARDED") entry.allowed++;
-    else if (f.verdict === "DROPPED") entry.denied++;
+    else if (isDenied(f)) entry.denied++;
   }
   const identityFlows = Array.from(idMap.values())
     .filter((e) => e.denied > 0 || e.allowed > 10) // 의미 있는 항목만
@@ -565,6 +605,7 @@ export async function collectSecuritySummary(
     generatedAt: new Date().toISOString(),
     timeWindowMinutes,
     policyVerdicts: { allowed, denied, audit },
+    nonPolicyDrops,
     ...(enforceReadiness ? { enforceReadiness } : {}),
     topDenied,
     identityFlows,

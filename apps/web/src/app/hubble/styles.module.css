@@ -1024,6 +1024,8 @@
 .nmLine { display: inline-block; width: 18px; height: 0; border-top: 2px solid rgba(var(--ink-rgb), 0.38); }
 .nmLine[data-tone="drop"] { border-top: 2px dashed var(--danger); }
 .nmLine[data-tone="l7err"] { border-top-color: var(--warning); }
+.nmLine[data-tone="dropOther"] { border-top: 2px dashed var(--warning); }
+.nmLine[data-tone="dropIpv6"] { border-top: 2px dotted rgba(var(--ink-rgb), 0.35); }
 .nmLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr) 340px; }
 .nmCanvas { height: calc(100vh - 300px); min-height: 460px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-md); background: rgba(var(--ink-rgb), 0.015); overflow: hidden; }
@@ -1079,6 +1081,9 @@
 .nmLinkRow[data-tone="drop"] { border-color: rgba(var(--danger-rgb), 0.35); }
 .nmLinkRow[data-tone="drop"] b { color: var(--danger); }
 .nmLinkRow[data-stale] { opacity: 0.55; }
+.nmLinkRow[data-tone="dropOther"] { border-color: rgba(var(--warning-rgb), 0.45); }
+.nmLinkRow[data-tone="dropOther"] b { color: var(--warning-strong); }
+.nmWindowNote { margin: 0 0 8px; font-size: var(--text-small); color: var(--muted); }
 .nmLinkDir { color: var(--subtle); }
 .nmLinkPeer { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nmLinkPort { font-family: var(--font-mono); color: var(--muted); }

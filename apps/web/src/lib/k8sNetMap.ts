@@ -12,10 +12,13 @@
 // Shared destinations (cluster DNS, the API server, nodes, Cilium health) are "hub" links: almost every workload
 // talks to them, so drawing them all hides everything else — like the live diagram's focus-only lines they are drawn
 // only for the hovered / selected card, and each card carries their count instead (chips 'DNS', 'API').
-// The card status uses the live diagram's glyphs: ■ drops seen · ▲ HTTP 5xx / DNS errors · ● traffic seen, no error ·
-// ○ not in the last sample. Nothing is invented: a workload with no flows in the samples is not drawn at all.
+// The card status uses the live diagram's glyphs: ■ policy drops · ▲ other datapath drops, HTTP 5xx / DNS errors ·
+// ● traffic seen, no error · ○ not in the last sample. Nothing is invented: a workload with no flows in the samples is
+// not drawn at all. Drops are split by why (API services/hubbleDrops.ts, 2026-11-13): a policy drop is the red
+// "blocked" line; an IPv6 packet the IPv4-only datapath does not carry (pods' neighbour discovery — on stg every drop
+// of a live sample) is a grey dotted line that does not change the card's status — it is not a connection.
 
-import type { HubbleServiceEdge, HubbleServiceMapResponse, HubbleServiceNode } from "@aud/types";
+import type { HubbleDropCounts, HubbleServiceEdge, HubbleServiceMapResponse, HubbleServiceNode } from "@aud/types";
 import { measure, place, type PackBox, type PackNode } from "./boxPack";
 
 /** CARD_H 80 (was 66): four 12px lines (name · kind · value label · value) at line-height 1.25 + padding — 2026-11-10 */
@@ -60,6 +63,8 @@ export type NetCard = {
   pods: number;
   flows: number;
   drops: number;
+  /** drops by why — policy (red ■) · datapath (▲) · ipv6 (no status: IPv6 packets the cluster does not carry) */
+  dropsBy: HubbleDropCounts;
   httpRequests: number;
   httpErrors: number;
   latencyMs: number | null;
@@ -84,7 +89,11 @@ export type NetLink = {
   drops: number;
   httpErrorRate: number;
   verdict: HubbleServiceEdge["verdict"];
-  tone: "forward" | "drop" | "l7err";
+  /** drop = a policy drop · dropOther = another datapath drop · dropIpv6 = only IPv6 packets the cluster does not carry */
+  tone: "forward" | "drop" | "dropOther" | "dropIpv6" | "l7err";
+  dropsBy: HubbleDropCounts;
+  /** Hubble's drop reasons on this link, most frequent first */
+  dropReasons: string[];
   /** Stroke width 1–4 by flow count (log) */
   width: number;
   stale: boolean;
@@ -104,10 +113,11 @@ export type NetMap = {
   height: number;
   /** Changes only when cards or links appear / disappear — the layout key (metrics updates keep positions) */
   structure: string;
-  totals: { workloads: number; namespaces: number; links: number; dropLinks: number; stale: number };
+  /** dropLinks = policy drops; otherDropLinks = datapath drops; ipv6DropLinks = IPv6 packets only */
+  totals: { workloads: number; namespaces: number; links: number; dropLinks: number; otherDropLinks: number; ipv6DropLinks: number; stale: number };
 };
 
-const PLATFORM = new Set(["host", "remote-node", "kube-apiserver", "health", "init", "unmanaged"]);
+const PLATFORM = new Set(["host", "remote-node", "kube-apiserver", "health", "init", "unknown", "unmanaged"]);
 const DNS_NAMES = new Set(["coredns", "kube-dns", "coredns-autoscaler"]);
 
 /** Pure: is this destination a shared hub every workload talks to? (cluster DNS · API server · nodes / health) */
@@ -121,12 +131,37 @@ export function hubOf(n: Pick<HubbleServiceNode, "serviceType" | "namespace" | "
 const isSystemNs = (ns: string) => ns.startsWith("kube-") || ns.endsWith("-system");
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/**
+ * Pure: drops by why — an API without the split (older) counts every drop as a policy drop, as before. A drop the
+ * API could not group is a datapath drop (never "harmless" without its reason).
+ */
+export function dropsOf(m: { droppedFlows?: number; droppedCount?: number; dropsByClass?: HubbleDropCounts }): HubbleDropCounts {
+  const total = m.droppedFlows ?? m.droppedCount ?? 0;
+  if (!m.dropsByClass) return { policy: total, ipv6: 0, datapath: 0 };
+  const { policy, ipv6, datapath } = m.dropsByClass;
+  return { policy, ipv6, datapath: datapath + Math.max(0, total - policy - ipv6 - datapath) };
+}
+
 function statusOf(n: HubbleServiceNode, stale: boolean): NetStatus {
   if (stale) return "stale";
-  if (n.metrics.droppedFlows > 0) return "danger";
-  if (n.metrics.httpErrorCount > 0 || n.metrics.dnsErrorCount > 0) return "warn";
+  const d = dropsOf(n.metrics);
+  if (d.policy > 0) return "danger";
+  if (d.datapath > 0 || n.metrics.httpErrorCount > 0 || n.metrics.dnsErrorCount > 0) return "warn";
   return "ok";
 }
+
+/** Pure: a link's tone — policy drop > other datapath drop > IPv6-only drop > HTTP errors > forwarded */
+export function toneOf(e: HubbleServiceEdge): NetLink["tone"] {
+  const d = dropsOf(e.metrics);
+  if (d.policy > 0) return "drop";
+  if (d.datapath > 0) return "dropOther";
+  if (d.ipv6 > 0) return "dropIpv6";
+  // a DROPPED link with no count (should not happen) stays a policy drop rather than vanish
+  if (e.verdict === "DROPPED") return "drop";
+  return e.metrics.httpErrorRate > 0 ? "l7err" : "forward";
+}
+
+const isDropTone = (t: NetLink["tone"]) => t === "drop" || t === "dropOther" || t === "dropIpv6";
 
 /** Pure: longest request path step per node — Tarjan SCC so a cycle shares one step (never an endless climb) */
 export function requestSteps(ids: string[], links: Array<{ source: string; target: string }>): Map<string, number> {
@@ -187,10 +222,11 @@ export function buildNetMap(mem: NetMemory, opts: { search?: string; verdict?: s
     return n?.serviceType === "world" ? `${nodeId}#${side === "src" ? "in" : "out"}` : nodeId;
   };
   let links: NetLink[] = linksAll.map(({ edge: e, lastSeen }) => {
-    const tone: NetLink["tone"] = e.verdict === "DROPPED" || e.metrics.droppedCount > 0 ? "drop" : e.metrics.httpErrorRate > 0 ? "l7err" : "forward";
+    const tone = toneOf(e);
     return {
       id: e.id, source: cardIdOf(e.sourceId, "src"), target: cardIdOf(e.destinationId, "dst"), port: e.port, protocol: e.protocol,
       flows: e.metrics.flowCount, drops: e.metrics.droppedCount, httpErrorRate: e.metrics.httpErrorRate, verdict: e.verdict, tone,
+      dropsBy: dropsOf(e.metrics), dropReasons: e.metrics.dropReasons ?? [],
       width: Math.round((1 + Math.min(3, Math.log10(Math.max(1, e.metrics.flowCount)))) * 10) / 10,
       stale: lastSeen < latest, hub: hubOf(mem.nodes.get(e.destinationId)?.node), ...(e.l7Summary ? { l7: e.l7Summary } : {}),
     };
@@ -202,7 +238,7 @@ export function buildNetMap(mem: NetMemory, opts: { search?: string; verdict?: s
     const stale = lastSeen < latest;
     const base = {
       nodeId: n.id, namespace: n.namespace, name: n.workloadName || n.serviceType, serviceType: n.serviceType, pods: n.podCount,
-      flows: n.metrics.totalFlows, drops: n.metrics.droppedFlows, httpRequests: n.metrics.httpRequestsTotal, httpErrors: n.metrics.httpErrorCount,
+      flows: n.metrics.totalFlows, drops: n.metrics.droppedFlows, dropsBy: dropsOf(n.metrics), httpRequests: n.metrics.httpRequestsTotal, httpErrors: n.metrics.httpErrorCount,
       latencyMs: n.metrics.avgLatencyMs, dnsQueries: n.metrics.dnsQueryCount, dnsErrors: n.metrics.dnsErrorCount, k8sServices: n.k8sServices?.length ?? 0,
       hubs: { dns: 0, api: 0, node: 0 }, status: statusOf(n, stale), stale, rank: 0,
     };
@@ -292,14 +328,15 @@ export function buildNetMap(mem: NetMemory, opts: { search?: string; verdict?: s
     boxes, cards: out, links, width, height, structure,
     totals: {
       workloads: out.filter((c) => c.kind === "workload").length, namespaces: nsGroups.size, links: links.length,
-      dropLinks: links.filter((l) => l.tone === "drop").length, stale: out.filter((c) => c.stale).length,
+      dropLinks: links.filter((l) => l.tone === "drop").length, otherDropLinks: links.filter((l) => l.tone === "dropOther").length,
+      ipv6DropLinks: links.filter((l) => l.tone === "dropIpv6").length, stale: out.filter((c) => c.stale).length,
     },
   };
 }
 
 /** Pure: the links touching a card, split by direction (the detail panel) */
 export function linksOf(map: NetMap, cardId: string): { inbound: NetLink[]; outbound: NetLink[] } {
-  const by = (a: NetLink, b: NetLink) => Number(b.tone === "drop") - Number(a.tone === "drop") || b.flows - a.flows || cmp(a.id, b.id);
+  const by = (a: NetLink, b: NetLink) => Number(b.tone === "drop") - Number(a.tone === "drop") || Number(isDropTone(b.tone)) - Number(isDropTone(a.tone)) || b.flows - a.flows || cmp(a.id, b.id);
   return {
     inbound: map.links.filter((l) => l.target === cardId).sort(by),
     outbound: map.links.filter((l) => l.source === cardId).sort(by),

@@ -52,6 +52,8 @@ const NetCardNode = memo(function NetCardNode({ data }: NodeProps<CardData>) {
   const second = c.httpRequests > 0
     ? { k: "HTTP 5xx", v: c.httpErrors.toLocaleString() }
     : c.dnsQueries > 0 ? { k: "DNS err", v: c.dnsErrors.toLocaleString() } : { k: t("hb.nm.drops"), v: c.drops.toLocaleString() };
+  // An IPv6 packet the cluster does not carry is not a problem — the drop cell lights up for policy / datapath drops only
+  const hot = second.k === t("hb.nm.drops") ? c.dropsBy.policy + c.dropsBy.datapath : second.k === "HTTP 5xx" ? c.httpErrors : c.dnsErrors;
   return (
     <div className={styles.nmCard} data-status={c.status} data-dim={data.dim || undefined} data-selected={data.selected || undefined} data-kind={c.kind}>
       <HiddenHandles />
@@ -65,7 +67,7 @@ const NetCardNode = memo(function NetCardNode({ data }: NodeProps<CardData>) {
       </div>
       <div className={styles.nmCells}>
         <span><small>{t("hb.nm.flows")}</small>{c.flows.toLocaleString()}</span>
-        <span data-hot={(second.k === t("hb.nm.drops") ? c.drops : second.k === "HTTP 5xx" ? c.httpErrors : c.dnsErrors) > 0 || undefined}><small>{second.k}</small>{second.v}</span>
+        <span data-hot={hot > 0 || undefined}><small>{second.k}</small>{second.v}</span>
       </div>
     </div>
   );
@@ -93,6 +95,8 @@ const NODE_TYPES = { netCard: NetCardNode, netBox: NetBoxNode };
 const TONE: Record<NetLink["tone"], { color: string; dash?: string }> = {
   forward: { color: rgba("ink", 0.38) },
   drop: { color: rgba("danger", 0.9), dash: "6 4" },
+  dropOther: { color: rgba("warning", 0.95), dash: "6 4" },
+  dropIpv6: { color: rgba("ink", 0.35), dash: "1 4" },
   l7err: { color: rgba("warning", 0.95) },
 };
 
@@ -194,13 +198,13 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
     const tone = TONE[l.tone];
     const on = !!focus && (l.source === focus || l.target === focus);
     // Hub lines (DNS · API server · nodes) only for the focused card; a drop to a hub is always shown
-    if (l.hub && !on && l.tone !== "drop") return [];
+    if (l.hub && !on && l.tone !== "drop" && l.tone !== "dropOther") return [];
     const dim = !!focus && !on;
     return [{
       id: l.id, source: l.source, target: l.target, type: "smoothstep",
       style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: l.stale ? "2 4" : tone.dash, opacity: dim ? 0.06 : on ? 1 : l.stale ? 0.25 : l.tone === "forward" ? 0.5 : 0.9 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
-      ...(on ? { label: `${l.protocol}:${l.port}${l.tone === "drop" ? ` · ${t("hb.nm.dropped")}` : ""}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
+      ...(on ? { label: `${l.protocol}:${l.port}${l.tone === "drop" ? ` · ${t("hb.nm.dropped")}` : l.tone === "dropOther" || l.tone === "dropIpv6" ? ` · ${l.dropReasons[0] ?? t("hb.nm.dropped")}` : ""}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
       zIndex: on ? 20 : 5,
     } satisfies Edge];
   }), [map.links, focus, t]);
@@ -229,6 +233,8 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
       <div className={styles.nmSummary}>
         <span>{t("hb.nm.summary", { w: map.totals.workloads, ns: map.totals.namespaces, l: map.totals.links })}</span>
         {map.totals.dropLinks > 0 && <span data-status="danger">{NET_GLYPH.danger} {t("hb.nm.dropLinks", { n: map.totals.dropLinks })}</span>}
+        {map.totals.otherDropLinks > 0 && <span data-status="warn" title={t("hb.nm.otherHint")}>{NET_GLYPH.warn} {t("hb.nm.otherDropLinks", { n: map.totals.otherDropLinks })}</span>}
+        {map.totals.ipv6DropLinks > 0 && <span className={styles.nmAt} title={t("hb.nm.ipv6Hint")}>ⓘ {t("hb.nm.ipv6DropLinks", { n: map.totals.ipv6DropLinks })}</span>}
         {map.totals.stale > 0 && <span data-status="stale" title={t("hb.nm.staleHint")}>{NET_GLYPH.stale} {t("hb.nm.stale", { n: map.totals.stale })}</span>}
         <span className={styles.nmAt} title={t("hb.nm.hubNote")}>ⓘ {t("hb.nm.hubShortNote")}</span>
         {last && <span className={styles.nmAt}>{t("hb.nm.at", { at: new Date(mem.current.at).toLocaleTimeString(dateLocale(locale)) })}</span>}
@@ -236,11 +242,20 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
           {(["ok", "warn", "danger", "stale"] as const).map((s) => <li key={s} data-status={s}><span aria-hidden="true">{NET_GLYPH[s]}</span>{t(`hb.nm.status.${s}`)}</li>)}
           <li><span className={styles.nmLine} data-tone="forward" />{t("hb.nm.line.forward")}</li>
           <li><span className={styles.nmLine} data-tone="drop" />{t("hb.nm.line.drop")}</li>
+          <li title={t("hb.nm.otherHint")}><span className={styles.nmLine} data-tone="dropOther" />{t("hb.nm.line.dropOther")}</li>
+          <li title={t("hb.nm.ipv6Hint")}><span className={styles.nmLine} data-tone="dropIpv6" />{t("hb.nm.line.dropIpv6")}</li>
           <li><span className={styles.nmLine} data-tone="l7err" />{t("hb.nm.line.l7err")}</li>
         </ul>
       </div>
 
       <CoverageNote coverage={last?.coverage} requestedMinutes={last?.timeWindowMinutes} />
+      {last?.windowDrops?.to && (
+        <p className={styles.nmWindowNote}>
+          {last.windowDrops.state === "ok"
+            ? t(last.windowDrops.truncated ? "hb.nm.windowDropsCut" : "hb.nm.windowDrops", { w: last.timeWindowMinutes, n: last.windowDrops.added, from: new Date(last.windowDrops.from).toLocaleTimeString(dateLocale(locale)), to: new Date(last.windowDrops.to).toLocaleTimeString(dateLocale(locale)) })
+            : t("hb.nm.windowDropsFail", { state: last.windowDrops.state })}
+        </p>
+      )}
       <ErrorNotice error={error} />
 
       {!last && !error ? <LoadingState label={t("hb.map.loading")} /> : (
@@ -285,12 +300,13 @@ function CardPanel({ card: c, map, onPick, onClose }: { card: NetPlacedCard; map
         <span className={styles.nmLinkDir}>{dir === "in" ? "←" : "→"}</span>
         <span className={styles.nmLinkPeer} title={nameOf(peer)}>{nameOf(peer)}</span>
         <span className={styles.nmLinkPort}>{l.protocol}:{l.port}</span>
-        <span className={styles.nmLinkFlows}>{l.flows.toLocaleString()}{l.drops ? <b> · {t("hb.nm.dropped")} {l.drops}</b> : null}</span>
+        <span className={styles.nmLinkFlows}>{l.flows.toLocaleString()}{l.drops ? <b> · {t(l.tone === "drop" ? "hb.nm.dropped" : "hb.nm.droppedOther")} {l.drops}</b> : null}</span>
+        {l.dropReasons.length ? <span className={styles.nmLinkL7} title={l.tone === "dropIpv6" ? t("hb.nm.ipv6Hint") : undefined}>{l.dropReasons.join(" · ")}</span> : null}
         {l.l7?.httpMethods?.length ? <span className={styles.nmLinkL7}>{l.l7.httpMethods.join(" ")}</span> : null}
       </button>
     </li>
   );
-  const why = c.status === "danger" ? t("hb.nm.why.danger", { n: c.drops }) : c.status === "warn" ? t("hb.nm.why.warn", { h: c.httpErrors, d: c.dnsErrors })
+  const why = c.status === "danger" ? t("hb.nm.why.danger", { n: c.dropsBy.policy }) : c.status === "warn" ? t("hb.nm.why.warn", { o: c.dropsBy.datapath, h: c.httpErrors, d: c.dnsErrors })
     : c.status === "stale" ? t("hb.nm.staleHint") : t("hb.nm.why.ok");
   return (
     <aside className={styles.nmPanel} aria-label={c.name}>
@@ -303,6 +319,7 @@ function CardPanel({ card: c, map, onPick, onClose }: { card: NetPlacedCard; map
         <Button size="sm" variant="ghost" ariaLabel={t("hb.nm.close")} onClick={onClose}>✕</Button>
       </header>
       <p className={styles.nmWhy}>{why}</p>
+      {c.dropsBy.ipv6 > 0 && <p className={styles.nmWhy}>{t("hb.nm.why.ipv6", { n: c.dropsBy.ipv6 })}</p>}
       <dl className={styles.nmKv}>
         <dt>{t("hb.nm.flows")}</dt><dd>{c.flows.toLocaleString()}</dd>
         <dt>{t("hb.nm.drops")}</dt><dd>{c.drops.toLocaleString()}</dd>

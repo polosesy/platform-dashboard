@@ -204,66 +204,143 @@ type Envelope = { meta?: { channel_id?: string; is_terminated?: boolean; is_erro
 
 class HubbleUiError extends Error { constructor(readonly state: HubbleUiState, message: string) { super(message); } }
 
-async function post(url: string, meta: Record<string, unknown>, body?: Uint8Array, signal?: AbortSignal): Promise<Envelope> {
-  let res: Response;
-  try {
-    res = await fetch(`${url}/api/service-map-stream`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ meta, ...(body ? { body: { content: Buffer.from(body).toString("base64") } } : {}) }),
-      signal: signal ?? AbortSignal.timeout(10_000),
-    });
-  } catch (e) {
-    throw new HubbleUiError("unreachable", safeMessage(e));
+/**
+ * Pure: what a 200 answer whose body is not a JSON envelope means. An empty body or a cut-off JSON object is an
+ * answer that broke off mid-way — on stg (2026-11-13 06:37:39Z) the hubble-ui backend was OOMKilled while answering
+ * (256Mi limit; one 10,000-flow channel costs it tens of Mi) and the error said "unsupported", as if the protocol were
+ * wrong. Anything else (an HTML page, another protocol) is "unsupported".
+ */
+export function nonJsonAnswer(contentType: string | null, text: string): { state: HubbleUiState; message: string } {
+  const t = text.trimStart();
+  if (!t || t.startsWith("{") || /json/i.test(contentType ?? "")) {
+    return { state: "failed", message: `Hubble UI's answer broke off (${text.length} bytes) — its backend may have restarted (memory limit?)` };
   }
-  if (res.status === 404 || res.status === 405) throw new HubbleUiError("unsupported", `Hubble UI ${res.status}: no service-map-stream route (hubble-ui < 0.13?)`);
-  if (!res.ok) throw new HubbleUiError("failed", `Hubble UI ${res.status}`);
-  try {
-    return (await res.json()) as Envelope;
-  } catch {
-    throw new HubbleUiError("unsupported", "Hubble UI answered something other than the JSON envelope");
-  }
+  return { state: "unsupported", message: `Hubble UI answered ${contentType || "an unknown type"} instead of the JSON envelope` };
 }
 
+type PostFn = (meta: Record<string, unknown>, body?: Uint8Array, timeoutMs?: number) => Promise<Envelope>;
+
+function poster(url: string): PostFn {
+  return async (meta, body, timeoutMs = 10_000) => {
+    let res: Response;
+    try {
+      res = await fetch(`${url}/api/service-map-stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ meta, ...(body ? { body: { content: Buffer.from(body).toString("base64") } } : {}) }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      throw new HubbleUiError("unreachable", safeMessage(e));
+    }
+    if (res.status === 404 || res.status === 405) throw new HubbleUiError("unsupported", `Hubble UI ${res.status}: no service-map-stream route (hubble-ui < 0.13?)`);
+    if (!res.ok) throw new HubbleUiError("failed", `Hubble UI ${res.status}`);
+    let text: string;
+    try { text = await res.text(); } catch (e) { const a = nonJsonAnswer(res.headers.get("content-type"), ""); throw new HubbleUiError(a.state, `${a.message}: ${safeMessage(e)}`); }
+    try {
+      return JSON.parse(text) as Envelope;
+    } catch {
+      const a = nonJsonAnswer(res.headers.get("content-type"), text);
+      throw new HubbleUiError(a.state, a.message);
+    }
+  };
+}
+
+/** How long to wait between polls: the backend's own `poll_delay_ms` (≈ 200 ms idle, its minimum while it has data), kept in 25–500 ms */
+export const pollDelay = (env: Envelope) => Math.min(500, Math.max(25, Number(env.meta?.poll_delay_ms ?? 0) || 100));
+/** The backlog is done once a flow this close to the moment the channel opened arrives (clocks of nodes vs this pod) */
+const CAUGHT_UP_SKEW_MS = 2_000;
+/** No flow for this long after data arrived = drained */
+const QUIET_MS = 1_500;
+
 /**
- * A live sample: open the stream, read the relay's backlog (up to `limit`, ≤ `budgetMs`), stop once it has drained
- * (two empty polls after data, or nothing at all for 3 s), then close the channel. Flows come back de-duplicated.
+ * A live sample: open the stream, read the relay's backlog (≤ `limit`, ≤ `budgetMs`), close the channel.
+ *
+ * The backend replays the relay's last 10,000 matching flows oldest → newest, flushed every 50 ms or 500 flows, and
+ * then follows. It was read as fast as possible and stopped after two empty polls (10 ms apart): a sample stopped at
+ * 179–4,500 of 10,000 flows, and always the OLDEST part — the newest minute was missing, so the 1-minute window was
+ * often empty and the rare drops came and went (stg probe 2026-11-13). Now: wait the backend's poll delay, and stop
+ * when the replay has caught up with the moment the channel opened, after QUIET_MS without data, at `limit`, or at
+ * the budget. A stream that matches nothing (a quiet filter) ends after 3 s.
  */
 export async function sampleHubbleUi(
   url: string, opts: { limit: number; verdict?: string; type?: string; budgetMs?: number },
+  io: { post?: PostFn; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
 ): Promise<HubbleFlow[]> {
-  const deadline = Date.now() + (opts.budgetMs ?? 8_000);
+  const post = io.post ?? poster(url);
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = io.now ?? Date.now;
+  const opened = now();
+  const deadline = opened + (opts.budgetMs ?? 12_000);
   const raws: Record<string, unknown>[] = [];
   const route = "service-map-stream";
-  let msg = await post(url, { route_name: route }, eventsRequest(opts));
+  let msg = await post({ route_name: route }, eventsRequest(opts));
   const channel = msg.meta?.channel_id;
   if (!channel) throw new HubbleUiError("unsupported", "Hubble UI returned no channel");
-  let emptyAfterData = 0;
-  const started = Date.now();
+  let lastData = opened;
+  // The relay sorts the replay in a short buffer — once caught up, one more poll takes what was still in it
+  let caughtPolls = 0;
   try {
     for (;;) {
       if (msg.meta?.is_error) throw new HubbleUiError("failed", msg.meta.errors?.map((e) => e.message).filter(Boolean).join("; ") || "Hubble UI stream error");
       const content = msg.body?.content ? Buffer.from(msg.body.content, "base64") : null;
       const got = content?.length ? flowsFromEventsResponse(content) : [];
-      for (const fb of got) raws.push(flowJsonFromProto(fb));
-      if (got.length) emptyAfterData = 0;
-      else if (raws.length) emptyAfterData++;
-      if (msg.meta?.is_terminated || raws.length >= opts.limit || emptyAfterData >= 2 || Date.now() > deadline) break;
-      if (!raws.length && Date.now() - started > 3_000) break;
-      msg = await post(url, { route_name: route, channel_id: channel, ...(msg.meta?.next_datum_id ? { last_datum_id: msg.meta.next_datum_id } : {}) });
+      let caughtUp = false;
+      for (const fb of got) {
+        const j = flowJsonFromProto(fb);
+        raws.push(j);
+        const t = typeof j.time === "string" ? Date.parse(j.time) : NaN;
+        if (t >= opened - CAUGHT_UP_SKEW_MS) caughtUp = true;
+      }
+      const t = now();
+      if (got.length) lastData = t;
+      if (caughtUp || caughtPolls) caughtPolls++;
+      if (msg.meta?.is_terminated || caughtPolls >= 2 || raws.length >= opts.limit || t > deadline) break;
+      if (raws.length ? t - lastData > QUIET_MS : t - opened > 3_000) break;
+      await sleep(pollDelay(msg));
+      msg = await post({ route_name: route, channel_id: channel, ...(msg.meta?.next_datum_id ? { last_datum_id: msg.meta.next_datum_id } : {}) });
     }
   } finally {
-    await post(url, { route_name: route, channel_id: channel, is_terminated: true }, undefined, AbortSignal.timeout(2_000)).catch(() => undefined);
+    await post({ route_name: route, channel_id: channel, is_terminated: true }, undefined, 2_000).catch(() => undefined);
   }
-  const flows = parseHubbleJsonOutput(raws.slice(0, opts.limit).map((flow) => JSON.stringify({ flow })).join("\n"));
+  const flows = parseHubbleJsonOutput(raws.slice(-opts.limit).map((flow) => JSON.stringify({ flow })).join("\n"));
   return dedupeObservations(flows).sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+}
+
+/** The relay always replays this many (hubble-ui GET_FLOWS_LAST default) — every stream is read whole, then cut */
+export const HUBBLE_UI_SAMPLE = 10_000;
+
+/**
+ * Pure: which backend stream answers a request. Every channel makes the backend replay up to 10,000 flows and build
+ * its service map (tens of Mi each — the stg backend has 256Mi), so requests share streams: an event type, or the
+ * DROPPED verdict (few flows, a longer reach than the mixed stream), get their own; everything else — the service
+ * map, the summaries, a FORWARDED filter, any limit — reads the one "requests + drops" stream and filters here.
+ */
+export function streamOf(opts: { verdict?: string; type?: string }): { key: string; verdict?: string; type?: string } {
+  const type = opts.type?.toLowerCase() || undefined;
+  const verdict = opts.verdict?.toUpperCase() || undefined;
+  if (type) return { key: `type:${type}:${verdict ?? ""}`, type, ...(verdict ? { verdict } : {}) };
+  if (verdict === "DROPPED") return { key: "dropped", verdict };
+  return { key: "all" };
 }
 
 const cache = new CacheManager<HubbleFlowSet>(30, 30_000);
 const inflight = new Map<string, Promise<HubbleFlowSet>>();
 const stateCache = new CacheManager<{ state: HubbleUiState; message?: string }>(20, 60_000);
+/** One channel per cluster at a time — the views ask together (the security tab alone asked for two at once) */
+const gates = new Map<string, Promise<unknown>>();
 
-/** Flows for the Hubble views (cached 30 s, one stream per key at a time); namespace filtering happens here */
+/** Pure-ish: run `job` after every job already queued for `key` (a failed one does not block the next) */
+export function gated<T>(key: string, job: () => Promise<T>): Promise<T> {
+  const prev = gates.get(key) ?? Promise.resolve();
+  const run = prev.catch(() => undefined).then(job);
+  const tail = run.catch(() => undefined);
+  gates.set(key, tail);
+  void tail.then(() => { if (gates.get(key) === tail) gates.delete(key); });
+  return run;
+}
+
+/** Flows for the Hubble views (cached 30 s, one channel per cluster at a time); verdict / namespace / limit applied here */
 export async function getFlowsFromHubbleUi(
   env: Env, bearerToken: string | undefined, clusterId: string,
   opts: { limit: number; namespace?: string; verdict?: string; type?: string },
@@ -271,27 +348,42 @@ export async function getFlowsFromHubbleUi(
   assertSignedInForCluster(env, bearerToken);
   const cfg = hubbleUiConfig(env, clusterId);
   if (!cfg) throw new HubbleUiError("notConfigured", "aks.observability.hubbleUi is not set for this connection");
-  const key = `${cachePrefix(bearerToken)}:hubble-ui:${clusterId.toLowerCase()}:${opts.verdict ?? ""}:${opts.type ?? ""}:${opts.limit}`;
-  const hit = cache.get(key);
-  const set = hit ?? await (inflight.get(key) ?? (() => {
-    const job = sampleHubbleUi(cfg.url, opts).then((flows) => {
-      const coverage: HubbleCoverage = { ...singleSourceCoverage("hubble-ui", flows) };
-      const s = { flows, coverage };
+  const cluster = clusterId.toLowerCase();
+  const stream = streamOf(opts);
+  const key = `${cachePrefix(bearerToken)}:hubble-ui:${cluster}:${stream.key}`;
+  const set = cache.get(key) ?? await (inflight.get(key) ?? (() => {
+    const job = gated(cluster, async () => {
+      const again = cache.get(key); // a job queued before this one may have read the same stream
+      if (again) return again;
+      const read = () => sampleHubbleUi(cfg.url, { limit: HUBBLE_UI_SAMPLE, ...(stream.verdict ? { verdict: stream.verdict } : {}), ...(stream.type ? { type: stream.type } : {}) });
+      // An answer that broke off (the backend restarted under memory pressure) is worth one more try a moment later
+      const flows = await read().catch(async (e) => {
+        if (!(e instanceof HubbleUiError) || e.state !== "failed" || !/broke off/.test(e.message)) throw e;
+        await new Promise((r) => setTimeout(r, 1_500));
+        return read();
+      });
+      const s = { flows, coverage: { ...singleSourceCoverage("hubble-ui", flows) } as HubbleCoverage };
       cache.set(key, s);
-      stateCache.set(clusterId.toLowerCase(), { state: "ok" });
+      stateCache.set(cluster, { state: "ok" });
       return s;
     }).finally(() => inflight.delete(key));
     inflight.set(key, job);
     return job;
   })());
-  if (!opts.namespace) return set;
+  const verdict = opts.verdict?.toUpperCase();
   const ns = opts.namespace;
-  const flows = set.flows.filter((f) => f.source.namespace === ns || f.destination.namespace === ns);
+  if (!ns && (!verdict || stream.verdict) && set.flows.length <= opts.limit) return set;
+  const flows = set.flows
+    .filter((f) => (!verdict || stream.verdict || f.verdict === verdict) && (!ns || f.source.namespace === ns || f.destination.namespace === ns))
+    .slice(0, opts.limit);
   return { flows, coverage: { ...set.coverage, rawEvents: flows.length } };
 }
 
-/** Is the Hubble UI source usable for this cluster? (a tiny sample, cached 60 s — /api/hubble/sources) */
-export async function hubbleUiAvailability(env: Env, clusterId: string): Promise<{ state: HubbleUiState; message?: string }> {
+/**
+ * Is the Hubble UI source usable for this cluster? (/api/hubble/sources, cached 60 s). It reads the same stream the
+ * views read next — a separate "tiny" probe still made the backend replay 10,000 flows, one more channel at once.
+ */
+export async function hubbleUiAvailability(env: Env, bearerToken: string | undefined, clusterId: string): Promise<{ state: HubbleUiState; message?: string }> {
   const cfg = hubbleUiConfig(env, clusterId);
   if (!cfg) return { state: "notConfigured" };
   const k = clusterId.toLowerCase();
@@ -299,7 +391,7 @@ export async function hubbleUiAvailability(env: Env, clusterId: string): Promise
   if (hit) return hit;
   let out: { state: HubbleUiState; message?: string };
   try {
-    await sampleHubbleUi(cfg.url, { limit: 50, budgetMs: 4_000 });
+    await getFlowsFromHubbleUi(env, bearerToken, clusterId, { limit: HUBBLE_UI_SAMPLE });
     out = { state: "ok" };
   } catch (e) {
     out = e instanceof HubbleUiError ? { state: e.state, message: e.message } : { state: "failed", message: safeMessage(e) };

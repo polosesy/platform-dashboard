@@ -74,10 +74,13 @@ export function NetworkTab({ clusterId, live = false, nonce = 0 }: Props) {
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardLabel}>{t("hb.verdict.DROPPED")}</div>
-          <div className={styles.summaryCardValue} style={{ color: data.droppedFlows > 0 ? rgba("danger", 0.85) : undefined }}>
+          <div className={styles.summaryCardValue} style={{ color: (data.dropsByClass ? data.dropsByClass.policy : data.droppedFlows) > 0 ? rgba("danger", 0.85) : undefined }}>
             {data.droppedFlows.toLocaleString()}
           </div>
-          <div className={styles.summaryCardSub}>{dropPct}%</div>
+          <div className={styles.summaryCardSub}>
+            {dropPct}%
+            {data.dropsByClass && data.droppedFlows > 0 ? ` · ${t("hb.dropSplit", { p: data.dropsByClass.policy, v: data.dropsByClass.ipv6, o: data.dropsByClass.datapath })}` : ""}
+          </div>
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardLabel}>{t("hb.dnsErrors")}</div>
@@ -148,8 +151,10 @@ export function NetworkTab({ clusterId, live = false, nonce = 0 }: Props) {
                 <tr key={i}>
                   <td>{d.source}</td>
                   <td>{d.destination}</td>
-                  <td style={{ fontWeight: 600, color: rgba("danger", 0.85) }}>{d.count}</td>
-                  <td style={{ fontSize: 12, color: rgba("ink", 0.55) }}>{d.dropReason || "—"}</td>
+                  <td style={{ fontWeight: 600, color: d.dropClass && d.dropClass !== "policy" ? undefined : rgba("danger", 0.85) }}>{d.count}</td>
+                  <td style={{ fontSize: 12, color: rgba("ink", 0.55) }} title={d.dropClass ? t(`hb.dropClass.${d.dropClass}.hint`) : undefined}>
+                    {d.dropReason || "—"}{d.dropClass ? ` · ${t(`hb.dropClass.${d.dropClass}`)}` : ""}
+                  </td>
                 </tr>
               ))}
             </tbody>
