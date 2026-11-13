@@ -11,8 +11,12 @@ metadata:
 spec:
   replicas: {{ .Values.replicas }}
   strategy:
+    {{- if and .Values.state.enabled (eq .Values.state.accessMode "ReadWriteOnce") }}
+    type: Recreate                                       # a ReadWriteOnce disk attaches to one node — the new pod waits for the old one
+    {{- else }}
     type: RollingUpdate
     rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+    {{- end }}
   selector:
     matchLabels:
       {{- include "aud.selector" . | nindent 6 }}
@@ -113,6 +117,9 @@ spec:
             {{- if .Values.metrics.enabled }}
             - { name: AUD_METRICS_PORT, value: {{ .Values.metrics.port | quote }} }
             {{- end }}
+            {{- if .Values.state.enabled }}
+            - { name: AUD_ARRANGEMENT_DIR, value: {{ .Values.state.mountPath | quote }} }   # team records survive restarts (values.yaml state)
+            {{- end }}
             {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -131,11 +138,17 @@ spec:
           volumeMounts:
             - { name: api-tmp, mountPath: /tmp }
             - { name: connections, mountPath: /etc/aud, readOnly: true }
+            {{- if .Values.state.enabled }}
+            - { name: state, mountPath: {{ .Values.state.mountPath | quote }} }
+            {{- end }}
       volumes:
         - { name: web-tmp, emptyDir: { sizeLimit: 64Mi } }
         - { name: api-tmp, emptyDir: { sizeLimit: 64Mi } }
         - { name: next-cache, emptyDir: { sizeLimit: 128Mi } }
         - { name: connections, configMap: { name: aud-dashboard-connections } }
+        {{- if .Values.state.enabled }}
+        - { name: state, persistentVolumeClaim: { claimName: {{ include "aud.stateClaim" . }} } }
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -83,7 +83,11 @@ const EnvSchema = z.object({
   AUD_PLATFORM_FEDERATION_SUBJECT: z.string().regex(/^system:serviceaccount:[a-z0-9-]+:[a-z0-9.-]+$/, "system:serviceaccount:<namespace>:<name>").optional(),
   /** One JSON audit line per signed-in API request (who · role · connection · route · status), never tokens or IDs */
   AUD_AUDIT_LOG: z.enum(["off", "stdout"]).optional(),
-  /** Team layout of the infrastructure diagram: a writable directory (mounted volume); unset = in memory, lost on restart */
+  /** 사례·런북 agent (stage 2 — skeleton, docs/architecture/ops-knowledge.md §8): only "off" until the provider and
+   *  what may be sent are decided */
+  AUD_OPS_AGENT: z.enum(["off"]).default("off"),
+  /** The team's records (diagram layouts, issue states, saved questions, SLO settings, the alert inbox, cases &
+   *  runbooks): a writable directory — a mounted PVC (Helm `state`); unset = in memory, lost on restart */
   AUD_ARRANGEMENT_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),
   /** 통합 위험 이슈 상태(열림·진행·해결·예외): a writable directory; unset = `<AUD_ARRANGEMENT_DIR>/issues`, else in memory */
   AUD_ISSUE_STATE_DIR: z.string().refine((v) => v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v), "absolute path").optional(),

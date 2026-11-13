@@ -287,6 +287,7 @@ export const PLATFORM_T: Translations = {
   "feat.allPermissions": { ko: "전체 권한 목록", en: "All permissions" },
   "feat.preconditions": { ko: "조건", en: "Requires" },
   "feat.pre.entraCluster": { ko: "Entra 연동 클러스터 (로컬 계정은 기본 거부)", en: "Entra-integrated cluster (local accounts refused by default)" },
+  "feat.pre.stateStore": { ko: "팀 기록 유지: 플랫폼 저장소(PVC — Azure Files·Blob·Managed Disk, Helm state). 없으면 재시작 때 사라짐", en: "Keeping the team's records: the platform's storage (a PVC — Azure Files, Blob or Managed Disk, Helm state); without it they are lost on restart" },
   "feat.pre.clusterReachable": { ko: "플랫폼 API에서 API 서버 도달 (프라이빗 클러스터는 네트워크 경로 필요)", en: "API server reachable from the platform API (private clusters need a network path)" },
   "feat.platformRole": { ko: "Pod 로그는 플랫폼 역할 {role} 이상", en: "Pod logs need the {role} platform role or higher" },
   "feat.noPermission": { ko: "Azure 권한이 따로 필요하지 않은 플랫폼 기능입니다 (연결마다 위 권한을 부여).", en: "A platform capability — no Azure permission of its own (grant the permissions above per connection)." },

@@ -1,0 +1,27 @@
+{{- /*
+Where the team's records live (AUD_ARRANGEMENT_DIR): arrangements, issue states, saved questions, SLO settings and
+resets, the alert center inbox, cases & runbooks. state.existingClaim = a PVC made outside the chart (a static PV on a
+Blob container or a file share); else the chart makes one from state.storageClassName. docs/deployment/kubernetes.md
+'상태 저장 (PVC)'.
+*/ -}}
+{{- if and .Values.state.enabled (not .Values.state.existingClaim) }}
+{{- if not .Values.state.storageClassName }}
+{{- fail "state.enabled needs state.existingClaim (a PVC of your own) or state.storageClassName (the chart makes one)" }}
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aud-dashboard-state
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aud.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep                        # uninstalling the chart never deletes the team's records
+  {{- include "aud.wave" (dict "root" . "wave" "-1") | nindent 2 }}
+spec:
+  accessModes: [{{ .Values.state.accessMode | quote }}]
+  storageClassName: {{ .Values.state.storageClassName | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.state.size | quote }}
+{{- end }}

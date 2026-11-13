@@ -66,6 +66,18 @@ api:
     limits: { memory: 1Gi }
 
 replicas: 1                        # caches and live diagrams are in memory
+# Where the team's records live — arrangements, issue states, saved questions, SLO settings and resets, the alert
+# center inbox, cases & runbooks (AUD_ARRANGEMENT_DIR). Off = in memory: lost on every restart (the screens say so).
+# Any PVC works (docs/deployment/kubernetes.md '상태 저장 (PVC)'): Azure Files (azurefile-csi, ReadWriteMany), Blob
+# through the Blob CSI driver (a static PV on a container, or azureblob-fuse-premium), Managed Disk (managed-csi,
+# ReadWriteOnce → the rollout becomes Recreate). Writes are file-per-scope + rename, one replica at a time.
+state:
+  enabled: false
+  existingClaim: ""                # a PVC made outside the chart (e.g. a static PV on a Blob container)
+  storageClassName: ""             # else the chart makes aud-dashboard-state from this class (kept on uninstall)
+  size: 1Gi
+  accessMode: ReadWriteMany        # ReadWriteOnce for a Managed Disk
+  mountPath: /var/lib/aud
 podDisruptionBudget:
   enabled: true                    # maxUnavailable 1 — never blocks node drains with one replica
 podAnnotations: {}

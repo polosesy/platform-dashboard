@@ -105,3 +105,21 @@ test(".dockerignore keeps local secrets and notes out of any build context (dock
     assert.ok(lines.has(must), `.dockerignore lacks ${must}`);
   }
 });
+
+test("state (the team's records): off by default; a PVC of your own or the chart's; ReadWriteOnce → Recreate; neither → a clear failure", (t) => {
+  assert.doesNotMatch(read(RENDERED), /AUD_ARRANGEMENT_DIR|persistentVolumeClaim/, "off by default: in memory");
+  const helm = spawnSync("helm", ["version", "--short"], { encoding: "utf8" });
+  if (helm.status !== 0) return t.skip("helm not installed");
+  const tpl = (...set: string[]) => spawnSync("helm", ["template", "aud-dashboard", CHART, "--namespace", "aud-dashboard", ...set.flatMap((s) => ["--set", s])], { cwd: ROOT, encoding: "utf8" });
+  const own = tpl("state.enabled=true", "state.existingClaim=team-records");
+  assert.equal(own.status, 0, own.stderr);
+  assert.match(own.stdout, /name: AUD_ARRANGEMENT_DIR, value: "\/var\/lib\/aud"/);
+  assert.match(own.stdout, /persistentVolumeClaim: \{ claimName: team-records \}/);
+  assert.doesNotMatch(own.stdout, /kind: PersistentVolumeClaim/, "an existing claim: the chart makes none");
+  assert.match(own.stdout, /type: RollingUpdate/, "ReadWriteMany keeps the rolling update");
+  const disk = tpl("state.enabled=true", "state.storageClassName=managed-csi", "state.accessMode=ReadWriteOnce");
+  assert.equal(disk.status, 0, disk.stderr);
+  assert.match(disk.stdout, /kind: PersistentVolumeClaim[\s\S]*name: aud-dashboard-state[\s\S]*helm\.sh\/resource-policy: keep/);
+  assert.match(disk.stdout, /type: Recreate/, "a ReadWriteOnce disk attaches to one node");
+  assert.notEqual(tpl("state.enabled=true").status, 0, "enabled with neither a claim nor a class fails");
+});

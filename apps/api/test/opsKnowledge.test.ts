@@ -150,3 +150,19 @@ test("web: the forms become the API bodies; an alert opens the find view with it
   assert.deepEqual(web.filterCases(CASES, "hubble", "").map((c) => c.id), ["hubble-ui-oom"]);
   assert.deepEqual(web.filterCases(CASES, "", "open").map((c) => c.id), ["entra-app"]);
 });
+
+test("agent seam (skeleton): the context is the text + the closest experience, masked and cut; no provider = not configured", async () => {
+  const { AGENT_LIMITS, agentContext, agentStatus, agentProvider } = await import("../src/services/opsAgent.js");
+  const jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmU";
+  const text = `hubble-ui backend OOMKilled exit code 137 Authorization: Bearer ${jwt} ` + "x".repeat(6000);
+  const similar = findSimilar({ text }, CASES.slice(0, 3), RUNBOOKS);
+  const ctx = agentContext(text, similar, CASES.slice(0, 3), RUNBOOKS);
+  assert.ok(ctx.text.length <= AGENT_LIMITS.textChars, "the text is cut");
+  assert.ok(!ctx.text.includes(jwt) && ctx.redactions >= 1, "secrets masked before anything would leave");
+  assert.equal(ctx.cases[0]?.id, "hubble-ui-oom", "the closest case first");
+  assert.ok(ctx.cases.length <= AGENT_LIMITS.cases && ctx.runbooks.length <= AGENT_LIMITS.runbooks);
+  assert.equal(ctx.runbooks[0]?.id, "oom-response", "the helper's runbook first");
+  assert.deepEqual(ctx.runbooks[0]?.steps, ["이전 컨테이너 종료 이유 확인", "메모리 사용량 vs limit 비교"], "step titles only — commands are not sent");
+  assert.equal(agentProvider({ AUD_OPS_AGENT: "off" }), null);
+  assert.deepEqual(agentStatus({}).state, "notConfigured");
+});

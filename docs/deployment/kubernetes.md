@@ -60,6 +60,74 @@ api ─▶ ARM listClusterUserCredential ─▶ privateFQDN(클러스터 DNS) �
 | `connections` | 연결 파일 JSON (ID·이름만) |
 | `gateway.*`·`healthCheckPolicy` | HTTPRoute(선택 `frontDoorId` — `X-Azure-FDID` 헤더가 맞을 때만 통과)·AGC 헬스 프로브 |
 | `networkPolicy.*` | CiliumNetworkPolicy — 처음엔 `enforce: false`(이름 `-audit`, 기본 거부 없음) |
+| `state.*` | 팀 기록 저장소(PVC) — 아래 '상태 저장' |
+
+### 상태 저장 (PVC) — 고객 환경 안내
+
+이 기능들은 **팀이 남긴 기록**을 파일로 저장합니다(`AUD_ARRANGEMENT_DIR`). 저장소가 없으면 메모리에만 있어 **파드가 다시 시작하면 사라지고**, 화면은 그렇다고 경고합니다. 기능·권한 화면에는 '조건: 팀 기록 유지 — 플랫폼 저장소(PVC)'로 표시됩니다.
+
+| 기능 | 남기는 것 |
+|---|---|
+| 인프라 구성도 · 라이브 다이어그램 | 팀 배치(게시한 배치) |
+| 통합 위험 | 이슈 상태·예외·담당 |
+| AKS 보안 점검 | 그래프 탐색 팀 질문 |
+| AKS 모니터링 | SLO 목표·에러 예산 초기화 |
+| 알림 센터 | 받은 알림·확인 기록 |
+| 사례·런북 | 사례·런북 전부 |
+
+**저장소 고르기** — 어떤 PVC든 됩니다. 쓰기는 파일 단위 + 이름 바꾸기이고, 동시에 쓰는 복제본은 하나라고 가정합니다(`replicas: 1`).
+
+| 방식 | 필요한 것 | 장단점 |
+|---|---|---|
+| **Azure Files** (`azurefile-csi`, RWX) | AKS 기본 드라이버. 파일 엔드포인트로 가는 네트워크 경로(PE 또는 VNet 규칙) | 가장 단순하다. 동적 PVC는 계정 키를 Secret에 저장한다 |
+| **Blob** (Blob CSI, RWX) | `az aks update --enable-blob-driver`(기본 꺼짐 — 클러스터 변경) · 컨테이너 · 워크로드 ID에 컨테이너 범위 **Storage Blob Data Contributor** | 키 없음(드라이버 ≥ 1.27 `mountWithWorkloadIdentityToken`). HNS 계정이면 이름 바꾸기가 원자적이다 |
+| **Managed Disk** (`managed-csi`, RWO) | 기본 드라이버 | 노드 하나에만 붙는다. 차트가 배포 방식을 `Recreate`로 바꿈(잠깐 멈춤). 영역 고정 |
+
+**차트 값**
+
+```yaml
+state:
+  enabled: true
+  existingClaim: aud-dashboard-state      # 직접 만든 PVC(예: 아래 Blob 정적 PV) — 또는
+  # storageClassName: azurefile-csi       # 차트가 PVC(aud-dashboard-state, 삭제 시 보존)를 만들게
+  # accessMode: ReadWriteOnce              # Managed Disk일 때
+```
+
+**Blob 정적 PV 예시** (stg에서 확인한 방식 — 키 없이 대시보드 파드의 워크로드 ID 토큰으로 마운트)
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: aud-dashboard-state-blob }
+spec:
+  capacity: { storage: 10Gi }
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain          # 지워도 기록은 남음
+  storageClassName: azureblob-fuse-premium
+  mountOptions: ["-o allow_other", "--file-cache-timeout-in-seconds=0", "-o attr_timeout=0", "-o entry_timeout=0", "-o negative_timeout=0"]
+  csi:
+    driver: blob.csi.azure.com
+    volumeHandle: <rg>#<account>#<container>#aud     # 클러스터에서 고유
+    volumeAttributes:
+      storageaccount: <account>
+      containerName: <container>
+      resourcegroup: <rg>
+      subscriptionid: <subscription>                  # 클러스터와 다른 구독이면
+      isHnsEnabled: "true"                            # ADLS Gen2 계정이면 — 원자적 이름 바꾸기
+      clientID: <aud 워크로드 ID client id>            # 서비스 계정 aud-dashboard가 페더레이션된 관리 ID
+      mountWithWorkloadIdentityToken: "true"          # 키 없이 토큰으로 (드라이버 ≥ 1.27)
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: aud-dashboard-state, namespace: aud-dashboard }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: azureblob-fuse-premium
+  volumeName: aud-dashboard-state-blob
+  resources: { requests: { storage: 10Gi } }
+```
+
+역할은 컨테이너 범위로 하나만 줍니다: `az role assignment create --assignee-object-id <aud 관리 ID principalId> --assignee-principal-type ServicePrincipal --role "Storage Blob Data Contributor" --scope <스토리지 계정 ID>/blobServices/default/containers/<container>`. 스토리지 방화벽이 기본 거부라면 Blob PE(또는 노드 서브넷 VNet 규칙)가 필요합니다. 마운트는 노드의 Blob CSI가 하기 때문입니다.
 
 **ArgoCD가 클러스터 레지스트리의 OCI 차트만 읽는 환경**(외부 Git·차트 저장소 차단): 이 차트를 고객 GitOps 저장소에 벤더링(래퍼 차트 + `charts/aud-dashboard-<ver>.tgz`, `repository: ""`)하거나 템플릿을 복사하고, 고객 파이프라인이 OCI로 게시합니다. 동기화 순서는 차트의 sync-wave(설정 −1 → 워크로드 0 → 경로 1), 네임스페이스·네트워크 정책·RBAC는 보통 고객 저장소의 아래 계층(정책 트랙)이 먼저 적용합니다.
 

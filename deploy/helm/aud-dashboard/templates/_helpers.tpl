@@ -37,3 +37,8 @@ allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 capabilities: { drop: [ALL] }
 {{- end }}
+
+{{/* The state PVC's name: the one given, or the chart's own */}}
+{{- define "aud.stateClaim" -}}
+{{- .Values.state.existingClaim | default "aud-dashboard-state" -}}
+{{- end -}}

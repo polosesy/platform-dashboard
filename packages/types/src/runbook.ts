@@ -113,6 +113,38 @@ export type OpsMatch = {
   };
 };
 
+// ── Agent (stage 2 — skeleton only: docs/architecture/ops-knowledge.md §8) ──
+
+/** Whether an agent may draft, and why not */
+export type OpsAgentStatus = {
+  state: "notConfigured" | "ready";
+  /** "none" until a provider is chosen (Microsoft Foundry · Anthropic API — a decision, §8) */
+  provider: "none";
+  /** What it would be sent, at most (the context is masked and cut before it leaves) */
+  limits: { textChars: number; cases: number; runbooks: number; fieldChars: number };
+};
+
+/** What an agent is given: the operator's text and the team's closest experience — masked, cut, nothing else */
+export type OpsAgentContext = {
+  text: string;
+  signals: OpsSignal[];
+  cases: Array<{ id: string; title: string; status: OpsCaseStatus; symptoms: string; cause?: string; resolution?: string }>;
+  runbooks: Array<{ id: string; title: string; when: string; steps: string[] }>;
+  /** Secrets masked while building it */
+  redactions: number;
+};
+
+/** An agent's draft — never saved by itself; shown as "agent draft — review", with the experience it leaned on */
+export type OpsAgentDraft = {
+  title: string;
+  symptoms: string;
+  causeCandidates: Array<{ text: string; basis: string[] }>;
+  nextSteps: string[];
+  basis: { cases: string[]; runbooks: string[] };
+  provider: string;
+  generatedAt: string;
+};
+
 export type OpsSimilarResponse = {
   /** Signals found in the text (plus the ones sent) */
   extracted: OpsSignal[];

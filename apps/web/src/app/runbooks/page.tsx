@@ -7,14 +7,14 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { OpsCase, OpsKnowledgeResponse, OpsRunbook, OpsSimilarResponse } from "@aud/types";
+import type { OpsAgentStatus, OpsCase, OpsKnowledgeResponse, OpsRunbook, OpsSimilarResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { useAksClusters } from "@/lib/useAksClusters";
 import {
-  Button, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput,
+  Button, Chip, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput,
 } from "@/components/ui";
 import {
   caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, runbookForm, type CaseForm, type RunbookForm,
@@ -219,6 +219,8 @@ function FindView({ data, canWrite, initialText, initialScope, onOpenCase, onOpe
             </Panel>
           ) : null}
 
+          <AgentSlot />
+
           {res.runbooks.length ? (
             <Panel title={t("ops.kb.find.runbooks", { n: res.runbooks.length })} flush>
               <ul className={s.list}>
@@ -239,6 +241,24 @@ function FindView({ data, canWrite, initialText, initialScope, onOpenCase, onOpe
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The agent's place (stage 2 — skeleton, docs/architecture/ops-knowledge.md §8): what it will do and how much it may be
+ * sent, disabled until a provider is configured. A draft is never saved by itself.
+ */
+function AgentSlot() {
+  const { t } = useI18n();
+  const st = useApiQuery("ops-agent", (token) => fetchJsonWithBearer<OpsAgentStatus>(apiUrl("/api/ops/agent"), token));
+  const s0 = st.data;
+  if (!s0) return null;
+  return (
+    <Panel title={t("ops.kb.agent.title")} actions={<Chip level={s0.state === "ready" ? "ok" : "neutral"}>{t(`ops.kb.agent.state.${s0.state}`)}</Chip>}>
+      <p className={s.muted}>{t("ops.kb.agent.what")}</p>
+      <p className={s.muted}>{t("ops.kb.agent.limits", { c: s0.limits.textChars, k: s0.limits.cases, r: s0.limits.runbooks, f: s0.limits.fieldChars })}</p>
+      <div className={s.actions}><Button disabled title={t("ops.kb.agent.disabled")}>{t("ops.kb.agent.draft")}</Button></div>
+    </Panel>
   );
 }
 

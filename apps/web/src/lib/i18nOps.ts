@@ -2523,5 +2523,12 @@ export const OPS_T: Translations = {
   "ops.kb.err.ops_case_not_found": { ko: "이미 지워졌습니다.", en: "Already deleted." },
   "ops.kb.err.ops_runbook_not_found": { ko: "이미 지워졌습니다.", en: "Already deleted." },
   "ops.kb.err.other": { ko: "저장하지 못했습니다({code}).", en: "Could not save ({code})." },
+  "ops.kb.agent.title": { ko: "에이전트 초안 (2단계 — 준비 중)", en: "Agent draft (stage 2 — not yet)" },
+  "ops.kb.agent.state.notConfigured": { ko: "설정 안 됨", en: "Not configured" },
+  "ops.kb.agent.state.ready": { ko: "사용 가능", en: "Ready" },
+  "ops.kb.agent.what": { ko: "붙여 넣은 글과 위의 비슷한 사례·런북을 읽고 사례 초안(증상 정리·원인 후보·다음 단계)을 만들 자리입니다. 초안은 스스로 저장되지 않고, 근거로 쓴 사례·런북을 함께 보입니다. 명령은 실행하지 않습니다.", en: "This is where an agent will read the text and the similar cases and runbooks above and draft a case (symptoms, cause candidates, next steps). A draft is never saved by itself and shows the cases and runbooks it leaned on. It never runs commands." },
+  "ops.kb.agent.limits": { ko: "보낼 수 있는 것(가린 뒤): 글 {c}자 · 비슷한 사례 {k}개 · 런북 {r}개 · 칸마다 {f}자. 모델을 어디서 돌릴지와 무엇을 보낼지 정해지면 켜집니다.", en: "What it may be sent (masked): {c} characters of text · {k} similar cases · {r} runbooks · {f} characters per field. It is turned on once where the model runs and what may be sent are decided." },
+  "ops.kb.agent.draft": { ko: "초안 만들기", en: "Draft" },
+  "ops.kb.agent.disabled": { ko: "에이전트가 아직 설정되지 않았습니다(2단계).", en: "The agent is not configured yet (stage 2)." },
   "notify.findSimilar": { ko: "비슷한 경험 찾기", en: "Find similar experience" },
 };

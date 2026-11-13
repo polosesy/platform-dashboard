@@ -4,7 +4,8 @@
 import type { Request, Response, Router } from "express";
 import { z } from "zod";
 import type { Env } from "../env.js";
-import type { OpsCase, OpsKnowledgeResponse, OpsRunbook, OpsSimilarResponse } from "@aud/types";
+import type { OpsAgentStatus, OpsCase, OpsKnowledgeResponse, OpsRunbook, OpsSimilarResponse } from "@aud/types";
+import { agentContext, agentProvider, agentStatus } from "../services/opsAgent.js";
 import { accessibleConnections, callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { sendError } from "../infra/requestParams.js";
@@ -56,6 +57,34 @@ export function registerOpsRoutes(router: Router, env: Env) {
       res.json(findSimilar({ ...body.data, signals }, cases, runbooks) satisfies OpsSimilarResponse);
     } catch (e: unknown) {
       sendError(res, e, "ops_similar_failed");
+    }
+  });
+
+  // Agent (stage 2 — skeleton): its status, and the draft call that answers 501 until a provider is configured.
+  // The context it would be given is built either way (the same code a provider will receive), so the answer can say
+  // how much would have been sent — never the text itself.
+  router.get("/api/ops/agent", (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+    res.json(agentStatus(env) satisfies OpsAgentStatus);
+  });
+  router.post("/api/ops/agent/draft", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const body = SimilarBody.safeParse(req.body);
+      if (!body.success || !body.data.text?.trim()) return res.status(400).json({ error: "ops_agent_invalid" });
+      const provider = agentProvider(env);
+      const { cases, runbooks } = await readKnowledge(dir, usable(req));
+      const similar = findSimilar({ text: body.data.text, ...(body.data.scope ? { scope: body.data.scope } : {}) }, cases, runbooks);
+      const ctx = agentContext(body.data.text, similar, cases, runbooks);
+      if (!provider) {
+        return res.status(501).json({
+          error: "ops_agent_not_configured", status: agentStatus(env),
+          wouldSend: { textChars: ctx.text.length, cases: ctx.cases.length, runbooks: ctx.runbooks.length, redactions: ctx.redactions },
+        });
+      }
+      res.json(await provider.draftCase(ctx, AbortSignal.timeout(60_000)));
+    } catch (e: unknown) {
+      sendError(res, e, "ops_agent_failed");
     }
   });
 

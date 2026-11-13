@@ -2,7 +2,7 @@
 status: current
 owner: platform
 last-verified: 2026-11-13
-covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMatch.ts, apps/api/src/routes/ops.ts, apps/web/src/app/runbooks]
+covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMatch.ts, apps/api/src/services/opsAgent.ts, apps/api/src/routes/ops.ts, apps/web/src/app/runbooks]
 ---
 # 사례·런북 — 경험으로 빨리 정상화하기
 
@@ -45,7 +45,7 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 - **런북 `OpsRunbook`**
   - 제목·**언제 쓰나**·신호·태그
   - **단계**(제목·설명·명령(복사만, 실행 안 함)·확인 방법)·되돌리기·팀·마지막 검증일
-- **저장**: `<AUD_ARRANGEMENT_DIR>/knowledge/knowledge.json`(없으면 메모리 + 화면 경고). 쓰기는 임시 파일 → rename, 한 번에 하나씩이다. 상한은 사례 2,000개·런북 300개, 글자 수는 칸마다 정해져 있다.
+- **저장**: `<AUD_ARRANGEMENT_DIR>/knowledge/knowledge.json`(없으면 메모리 + 화면 경고). 쿠버네티스에서는 Helm `state` PVC가 이 폴더다(Azure Files·Blob·Managed Disk — [kubernetes.md '상태 저장'](../deployment/kubernetes.md)). stg는 Blob 컨테이너 정적 PV(키 없이 워크로드 ID 토큰 마운트)를 쓴다(2026-11-13). 쓰기는 임시 파일 → rename, 한 번에 하나씩이다. 상한은 사례 2,000개·런북 300개, 글자 수는 칸마다 정해져 있다.
 
 ## 4. 비슷함 계산 (`services/opsMatch.ts`, 순수)
 
@@ -95,7 +95,7 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 2. 장애 뒤(24시간 안): '이 내용으로 사례 기록' → 원인·조치·교훈 → '해결'로 바꾼다. 같은 조치가 두 번째라면 그 조치를 런북으로 만들고 사례에서 가리킨다.
 3. 매월: 런북 목록에서 '마지막 사용'이 오래된 것과 검증일이 없는 것을 정리한다.
 
-## 8. 2단계 — 에이전트 (결정 필요, 미구현)
+## 8. 2단계 — 에이전트 (결정 필요, 뼈대만 구현)
 
 | 결정 | 선택지 | 권장 |
 |---|---|---|
@@ -105,6 +105,17 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 | 표시 | '에이전트 초안 — 검토 필요' 칩, 근거(어느 사례·어느 신호)를 꼭 붙임 | — |
 
 이음새: `POST /api/ops/similar`의 응답(신호·사례·런북)이 그대로 에이전트의 입력 맥락이 됩니다. 모델이 바뀌어도 검색은 바뀌지 않습니다.
+
+**뼈대(2026-11-13 구현, 모델 없음)**
+
+- `services/opsAgent.ts`
+  - `agentContext()`(순수·테스트): 에이전트가 받을 것을 정확히 만든다. 글 4,000자, 비슷한 사례 3개(증상·원인·조치 각 800자), 런북 2개(언제·단계 제목)이고, 모든 칸을 로그 가리기로 가린다.
+  - `OpsAgentProvider.draftCase(ctx, signal)`: 제공자가 구현할 유일한 호출이다. 초안만 만들고, 쓰기·명령 실행은 없다.
+  - `agentStatus()`
+- API: `GET /api/ops/agent`(상태·한도)와 `POST /api/ops/agent/draft`(운영자). 제공자가 없으면 501 `ops_agent_not_configured`를 내고, 보낼 뻔한 양(글자 수·사례·런북·가린 수)만 알려 준다. 글 자체는 돌려주지 않는다.
+- `AUD_OPS_AGENT`는 `off`만 받는다.
+- 화면: 찾기 결과의 '에이전트 초안 (2단계 — 준비 중)'. 할 일과 보낼 수 있는 양을 보이고, 버튼은 꺼져 있다.
+- 켜는 일: 8절의 결정 → 제공자 하나(`OpsAgentProvider`) → `agentProvider(env)`가 고름 → 화면 버튼과 '에이전트 초안 — 검토 필요' 표시.
 
 ## 9. 남은 일
 

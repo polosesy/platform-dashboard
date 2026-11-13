@@ -55,27 +55,29 @@ export const PERMISSIONS: PermissionDef[] = [
 ];
 
 const AKS_PRE: FeatureDef["preconditions"] = ["entraCluster", "clusterReachable"];
+// Features that keep the team's records (AUD_ARRANGEMENT_DIR): without the platform PVC they live in memory — lost on restart
+const STATE: NonNullable<FeatureDef["preconditions"]> = ["stateStore"];
 
 /** Every screen, its package and what it reads with (required = it does not work without; optional = less) */
 export const FEATURES: FeatureDef[] = [
-  { id: "inventoryDiagram", tier: "core", routes: ["/architecture"], requires: ["inventory"], optional: ["logs"] },
-  { id: "liveDiagram", tier: "core", routes: ["/live-diagram"], requires: ["inventory", "metrics"], optional: ["logs", "flowLogBlobs"] },
+  { id: "inventoryDiagram", tier: "core", routes: ["/architecture"], requires: ["inventory"], optional: ["logs"], preconditions: STATE },
+  { id: "liveDiagram", tier: "core", routes: ["/live-diagram"], requires: ["inventory", "metrics"], optional: ["logs", "flowLogBlobs"], preconditions: STATE },
   { id: "resourceHealth", tier: "core", routes: ["/health"], requires: ["inventory"], optional: [] },
   { id: "costManagement", tier: "core", routes: ["/cost"], requires: ["cost"], optional: [] },
   { id: "vnetTraffic", tier: "pro", routes: ["/network"], requires: ["inventory", "logs"], optional: [] },
   { id: "privateLinkUsage", tier: "pro", routes: ["/live-diagram"], requires: ["inventory", "logs"], optional: [] },
   { id: "defenderPosture", tier: "pro", routes: ["/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance"], requires: ["security"], optional: [] },
   { id: "aksClusters", tier: "pro", routes: ["/kubernetes"], requires: ["aksCredential", "k8sRead"], optional: ["inventory"], preconditions: AKS_PRE },
-  { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs", "registryPull"], preconditions: AKS_PRE, platformRole: "operator" },
-  { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec", "security", "logs"], preconditions: AKS_PRE },
-  { id: "integratedRisk", tier: "enterprise", routes: ["/security/risk"], requires: ["security", "inventory", "aksCredential", "k8sRead"], optional: [] },
+  { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs", "registryPull"], preconditions: [...AKS_PRE!, ...STATE], platformRole: "operator" },
+  { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec", "security", "logs"], preconditions: [...AKS_PRE!, ...STATE] },
+  { id: "integratedRisk", tier: "enterprise", routes: ["/security/risk"], requires: ["security", "inventory", "aksCredential", "k8sRead"], optional: [], preconditions: STATE },
   // Official feeds and the dashboard's own runtime need no Azure permission; Defender findings and cluster images add targets
   { id: "urgentVulnerabilities", tier: "pro", routes: ["/security/advisories"], requires: [], optional: ["security", "aksCredential", "k8sRead"] },
   { id: "podTraffic", tier: "enterprise", routes: ["/hubble"], requires: ["aksCredential", "hubbleExec"], optional: [], preconditions: AKS_PRE },
   // The dashboard is the receiver (Azure action groups · Grafana contact points push to it) — no Azure read permission
-  { id: "alertCenter", tier: "core", routes: ["/notifications"], requires: [], optional: [] },
+  { id: "alertCenter", tier: "core", routes: ["/notifications"], requires: [], optional: [], preconditions: STATE },
   // The team's cases and runbooks, kept by the platform — no Azure read permission (docs/architecture/ops-knowledge.md)
-  { id: "opsKnowledge", tier: "pro", routes: ["/runbooks"], requires: [], optional: [] },
+  { id: "opsKnowledge", tier: "pro", routes: ["/runbooks"], requires: [], optional: [], preconditions: STATE },
   { id: "multiTenantConnections", tier: "enterprise", routes: ["/settings/connections"], requires: [], optional: [] },
 ];
 

@@ -46,7 +46,8 @@ export type FeatureDef = {
   routes: string[];
   requires: PermissionKey[];
   optional: PermissionKey[];
-  preconditions?: Array<"entraCluster" | "clusterReachable">;
+  /** stateStore = the team's records here (layouts, issue states, SLO settings, alerts, cases …) outlive a restart only on the platform's PVC (Helm `state`) */
+  preconditions?: Array<"entraCluster" | "clusterReachable" | "stateStore">;
   /** a platform role beyond viewer for part of it (pod logs = operator) */
   platformRole?: PlatformRole;
 };
