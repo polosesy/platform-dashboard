@@ -28,7 +28,7 @@ import {
 } from "@/lib/workloadHeatView";
 import { WorkloadHeatPanel } from "./WorkloadHeatPanel";
 import {
-  BLOCKS_STORAGE_KEY, SETS_STORAGE_KEY, autoBlocks, deleteSet, formatAppValue, kindsOf, parseBlocks, parseSets, sameBlocks, saveSet, sortByApp,
+  BLOCKS_STORAGE_KEY, SETS_STORAGE_KEY, autoBlocks, deleteSet, formatAppValue, imageConfigBadge, kindsOf, parseBlocks, parseSets, sameBlocks, saveSet, sortByApp,
   type BlockId, type BlockSet,
 } from "@/lib/workloadBlocks";
 import { BlockEditor, KindChips, RuntimeGuide, blockLabel } from "./WorkloadBlocks";
@@ -114,6 +114,8 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   useRangeRefresh("appMetrics", nonce, appQ.loading, appQ.reload, report);
   const apps = appQ.data?.clusterId === clusterId && appQ.data.metricsState === "ok" ? appQ.data : null;
   const appsFailed = !!appQ.error || (!!appQ.data && appQ.data.metricsState !== "ok");
+  // The registry's image configs: say when they could not be read (no AcrPull · unreachable) or are still being read
+  const cfgBadge = imageConfigBadge(apps?.evidence);
   const appByKey = useMemo(() => new Map<string, AppMetricsResponse["workloads"][number]>((apps?.workloads ?? []).map((w) => [`${w.namespace}/${w.workload}`, w])), [apps]);
   const appCols = useMemo(() => new Map<string, AppMetricsResponse["columns"][number]>((apps?.columns ?? []).map((c) => [c.id, c])), [apps]);
   // The viewer's blocks (columns of the table, values a tile can show): automatic until something is chosen. Changes
@@ -283,6 +285,7 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
           {t(dirty ? "ob.bl.customizeDirty" : chosen ? "ob.bl.customizeOn" : "ob.bl.customize")}
         </Button>
         {appsFailed ? <Badge tone="medium" title={appQ.error ?? appQ.data?.message ?? ""}>{t("ob.bl.appsFailed")}</Badge> : null}
+        {cfgBadge ? <Badge tone={cfgBadge.tone} title={t(cfgBadge.hint, cfgBadge.vars)}>{t(cfgBadge.key, cfgBadge.vars)}</Badge> : null}
         <span className={styles.hmMeta}>
           {/* The picker's range differs from what the heatmap reads — said, never a silent other range */}
           {span.differs === "max" ? <Badge tone="info" title={t("ob.hm.windowMaxHint")}>{t("ob.hm.windowMax")}</Badge> : null}

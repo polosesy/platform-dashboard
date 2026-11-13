@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-11-06
+last-verified: 2026-11-13
 covers: [apps/api/src/services/featureCatalog.ts]
 ---
 # Azure 연결 권한 표
@@ -35,8 +35,9 @@ covers: [apps/api/src/services/featureCatalog.ts]
 | AKS 보안 점검 — 이미지 취약성(진입점) | **Security Reader** (선택) | 구독 | Defender for Containers 취약성 결과(Resource Graph). 없으면 알려진 오픈소스 이미지의 버전 조회(OSV)만 | `security` |
 | NSG 흐름 로그 원본(blob) | **Storage Blob Data Reader** | 흐름 로그 스토리지 계정 | 데이터 평면 읽기 | `flowLogBlobs` |
 | Prometheus 메트릭 | **Monitoring Data Reader** | Azure Monitor 작업 영역 | PromQL | `prometheus` |
+| AKS 모니터링 — 앱 런타임(이미지 설정, 선택) | **AcrPull** | 컨테이너 레지스트리 | 이미지 설정 blob만(레이어 안 받음) — 연결 파일 `aks.imageConfig: true`일 때만. 'RBAC Registry + ABAC Repository Permissions' 모드 레지스트리는 AcrPull 대신 **Container Registry Repository Reader**가 필요(연결 점검은 기존 pull 동작으로 확인하므로 이 모드에서는 화면의 '권한 없음'이 실제 결과) | `registryPull` |
 
-Microsoft 기본 제공 역할 정의 ID(템플릿에서 사용): Reader `acdd72a7-3385-48ef-bd42-f606fba81ae7` · Monitoring Reader `43d0d8ad-25c7-4714-9337-8ba259a9fe05` · Log Analytics Reader `73c42c96-874c-492b-b04d-ab87d138a893` · Security Reader `39bc4728-0917-49c7-9d2c-d95423bc2eb4` · Cost Management Reader `72fafb9e-0641-4937-9268-a91bfd8191a3` · AKS Cluster User Role `4abbcc35-e782-43d8-92c5-2d3f1bd2253f` · Storage Blob Data Reader `2a2b9908-6ea1-4ae2-8e65-a410df84e7d1` · Monitoring Data Reader `b0d8363b-8ddd-447d-831f-62ca05bff136`.
+Microsoft 기본 제공 역할 정의 ID(템플릿에서 사용): Reader `acdd72a7-3385-48ef-bd42-f606fba81ae7` · Monitoring Reader `43d0d8ad-25c7-4714-9337-8ba259a9fe05` · Log Analytics Reader `73c42c96-874c-492b-b04d-ab87d138a893` · Security Reader `39bc4728-0917-49c7-9d2c-d95423bc2eb4` · Cost Management Reader `72fafb9e-0641-4937-9268-a91bfd8191a3` · AKS Cluster User Role `4abbcc35-e782-43d8-92c5-2d3f1bd2253f` · Storage Blob Data Reader `2a2b9908-6ea1-4ae2-8e65-a410df84e7d1` · Monitoring Data Reader `b0d8363b-8ddd-447d-831f-62ca05bff136` · AcrPull `7f951dda-4ed3-4680-a7ca-43fe172d538d`.
 
 ### 주의
 

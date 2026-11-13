@@ -199,3 +199,31 @@ export function unidentified(apps: AppMetricsResponse["workloads"]): AppMetricsR
   return apps.filter((w) => !w.kinds.some((k) => k.basis === "metrics"))
     .sort((a, b) => Number(b.kinds.length > 0) - Number(a.kinds.length > 0) || (`${a.namespace}/${a.workload}` < `${b.namespace}/${b.workload}` ? -1 : 1));
 }
+
+/**
+ * Pure: where the kinds came from, one line per source (the guide's "근거 출처") — each with its i18n key and values.
+ * `level` = how the viewer should read it: ok (read) · info (nothing there / not chosen) · warn (could not read).
+ */
+export type EvidenceLine = { source: "spec" | "scan" | "config"; key: string; vars?: Record<string, number>; level: "ok" | "info" | "warn" };
+export function evidenceLines(ev: AppMetricsResponse["evidence"] | undefined): EvidenceLine[] {
+  if (!ev) return [];
+  const out: EvidenceLine[] = [
+    { source: "spec", key: `ob.bl.ev.spec.${ev.spec}`, level: ev.spec === "ok" ? "ok" : "warn" },
+    { source: "scan", key: `ob.bl.ev.scan.${ev.scan}`, level: ev.scan === "ok" ? "ok" : ev.scan === "empty" ? "info" : "warn" },
+  ];
+  const c = ev.imageConfig;
+  if (c) {
+    const level = c.state === "ok" ? (c.pending ? "info" : "ok") : c.state === "off" || c.state === "none" ? "info" : "warn";
+    out.push({ source: "config", key: `ob.bl.ev.cfg.${c.state}${c.state === "ok" && c.pending ? "Pending" : ""}`, vars: { read: c.read, pending: c.pending }, level });
+  }
+  return out;
+}
+
+/** Pure: the one badge above the heatmap/table when the image configs could not (all) be read — null when nothing to say */
+export function imageConfigBadge(ev: AppMetricsResponse["evidence"] | undefined): { key: string; hint: string; vars?: Record<string, number>; tone: "medium" | "info" } | null {
+  const c = ev?.imageConfig;
+  if (!c) return null;
+  if (c.state === "forbidden" || c.state === "unreachable" || c.state === "failed") return { key: `ob.bl.cfgBadge.${c.state}`, hint: `ob.bl.ev.cfg.${c.state}`, tone: "medium" };
+  if (c.state === "ok" && c.pending > 0) return { key: "ob.bl.cfgBadge.pending", hint: "ob.bl.ev.cfg.okPending", vars: { read: c.read, pending: c.pending }, tone: "info" };
+  return null;
+}

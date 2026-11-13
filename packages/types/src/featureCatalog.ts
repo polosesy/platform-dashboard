@@ -28,7 +28,7 @@ export type PermissionDef = {
   /** the one operation the check tests */
   probe?: { action: string; data?: boolean };
   /** off unless switched on: Hubble exec (deployment + connection), pod logs (connection namespaces) */
-  gate?: "hubbleExec" | "podLogs";
+  gate?: "hubbleExec" | "podLogs" | "imageConfig";
   docs: string;
   /** copyable grant command with placeholders — the dashboard never runs it */
   grant: string;

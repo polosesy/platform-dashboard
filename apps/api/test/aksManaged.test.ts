@@ -103,3 +103,17 @@ test("view: families worst first (exploited, then Microsoft-unfixed); compare ki
   assert.equal(view.compareKind(comp("csi", [])), "none");
   assert.equal(view.shortImage(COREDNS), "kubernetes/coredns");
 });
+
+test("managed parts: a digest-pinned pod (status image = bare sha256) is found by its imageID", async () => {
+  const { mcrImages } = await import("../src/services/k8sPolicyCollector.js");
+  const D = "sha256:" + "a".repeat(64);
+  assert.deepEqual(mcrImages([
+    { name: "a", image: D, imageID: `mcr.microsoft.com/oss/kubernetes/coredns@${D}` },
+    { name: "b", image: "mcr.microsoft.com/oss/kubernetes/coredns:v1.12.1", imageID: `mcr.microsoft.com/oss/kubernetes/coredns@${D}` },
+    { name: "c", image: D, imageID: `myreg1.azurecr.io/team/app@${D}` },
+    { name: "d", image: D },
+  ]).mcr, [
+    { container: "a", image: "mcr.microsoft.com/oss/kubernetes/coredns", digest: D },
+    { container: "b", image: "mcr.microsoft.com/oss/kubernetes/coredns:v1.12.1", digest: D },
+  ]);
+});

@@ -90,6 +90,7 @@ if (!token) {
       await check("heatmap", q("/api/observability/heatmap", { clusterId: cluster, window: "60" }), (b) => `${b.workloads?.length ?? 0} workloads ${state(b)}`.trim());
       await check("app runtimes", q("/api/observability/app-metrics", { clusterId: cluster }), (b) => `${(b.workloads ?? []).filter((w) => w.kinds?.length).length}/${b.workloads?.length ?? 0} with a kind, evidence ${JSON.stringify(b.evidence ?? {})} ${state(b)}`.trim());
       await check("SLO", q("/api/observability/slo", { clusterId: cluster }), state);
+      await check("RED", q("/api/observability/red", { clusterId: cluster, window: "60" }), (b) => `${b.services?.length ?? 0} services, ${(b.services ?? []).filter((s) => s.workload).length} with a workload, resets ${b.resets ?? "?"} ${state(b)}`.trim());
       await check("kube events", q("/api/observability/events", { clusterId: cluster, limit: "100" }), (b) => `${b.total ?? b.events?.length ?? 0} warnings`);
       await check("observability stack", q("/api/observability/stack", { clusterId: cluster }), state);
       await check("nodes", q("/api/observability/nodes", { clusterId: cluster }), (b) => `${b.nodes?.length ?? 0} nodes`);

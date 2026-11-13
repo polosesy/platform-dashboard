@@ -134,7 +134,6 @@ export const mockCostSummary: CostSummary = {
   changePercentage: 10.9,
   forecastedTotal: 14_120.00,
   budgetTotal: 15_000,
-  budgetUsedPercentage: 83.0,
   note: "mock data",
 };
 

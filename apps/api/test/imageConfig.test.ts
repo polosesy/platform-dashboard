@@ -83,3 +83,20 @@ test("image config: opt-in per connection, ACR hosts only, registry FQDNs behind
   assert.match(src("deploy/helm/aud-dashboard/templates/networkpolicy.yaml"), /if \.Values\.features\.imageConfig[\s\S]*\*\.azurecr\.io/);
   assert.match(src("deploy/helm/aud-dashboard/values.yaml"), /\n  imageConfig: false/);
 });
+
+test("image config state on screen: a badge only when something could not be read; the guide lists every source", async () => {
+  const ns = await import("../../web/src/lib/workloadBlocks.ts");
+  const wb = ((ns as unknown as { default?: typeof ns }).default ?? ns) as typeof ns;
+  const ev = (state: "ok" | "off" | "forbidden" | "unreachable" | "failed" | "none", read = 0, pending = 0) =>
+    ({ spec: "ok" as const, scan: "empty" as const, imageConfig: { state, read, pending } });
+  assert.equal(wb.imageConfigBadge(ev("ok", 36, 0)), null);
+  assert.equal(wb.imageConfigBadge(ev("off")), null, "not chosen is not a problem");
+  assert.equal(wb.imageConfigBadge(ev("none")), null);
+  assert.deepEqual(wb.imageConfigBadge(ev("forbidden")), { key: "ob.bl.cfgBadge.forbidden", hint: "ob.bl.ev.cfg.forbidden", tone: "medium" });
+  assert.equal(wb.imageConfigBadge(ev("ok", 30, 6))?.key, "ob.bl.cfgBadge.pending");
+  assert.deepEqual(wb.evidenceLines(ev("unreachable")).map((l) => [l.key, l.level]), [
+    ["ob.bl.ev.spec.ok", "ok"], ["ob.bl.ev.scan.empty", "info"], ["ob.bl.ev.cfg.unreachable", "warn"],
+  ]);
+  assert.equal(wb.evidenceLines(ev("ok", 30, 6))[2]!.key, "ob.bl.ev.cfg.okPending");
+  assert.deepEqual(wb.evidenceLines(undefined), []);
+});

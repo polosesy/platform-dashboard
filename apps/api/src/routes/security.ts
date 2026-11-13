@@ -1,7 +1,6 @@
 import type { Request, Response, Router } from "express";
 import type { Env } from "../env.js";
-import { mockSecureScore, mockSecurityAlerts, mockSecurityPosture } from "../mockData.js";
-import { tryGetSecureScore, tryGetSecurityAlerts } from "../services/security.js";
+import { mockSecurityPosture } from "../mockData.js";
 import { tryGetSecurityPosture } from "../services/securityPosture.js";
 import { localizePosture } from "../services/assessmentTexts.js";
 import { defaultSubscriptions } from "../infra/azureClientFactory.js";
@@ -15,32 +14,8 @@ import { IssueStateBody, issueStateDir, readIssueStates, writeIssueState } from 
 import { SavedQueryBody, readSavedQueries, writeSavedQuery } from "../services/savedQueryStore.js";
 
 export function registerSecurityRoutes(router: Router, env: Env) {
-  const enabled = env.AZURE_SECURITY_ENABLED;
-
-  router.get("/api/security/score", (req: Request, res: Response) =>
-    respondWithFallback(
-      res,
-      async () => {
-        const subscriptionId = querySubscriptionId(req, env);
-        return enabled ? tryGetSecureScore(env, req.auth?.bearerToken, { subscriptionId }) : null;
-      },
-      mockSecureScore,
-      "security",
-    ),
-  );
-
-  router.get("/api/security/alerts", (req: Request, res: Response) =>
-    respondWithFallback(
-      res,
-      async () => {
-        const subscriptionId = querySubscriptionId(req, env);
-        return enabled ? tryGetSecurityAlerts(env, req.auth?.bearerToken, { subscriptionId }) : null;
-      },
-      mockSecurityAlerts,
-      "security",
-    ),
-  );
-
+  // (2026-11-13) the old /api/security/score and /api/security/alerts are gone: nothing called them (the web reads
+  // /api/security/posture — score, controls and alerts together), and the score filled a missing value with 0/100.
   // Defender posture via Resource Graph — recommendations, controls, compliance, plans, alerts (OBO or SP)
   router.get("/api/security/posture", (req: Request, res: Response) =>
     respondWithFallback(

@@ -81,13 +81,15 @@ test("a failed read is an error — not empty, not healthy, not sample data", ()
 });
 
 test("secure score: ARM's percentage is a ratio (0–1) — the page's number comes from current / max", () => {
-  const src = api("services/security.ts");
-  assert.match(src, /maxScore > 0 \? \(currentScore \/ maxScore\) \* 100 : \(scoreProps\?\.percentage \?\? 0\) \* 100/);
+  // (2026-11-13) the old /api/security/score and its service are gone; the posture computes the same way
+  const src = api("services/securityPosture.ts");
+  assert.match(src, /percentage: max > 0 \? Math\.round\(\(current \/ max\) \* 1000\) \/ 10/);
+  assert.ok(!src.includes("properties.percentage"), "never ARM's 0–1 ratio as a percent");
 });
 
 test("a read without a subscription defaults to what the caller's role can read (or all → refused as an error, never sample)", () => {
   assert.equal(typeof defaultSubscriptions, "function");
-  for (const f of ["kubernetes", "securityPosture", "reservations", "health", "security", "cost", "azureEndpoints", "privateLinkUsageCollector"]) {
+  for (const f of ["kubernetes", "securityPosture", "reservations", "health", "cost", "azureEndpoints", "privateLinkUsageCollector"]) {
     assert.match(api(`services/${f}.ts`), /defaultSubscriptions\(env, bearerToken\)/, f);
   }
 });

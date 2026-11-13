@@ -9,6 +9,8 @@ import {
 import { collectPodLogs } from "../services/containerInsightsCollector.js";
 import { getObservabilityStack } from "../services/observabilityStack.js";
 import { SLO_DEFAULTS, getWorkloadSlo } from "../services/workloadSlo.js";
+import { RED_WINDOWS, getWorkloadRed } from "../services/workloadRed.js";
+import type { RedWindow } from "@aud/types";
 import {
   SloResetBody, SloSettingsBody, addSloReset, readSloSettings, removeSloReset, sloSettingsDir, writeSloSettings, type SloSettingsDoc,
 } from "../services/sloSettingsStore.js";
@@ -200,6 +202,18 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getWorkloadSlo(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_slo_failed", "observability");
+    }
+  });
+
+  // RED (트레이스): requests · errors · duration per service from spanmetrics (server spans, /actuator apart)
+  router.get("/api/observability/red", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const w = Number(req.query.window ?? 60);
+      if (!RED_WINDOWS.includes(w as RedWindow)) return res.status(400).json({ error: "invalid_window", allowed: RED_WINDOWS });
+      res.json(await getWorkloadRed(env, req.auth?.bearerToken, clusterId, w as RedWindow, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_red_failed", "observability");
     }
   });
 

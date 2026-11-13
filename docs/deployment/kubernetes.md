@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-12
+last-verified: 2026-11-13
 covers: [deploy/helm/aud-dashboard, deploy/kubernetes, docs/integrations/azure/templates/aks]
 ---
 # Kubernetes(AKS) 배포 — 클러스터 안 네임스페이스
@@ -132,6 +132,8 @@ API가 자기 상태를 Prometheus 형식으로 냅니다: `aud_http_requests_to
 
 - API 포트(파드 안 루프백)의 `GET /metrics`는 `/api` 밖이라 웹을 통해 나가지 않습니다.
 - 수집하려면 값 `metrics.enabled: true` → 지표만 답하는 포트(기본 9464)·`prometheus.io/*` 파드 주석·`AUD_METRICS_PORT`. 네트워크 정책을 쓰면 `metrics.fromNamespaces: ["<수집기 네임스페이스>"]`로 그 포트만 엽니다. 기본은 꺼짐(렌더 결과 변화 없음).
+- **수집기 쪽 조건**(2026-11-13 시험 환경 확인): 고객 Alloy는 `prometheus.io/scrape: "true"` 파드를 모든 네임스페이스에서 수집하고 지표 이름도 거르지 않지만, Alloy의 송신 네트워크 정책이 허용한 네임스페이스로만 나갈 수 있습니다. `aud-dashboard`가 그 목록에 없으면 켜는 순간 매분 수집 시도가 POLICY_DENIED 드롭으로 쌓입니다 — **먼저 수집기 정책에 `aud-dashboard` 네임스페이스 :9464 송신 규칙**을 넣고 켜세요. Azure Monitor 관리형 수집(ama-metrics)의 주석 기반 수집은 `podannotationnamespaceregex`와 지표 허용 목록(`podannotations`)에 `aud_.*`가 있어야 합니다.
+- 켜지 않고 확인: `kubectl -n aud-dashboard port-forward pod/<파드> 14000:4000` → `curl http://127.0.0.1:14000/metrics`(API 포트는 파드 루프백 — 포트 포워딩은 닿음).
 - 온프렘 Docker는 `api.env`에 `AUD_METRICS_PORT`(파드 공간 안에서만 열림 — 밖으로 내보내려면 compose 포트를 따로 엽니다).
 
 ## 9. 문제 해결

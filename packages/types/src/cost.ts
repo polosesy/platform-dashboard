@@ -11,7 +11,6 @@ export type CostSummary = {
   changePercentage: number | null;
   forecastedTotal: number;
   budgetTotal?: number;
-  budgetUsedPercentage?: number;
   note?: string;
 };
 

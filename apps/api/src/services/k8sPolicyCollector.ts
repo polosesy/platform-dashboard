@@ -166,14 +166,20 @@ const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * What the azure-workload-identity webhook injected into a running pod — only the token file variable's name and the
  * client / tenant GUIDs are kept; no other environment variable (names or values) leaves this function.
  */
-/** Running images from Microsoft's registry with their digest (imageID "…@sha256:…") — the AKS managed parts */
+/**
+ * Running images from Microsoft's registry with their digest (imageID "…@sha256:…") — the AKS managed parts.
+ * A pod pinned by digest reports its status image as a bare "sha256:…" (stg 2026-11-13: 60 containers, all ACR) —
+ * the repository is then only in imageID (no tag: the managed-parts check treats it as "no tag").
+ */
 export function mcrImages(statuses: Array<{ name: string; image?: string; imageID?: string }>): { mcr?: { container: string; image: string; digest?: string }[] } {
   const out = statuses
-    .filter((s) => (s.image ?? "").startsWith("mcr.microsoft.com/"))
     .map((s) => {
-      const d = /@(sha256:[0-9a-f]{64})$/.exec(s.imageID ?? "")?.[1];
-      return { container: s.name, image: s.image!, ...(d ? { digest: d } : {}) };
-    });
+      const id = (s.imageID ?? "").replace(/^[a-z-]+:\/\//, "");
+      const image = /^sha256:/.test(s.image ?? "") && id.includes("/") ? id.replace(/@sha256:[0-9a-f]{64}$/, "") : s.image ?? "";
+      const d = /@(sha256:[0-9a-f]{64})$/.exec(id)?.[1];
+      return { container: s.name, image, ...(d ? { digest: d } : {}) };
+    })
+    .filter((s) => s.image.startsWith("mcr.microsoft.com/"));
   return out.length ? { mcr: out } : {};
 }
 

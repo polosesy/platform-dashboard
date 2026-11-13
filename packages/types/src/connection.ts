@@ -54,7 +54,7 @@ export type MeResponse = {
 };
 
 /** Feature → the permission it needs, checked per subscription */
-export type ConnectionFeature = "inventory" | "metrics" | "logs" | "security" | "cost" | "aksCredential" | "flowLogBlobs" | "prometheus";
+export type ConnectionFeature = "inventory" | "metrics" | "logs" | "security" | "cost" | "aksCredential" | "flowLogBlobs" | "prometheus" | "registryPull";
 export type FeatureStatus = "ok" | "missing" | "unknown";
 /** More than read access — a warning, never a block */
 export type PrivilegeWarning = "wildcard" | "write_or_delete" | "role_assignment_write" | "cluster_admin_credential";

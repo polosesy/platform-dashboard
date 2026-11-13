@@ -14,7 +14,7 @@ import { useState } from "react";
 import { Button, Chip, CodeBlock, Panel, Segmented, Select, TextInput } from "@/components/ui";
 import {
   ALL_BLOCKS, BLOCK_RUNTIME, MAX_BLOCKS, PRESETS, PRESET_IDS, RUNTIME_GUIDE, RUNTIME_ORDER, SCRAPE_SNIPPET, addBlock, shortVersion,
-  MAX_SETS, SET_NAME_MAX, kindsOf, moveBlock, presetOf, removeBlock, sameBlocks, setName, unidentified, type BlockId, type BlockSet, type PresetId,
+  MAX_SETS, SET_NAME_MAX, evidenceLines, kindsOf, moveBlock, presetOf, removeBlock, sameBlocks, setName, unidentified, type BlockId, type BlockSet, type PresetId,
 } from "@/lib/workloadBlocks";
 import styles from "../styles.module.css";
 
@@ -152,6 +152,18 @@ export function RuntimeGuide({ apps, blocks, kind, onKind, onClose }: {
                 : t("ob.bl.g.hereN", { n: rt.workloads })}
               {rt && rt.hinted > 0 ? ` · ${t("ob.bl.g.hinted", { n: rt.hinted })}` : ""}
             </dd>
+            {apps?.evidence && (
+              <>
+                <dt>{t("ob.bl.ev.title")}</dt>
+                <dd>
+                  <span className={styles.blKinds}>
+                    {evidenceLines(apps.evidence).map((l) => (
+                      <Chip key={l.source} level={l.level === "warn" ? "warn" : l.level === "ok" ? "ok" : "neutral"}>{t(l.key, l.vars)}</Chip>
+                    ))}
+                  </span>
+                </dd>
+              </>
+            )}
             <dt>{t("ob.bl.g.detect")}</dt>
             <dd><code className={styles.sloCode}>{g.detect}</code> — {t("ob.bl.g.detectHint")}</dd>
             <dt>{t("ob.bl.g.library")}</dt>

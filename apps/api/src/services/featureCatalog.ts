@@ -41,6 +41,11 @@ export const PERMISSIONS: PermissionDef[] = [
     probe: { action: "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read", data: true }, docs: "permissions.md", grant: azRole("<FLOW_LOG_STORAGE_ACCOUNT_RESOURCE_ID>")("Storage Blob Data Reader") },
   { key: "prometheus", plane: "azure", role: "Monitoring Data Reader", roleDefinitionId: "b0d8363b-8ddd-447d-831f-62ca05bff136", scope: { kind: "resource", armType: "microsoft.monitor/accounts" },
     probe: { action: "Microsoft.Monitor/accounts/data/metrics/read", data: true }, docs: "permissions.md", grant: azRole("<MONITOR_WORKSPACE_RESOURCE_ID>")("Monitoring Data Reader") },
+  // 앱 런타임 — the image's own configuration (config blob only). Learn (container-registry-rbac-built-in-roles-*):
+  // on "RBAC Registry Permissions" registries AcrPull (and Reader) pull; "RBAC Registry + ABAC Repository Permissions"
+  // registries need "Container Registry Repository Reader" instead — the probe is the classic pull action.
+  { key: "registryPull", plane: "azure", role: "AcrPull", roleDefinitionId: "7f951dda-4ed3-4680-a7ca-43fe172d538d", scope: { kind: "resource", armType: "microsoft.containerregistry/registries" },
+    probe: { action: "Microsoft.ContainerRegistry/registries/pull/read" }, gate: "imageConfig", docs: "permissions.md", grant: azRole("<REGISTRY_RESOURCE_ID>")("AcrPull") },
   { key: "k8sRead", plane: "kubernetes", role: "aud-dashboard-reader (ClusterRole)", scope: { kind: "kubernetes", manifest: "aud-dashboard-reader.yaml" },
     docs: "aks.md", grant: kubectl("aud-dashboard-reader.yaml") },
   { key: "k8sPodLogs", plane: "kubernetes", role: "aud-dashboard-pod-logs (Role)", scope: { kind: "kubernetes", manifest: "aud-dashboard-pod-logs.yaml", namespace: "<NAMESPACE>" },
@@ -61,7 +66,7 @@ export const FEATURES: FeatureDef[] = [
   { id: "privateLinkUsage", tier: "pro", routes: ["/live-diagram"], requires: ["inventory", "logs"], optional: [] },
   { id: "defenderPosture", tier: "pro", routes: ["/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance"], requires: ["security"], optional: [] },
   { id: "aksClusters", tier: "pro", routes: ["/kubernetes"], requires: ["aksCredential", "k8sRead"], optional: ["inventory"], preconditions: AKS_PRE },
-  { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs"], preconditions: AKS_PRE, platformRole: "operator" },
+  { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs", "registryPull"], preconditions: AKS_PRE, platformRole: "operator" },
   { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec", "security", "logs"], preconditions: AKS_PRE },
   { id: "integratedRisk", tier: "enterprise", routes: ["/security/risk"], requires: ["security", "inventory", "aksCredential", "k8sRead"], optional: [] },
   // Official feeds and the dashboard's own runtime need no Azure permission; Defender findings and cluster images add targets

@@ -12,7 +12,7 @@ import { PermissionTable } from "../PermissionTable";
 import s from "./styles.module.css";
 import ss from "../settings.module.css";
 
-const SUB_FEATURES: ConnectionFeature[] = ["inventory", "metrics", "logs", "security", "cost", "aksCredential", "flowLogBlobs", "prometheus"];
+const SUB_FEATURES: ConnectionFeature[] = ["inventory", "metrics", "logs", "security", "cost", "aksCredential", "flowLogBlobs", "prometheus", "registryPull"];
 const STATUS_TONE: Record<ConnectionCheckStatus, BadgeTone> = { ok: "success", warning: "medium", failed: "high" };
 const FEATURE_TONE: Record<FeatureStatus, BadgeTone> = { ok: "success", missing: "high", unknown: "neutral" };
 

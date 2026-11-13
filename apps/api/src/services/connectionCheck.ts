@@ -88,7 +88,7 @@ export function permissionCells(input: {
   /** resource ids by permission; null = the sample query failed */
   resources: Partial<Record<ConnectionFeature, string[]>> | null;
   probes: ReadonlyMap<string, boolean | null>;
-  gates: { hubbleExec: boolean; podLogs: boolean };
+  gates: { hubbleExec: boolean; podLogs: boolean; imageConfig?: boolean };
 }): Record<PermissionKey, PermissionCell> {
   const out = {} as Record<PermissionKey, PermissionCell>;
   const reachable = input.subs.filter((s) => s.reachable);
@@ -99,6 +99,8 @@ export function permissionCells(input: {
       continue;
     }
     const key = p.key as ConnectionFeature;
+    // an Azure permission behind a connection switch (aks.imageConfig): off = not needed, never "missing"
+    if (p.gate === "imageConfig" && !input.gates.imageConfig) { out[key] = { status: "optInOff", at: p.scope.kind === "subscription" ? "subscription" : "resource", reason: "gateOff" }; continue; }
     if (p.scope.kind === "subscription") {
       out[key] = cellFrom("subscription", reachable.filter((s) => s.features[key] === "ok").length, reachable.length, input.subs.length);
       continue;
@@ -130,10 +132,10 @@ export function pickSamples(
   return out;
 }
 
-// One Resource Graph query for the samples: clusters, workspaces, Azure Monitor workspaces, and the storage
+// One Resource Graph query for the samples: clusters, workspaces, Azure Monitor workspaces, registries, and the storage
 // accounts that flow logs write to (a flow log's storageId)
 const SAMPLE_QUERY =
-  "resources | where type in~ ('microsoft.containerservice/managedclusters','microsoft.operationalinsights/workspaces','microsoft.monitor/accounts')" +
+  "resources | where type in~ ('microsoft.containerservice/managedclusters','microsoft.operationalinsights/workspaces','microsoft.monitor/accounts','microsoft.containerregistry/registries')" +
   " | project id = tolower(id), type = tolower(type)" +
   " | union (resources | where type =~ 'microsoft.network/networkwatchers/flowlogs' | extend sid = tolower(tostring(properties.storageId))" +
   " | where isnotempty(sid) | distinct sid | project id = sid, type = 'microsoft.storage/storageaccounts')";
@@ -287,7 +289,7 @@ export async function checkConnection(env: Env, c: AzureConnection, bearerToken:
   const home = c.mode === "platform" || c.mode === "delegated";
   const hubbleOn = (env.HUBBLE_EXEC_ENABLED ?? env.NODE_ENV !== "production") && (home || c.aks?.hubbleExec === true);
   const podLogsOn = home || (c.aks?.podLogNamespaces?.length ?? 0) > 0;
-  const permissions = permissionCells({ subs: subFeatures, resources, probes, gates: { hubbleExec: hubbleOn, podLogs: podLogsOn } });
+  const permissions = permissionCells({ subs: subFeatures, resources, probes, gates: { hubbleExec: hubbleOn, podLogs: podLogsOn, imageConfig: c.aks?.imageConfig === true } });
   const readiness = FEATURES.map((d) => rollupFeature(d, permissions));
 
   const failed = subscriptions.some((s) => !s.reachable) || workspaces.some((w) => !w.ok) || (visible?.missing ?? 0) > 0;

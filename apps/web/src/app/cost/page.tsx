@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import styles from "./styles.module.css";
 import type { CostSummary, CostTrendResponse, BudgetsResponse } from "@aud/types";
-import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { budgetCard } from "@/lib/costView";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
 import { Cell, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
@@ -37,14 +38,17 @@ export default function CostPage() {
       const [summary, trend, budgets] = await Promise.all([
         fetchJsonWithBearer<CostSummary>(apiUrl("/api/cost/summary", { subscriptionId: sub }), token),
         fetchJsonWithBearer<CostTrendResponse>(apiUrl("/api/cost/trend", { subscriptionId: sub, granularity }), token),
-        fetchJsonWithBearer<BudgetsResponse>(apiUrl("/api/cost/budgets", { subscriptionId: sub }), token),
+        // budgets fail on their own (e.g. 403 without Cost Management Reader on budgets) — the card says why, the page stays
+        fetchJsonWithBearer<BudgetsResponse>(apiUrl("/api/cost/budgets", { subscriptionId: sub }), token)
+          .then((b) => ({ ok: b, failed: null }), (e: unknown) => ({ ok: null, failed: { ...(e instanceof ApiError ? { status: e.status } : {}) } })),
       ]);
-      return { summary, trend, budgets };
+      return { summary, trend, budgets: budgets.ok, budgetsFailed: budgets.failed };
     },
   );
   const summary = data?.summary ?? null;
   const trend = data?.trend ?? null;
   const budgets = data?.budgets ?? null;
+  const card = budgetCard(budgets?.budgets, data?.budgetsFailed ?? null, loading);
 
   const trendMax = useMemo(() => {
     const max = Math.max(0, ...(trend?.data ?? []).map((p) => p.cost));
@@ -86,8 +90,14 @@ export default function CostPage() {
             hint={!summary ? undefined : [t("cost.projectedHint"), summary.previousMonthTotal > 0 ? t("cost.vsPreviousFull", { pct: fmtPct(((summary.forecastedTotal - summary.previousMonthTotal) / summary.previousMonthTotal) * 100) }) : null].filter(Boolean).join(" · ")} />
         </Cell>
         <Cell span={3}>
-          <Stat label={t("cost.budgetUsed")} value={summary?.budgetUsedPercentage != null ? `${summary.budgetUsedPercentage.toFixed(1)}%` : "—"}
-            tone={summary?.budgetUsedPercentage != null ? STAT_TONE[budgetTone(summary.budgetUsedPercentage)] : undefined} />
+          {/* The most-used budget; otherwise why there is no number (no budget · not read · no spend value) — never 0% */}
+          <Stat label={t("cost.budgetUsed")} value={card.state === "ok" ? `${card.pct.toFixed(1)}%` : "—"}
+            tone={card.state === "ok" ? STAT_TONE[budgetTone(card.pct)] : undefined}
+            hint={card.state === "ok" ? t(card.budgets > 1 ? "cost.budgetCard.topOf" : "cost.budgetCard.one", { name: card.name, n: card.budgets })
+              : card.state === "loading" ? undefined
+              : card.state === "failed" ? t(card.status === 403 ? "cost.budgetCard.forbidden" : "cost.budgetCard.failed")
+              : card.state === "none" ? t("cost.budgetCard.none")
+              : t("cost.budgetCard.noSpend", { n: card.budgets })} />
         </Cell>
 
         <Cell span={12}>
@@ -114,7 +124,7 @@ export default function CostPage() {
                 <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.usedPercentage}
                   left={`${b.currentSpend === null ? t("cost.spendNone") : fmtCurrency(b.currentSpend, b.currency)} / ${fmtCurrency(b.amount, b.currency)}`} right={b.timeGrain} />
               ))
-            ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
+            ) : loading ? <LoadingState /> : <EmptyState title={card.state === "failed" ? t(card.status === 403 ? "cost.budgetCard.forbidden" : "cost.budgetCard.failed") : t("cost.noBudgets")} />}
           </Panel>
         </Cell>
 
@@ -125,7 +135,7 @@ export default function CostPage() {
                 <BudgetRow key={b.budgetName} name={b.budgetName} pct={b.amount > 0 && b.forecastedSpend !== null ? (b.forecastedSpend / b.amount) * 100 : null}
                   left={b.forecastedSpend === null ? t("cost.forecastNone") : `${t("cost.forecastAzure")}: ${fmtCurrency(b.forecastedSpend, b.currency)}`} right={`${t("cost.budget")}: ${fmtCurrency(b.amount, b.currency)}`} />
               ))
-            ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noBudgets")} />}
+            ) : loading ? <LoadingState /> : <EmptyState title={card.state === "failed" ? t(card.status === 403 ? "cost.budgetCard.forbidden" : "cost.budgetCard.failed") : t("cost.noBudgets")} />}
           </Panel>
         </Cell>
 

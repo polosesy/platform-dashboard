@@ -44,3 +44,15 @@ test("node pools: no default power / provisioning state", () => {
     assert.ok(!/\?\? "Succeeded"|\|\| "Succeeded"/.test(s), `${f}: default Succeeded`);
   }
 });
+
+test("cost: the budget card — the most-used budget, else why there is no number (never 0 %)", async () => {
+  const ns = await import("../../web/src/lib/costView.ts");
+  const cv = ((ns as unknown as { default?: typeof ns }).default ?? ns) as typeof ns;
+  const b = (budgetName: string, usedPercentage: number | null) => ({ budgetName, amount: 100, currentSpend: usedPercentage, forecastedSpend: null, currency: "USD", timeGrain: "Monthly" as const, usedPercentage });
+  assert.deepEqual(cv.budgetCard(null, null, true), { state: "loading" });
+  assert.deepEqual(cv.budgetCard(null, { status: 403 }, false), { state: "failed", status: 403 });
+  assert.deepEqual(cv.budgetCard([], null, false), { state: "none" });
+  assert.deepEqual(cv.budgetCard([b("a", null)], null, false), { state: "noSpend", budgets: 1 });
+  assert.deepEqual(cv.budgetCard([b("a", 40), b("b", 91.5), b("c", null)], null, false), { state: "ok", pct: 91.5, name: "b", budgets: 3, measured: 2 });
+  assert.ok(!src("../web/src/app/cost/page.tsx").includes("budgetUsedPercentage"), "the card no longer reads a summary field the API never set");
+});

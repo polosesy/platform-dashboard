@@ -923,3 +923,57 @@ export type AppMetricsResponse = {
     imageConfig?: { state: "ok" | "off" | "forbidden" | "unreachable" | "failed" | "none"; read: number; pending: number };
   };
 };
+
+/**
+ * AKS 모니터링 › SLO › RED (트레이스) — requests · errors · duration per service from the trace pipeline's spanmetrics
+ * (`traces_spanmetrics_calls_total`, `traces_spanmetrics_duration_seconds_bucket`): server spans only, /actuator
+ * apart. Duration is a bucket boundary ("≤ 0.5 s"), never interpolated.
+ */
+export type RedWindow = 5 | 15 | 60 | 360 | 1440;
+/** A quantile as the bucket that holds it: `le` = its upper boundary in seconds; null `le` = above the last boundary */
+export type RedQuantile = { le: number | null };
+export type RedEndpoint = {
+  /** the span name (method + route template, as the app's instrumentation names it) */
+  name: string;
+  requests: number;
+  errors: number;
+  p95: RedQuantile | null;
+};
+export type RedService = {
+  /** the OpenTelemetry service.name */
+  service: string;
+  /** The workload of exactly that name (one only) — otherwise null + how many had the name */
+  workload: { namespace: string; name: string; kind: "Deployment" | "StatefulSet" | "DaemonSet" } | null;
+  sameName: number;
+  /** requests in the window (server spans, /actuator excluded) and per second */
+  requests: number;
+  rate: number;
+  /** server spans with status ERROR (on an HTTP server span: 5xx or an exception while handling — not 4xx) */
+  errors: number;
+  /** null when there were no requests */
+  errorRate: number | null;
+  p50: RedQuantile | null; p95: RedQuantile | null; p99: RedQuantile | null;
+  /** /actuator requests per second, apart */
+  actuatorRate: number;
+  /** busiest span names first (≤ 5) */
+  endpoints: RedEndpoint[];
+  /** under RED_MIN_REQUESTS in the window — the ratios are shown, not judged */
+  lowTraffic: boolean;
+};
+export type WorkloadRedResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowMinutes: RedWindow;
+  metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
+  message?: string;
+  /** whether spanmetrics exist at all in this cluster's scope */
+  instrumented: boolean;
+  /** the histogram's boundaries (seconds) */
+  buckets: number[];
+  /** counter resets in the window over all calls series — > 0 = the rates can be inflated (two writers per series); null = not read */
+  resets: number | null;
+  /** services with no workload of the same name are still listed (workload null) */
+  services: RedService[];
+  gaps?: StackQueryGap[];
+};

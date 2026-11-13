@@ -26,6 +26,7 @@ test("the subscription check's operations come from the catalog — unchanged", 
     aksCredential: { action: "Microsoft.ContainerService/managedClusters/listClusterUserCredential/action", scopedBelow: true },
     flowLogBlobs: { action: "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read", data: true, scopedBelow: true },
     prometheus: { action: "Microsoft.Monitor/accounts/data/metrics/read", data: true, scopedBelow: true },
+    registryPull: { action: "Microsoft.ContainerRegistry/registries/pull/read", scopedBelow: true },
   });
 });
 
@@ -167,4 +168,15 @@ test("cluster check rollup: read surface allowed n/m, missing rules named, opt-i
   const off = rollupClusterRules({ read: [{ rule: "pods list", allowed: true }], podLogs: null, hubble: null, over: { secrets: false, exec: true, wildcard: true }, hubbleOn: false });
   assert.deepEqual(off.warnings, ["k8s_exec", "k8s_wildcard"]);
   assert.equal(off.permissions.k8sRead?.status, "ok");
+});
+
+test("registry pull (앱 런타임 image configs): off unless the connection opts in — then checked on sampled registries", () => {
+  const feats = (registryPull: FeatureStatus) => ({ inventory: "ok", metrics: "ok", logs: "ok", security: "ok", cost: "ok", aksCredential: "ok", flowLogBlobs: "ok", prometheus: "ok", registryPull }) as Record<ConnectionFeature, FeatureStatus>;
+  const reg = "/subscriptions/00000000-0000-0000-0000-00000000000a/resourcegroups/rg/providers/microsoft.containerregistry/registries/myreg1";
+  const base = { subs: [{ id: "00000000-0000-0000-0000-00000000000a", reachable: true, features: feats("unknown") }], resources: { registryPull: [reg] } };
+  assert.equal(permissionCells({ ...base, probes: new Map(), gates: { hubbleExec: true, podLogs: true } }).registryPull.status, "optInOff");
+  assert.equal(permissionCells({ ...base, probes: new Map([[reg, true]]), gates: { hubbleExec: true, podLogs: true, imageConfig: true } }).registryPull.status, "ok");
+  assert.equal(permissionCells({ ...base, probes: new Map([[reg, false]]), gates: { hubbleExec: true, podLogs: true, imageConfig: true } }).registryPull.status, "missing");
+  const mon = FEATURES.find((f) => f.id === "aksMonitoring")!;
+  assert.ok(mon.optional.includes("registryPull") && !mon.requires.includes("registryPull"), "optional: the screen works without it");
 });

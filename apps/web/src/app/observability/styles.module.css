@@ -943,6 +943,11 @@
 .sloTable tr { height: var(--row); }
 .sloCellMain { display: block; font-weight: 600; }
 .sloCellSub { display: block; font-size: var(--text-caption); color: var(--subtle); }
+/* RED (트레이스): numbers right-aligned; an endpoint row sits under its service, indented */
+.redNum { text-align: right; white-space: nowrap; }
+.sloTable th.redNum { text-align: right; }
+.redSubRow td { background: var(--panel-sunken); font-size: var(--text-caption); }
+.redEndpoint { display: block; padding-left: 16px; font-family: var(--font-mono); overflow-wrap: anywhere; }
 .sloWhere { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 @media (max-width: 1100px) { .sloWhere { grid-template-columns: minmax(0, 1fr); } }
 .sloWhereStack { display: grid; gap: 16px; }

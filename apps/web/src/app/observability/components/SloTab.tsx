@@ -14,7 +14,7 @@
 //                     targets (on-prem file / Helm values) with a draft filled from the measured tiers · the fields ·
 //                     workloads without HTTP metrics
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { SloService, SloSettingsResponse, SloSli, WorkloadSloResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -26,6 +26,7 @@ import { atParam, type TimeRange, answersAt } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { spanLabel } from "@/lib/sloSettingsView";
 import { ResetForm, SloSettingsView } from "./SloSettings";
+import { RedView } from "./RedView";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
@@ -38,7 +39,7 @@ const MICROMETER_HINT = `management.metrics.distribution.percentiles-histogram.h
 management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
-type View = "services" | "settings" | "guide";
+type View = "services" | "red" | "settings" | "guide";
 
 export function SloTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
   const { t, locale } = useI18n();
@@ -56,24 +57,38 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   const changed = () => { sq.reload(); q.reload(); };
   const [view, setView] = useState<View>("services");
   const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
+  const switcher = (
+    <Segmented label={t("ob.slo.view")} value={view} onChange={setView}
+      items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "red", label: t("ob.slo.view.red") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
+  );
+  // RED reads spanmetrics, not Micrometer — it opens whatever the SLO data's state
+  if (view === "red") {
+    return (
+      <div className={styles.slo}>
+        <Toolbar start={switcher} />
+        <RedView clusterId={clusterId} range={range} nonce={nonce} report={report} />
+      </div>
+    );
+  }
+  const withSwitcher = (body: ReactNode) => <div className={styles.slo}><Toolbar start={switcher} />{body}</div>;
 
-  if (q.error) return <ErrorNotice error={q.error} />;
+  if (q.error) return withSwitcher(<ErrorNotice error={q.error} />);
   if (!d) return <LoadingState label={t("ob.slo.loading")} />;
   if (d.metricsState !== "ok") {
-    return (
+    return withSwitcher(
       <Notice tone={d.metricsState === "noWorkspace" ? "info" : "warning"} title={t(`hb.m.state.${d.metricsState}`)}>
         {t(`hb.m.stateHint.${d.metricsState}`)}{d.message ? ` (${d.message})` : ""}
-      </Notice>
+      </Notice>,
     );
   }
   if (!d.instrumented) {
-    return (
+    return withSwitcher(
       <EmptyState title={t("ob.slo.notInstrumented")}>
         {t("ob.slo.notInstrumentedHint")}
         <div className={styles.sloEmptyCode}>
           <CodeBlock code={MICROMETER_HINT} label={t("ob.slo.g.micrometerLabel")} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
         </div>
-      </EmptyState>
+      </EmptyState>,
     );
   }
 
@@ -93,8 +108,7 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   return (
     <div className={styles.slo}>
       <Toolbar
-        start={<Segmented label={t("ob.slo.view")} value={view} onChange={setView}
-          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />}
+        start={switcher}
         end={<>
           {t(d.at ? "ob.slo.metaAt" : "ob.slo.metaNow", { days: d.windowDays, at: when })}
           <Chip level="info" glyph={false} title={t("ob.slo.windowFixedHint")}>{t("ob.slo.windowFixed", { days: d.windowDays })}</Chip>
