@@ -1,12 +1,13 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-11
+last-verified: 2026-11-16
 covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/page.tsx, apps/web/src/lib/navConfig.ts]
 ---
 # Kubernetes 메뉴 구조 검토 — AKS 클러스터 · AKS 모니터링
 
 > 결론(권장): **합치지 않고 역할을 나눈 뒤, 같은 대상(워크로드)으로 잇는다.**
+> 2026-11-16 추가: 모니터링 탭 검토와 빠진 범주(스토리지 · 용량·확장 · 모든 종류의 경고 신호) — 7절.
 > 'AKS 클러스터' = **구성·리소스**(무엇이 있고 어떻게 설정됐나), 'AKS 모니터링' = **상태·신호**(건강한가).
 > 겹치는 숫자는 한 곳에만 두고, 두 화면을 같은 워크로드로 잇는다. 2026-11-11 구현 — 무엇을 했고 무엇이 남았는지는 맨 아래 6절.
 
@@ -100,3 +101,105 @@ covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/Clust
 | 3 | 메뉴 설명: AKS 클러스터 '구성 · 리소스 — …' / AKS 모니터링 '상태 · 신호 — …' | — |
 
 테스트 `apps/api/test/aksClusterConfig.test.ts`.
+
+## 7. AKS 모니터링 탭 검토 (2026-11-16)
+
+질문: 메뉴 2개(클러스터 · 모니터링)는 적절한가, 모니터링의 탭 6개(클러스터 · 워크로드 · SLO · 노드 · 로그 · 네트워크(Hubble) · 수집 상태)는 적절한가, 무엇이 빠졌나.
+판단은 의견이 아니라 **세 가지 바깥 기준**으로 한다.
+
+### 7.1 근거 (원본)
+
+1. **Microsoft 권장 AKS 경고 규칙 29개**(Prometheus 커뮤니티 규칙 — 클러스터 11 · 노드 2 · 파드 16, [Learn: Recommended alert rules for Kubernetes clusters](https://learn.microsoft.com/azure/azure-monitor/containers/kubernetes-metric-alerts), 2026-07-21판): '무엇을 감시해야 하나'의 공인 목록.
+2. **고객 작업 영역에 실제로 있는 메트릭 이름**(stg, Prometheus `label/__name__/values`, 읽기 전용, 2026-11-16): 2,960개 — 고객 Alloy가 kube-state-metrics를 넓게 수집. 컨트롤 플레인 계열은 없음.
+3. **유료 솔루션의 현재 공식 문서상 구조**(아래 7.2).
+
+| 메트릭 계열 (stg) | 있나 | 대시보드가 쓰나 |
+|---|---|---|
+| `kubelet_volume_stats_*` · `kube_persistentvolume*` (PV 사용량·상태) | 있음 (6 · 14) | **안 씀** |
+| `kube_horizontalpodautoscaler_*` (HPA 목표·최대) | 있음 (10) | **안 씀** |
+| `kube_job_*` · `kube_cronjob_*` (배치 작업) | 있음 (12 · 10) | **안 씀** |
+| `kube_pod_container_status_waiting_reason` (ImagePullBackOff 등) | 있음 | **안 씀**(Warning 이벤트로만 간접) |
+| `kubelet_pod_start_*` (파드 시작 지연) | 있음 (9) | **안 씀** |
+| `kube_node_status_allocatable` (할당 가능량 — 과할당 판정) | 있음 | **안 씀** |
+| `node_netstat_*` (TCP 재전송) | 있음 (42) | 안 씀 |
+| `apiserver_request_total` · `etcd_*` · `scheduler_*` · `cluster_autoscaler_*` (컨트롤 플레인) | **없음** — 수집 꺼짐 | — |
+| `kube_resourcequota` | 없음(쿼터 없음 또는 미수집) | — |
+| Prometheus 경고 규칙 그룹(Resource Graph) | **0개 조회됨** | — |
+
+### 7.2 유료 솔루션의 구분 (공식 문서)
+
+| 제품 | 1차 구분 | 신호를 보는 곳 | 우리에게 없는 범주 |
+|---|---|---|---|
+| Datadog ([Container Monitoring](https://docs.datadoghq.com/containers/monitoring)) | Kubernetes Overview · **Explorer**(리소스 종류별) · **Resource Utilization** · **Autoscaling** · Remediation | 리소스 행의 옆 패널 | 사용률·적정 크기, 자동 확장 |
+| Dynatrace ([Kubernetes app](https://docs.dynatrace.com/docs/observe/infrastructure-monitoring/container-platform-monitoring/kubernetes-app)) | 클러스터 · 노드 · 네임스페이스 · 워크로드의 **건강 집계** + **Warning signals**(문제 조건 먼저) + **Recommendations 탭**(권장 경고가 켜졌나) | 대상 상세 | 모든 종류를 가로지르는 경고 신호 목록, 권장 경고 적용 현황 |
+| Grafana Cloud ([Navigate Kubernetes Monitoring](https://grafana.com/docs/grafana-cloud/kubernetes-monitoring/navigate-k8s-monitoring/)) | Overview(경고 · 효율 탭) · 클러스터 › 네임스페이스 › 워크로드 › 파드 · **비용** · **Configuration** | 각 단계 | 효율, 비용, 경고 |
+| New Relic (Kubernetes Navigator) | Overview · Health · Performance · Resources · Workloads (미리 보기 문서 — 이름은 바뀔 수 있음) | 대상 | 건강·성능 분리 |
+| Azure Portal (AKS **Monitor** 블레이드 — 옛 Insights) | 클러스터 리소스 안에 Kubernetes 리소스 + Monitor(관리형 Prometheus 시각화) · 경고 '권장 설정' | 객체 개요 안 관측 | — |
+
+공통점은 네 가지입니다.
+
+- (a) **대상 계층**(클러스터 › 노드 · 네임스페이스 › 워크로드 › 파드)이 1차 축입니다.
+- (b) **"지금 문제"를 모든 종류에 걸쳐 한 목록**으로 보여 줍니다(Dynatrace warning signals, Datadog overview, Grafana overview).
+- (c) **용량·효율**(요청 대비 사용, 적정 크기, 자동 확장)은 별도 범주입니다.
+- (d) **수집 구성**(Grafana Configuration)과 **경고 적용 현황**(Dynatrace Recommendations)을 제품이 직접 보여 줍니다.
+
+### 7.3 지금 탭의 판정
+
+| 탭 | 축 | 판정 |
+|---|---|---|
+| 클러스터 · 워크로드 | 대상(워크로드) | 강점(히트맵 · 신호 풀이 · 이벤트). 다만 **'지금 문제' 목록이 워크로드만** 본다 — 노드 · PV · Job · HPA 문제는 다른 탭이거나 없음 |
+| SLO | 실천(서비스 수준) | 적절(SLO + RED). 이름은 '서비스 수준'이 내용(RED 포함)에 더 맞음 |
+| 노드 | 대상(노드) | 적절. 노드 풀 · 유지 보수 포함 |
+| 로그 | 신호 종류 | 적절(유료 제품도 로그 검색은 따로) |
+| 네트워크 (Hubble) | 신호 종류 | 적절(`/hubble`과 같은 컴포넌트 — 의도된 중복) |
+| 수집 상태 | 메타(구성) | 적절(Grafana Configuration과 같은 자리). 컨트롤 플레인 수집 꺼짐 · 경고 규칙 0개 같은 **'안 보이는 이유'**도 여기에 |
+
+탭마다 축이 섞여 있습니다(대상 · 신호 종류 · 실천 · 메타). 유료 제품도 같아서 그 자체는 문제가 아닙니다.
+**문제는 빠진 범주 세 가지**입니다.
+
+- **스토리지**: PV 사용량 · 상태
+- **용량 · 확장**: 과할당, 요청 대비 사용, HPA 최대 도달
+- **'지금 문제'가 모든 종류를 보지 않는 것**: Dynatrace의 warning signals와 같은 목록이 없음
+
+### 7.4 권장 경고 29개 기준 커버리지 (지금)
+
+화면에 그 조건이 보이면 ✓, 일부만 보이면 △, 안 보이면 ✗입니다. Prometheus 규칙 29개만 셉니다. 플랫폼 메트릭 규칙 2개(노드 CPU · 메모리)는 노드 탭에 있어서 따로 ✓입니다.
+
+| 묶음 | ✓ | △ | ✗ |
+|---|---|---|---|
+| 클러스터 11 | OOMKilled · DaemonSet 미배치 | ContainerWaiting(Warning 이벤트로만) | CPU · 메모리 과할당 · API 서버 5xx(데이터 없음) · PV 채워짐 · PV inode · PV 오류 · DaemonSet 잘못 배치 · 쿼터 거의 참(데이터 없음) |
+| 노드 2 | 노드 도달 불가 | Ready 깜빡임(계획 외 NotReady만) | — |
+| 파드 16 | Deployment · StatefulSet 레플리카 불일치 · 컨테이너 재시작 · Ready 비율 낮음 · 컨트롤러별 NotReady · 컨테이너 CPU · 메모리 높음 | CrashLooping(재시작만, 이유는 이벤트) · 실패 파드(완료 파드 제외 규칙과 겹침) | PV 사용률 · HPA 불일치 · HPA 최대 도달 · Job 오래됨 · Job 실패 · StatefulSet 세대 불일치 · 파드 시작 지연 |
+| **합** | **10** | **4** | **15** |
+
+✗ 15개 중 **13개는 데이터가 이미 작업 영역에 있습니다**(7.1). 수집이 필요한 것은 API 서버 5xx와 쿼터, 2개뿐입니다.
+
+### 7.5 권장 구성
+
+메뉴 2개(구성 · 리소스 / 상태 · 신호)는 유지합니다. 클라우드 콘솔과 관측 플랫폼의 구분과 같고, 6절에서 구현했습니다. 모니터링 탭은 다음 7개로 정리합니다.
+
+| # | 탭 | 내용 | 변화 |
+|---|---|---|---|
+| 1 | **개요** (기본) | 클러스터 한눈에 보기 + **경고 신호** — 워크로드 · 노드 · PV · Job · HPA · 수집을 한 목록에(문제 조건 먼저, 누르면 그 대상) | 새로(지금의 주의 목록을 모든 종류로) |
+| 2 | 워크로드 | 히트맵 · 표 · K8s 이벤트 + **대기 이유 · 시작 지연** 신호, 종류에 Job · CronJob | 보강 |
+| 3 | 노드 · 스토리지 | 노드 · 노드 풀 · 유지 보수 + **PV**(사용률 · 6시간 추세로 채워짐 예측 · inode · Pending/Failed) | 보강 |
+| 4 | **용량 · 확장** | 할당 가능량 대비 요청(과할당) · 요청 대비 사용(적정 크기 — VPA 권장 재사용) · **HPA**(최대 도달 · 불일치) · 클러스터 자동 확장(수집되면) | 새로 |
+| 5 | 서비스 수준 | SLO · RED (이름만) | 이름 |
+| 6 | 로그 | 그대로 | — |
+| 7 | 네트워크 (Hubble) | 그대로 | — |
+| — | 수집 상태 | 머리의 데이터 소스 칩에서 여는 서랍(또는 마지막 탭 유지) + **컨트롤 플레인 수집 꺼짐 · 권장 경고 규칙 적용 현황**(Resource Graph 규칙 그룹 → 29개 중 켜진 수) | 이동 · 보강 |
+
+**하지 않는 것(이 메뉴 밖)**: 비용 배분(platform-roadmap ③), 변경 타임라인(②). 둘 다 로드맵에 따로 있습니다.
+
+### 7.6 순서 (데이터가 이미 있는 것부터)
+
+1. 경고 신호 수집기 — PV · Job · HPA · 대기 이유 · 시작 지연 · 과할당 · StatefulSet 세대를 PromQL로(값마다 PromQL 동반, 시계열 없음 = 미측정). 권장 경고 ✗ 13개(데이터 있음)와 △ 4개를 화면 조건으로
+2. 개요 탭 — 1의 결과 + 워크로드 주의 목록을 한 목록으로
+3. 용량 · 확장 탭
+4. 수집 상태 — 컨트롤 플레인 · 권장 경고 규칙 현황(읽기만, 켜는 명령은 복사)
+
+**완료의 객관적 기준**
+
+- 권장 경고 29개 중 화면 조건 ✓가 10개에서 27개가 될 것. 남는 2개는 수집이 필요한 API 서버 5xx와 쿼터입니다.
+- 새 값마다 PromQL이 함께 나올 것.
+- stg에서 같은 PromQL을 작업 영역에 직접 물어 화면 숫자와 일치할 것.
