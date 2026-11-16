@@ -17,6 +17,7 @@ import { useAksClusters } from "@/lib/useAksClusters";
 import { HubbleTab } from "./components/HubbleTab";
 import { StackTab } from "./components/StackTab";
 import { SloTab } from "./components/SloTab";
+import { RecommendedAlertsTab } from "./components/RecommendedAlertsTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
@@ -26,9 +27,9 @@ import { useTimeRange } from "@/lib/useTimeRange";
 // Six places, heatmap first (Datadog's Kubernetes overview): the cluster at a glance + every workload as a tile and,
 // under it, the cluster's Warning events (kubectl get events — what is wrong and why Kubernetes says so, on one
 // screen), then SLO, nodes, logs, the network (Hubble) and whether the collection pipeline itself is healthy
-type Tab = "overview" | "slo" | "infra" | "logs" | "hubble" | "stack";
+type Tab = "overview" | "signals" | "slo" | "infra" | "logs" | "hubble" | "stack";
 
-const TABS: Tab[] = ["overview", "slo", "infra", "logs", "hubble", "stack"];
+const TABS: Tab[] = ["overview", "signals", "slo", "infra", "logs", "hubble", "stack"];
 
 export default function ObservabilityPage() {
   return (
@@ -123,7 +124,7 @@ function ObservabilityView() {
       )}
 
       {/* Tabs — not while signed out: every tab would repeat the same sign-in notice (one notice per screen) */}
-      {clusterId && error !== t("auth.state.signin") && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview" || tab === "slo") && (
+      {clusterId && error !== t("auth.state.signin") && (overview || nodesResp || tab === "hubble" || tab === "stack" || tab === "overview" || tab === "slo" || tab === "signals") && (
         <>
           <Tabs label={t("nav.item.aksMonitoring")} idPrefix="obs-tab" value={tab} onChange={setTab} items={TABS.map((id) => ({ id, label: t(`obs.tab.${id}`) }))} />
 
@@ -135,6 +136,7 @@ function ObservabilityView() {
           {tab === "overview" && <WorkloadHeatmap key={`heat:${clusterId}`} clusterId={clusterId} layout={wlView} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "overview" && <EventsSection key={`events:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
 
+          {tab === "signals" && <RecommendedAlertsTab key={`signals:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "slo" && <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && <NodeMaintenancePanel key={`maint:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && nodesResp && (

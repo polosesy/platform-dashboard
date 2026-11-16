@@ -1086,3 +1086,14 @@
 .blSteps { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .blNone { display: grid; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 @media (max-width: 1100px) { .blGuide { grid-template-columns: minmax(0, 1fr); } }
+
+/* 서비스 (APM) › 의존성 — section heads between the three tables */
+.depHead { margin: 16px 0 8px; font-size: var(--text-heading); font-weight: 600; color: var(--ink); }
+
+/* 경고 신호 — Microsoft's recommended rules, one card each (state chip carries the colour + glyph) */
+.raList { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.raRule { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; display: grid; gap: 6px; background: var(--panel); min-width: 0; }
+.raHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.raName { font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
+.raObjects { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-size: var(--text-small); }
+.raObjects .mono, .raMono { font-family: var(--font-mono); overflow-wrap: anywhere; }

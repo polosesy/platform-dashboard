@@ -972,7 +972,7 @@ export type RedService = {
   p50: RedQuantile | null; p95: RedQuantile | null; p99: RedQuantile | null;
   /** /actuator requests per second, apart */
   actuatorRate: number;
-  /** busiest span names first (≤ 5) */
+  /** busiest span names first — every one with requests in the window (≤ RED_TOP_ENDPOINTS) */
   endpoints: RedEndpoint[];
   /** under RED_MIN_REQUESTS in the window — the ratios are shown, not judged */
   lowTraffic: boolean;
@@ -1045,5 +1045,109 @@ export type ServiceGraphResponse = {
   buckets: number[];
   /** the PromQL behind the numbers (the window's increase), for "how was this measured" */
   queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};
+
+/**
+ * 서비스 (APM) › 의존성 — what each application calls outside the traced services and what it waits on, from the
+ * application's own Micrometer metrics (vendor-neutral names): outbound HTTP (`http_client_requests_seconds` — both the
+ * classic `client_name`/`status`/`outcome` tags and the Observation convention `clientname`/`http_status_code`/`error`),
+ * JDBC pools (`hikaricp_*`), Kafka consumers (`kafka_consumer_fetch_manager_records_lag_max`). Timers here carry no
+ * histogram: latency is average (sum / count) and the window's maximum — never a percentile.
+ */
+export type OutboundCall = {
+  /** the target host / client name as the app tags it ("" = not tagged) */
+  target: string;
+  /** which tag set the app uses */
+  convention: "micrometer" | "observation";
+  requests: number;
+  rate: number;
+  /** 5xx, an I/O error with no response, or an exception tag — not 4xx */
+  failed: number;
+  errorRate: number | null;
+  /** seconds; null when not read */
+  avg: number | null;
+  max: number | null;
+  /** requests by status as tagged ("" = untagged) — the busiest first, ≤ 6 */
+  statuses: Array<{ status: string; requests: number }>;
+};
+export type DbPool = {
+  pool: string;
+  /** now */
+  active: number | null;
+  max: number | null;
+  pending: number | null;
+  /** the window's highest pending (threads waiting for a connection) */
+  pendingPeak: number | null;
+  /** connection acquisitions that timed out in the window */
+  timeouts: number | null;
+  /** average wait to get a connection in the window (seconds) */
+  acquireAvg: number | null;
+};
+export type KafkaConsumer = {
+  topic: string;
+  /** records behind (max over the app's consumers of the topic): now and the window's peak */
+  lag: number | null;
+  lagPeak: number | null;
+};
+export type AppDependencies = {
+  application: string;
+  namespace: string | null;
+  /** the service-map node of exactly that name (the trace service.name), when there is one */
+  inServiceMap: boolean;
+  outbound: OutboundCall[];
+  pools: DbPool[];
+  consumers: KafkaConsumer[];
+};
+export type AppDependenciesResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowMinutes: RedWindow;
+  metricsState: WorkloadRedResponse["metricsState"];
+  message?: string;
+  /** whether any of the three families exist in this cluster's scope */
+  instrumented: boolean;
+  apps: AppDependencies[];
+  queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};
+
+
+/**
+ * AKS 모니터링 › 경고 신호 — Microsoft's recommended Kubernetes alert rules (Azure/prometheus-collector, verbatim) evaluated
+ * in this cluster's workspace with each metric family's scope: firing now (held for the rule's "for"), clear, or cannot
+ * fire here (a metric it reads is not in the workspace).
+ */
+export type RecommendedAlertFiring = {
+  /** the labels that name the object (namespace, controller, pod, node, persistentvolumeclaim, …) */
+  object: Record<string, string>;
+  value: number;
+};
+export type RecommendedAlertRule = {
+  alert: string;
+  group: "cluster" | "node" | "pod";
+  /** Azure Monitor severity as the template sets it (0 critical … 4 verbose) */
+  severity: number;
+  forMinutes: number;
+  state: "firing" | "clear" | "noData" | "ambiguous" | "failed";
+  /** noData: the required metrics not in the workspace · ambiguous: metrics written for several clusters */
+  missing?: string[];
+  reason?: string;
+  /** required metrics */
+  metrics: string[];
+  firing: RecommendedAlertFiring[];
+  /** Microsoft's expression, and the one run here (job matchers replaced by this cluster's scope) */
+  original: string;
+  expression?: string;
+};
+export type RecommendedAlertsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadRedResponse["metricsState"];
+  message?: string;
+  source: string;
+  rules: RecommendedAlertRule[];
   gaps?: StackQueryGap[];
 };

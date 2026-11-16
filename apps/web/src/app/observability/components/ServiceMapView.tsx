@@ -10,7 +10,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position, ReactFlowProvider, useNodesInitialized, useReactFlow, type Edge, type Node, type NodeProps } from "reactflow";
 import "reactflow/dist/style.css";
-import type { ServiceGraphResponse } from "@aud/types";
+import type { AppDependencies, ServiceGraphResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useI18n } from "@/lib/i18n";
@@ -20,6 +20,8 @@ import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { RED_WINDOWS, countText, errorRateText, quantileText, rateText } from "@/lib/redView";
 import { NET_GLYPH, apmLinksOf, buildApmMap, type ApmBox, type ApmLink, type ApmMap, type ApmPlacedCard } from "@/lib/apmServiceMap";
+import { depsOf, durationText } from "@/lib/depsView";
+import { useDependencies } from "./DependenciesView";
 import styles from "../../hubble/styles.module.css";
 
 type CardData = { card: ApmPlacedCard; dim: boolean; selected: boolean };
@@ -104,6 +106,8 @@ export function ServiceMapView({ clusterId, range, nonce, report }: { clusterId:
     fetchJsonWithBearer<ServiceGraphResponse>(apiUrl("/api/observability/service-map", { clusterId, window: String(fit.value), at: atQ }), token),
   );
   useRangeRefresh("svcmap", nonce, q.loading, q.reload, report);
+  // What each service calls outside the traces (Micrometer) — the panel's "dependencies" (exact name only)
+  const deps = useDependencies(clusterId, range);
   const d = q.data?.clusterId === clusterId && q.data.windowMinutes === fit.value && answersAt(q.data.at, atQ) ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
@@ -118,12 +122,12 @@ export function ServiceMapView({ clusterId, range, nonce, report }: { clusterId:
   if (!d.instrumented) return <Notice tone="info" title={t("ob.apm.notInstrumented")}>{t("ob.apm.notInstrumentedHint")}</Notice>;
   return (
     <ReactFlowProvider>
-      <ServiceMap d={d} fitKey={`${clusterId}|${fit.value}|${atQ ?? "now"}`} windowChip={fit.differs ? t("ob.apm.window", { n: fit.value }) : null} />
+      <ServiceMap d={d} deps={deps.d?.metricsState === "ok" ? deps.d.apps : undefined} fitKey={`${clusterId}|${fit.value}|${atQ ?? "now"}`} windowChip={fit.differs ? t("ob.apm.window", { n: fit.value }) : null} />
     </ReactFlowProvider>
   );
 }
 
-function ServiceMap({ d, fitKey, windowChip }: { d: ServiceGraphResponse; fitKey: string; windowChip: string | null }) {
+function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; deps?: AppDependencies[]; fitKey: string; windowChip: string | null }) {
   const { t, locale } = useI18n();
   const [failing, setFailing] = useState(false);
   const [search, setSearch] = useState("");
@@ -217,7 +221,7 @@ function ServiceMap({ d, fitKey, windowChip }: { d: ServiceGraphResponse; fitKey
             </ReactFlow>
           )}
         </div>
-        {sel && <CardPanel card={sel} map={map} d={d} onPick={setSelected} onClose={() => setSelected(null)} />}
+        {sel && <CardPanel card={sel} map={map} d={d} deps={depsOf(deps, sel.id)} onPick={setSelected} onClose={() => setSelected(null)} />}
       </div>
 
       <details className={styles.nmAt}>
@@ -229,7 +233,7 @@ function ServiceMap({ d, fitKey, windowChip }: { d: ServiceGraphResponse; fitKey
   );
 }
 
-function CardPanel({ card: c, map, d, onPick, onClose }: { card: ApmPlacedCard; map: ApmMap; d: ServiceGraphResponse; onPick: (id: string) => void; onClose: () => void }) {
+function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlacedCard; map: ApmMap; d: ServiceGraphResponse; deps: AppDependencies | null; onPick: (id: string) => void; onClose: () => void }) {
   const { t, locale } = useI18n();
   const rate = useRate();
   const { inbound, outbound } = apmLinksOf(map, c.id);
@@ -268,6 +272,37 @@ function CardPanel({ card: c, map, d, onPick, onClose }: { card: ApmPlacedCard; 
       )}
       {inbound.length > 0 && <section><h4>{t("hb.inbound", { n: inbound.length })}</h4><ul className={styles.nmLinks}>{inbound.map((l) => row(l, l.source, "in"))}</ul></section>}
       {outbound.length > 0 && <section><h4>{t("hb.outbound", { n: outbound.length })}</h4><ul className={styles.nmLinks}>{outbound.map((l) => row(l, l.target, "out"))}</ul></section>}
+      {deps && (deps.outbound.some((o) => o.requests > 0) || deps.pools.length || deps.consumers.length) ? (
+        <section>
+          <h4>{t("ob.apm.deps")}</h4>
+          <ul className={styles.nmLinks}>
+            {deps.outbound.filter((o) => o.requests > 0).map((o) => (
+              <li key={`o:${o.target}`} className={styles.nmLinkRow} data-tone={o.failed > 0 ? "dropOther" : "forward"}>
+                <span className={styles.nmLinkDir}>⇢</span>
+                <span className={styles.nmLinkPeer} title={o.target}>{o.target || t("ob.dep.untagged")}</span>
+                <span className={styles.nmLinkPort}>HTTP</span>
+                <span className={styles.nmLinkFlows}>{rate(o.rate)} · {t("ob.dep.col.avg")} {durationText(o.avg)}{o.failed ? <b> · {t("ob.apm.failed")} {countText(o.failed, locale)}</b> : null}</span>
+              </li>
+            ))}
+            {deps.pools.map((p) => (
+              <li key={`p:${p.pool}`} className={styles.nmLinkRow} data-tone={(p.pendingPeak ?? 0) > 0 || (p.timeouts ?? 0) > 0 ? "dropOther" : "forward"}>
+                <span className={styles.nmLinkDir}>⛁</span>
+                <span className={styles.nmLinkPeer} title={p.pool}>{p.pool || "—"}</span>
+                <span className={styles.nmLinkPort}>JDBC</span>
+                <span className={styles.nmLinkFlows}>{t("ob.dep.col.active")} {p.active ?? "—"}/{p.max ?? "—"} · {t("ob.dep.col.pending")} {t("ob.dep.peak", { n: p.pendingPeak ?? "—" })} · {t("ob.dep.col.timeouts")} {p.timeouts ?? "—"}</span>
+              </li>
+            ))}
+            {deps.consumers.map((k) => (
+              <li key={`k:${k.topic}`} className={styles.nmLinkRow} data-tone={(k.lagPeak ?? 0) > 0 ? "dropOther" : "forward"}>
+                <span className={styles.nmLinkDir}>⇠</span>
+                <span className={styles.nmLinkPeer} title={k.topic}>{k.topic || "—"}</span>
+                <span className={styles.nmLinkPort}>Kafka</span>
+                <span className={styles.nmLinkFlows}>{t("ob.dep.col.lag")} {t("ob.dep.peak", { n: k.lagPeak ?? "—" })}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <p className={styles.nmAt}>{t("ob.apm.panelNote")}</p>
     </aside>
   );

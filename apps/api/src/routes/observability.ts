@@ -11,6 +11,8 @@ import { getObservabilityStack } from "../services/observabilityStack.js";
 import { SLO_DEFAULTS, getWorkloadSlo } from "../services/workloadSlo.js";
 import { RED_WINDOWS, getWorkloadRed } from "../services/workloadRed.js";
 import { getServiceGraph } from "../services/serviceGraph.js";
+import { getAppDependencies } from "../services/appDependencies.js";
+import { getRecommendedAlerts } from "../services/k8sRecommendedAlerts.js";
 import type { RedWindow } from "@aud/types";
 import {
   SloResetBody, SloSettingsBody, addSloReset, readSloSettings, removeSloReset, sloSettingsDir, writeSloSettings, type SloSettingsDoc,
@@ -227,6 +229,28 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getServiceGraph(env, req.auth?.bearerToken, clusterId, w as RedWindow, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_service_map_failed", "observability");
+    }
+  });
+
+  // 의존성 (APM): outbound HTTP · JDBC pools · Kafka consumer lag per application (Micrometer)
+  router.get("/api/observability/dependencies", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const w = Number(req.query.window ?? 60);
+      if (!RED_WINDOWS.includes(w as RedWindow)) return res.status(400).json({ error: "invalid_window", allowed: RED_WINDOWS });
+      res.json(await getAppDependencies(env, req.auth?.bearerToken, clusterId, w as RedWindow, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_dependencies_failed", "observability");
+    }
+  });
+
+  // 경고 신호: Microsoft's recommended Kubernetes alert rules evaluated in this cluster's workspace
+  router.get("/api/observability/recommended-alerts", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getRecommendedAlerts(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_recommended_alerts_failed", "observability");
     }
   });
 

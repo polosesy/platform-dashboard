@@ -75,3 +75,25 @@ export function redTotals(services: RedService[]): { services: number; active: n
     withErrors: services.filter((s) => s.errors > 0).length,
   };
 }
+
+export type EndpointRow = { service: string; workload: RedService["workload"]; name: string; requests: number; errors: number; errorRate: number | null; p95: RedService["p95"] };
+export type EndpointSort = "errors" | "requests" | "p95";
+/**
+ * Pure: every endpoint of every service as one table (AppDynamics business transactions, Datadog resources) — sorted
+ * by errors, requests or p95 (the bucket's boundary; above the last = slowest), filtered by a search over service and
+ * endpoint (the route template as people read it)
+ */
+export function endpointRows(services: RedService[], sort: EndpointSort = "errors", search = ""): EndpointRow[] {
+  const q = search.trim().toLowerCase();
+  const rows: EndpointRow[] = services.flatMap((s) => s.endpoints.map((e) => ({
+    service: s.service, workload: s.workload, name: e.name, requests: e.requests, errors: e.errors,
+    errorRate: e.requests > 0 ? e.errors / e.requests : null, p95: e.p95,
+  }))).filter((r) => !q || r.service.toLowerCase().includes(q) || endpointLabel(r.name).toLowerCase().includes(q));
+  const p95 = (r: EndpointRow) => (r.p95 === null ? -1 : r.p95.le === null ? Number.POSITIVE_INFINITY : r.p95.le);
+  const by: Record<EndpointSort, (a: EndpointRow, b: EndpointRow) => number> = {
+    errors: (a, b) => b.errors - a.errors || b.requests - a.requests,
+    requests: (a, b) => b.requests - a.requests,
+    p95: (a, b) => p95(b) - p95(a) || b.requests - a.requests,
+  };
+  return rows.sort((a, b) => by[sort](a, b) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0) || (a.name < b.name ? -1 : 1));
+}

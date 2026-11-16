@@ -172,7 +172,7 @@ covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/Clust
 | 파드 16 | Deployment · StatefulSet 레플리카 불일치 · 컨테이너 재시작 · Ready 비율 낮음 · 컨트롤러별 NotReady · 컨테이너 CPU · 메모리 높음 | CrashLooping(재시작만, 이유는 이벤트) · 실패 파드(완료 파드 제외 규칙과 겹침) | PV 사용률 · HPA 불일치 · HPA 최대 도달 · Job 오래됨 · Job 실패 · StatefulSet 세대 불일치 · 파드 시작 지연 |
 | **합** | **10** | **4** | **15** |
 
-✗ 15개 중 **13개는 데이터가 이미 작업 영역에 있습니다**(7.1). 수집이 필요한 것은 API 서버 5xx와 쿼터, 2개뿐입니다.
+✗ 15개 중 **11개는 데이터가 이미 작업 영역에 있습니다**(7.1). 쿼터 규칙 3개(과할당 2 · 거의 참)는 `kube_resourcequota`가, API 서버 5xx는 `rest_client_requests_total`이 필요합니다(2026-11-16 정정 — 처음엔 13이라고 썼음). 2026-11-16부터 탭 '경고 신호'가 30개 원문을 이 작업 영역에 직접 평가합니다([apm-parity.md](apm-parity.md) 4절).
 
 ### 7.5 권장 구성
 

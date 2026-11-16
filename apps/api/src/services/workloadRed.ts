@@ -28,7 +28,11 @@ import { runAll } from "./observabilityStack.js";
 export const RED_WINDOWS: RedWindow[] = [5, 15, 60, 360, 1440];
 /** Fewer requests than this in the window: ratios and quantiles are shown, not judged */
 export const RED_MIN_REQUESTS = 20;
-export const RED_TOP_ENDPOINTS = 5;
+/**
+ * Endpoints kept per service — every one with requests in the window up to this cap (2026-11-16: was the top 5; stg has
+ * 92 active server endpoints an hour, at most 126 span names in one service — the 엔드포인트 view lists them all)
+ */
+export const RED_TOP_ENDPOINTS = 200;
 const QUERY_TIMEOUT_MS = 20_000;
 
 const SERVER = 'span_kind=~"(?i)(span_kind_)?server"';

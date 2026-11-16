@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-16
-covers: [apps/api/src/services/serviceGraph.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -26,19 +26,19 @@ covers: [apps/api/src/services/serviceGraph.ts, apps/web/src/lib/apmServiceMap.t
 |---|---|---|---|---|---|
 | 1 | **서비스 맵** — 트레이스로 본 호출 관계, 실패 · 지연 | Datadog Service Map · Dynatrace Smartscape · AppD Flow Map(동기 실선/비동기 점선) · NR Service map | **✓ (2026-11-16)** | `traces_service_graph_*` 연결 33개 | 이 문서와 함께 구현 — 3절 |
 | 2 | 서비스 목록 + RED | Datadog Service page · NR APM summary | ✓ | spanmetrics | 서비스 (APM) › RED |
-| 3 | 엔드포인트(트랜잭션)별 | AppD Business Transactions · Datadog resources | △ | spanmetrics `span_name` | RED 패널에 상위 5개만 — 전체 표·정렬은 다음 |
+| 3 | 엔드포인트(트랜잭션)별 | AppD Business Transactions · Datadog resources | **✓ (2026-11-16)** | spanmetrics `span_name` (서버 444 · 1시간 활성 92) | 서비스 (APM) › 엔드포인트 — 모든 서비스, 오류·요청·p95 정렬 |
 | 4 | SLO · 오류 예산 · 소진율 경보 | Datadog SLO · Dynatrace SLO | ✓ | Micrometer | 서비스 (APM) › 서비스 SLO |
 | 5 | 런타임(JVM · Node …) | 공통 | ✓ | jvm_* 27 · process_* | 히트맵 JVM 여유 · 앱 종류 |
 | 6 | 로그 ↔ 트레이스 연결 | 공통 | ✓ | Loki + traceId | 로그 줄 → Tempo 링크 |
-| 7 | **외부 호출 · 의존성**(HTTP 클라이언트 · DB) | Datadog external services · AppD backends · NR externals | ✗ | `http_client_requests_seconds` 앱 8개(client_name · uri · status) · hikaricp 24 | 맵이 그리지 못하는 '트레이스 밖 대상'(외부 API · DB) — 다음 1순위 |
-| 8 | **메시징 지연**(Kafka 소비 지연) | Datadog Data Streams · Dynatrace queues | ✗ | `kafka_consumer_fetch_manager_records_lag*` 15 | 맵에는 메시징 선만 |
+| 7 | **외부 호출 · 의존성**(HTTP 클라이언트 · DB) | Datadog external services · AppD backends · NR externals | **✓ (2026-11-16)** | `http_client_requests_seconds` 두 규약(앱·대상 32쌍) · hikaricp 풀 11 | 서비스 (APM) › 의존성 + 서비스 맵 카드 패널 — 히스토그램이 없어 평균·최대만 |
+| 8 | **메시징 지연**(Kafka 소비 지연) | Datadog Data Streams · Dynatrace queues | **✓ (2026-11-16)** | `kafka_consumer_fetch_manager_records_lag_max` (앱·토픽 9) | 의존성 보기 · 맵 패널 — 지금과 기간 중 최고 |
 | 9 | 오류 추적(예외 묶음) | Datadog Error Tracking · NR Errors inbox | △ | Loki 예외 클래스 | 로그 지표의 워크로드 × 예외 Top 15 — 서비스 · 처음 본 시각 · 추세 묶음은 다음 |
 | 10 | 분산 트레이스 검색 · 워터폴 | Datadog Trace Explorer · AppD snapshots · NR distributed tracing | ✗(링크만) | Tempo(클러스터 안) | 인증 없는 백엔드를 직접 읽지 않는 원칙 — Grafana `/api/ds/query` 연결별 opt-in(관측 스택 절 2단계)으로 |
 | 11 | 지속 프로파일링 | Datadog Continuous Profiler · Dynatrace | ✗(링크만) | Pyroscope(클러스터 안) | 10과 같은 길 |
 | 12 | 배포 추적 · 버전 비교 | Datadog deployment tracking · Dynatrace release | ✗ | Argo CD 출처(정책 화면) · `kube_*_metadata_generation` | platform-roadmap ② 변경 타임라인 |
 | 13 | 자동 기준선 · 이상 탐지 | AppD dynamic baselines · Dynatrace Davis | ✗ | 모든 시계열 | 결정 대기 — 임계값 없는 색 금지 원칙과 충돌하지 않게 '평소 대비 n배'를 사실로 |
-| 14 | Kubernetes 상태 경고 신호 | Dynatrace warning signals · Recommendations | △ ✓10/29 | ✗ 15 중 13은 데이터 있음 | kubernetes-ia 7.6 순서 |
-| 15 | 경고 규칙 작성 · 적용 현황 | 공통 | △ | Resource Graph 규칙 그룹 0개 조회 | 알림 센터는 받기만 |
+| 14 | Kubernetes 상태 경고 신호 | Dynatrace warning signals · Recommendations | **✓ (2026-11-16)** | Microsoft 권장 30개 원문 평가 | 탭 '경고 신호' — 4절 |
+| 15 | 경고 규칙 작성 · 적용 현황 | 공통 | △ | Resource Graph 규칙 그룹 0개 조회 | '경고 신호'가 권장 규칙을 켜면 어떻게 될지(울림·평가 불가)를 보여 줌 — 규칙 작성은 아직 |
 | 16 | RUM · 합성 | 공통 | ✗ | 없음 | 범위 밖(브라우저 · 외부 프로브) |
 | 17 | 클라우드 중립 데이터 원천 | 공통(에이전트 기반) | ✗ | — | 1절 — Prometheus 호환 엔드포인트 추상화 |
 
@@ -79,15 +79,66 @@ covers: [apps/api/src/services/serviceGraph.ts, apps/web/src/lib/apmServiceMap.t
 
 테스트는 `serviceGraph.test.ts`입니다.
 
-## 4. 다음 순서 (데이터가 이미 있는 것부터)
+## 4. 구현 — 의존성 · 엔드포인트 · 경고 신호 (2026-11-16, 2차)
 
-1. **외부 호출 · 의존성**(7): `http_client_requests_seconds`(client_name · uri · status) + hikaricp(대기 · 시간 초과)
-   - 서비스 카드에 '외부 대상' 줄을 붙입니다. 맵의 트레이스 밖 대상을 채웁니다.
-2. **Kubernetes 경고 신호**(14): PV · Job · HPA · 대기 이유 · 시작 지연 · 과할당 → 개요 탭(kubernetes-ia 7.5)
-3. **메시징 지연**(8): Kafka `records_lag_max` → 맵의 메시징 선과 소비 서비스 카드
-4. **엔드포인트 표 · 오류 묶음**(3 · 9): spanmetrics 전체 `span_name` 정렬 표, Loki 예외 클래스를 서비스 · 처음 본 시각으로
+**의존성** `GET /api/observability/dependencies` → `services/appDependencies.ts`
+
+원본(stg, 1시간)을 먼저 확인했습니다.
+
+- 외부 HTTP는 태그 규약이 **둘**입니다.
+  - 기존 Micrometer `client_name`·`status`·`outcome`·`exception`: 535건
+  - Observation `clientname`·`http_status_code`·`error`: 1,618건, 앱 6개
+- `_bucket` 0개입니다. 히스토그램이 없으므로 **평균(합÷개수)과 최대만** 보여 주고 분위수는 주장하지 않습니다.
+- 수집기는 하나(alloy)입니다.
+- `application` 라벨이 트레이스 서비스 이름과 **정확히 같은 앱은 11개 중 10개**입니다. 그 10개만 서비스 맵 카드와 잇습니다.
+
+실패의 정의는 서버 쪽과 같습니다: 5xx, 응답 없는 I/O 오류(`status`가 IO_ERROR·CLIENT_ERROR), 예외·error 태그. 4xx는 실패가 아닙니다.
+
+**독립 질의 대조**
+
+| 항목 | 집계 | 독립 질의 |
+|---|---|---|
+| 앱·대상 쌍 | 32 | 32 |
+| 요청 | 1,895 | 1,895 |
+| DB 풀 | 11 | 11 |
+| Kafka | 9 | 9 |
+
+평균이 없는 20쌍은 모두 이 기간 요청이 0건입니다.
+
+**엔드포인트**: RED가 서비스마다 상위 5개 대신 **요청이 있는 엔드포인트 전부**(상한 200)를 줍니다. 서비스 (APM) › 엔드포인트가 모든 서비스를 한 표로 보여 줍니다(오류·요청·p95 정렬).
+
+**경고 신호** `GET /api/observability/recommended-alerts` → `services/k8sRecommendedAlerts.ts` + `msRecommendedAlerts.ts`
+
+- 규칙: Microsoft [recommendedMetricAlerts.json](https://github.com/Azure/prometheus-collector/blob/main/GeneratedMonitoringArtifacts/Default/recommendedMetricAlerts.json) 30개 **원문**(MIT)
+- 바꾸는 것은 `job="…"` 자리뿐입니다. 그 메트릭 계열을 이 작업 영역에서 실제로 쓰는 범위(클러스터 · 여럿이면 job · 수집기)를 넣습니다.
+- `for` 확인: `E and count_over_time(E[for:step]) >= n`
+- 지금 시계열이 없는 계열은 1일을 되돌아보고 판단합니다. `waiting_reason`은 대기 중일 때만 생깁니다.
+
+stg 실측 결과(30개):
+
+| 상태 | 수 | 내용 |
+|---|---|---|
+| 정상 | 24 | |
+| **울림** | 1 | KubePodFailedState — Failed 파드 1개, 독립 질의로 확인 |
+| **메트릭 없음** | 4 | 쿼터 3개(`kube_resourcequota` 없음) + **KubeJobFailed**(`kube_job_failed` 없음 — 작업 영역에는 `kube_job_status_failed`) |
+| **식 오류** | 1 | KubePVUsageHigh — 파드에 PVC가 여럿이면 `on(namespace,cluster,pod,container)` 짝이 중복 |
+
+'메트릭 없음'과 '식 오류'는 **켜도 이 클러스터에서 울리지 않는 규칙**입니다. 정상으로 세지 않습니다.
+
+**바로잡음**: kubernetes-ia 7.4에서 '✗ 15 중 13개는 데이터 있음'이라고 썼지만, 쿼터 규칙 2개는 `kube_resourcequota`가 없어 **11개**가 맞습니다.
+
+**벤더 중립 메모**: Azure Monitor 작업 영역은 라벨 값을 대소문자 구분 없이 비교합니다(실측: `phase=~"Running|Pending"`도 소문자 값 200개와 일치). Microsoft 식의 `phase="failed"`는 여기서는 맞지만, 일반 Prometheus(AMP·GMP)의 kube-state-metrics 값 `Failed`와는 맞지 않습니다. 17번 작업 때 규칙을 대소문자 무시 정규식으로 옮겨야 합니다.
+
+## 5. 다음 순서 (데이터가 이미 있는 것부터)
+
+1. ~~외부 호출 · 의존성(7)~~ · ~~Kubernetes 경고 신호(14)~~ · ~~메시징 지연(8)~~ · ~~엔드포인트 표(3)~~ — 4절에서 구현
+4. **오류 묶음**(9): Loki 예외 클래스를 서비스 · 처음 본 시각으로
+   - 보류 이유: '처음 본 시각'은 Loki에 긴 기간 정규식 질의가 필요합니다. 이는 작은 Loki를 과부하시킵니다(6시간 상한 원칙).
+   - 방법 후보: 앱의 `logback_events_total{level="error"}`(Micrometer — 메트릭이라 싸게 30일)로 시작 시각을 잡고, 예외 클래스는 6시간 안 Loki로.
 5. **Prometheus 호환 엔드포인트**(17): 연결에 `prometheus {url, auth: azure | sigv4 | google | bearer}`
    - `resolvePrometheusTarget` 뒤로 숨깁니다. 질의 · 집계 코드는 그대로입니다.
+   - 보류 이유: 검증할 AWS·GCP 환경이 없어, 확인하지 못한 인증 코드를 내보내지 않습니다.
+   - 먼저 할 것: 시험용 EKS/AMP 또는 GKE/GMP, 또는 자체 Prometheus 하나와 대소문자 규칙 전환(4절 메모).
 6. **결정 대기**: 트레이스 · 프로파일 읽기(10 · 11, Grafana 경유 opt-in), 기준선(13), 배포 추적(12 — 로드맵 ②)
 
 ## 출처
