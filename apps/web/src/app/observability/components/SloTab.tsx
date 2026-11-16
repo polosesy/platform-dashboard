@@ -30,6 +30,8 @@ import { RedView } from "./RedView";
 import { ServiceMapView } from "./ServiceMapView";
 import { DependenciesView } from "./DependenciesView";
 import { EndpointsView } from "./EndpointsView";
+import { ErrorsView } from "./ErrorsView";
+import { RolloutsView } from "./RolloutsView";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
@@ -42,7 +44,7 @@ const MICROMETER_HINT = `management.metrics.distribution.percentiles-histogram.h
 management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
-type View = "map" | "deps" | "endpoints" | "services" | "red" | "settings" | "guide";
+type View = "map" | "deps" | "endpoints" | "errors" | "rollouts" | "services" | "red" | "settings" | "guide";
 
 export function SloTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
   const { t, locale } = useI18n();
@@ -60,9 +62,17 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   const changed = () => { sq.reload(); q.reload(); };
   const [view, setView] = useState<View>("map");
   const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
+  // Two rows: the APM views, and — when SLO is chosen — its own three (one row of nine did not fit)
+  const sloView = view === "services" || view === "settings" || view === "guide";
   const switcher = (
-    <Segmented label={t("ob.slo.view")} value={view} onChange={setView}
-      items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "deps", label: t("ob.slo.view.deps") }, { id: "endpoints", label: t("ob.slo.view.endpoints") }, { id: "services", label: t("ob.slo.view.services") }, { id: "red", label: t("ob.slo.view.red") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
+    <>
+      <Segmented label={t("ob.slo.view")} value={sloView ? "slo" : view} onChange={(v) => setView(v === "slo" ? "services" : v)}
+        items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "red", label: t("ob.slo.view.red") }, { id: "endpoints", label: t("ob.slo.view.endpoints") }, { id: "deps", label: t("ob.slo.view.deps") }, { id: "errors", label: t("ob.slo.view.errors") }, { id: "rollouts", label: t("ob.slo.view.rollouts") }, { id: "slo", label: t("ob.slo.view.slo") }]} />
+      {sloView ? (
+        <Segmented label={t("ob.slo.view.sloSub")} value={view} onChange={setView}
+          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
+      ) : null}
+    </>
   );
   // The service map reads the service graph, RED spanmetrics — not Micrometer: both open whatever the SLO data's state
   if (view === "map") {
@@ -70,6 +80,14 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
       <div className={styles.slo}>
         <Toolbar start={switcher} />
         <ServiceMapView clusterId={clusterId} range={range} nonce={nonce} report={report} />
+      </div>
+    );
+  }
+  if (view === "errors" || view === "rollouts") {
+    return (
+      <div className={styles.slo}>
+        <Toolbar start={switcher} />
+        {view === "errors" ? <ErrorsView clusterId={clusterId} range={range} nonce={nonce} report={report} /> : <RolloutsView clusterId={clusterId} range={range} nonce={nonce} report={report} />}
       </div>
     );
   }

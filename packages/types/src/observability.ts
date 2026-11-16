@@ -976,6 +976,8 @@ export type RedService = {
   endpoints: RedEndpoint[];
   /** under RED_MIN_REQUESTS in the window — the ratios are shown, not judged */
   lowTraffic: boolean;
+  /** the same window a week earlier (null = not read, or no series then) — a fact to compare with, not a baseline model */
+  weekAgo?: { requests: number; rate: number; errors: number; errorRate: number | null; p95: RedQuantile | null } | null;
 };
 export type WorkloadRedResponse = {
   clusterId: string;
@@ -1149,5 +1151,79 @@ export type RecommendedAlertsResponse = {
   message?: string;
   source: string;
   rules: RecommendedAlertRule[];
+  gaps?: StackQueryGap[];
+};
+
+
+/**
+ * 서비스 (APM) › 오류 — error events per application from the apps' own logging metrics (`log4j2_events_total` — Log4j2
+ * Micrometer binder; `logback_events_total` when an app uses Logback): the window's ERROR / FATAL / WARN counts and an
+ * hourly 7-day series (first and last error hour, the days' totals, "new in the last 24 h"). The metric carries no
+ * exception class — which exception: the logs tab's insights (Loki, ≤ 6 h).
+ */
+export type AppErrorSeries = {
+  application: string;
+  namespace: string | null;
+  workload: { namespace: string; name: string; kind: "Deployment" | "StatefulSet" | "DaemonSet" } | null;
+  /** the window's events by level (null = not read) */
+  error: number | null;
+  fatal: number | null;
+  warn: number | null;
+  /** ERROR + FATAL per day, oldest first (7 days ending at the read time) */
+  daily: Array<{ day: string; errors: number }>;
+  /** first / last hour with an ERROR or FATAL event in the 7 days (ISO), null = none */
+  firstSeen: string | null;
+  lastSeen: string | null;
+  /** errors in the last 24 h and none in the 6 days before */
+  newIn24h: boolean;
+};
+export type AppErrorsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowMinutes: RedWindow;
+  metricsState: WorkloadRedResponse["metricsState"];
+  message?: string;
+  /** which logging metric answered (null = neither exists) */
+  metric: "log4j2_events_total" | "logback_events_total" | null;
+  apps: AppErrorSeries[];
+  queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};
+
+/**
+ * 서비스 (APM) › 배포 — rollouts (a new ReplicaSet of a Deployment, kube-state-metrics) with the image before and after
+ * and the same-name service's server spans 30 minutes before vs after (Datadog deployment tracking, Dynatrace release
+ * comparison). A rollback to an existing ReplicaSet creates none — not shown.
+ */
+export type RolloutRed = { requests: number; errors: number; errorRate: number | null; p95: RedQuantile | null };
+export type Rollout = {
+  namespace: string;
+  deployment: string;
+  replicaset: string;
+  /** the new ReplicaSet's creation time (ISO) */
+  at: string;
+  /** container → image of the new ReplicaSet's pods now (empty when none run) and of the Deployment's pods a minute before */
+  images: Array<{ container: string; image: string }>;
+  previousImages: Array<{ container: string; image: string }> | null;
+  /** the trace service of exactly the Deployment's name, when there is one */
+  service: string | null;
+  before: RolloutRed | null;
+  after: RolloutRed | null;
+  /** minutes the "after" covers (< 30 when the rollout is recent) */
+  afterMinutes: number;
+};
+export type RolloutsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowDays: 1 | 7;
+  metricsState: WorkloadRedResponse["metricsState"];
+  message?: string;
+  rollouts: Rollout[];
+  /** rollouts in the window beyond the ones compared (most recent first are compared) */
+  more: number;
+  buckets: number[];
+  queries: Record<string, string>;
   gaps?: StackQueryGap[];
 };

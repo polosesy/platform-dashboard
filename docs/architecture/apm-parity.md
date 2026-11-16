@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-16
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -32,11 +32,11 @@ covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appDepende
 | 6 | 로그 ↔ 트레이스 연결 | 공통 | ✓ | Loki + traceId | 로그 줄 → Tempo 링크 |
 | 7 | **외부 호출 · 의존성**(HTTP 클라이언트 · DB) | Datadog external services · AppD backends · NR externals | **✓ (2026-11-16)** | `http_client_requests_seconds` 두 규약(앱·대상 32쌍) · hikaricp 풀 11 | 서비스 (APM) › 의존성 + 서비스 맵 카드 패널 — 히스토그램이 없어 평균·최대만 |
 | 8 | **메시징 지연**(Kafka 소비 지연) | Datadog Data Streams · Dynatrace queues | **✓ (2026-11-16)** | `kafka_consumer_fetch_manager_records_lag_max` (앱·토픽 9) | 의존성 보기 · 맵 패널 — 지금과 기간 중 최고 |
-| 9 | 오류 추적(예외 묶음) | Datadog Error Tracking · NR Errors inbox | △ | Loki 예외 클래스 | 로그 지표의 워크로드 × 예외 Top 15 — 서비스 · 처음 본 시각 · 추세 묶음은 다음 |
+| 9 | 오류 추적(예외 묶음) | Datadog Error Tracking · NR Errors inbox | **✓ 메트릭 부분 (2026-11-16)** · 예외 클래스는 △ | `log4j2_events_total` 앱 17 · 25일+ / Loki 예외 클래스(≤6시간) | 서비스 (APM) › 오류 — 앱별 ERROR·FATAL·WARN, 7일 날짜별, 처음·마지막 시각, 24시간 새로 생김. 예외 클래스 라벨은 메트릭에 없음 → 로그 지표(Loki) |
 | 10 | 분산 트레이스 검색 · 워터폴 | Datadog Trace Explorer · AppD snapshots · NR distributed tracing | ✗(링크만) | Tempo(클러스터 안) | 인증 없는 백엔드를 직접 읽지 않는 원칙 — Grafana `/api/ds/query` 연결별 opt-in(관측 스택 절 2단계)으로 |
 | 11 | 지속 프로파일링 | Datadog Continuous Profiler · Dynatrace | ✗(링크만) | Pyroscope(클러스터 안) | 10과 같은 길 |
-| 12 | 배포 추적 · 버전 비교 | Datadog deployment tracking · Dynatrace release | ✗ | Argo CD 출처(정책 화면) · `kube_*_metadata_generation` | platform-roadmap ② 변경 타임라인 |
-| 13 | 자동 기준선 · 이상 탐지 | AppD dynamic baselines · Dynatrace Davis | ✗ | 모든 시계열 | 결정 대기 — 임계값 없는 색 금지 원칙과 충돌하지 않게 '평소 대비 n배'를 사실로 |
+| 12 | 배포 추적 · 버전 비교 | Datadog deployment tracking · Dynatrace release | **✓ (2026-11-16)** | `kube_replicaset_created`·`_owner`·`kube_pod_container_info` (7일 롤아웃 70) | 서비스 (APM) › 배포 — 이미지 이전 → 지금, 서비스 직전 30분 vs 직후. 기존 ReplicaSet으로의 롤백은 잡히지 않음 |
+| 13 | 자동 기준선 · 이상 탐지 | AppD dynamic baselines · Dynatrace Davis | **△ 사실 비교 (2026-11-16)** | spanmetrics `offset 7d` 482 시계열 | RED에 '1주 전 같은 시각' 요청·오류·p95와 ×배 — 모델·색 없음. 학습형 기준선·이상 경보는 결정 대기 |
 | 14 | Kubernetes 상태 경고 신호 | Dynatrace warning signals · Recommendations | **✓ (2026-11-16)** | Microsoft 권장 30개 원문 평가 | 탭 '경고 신호' — 4절 |
 | 15 | 경고 규칙 작성 · 적용 현황 | 공통 | △ | Resource Graph 규칙 그룹 0개 조회 | '경고 신호'가 권장 규칙을 켜면 어떻게 될지(울림·평가 불가)를 보여 줌 — 규칙 작성은 아직 |
 | 16 | RUM · 합성 | 공통 | ✗ | 없음 | 범위 밖(브라우저 · 외부 프로브) |
@@ -129,17 +129,59 @@ stg 실측 결과(30개):
 
 **벤더 중립 메모**: Azure Monitor 작업 영역은 라벨 값을 대소문자 구분 없이 비교합니다(실측: `phase=~"Running|Pending"`도 소문자 값 200개와 일치). Microsoft 식의 `phase="failed"`는 여기서는 맞지만, 일반 Prometheus(AMP·GMP)의 kube-state-metrics 값 `Failed`와는 맞지 않습니다. 17번 작업 때 규칙을 대소문자 무시 정규식으로 옮겨야 합니다.
 
+## 4b. 구현 — 오류 · 배포 · 1주 전 비교 (2026-11-16, 3차)
+
+**원본 확인과 정정**
+
+- 5절의 계획 "오류 시작 시각은 `logback_events_total`로"는 **틀렸습니다.** 그 이름은 작업 영역에 있지만 시계열이 0개입니다(지금도, 29일 전도). 앱들이 쓰는 것은 `log4j2_events_total`입니다.
+  - 앱 17개 · 파드 37개, 수집기 alloy 하나
+  - 25일 넘게 보존, 1시간 리셋 0회
+  - level 라벨: trace…fatal
+  - **예외 클래스 라벨은 없습니다.**
+
+**오류** `GET /api/observability/app-errors` → `services/appErrors.ts`
+
+- 기간 ERROR·FATAL·WARN은 앱마다 소수 둘째 자리까지 유지합니다. 앱마다 먼저 정수로 반올림하면 730 vs 731처럼 합이 어긋났습니다.
+- 7일은 **UTC 달력 날짜**, 범위 질의 하나(1시간 단계)입니다. 처음·마지막 오류 시각, '24시간 안에 새로 생김'(그 전 6일엔 없음)도 여기서 계산합니다.
+
+| 대조 | 집계 | 독립 질의 |
+|---|---|---|
+| 1시간 ERROR+FATAL | 23 | 23 |
+| 1시간 WARN | 731 | 731 |
+| 24시간 시간별 합 | 112 | 112 |
+| 7일 날짜별 합 | 8,801.12 | 같은 정의의 서버 하위 질의 8,801.13 |
+
+처음엔 7일 합이 8,797 vs 9,109로 맞지 않았습니다. '끝에서 7×24시간'은 달력 날짜 8개에 걸치는데 날짜 목록이 7개라 가장 오래된 날의 시간을 버린 것이 원인이었습니다. 지금은 첫 날 자정부터 읽습니다. 단일 `increase` 8,777과의 0.3% 차이는 계산 방식 차이입니다. 7일 동안 시계열이 74 → 316개로 바뀌어(롤아웃) 외삽이 달라집니다.
+
+**배포** `GET /api/observability/rollouts?days=1|7` → `services/rollouts.ts`
+
+- 롤아웃 = Deployment 소유의 새 ReplicaSet
+- 이미지: 지금은 새 ReplicaSet의 파드, 이전은 생성 1분 전 그 Deployment의 다른 ReplicaSet 파드(소유 관계로 고름 — 이름 접두사 `orders-`는 `orders-api`까지 잡는 버그였음)
+- 같은 이름 트레이스 서비스의 서버 스팬을 직전 30분과 직후(최대 30분)로 나란히 둡니다. 최근 10개를 비교합니다.
+
+| 대조 | 집계 | 독립 질의 |
+|---|---|---|
+| 1일 롤아웃 수 | 9 | 9 |
+| 한 롤아웃의 직전 30분 요청 | 2.07 | 서버 스팬 − actuator 2.07 |
+
+**1주 전 비교**: RED가 같은 창을 `offset 7d`로 다시 읽어 서비스마다 요청·오류율·p95와 ×배를 보여 줍니다. 대조: 1주 전 요청 18,310 = 18,310. 그 시각 지금은 3,417로, 1주 전의 0.19배였습니다.
+
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 
 1. ~~외부 호출 · 의존성(7)~~ · ~~Kubernetes 경고 신호(14)~~ · ~~메시징 지연(8)~~ · ~~엔드포인트 표(3)~~ — 4절에서 구현
-4. **오류 묶음**(9): Loki 예외 클래스를 서비스 · 처음 본 시각으로
-   - 보류 이유: '처음 본 시각'은 Loki에 긴 기간 정규식 질의가 필요합니다. 이는 작은 Loki를 과부하시킵니다(6시간 상한 원칙).
-   - 방법 후보: 앱의 `logback_events_total{level="error"}`(Micrometer — 메트릭이라 싸게 30일)로 시작 시각을 잡고, 예외 클래스는 6시간 안 Loki로.
+4. ~~오류 묶음(9)의 메트릭 부분~~ — 4b절에서 구현
+   - 남은 것: **예외 클래스별** 처음 본 시각.
+   - 보류 이유: 메트릭에 예외 클래스가 없고, Loki로 긴 기간 정규식은 6시간 상한 원칙에 걸립니다.
+   - 방법 후보: 앱이 예외 클래스를 메트릭 태그로 내보내거나(Micrometer `exception` 태그가 붙는 카운터), Loki recording rule로 예외 클래스별 카운터를 만드는 것. 둘 다 고객 파이프라인 변경이라 결정이 필요합니다.
 5. **Prometheus 호환 엔드포인트**(17): 연결에 `prometheus {url, auth: azure | sigv4 | google | bearer}`
    - `resolvePrometheusTarget` 뒤로 숨깁니다. 질의 · 집계 코드는 그대로입니다.
    - 보류 이유: 검증할 AWS·GCP 환경이 없어, 확인하지 못한 인증 코드를 내보내지 않습니다.
    - 먼저 할 것: 시험용 EKS/AMP 또는 GKE/GMP, 또는 자체 Prometheus 하나와 대소문자 규칙 전환(4절 메모).
-6. **결정 대기**: 트레이스 · 프로파일 읽기(10 · 11, Grafana 경유 opt-in), 기준선(13), 배포 추적(12 — 로드맵 ②)
+6. **결정 대기**(구현하지 않은 이유)
+   - 트레이스 검색 · 프로파일(10 · 11): 클러스터 안 Tempo·Pyroscope는 인증이 없습니다. 직접 읽지 않는다는 원칙이 있어 Grafana `/api/ds/query` 경유(연결별 opt-in · Viewer 역할 범위)로 할지 정해야 합니다.
+   - 학습형 기준선 · 이상 경보(13): '1주 전 비교'는 사실이라 구현했습니다. 모델이 정하는 기준선은 '임계값 없이 색칠하지 않는다'는 원칙과 맞춰야 해서 결정이 필요합니다.
+   - 규칙 작성(15): 플랫폼이 읽기 전용이라 Azure에 쓰지 않습니다. '경고 신호'가 찾은 고칠 점(KubeJobFailed의 메트릭 이름, KubePVUsageHigh의 짝 중복)을 반영한 규칙 그룹 템플릿을 **복사용**으로 줄지 결정이 필요합니다.
+   - RUM · 합성(16): 브라우저와 외부 프로브가 필요해 범위 밖입니다.
 
 ## 출처
 

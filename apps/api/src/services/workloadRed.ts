@@ -46,6 +46,10 @@ export function redQueries(C: string, ksm: string, minutes: number): Record<stri
   return {
     calls: `sum by (service_name, span_name, status_code) (increase(traces_spanmetrics_calls_total${sel([])}[${minutes}m]))`,
     buckets: `sum by (service_name, span_name, le) (increase(traces_spanmetrics_duration_seconds_bucket${sel(['span_name!~"(?i).*actuator.*"'])}[${minutes}m]))`,
+    // The same window a week earlier (baseline as a fact, not a model — stg keeps the series ≥ 7 days: 482 series at
+    // offset 7d on 2026-11-16): per service, /actuator apart, no span breakdown
+    calls7d: `sum by (service_name, status_code) (increase(traces_spanmetrics_calls_total${sel(['span_name!~"(?i).*actuator.*"'])}[${minutes}m] offset 7d))`,
+    buckets7d: `sum by (service_name, le) (increase(traces_spanmetrics_duration_seconds_bucket${sel(['span_name!~"(?i).*actuator.*"'])}[${minutes}m] offset 7d))`,
     resets: `sum(resets(traces_spanmetrics_calls_total{${C}}[${minutes}m]))`,
     workloads: `group by (namespace, deployment) (${k("kube_deployment_created")}) or group by (namespace, statefulset) (${k("kube_statefulset_created")}) or group by (namespace, daemonset) (${k("kube_daemonset_created")})`,
   };
@@ -110,6 +114,26 @@ export function aggregateRed(raw: Record<string, PromRow[]>, minutes: number, fa
     named.set(name, [...(named.get(name) ?? []), { namespace: ns, name, kind }]);
   }
   const noDuration = failed.has("buckets");
+  // A week earlier: requests · errors · p95 per service (null when the query failed or the service had no series then)
+  const week = new Map<string, { requests: number; errors: number; cum: Map<number, number> }>();
+  const wk = (s: string) => week.get(s) ?? week.set(s, { requests: 0, errors: 0, cum: new Map() }).get(s)!;
+  if (!failed.has("calls7d")) for (const r of raw.calls7d ?? []) {
+    const s = r.metric.service_name;
+    if (!s) continue;
+    wk(s).requests += r.value;
+    if (isError(r.metric.status_code)) wk(s).errors += r.value;
+  }
+  if (!failed.has("buckets7d")) for (const r of raw.buckets7d ?? []) {
+    const s = r.metric.service_name, le = leOf(r.metric.le);
+    if (!s || le === null || !week.has(s)) continue;
+    week.get(s)!.cum.set(le, (week.get(s)!.cum.get(le) ?? 0) + r.value);
+  }
+  const weekAgoOf = (s: string): RedService["weekAgo"] => {
+    if (failed.has("calls7d")) return null;
+    const w = week.get(s);
+    if (!w) return null;
+    return { requests: round(w.requests), rate: round(w.requests / (minutes * 60), 4), errors: round(w.errors), errorRate: w.requests > 0 ? round(w.errors / w.requests, 5) : null, p95: failed.has("buckets7d") ? null : quantileBucket(w.cum, 0.95) };
+  };
   const services: RedService[] = [...by.entries()]
     .filter(([, a]) => a.requests > 0 || a.actuator > 0)
     .map(([service, a]) => {
@@ -127,6 +151,7 @@ export function aggregateRed(raw: Record<string, PromRow[]>, minutes: number, fa
         actuatorRate: round(a.actuator / (minutes * 60), 4),
         // no user request at all is not "low traffic": the view lists those apart (only /actuator in the window)
         endpoints, lowTraffic: a.requests > 0 && a.requests < RED_MIN_REQUESTS,
+        weekAgo: weekAgoOf(service),
       };
     })
     // busiest first, then by name — a service with errors is not reordered: there is no threshold to rank by

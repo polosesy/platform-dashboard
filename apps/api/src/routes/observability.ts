@@ -13,6 +13,8 @@ import { RED_WINDOWS, getWorkloadRed } from "../services/workloadRed.js";
 import { getServiceGraph } from "../services/serviceGraph.js";
 import { getAppDependencies } from "../services/appDependencies.js";
 import { getRecommendedAlerts } from "../services/k8sRecommendedAlerts.js";
+import { getAppErrors } from "../services/appErrors.js";
+import { getRollouts } from "../services/rollouts.js";
 import type { RedWindow } from "@aud/types";
 import {
   SloResetBody, SloSettingsBody, addSloReset, readSloSettings, removeSloReset, sloSettingsDir, writeSloSettings, type SloSettingsDoc,
@@ -241,6 +243,30 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getAppDependencies(env, req.auth?.bearerToken, clusterId, w as RedWindow, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_dependencies_failed", "observability");
+    }
+  });
+
+  // 오류 (APM): error events per application from the apps' logging metrics (log4j2 / logback events)
+  router.get("/api/observability/app-errors", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const w = Number(req.query.window ?? 60);
+      if (!RED_WINDOWS.includes(w as RedWindow)) return res.status(400).json({ error: "invalid_window", allowed: RED_WINDOWS });
+      res.json(await getAppErrors(env, req.auth?.bearerToken, clusterId, w as RedWindow, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_app_errors_failed", "observability");
+    }
+  });
+
+  // 배포 (APM): rollouts (new ReplicaSets) with images before / after and the service's spans 30 min before vs after
+  router.get("/api/observability/rollouts", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const days = Number(req.query.days ?? 1);
+      if (days !== 1 && days !== 7) return res.status(400).json({ error: "invalid_days", allowed: [1, 7] });
+      res.json(await getRollouts(env, req.auth?.bearerToken, clusterId, days, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_rollouts_failed", "observability");
     }
   });
 

@@ -15,6 +15,7 @@ import { Chip, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel 
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { RED_WINDOWS, countText, endpointLabel, errorRateText, quantileText, rateText, redTotals, splitByTraffic } from "@/lib/redView";
+import { ratioText } from "@/lib/apmMoreView";
 import styles from "../styles.module.css";
 
 export function RedView({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
@@ -90,13 +91,18 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                       <td className={styles.redNum}>
                         <span className={styles.sloCellMain}>{rate(s.rate)}</span>
                         <span className={styles.sloCellSub} title={t("ob.red.countHint")}>{t("ob.red.requestsIn", { n: countText(s.requests, lc) })}</span>
+                        {s.weekAgo !== undefined ? <span className={styles.sloCellSub} title={t("ob.red.weekAgoHint")}>{s.weekAgo ? t("ob.red.weekAgo", { v: rate(s.weekAgo.rate), x: ratioText(s.rate, s.weekAgo.rate) ?? "—" }) : t("ob.red.weekAgoNone")}</span> : null}
                       </td>
                       <td className={styles.redNum}>
                         <span className={styles.sloCellMain}>{errorRateText(s.errorRate)}</span>
                         <span className={styles.sloCellSub}>{t("ob.red.errorsN", { n: countText(s.errors, lc) })}</span>
+                        {s.weekAgo ? <span className={styles.sloCellSub} title={t("ob.red.weekAgoHint")}>{t("ob.red.weekAgoErr", { v: errorRateText(s.weekAgo.errorRate) })}</span> : null}
                       </td>
                       <td className={styles.redNum}>{quantileText(s.p50, d.buckets)}</td>
-                      <td className={styles.redNum}>{quantileText(s.p95, d.buckets)}</td>
+                      <td className={styles.redNum}>
+                        <span className={styles.sloCellMain}>{quantileText(s.p95, d.buckets)}</span>
+                        {s.weekAgo ? <span className={styles.sloCellSub} title={t("ob.red.weekAgoHint")}>{t("ob.red.weekAgoP95", { v: quantileText(s.weekAgo.p95, d.buckets) })}</span> : null}
+                      </td>
                       <td className={styles.redNum}>{quantileText(s.p99, d.buckets)}</td>
                       <td className={styles.redAction}>
                         {s.endpoints.length ? (
