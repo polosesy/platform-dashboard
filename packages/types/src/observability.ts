@@ -191,7 +191,8 @@ export type LogContextResponse = {
 /** Where pod logs can come from, in the order the API tries them (services/podLogSources.ts) */
 export type PodLogSource = "loki" | "kubelet" | "containerInsights";
 /** pastRange = the source reads only up to now (kubelet tails the live log) — skipped for a range in the past */
-export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "busy" | "failed" | "pastRange";
+/** lokiOnly = a whole workload's lines are read from Loki only (kubelet and Container Insights answer per pod) */
+export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "busy" | "failed" | "pastRange" | "lokiOnly";
 /** One source the API tried for these logs — the page says which answered and why the others did not */
 export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string };
 
@@ -210,6 +211,22 @@ export type ObservabilityLogsResponse = {
   attempts?: PodLogAttempt[];
   /** Lines whose secrets were masked (logRedaction.ts) */
   redactions?: number;
+  /** What was read: one pod, or every pod of a workload (Loki only) */
+  scope?: { kind: "pod" | "workload"; name: string };
+  /** The level filter the API applied — server side, with the log insights' rules (lokiLogs ERROR_LINE · WARN_LINE) */
+  level?: "error" | "warn" | null;
+  /** The minutes read (a level filter reads at most 6 h — less than asked when the range is longer) */
+  windowMinutes?: number;
+  /**
+   * The scope's ERROR and WARN lines in the whole window — counted by Loki with the insights' rules (null = not
+   * counted: not Loki, over 6 h or the count failed — never 0)
+   */
+  counts?: { error: number | null; warn: number | null } | null;
+  /**
+   * How much of the window the lines cover: complete = every matching line of the window is here; else the newest
+   * `limit` lines, the oldest at `from` (2026-11-16: 300 lines of a busy pod were 25 of 60 minutes, unsaid)
+   */
+  coverage?: { complete: boolean; from: string | null };
 };
 
 // ── Namespace / Pod Discovery (for Logs tab dropdown) ──

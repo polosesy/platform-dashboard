@@ -44,8 +44,28 @@ export function workloadSelector(namespace: string, workload: string, pods: stri
   return `{namespace="${namespace}", pod=~"${alts.join("|")}"}`;
 }
 
-/** ERROR / FATAL lines — the customer's ANSI-aware pattern (works before `level` metadata exists) */
-export const ERROR_FILTER = String.raw`|~ "(^|\\s|\\x1b\\[[0-9;]*m)(ERROR|FATAL)(\\s|\\x1b|:)|\\[(error|fatal)\\]:"`;
+// ── Level rules — ONE definition for the log-insight counts, the viewer's ERROR / WARN+ filter (server side, so the
+// list holds every such line of the window — 2026-11-16: the counts said ERROR 4 while the viewer, filtering the last
+// 300 lines of one pod in the browser, showed 0 and 3) and kubelet / Container Insights lines (no Loki to ask) ──
+/** ERROR / FATAL lines — the customer's ANSI-aware pattern (works before `level` metadata exists), as LogQL text */
+const ERROR_RE = String.raw`(^|\\s|\\x1b\\[[0-9;]*m)(ERROR|FATAL)(\\s|\\x1b|:)|\\[(error|fatal)\\]:`;
+/** WARN lines — the same customer pattern */
+const WARN_RE = String.raw`(^|\\s|\\x1b\\[[0-9;]*m)WARN(\\s|\\x1b)|\\[warn\\]:`;
+export const ERROR_FILTER = `|~ "${ERROR_RE}"`;
+export const WARN_FILTER = `|~ "${WARN_RE}"`;
+/** WARN and worse: one regex (LogQL line filters cannot be OR-ed) */
+export const WARN_PLUS_FILTER = `|~ "${ERROR_RE}|${WARN_RE}"`;
+/** The same rules in JavaScript (the LogQL text unescaped once — a test keeps them equal) */
+export const ERROR_LINE = /(^|\s|\x1b\[[0-9;]*m)(ERROR|FATAL)(\s|\x1b|:)|\[(error|fatal)\]:/;
+export const WARN_LINE = /(^|\s|\x1b\[[0-9;]*m)WARN(\s|\x1b)|\[warn\]:/;
+export const LEVEL_RULE_SOURCES = { error: ERROR_RE, warn: WARN_RE } as const;
+export type LogLevelFilter = "error" | "warn";
+/** Pure: whether a line passes the viewer's level filter by the counting rules (warn = WARN or worse) */
+export function passesLevelRule(text: string, level: LogLevelFilter): boolean {
+  return ERROR_LINE.test(text) || (level === "warn" && WARN_LINE.test(text));
+}
+/** Filters' longest window: a day of regex over a busy pod overloads a small Loki (the insights stop at 6 h too) */
+export const LEVEL_MAX_MINUTES = 360;
 const EXCEPTION = String.raw`| regexp "(?P<exc>[A-Z][A-Za-z0-9_$]*(?:Exception|Error))\\b"`;
 
 export function logQueries(selector: string, errorsOnly: boolean, minutes: number) {
@@ -202,8 +222,6 @@ export async function getWorkloadLogs(
 
 // ── Log insights (AKS 모니터링 › 로그): counts, not lines ──
 
-/** WARN lines — the customer's ANSI-aware pattern, like ERROR_FILTER */
-export const WARN_FILTER = String.raw`|~ "(^|\\s|\\x1b\\[[0-9;]*m)WARN(\\s|\\x1b)|\\[warn\\]:"`;
 /** Error-ish lines naming an exception class (their "Error & Exception Explorer" query) */
 const EXCEPTION_LINES = String.raw`|~ "(?i)(exception|\\berror\\b)" | regexp "(?P<exc>[A-Z][A-Za-z0-9_$]*(?:Exception|Error))" | exc!=""`;
 const BUCKETS = 30;
@@ -438,7 +456,8 @@ export async function getLogContext(
   }
 }
 
-const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }>(50, 10_000);
+type PodLogRead = { state: LokiState; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean; counts: { error: number | null; warn: number | null } | null; minutes: number };
+const podLogCache = new CacheManager<PodLogRead>(50, 10_000);
 
 /**
  * A pod's lines from Loki (the same gate as kubelet logs — the route checks it): `{namespace, pod[, container]}`
@@ -447,29 +466,46 @@ const podLogCache = new CacheManager<{ state: LokiState; message?: string; lines
  */
 export async function getPodLogsFromLoki(
   env: Env, bearerToken: string | undefined, clusterId: string,
-  opts: { namespace: string; pod: string; container?: string; minutes: number; limit: number; at?: number },
-): Promise<{ state: LokiState | "notConfigured"; message?: string; retryAt?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean }> {
+  opts: { namespace: string; pod?: string; workload?: string; container?: string; minutes: number; limit: number; at?: number; level?: LogLevelFilter },
+): Promise<Omit<PodLogRead, "state"> & { state: LokiState | "notConfigured"; retryAt?: string }> {
   assertSignedInForCluster(env, bearerToken);
+  // A level filter is regex over the window: at most LEVEL_MAX_MINUTES (the answer says what was read)
+  const minutes = opts.level ? Math.min(opts.minutes, LEVEL_MAX_MINUTES) : opts.minutes;
+  const none = { lines: [] as PodLogEntry[], redactions: 0, truncated: false, counts: null, minutes };
   const cfg = lokiConfig(env, clusterId);
-  if (!cfg) return { state: "notConfigured", lines: [], redactions: 0, truncated: false };
-  for (const v of [opts.namespace, opts.pod, ...(opts.container ? [opts.container] : [])]) {
+  if (!cfg) return { state: "notConfigured", ...none };
+  for (const v of [opts.namespace, ...(opts.pod ? [opts.pod] : []), ...(opts.container ? [opts.container] : [])]) {
     if (!NAME.test(v)) throw new HttpError(400, "invalid_name", "namespace / pod / container is not a Kubernetes name");
   }
-  const selector = `{namespace="${opts.namespace}", pod="${opts.pod}"${opts.container ? `, container="${opts.container}"` : ""}}`;
+  if (!opts.workload && !opts.pod) throw new HttpError(400, "missing_param", "podName or workload is required");
+  // One pod, or every pod of a workload (the log insights count per workload — the viewer can read the same scope)
+  const selector = opts.workload ? workloadSelector(opts.namespace, opts.workload)
+    : `{namespace="${opts.namespace}", pod="${opts.pod}"${opts.container ? `, container="${opts.container}"` : ""}}`;
+  const filter = opts.level === "error" ? ` ${ERROR_FILTER}` : opts.level === "warn" ? ` ${WARN_PLUS_FILTER}` : "";
   const limit = Math.min(Math.max(opts.limit, 1), MAX_LINES);
-  const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.minutes}:${limit}:${opts.at ?? "now"}`;
+  const key = `${cachePrefix(bearerToken)}:loki-pod:${clusterId.toLowerCase()}:${selector}:${opts.level ?? "all"}:${minutes}:${limit}:${opts.at ?? "now"}`;
   const hit = podLogCache.get(key);
   if (hit) return hit;
   const wait = backingOff(cfg);
-  if (wait) return { ...wait, lines: [], redactions: 0, truncated: false };
+  if (wait) return { ...wait, ...none };
+  // The scope's ERROR / WARN lines in the whole window — the insight rules, so the two panels can be compared; over
+  // LEVEL_MAX_MINUTES there are no counts (null — never 0)
+  const counted = minutes <= LEVEL_MAX_MINUTES;
+  const evalAt = String(opts.at === undefined ? nowNs() : BigInt(opts.at) * 1_000_000_000n);
+  const count = (f: string) => !counted ? Promise.resolve(null)
+    : lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time(${selector} ${f} [${minutes}m]))`, time: evalAt }, 15_000)
+      .then((r) => Math.round(Number(r.body.data?.result?.[0]?.value?.[1] ?? 0)) || 0).catch(() => null);
   try {
-    const res = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, ...range(opts.minutes, opts.at), limit: String(limit), direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE);
-    const { lines, redactions } = podEntries(res.body, opts.pod);
-    const out = { state: "ok" as const, lines: lines.slice(-limit), redactions, truncated: res.truncated };
+    const [res, error, warn] = await Promise.all([
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: `${selector}${filter}`, ...range(minutes, opts.at), limit: String(limit), direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE),
+      count(ERROR_FILTER), count(WARN_FILTER),
+    ]);
+    const { lines, redactions } = podEntries(res.body, opts.pod ?? "");
+    const out: PodLogRead = { state: "ok", lines: lines.slice(-limit), redactions, truncated: res.truncated, minutes, counts: counted ? { error, warn } : null };
     podLogCache.set(key, out);
     return out;
   } catch (e) {
-    return { ...(await classify(cfg, e)), lines: [], redactions: 0, truncated: false };
+    return { ...(await classify(cfg, e)), ...none };
   }
 }
 

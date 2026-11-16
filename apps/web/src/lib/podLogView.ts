@@ -31,6 +31,33 @@ export function levelCounts(lines: PodLogEntry[]): Record<LogLevel, number> {
   return n;
 }
 
+/**
+ * Pure: the level filter's numbers. The API filters on the server with the log insights' rules and counts the scope's
+ * ERROR / WARN lines over the whole window (Loki) — those are the numbers; without counts (kubelet, Container
+ * Insights, over 6 h) there are none (null), never the lines that happen to be loaded (2026-11-16: "ERROR 0" next to
+ * "ERROR 4" — one counted 300 lines of one pod, the other an hour of every pod).
+ */
+export function levelNumbers(counts: { error: number | null; warn: number | null } | null | undefined): { error: number | null; warnPlus: number | null } {
+  if (!counts) return { error: null, warnPlus: null };
+  return { error: counts.error, warnPlus: counts.error === null || counts.warn === null ? null : counts.error + counts.warn };
+}
+
+export type Coverage = { kind: "complete" } | { kind: "partial"; from: string; minutes: number } | { kind: "unknown" };
+/**
+ * Pure: how much of the window the lines cover — all of it, or the newest lines back to `from` (minutes of the
+ * window, rounded up, never more than the window)
+ */
+export function coverageOf(cov: { complete: boolean; from: string | null } | undefined, windowMinutes: number, endIso: string): Coverage {
+  if (!cov) return { kind: "unknown" };
+  if (cov.complete) return { kind: "complete" };
+  const from = cov.from ? Date.parse(cov.from) : NaN, end = Date.parse(endIso);
+  if (!Number.isFinite(from) || !Number.isFinite(end)) return { kind: "unknown" };
+  return { kind: "partial", from: cov.from!, minutes: Math.min(windowMinutes, Math.max(1, Math.ceil((end - from) / 60_000))) };
+}
+
+/** Pure: the pod's tail for a row when lines of several pods are listed (`…-drjd7` → `drjd7`) */
+export const podTail = (pod: string): string => pod.split("-").pop() ?? pod;
+
 /** A row's identity: the exact timestamp when Loki gave one (two lines can share a millisecond), else its position */
 export const lineKey = (l: PodLogEntry, i: number): string => (l.tsNs ? `${l.tsNs}:${i}` : `i${i}`);
 

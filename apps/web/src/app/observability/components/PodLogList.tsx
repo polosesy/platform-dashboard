@@ -12,7 +12,7 @@ import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { Button, Chip, CopyButton, EmptyState, Notice } from "@/components/ui";
-import { LEVEL_GLYPH, firstLine, hasContext, labelRows, levelOf, lineKey, lineText } from "@/lib/podLogView";
+import { LEVEL_GLYPH, firstLine, hasContext, labelRows, levelOf, lineKey, lineText, podTail } from "@/lib/podLogView";
 import styles from "../styles.module.css";
 
 const CONTEXT_LINES = 20;
@@ -20,7 +20,11 @@ const CONTEXT_MORE = 50;
 
 type ContextState = { loading: boolean; lines: number; data?: LogContextResponse; error?: string };
 
-export function PodLogList({ clusterId, namespace, logs, empty }: { clusterId: string; namespace: string; logs: PodLogEntry[]; empty: string }) {
+export function PodLogList({ clusterId, namespace, logs, empty, showPod }: {
+  clusterId: string; namespace: string; logs: PodLogEntry[]; empty: string;
+  /** Lines of several pods (a whole workload): each row names its pod */
+  showPod?: boolean;
+}) {
   const { t, locale } = useI18n();
   const getToken = useApiToken();
   const [open, setOpen] = useState<string | null>(null);
@@ -63,6 +67,7 @@ export function PodLogList({ clusterId, namespace, logs, empty }: { clusterId: s
               <span className={styles.lgGlyph} aria-hidden="true">{LEVEL_GLYPH[level]}</span>
               <span className={styles.lgMeta}>
                 <time dateTime={l.timestamp}>{time(l.timestamp)}</time>
+                {showPod && l.podName ? <span title={l.podName}> · {podTail(l.podName)}</span> : null}
                 {l.containerName ? <span> · {l.containerName}</span> : null}
                 {l.stream !== "unknown" ? <span> · {l.stream}</span> : null}
               </span>

@@ -10,7 +10,7 @@ import { useApiToken } from "@/lib/useApiToken";
 import styles from "../styles.module.css";
 import { Chip, EmptyState, Notice, Panel, SearchInput, Segmented, Select, Toggle } from "@/components/ui";
 import { PodLogList } from "./PodLogList";
-import { levelCounts, passesLevel, type LevelFilter } from "@/lib/podLogView";
+import { coverageOf, levelNumbers, type LevelFilter } from "@/lib/podLogView";
 import { atParam, podLogMinutesFor, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 
@@ -38,6 +38,11 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [streamFilter, setStreamFilter] = useState<"all" | "stdout" | "stderr">("all");
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
+  // What the viewer reads: one pod, or every pod of a workload — the scope the log insights count (Loki only)
+  const [scope, setScope] = useState<"pod" | "workload">("pod");
+  const [pickedWorkload, setPickedWorkload] = useState("");
+  // The answer's own words on what it holds: counts over the window, how much of it the lines cover
+  const [meta, setMeta] = useState<(Pick<ObservabilityLogsResponse, "counts" | "coverage" | "windowMinutes" | "scope" | "level" | "generatedAt" | "at"> & { key: string }) | null>(null);
 
   const [nsPodItems, setNsPodItems] = useState<NamespacePodItem[]>([]);
   const [logs, setLogs] = useState<PodLogEntry[]>([]);
@@ -131,10 +136,17 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     }
   }, [containerOptions]);  
 
+  // The workload of the pod in view (the API's controller name), or the one picked in the log insights
+  const workload = useMemo(() => pickedWorkload || nsPodItems.find((i) => i.namespace === namespace && i.podName === podName)?.workloadName || "",
+    [pickedWorkload, nsPodItems, namespace, podName]);
+  const wholeWorkload = scope === "workload" && !!workload;
+  // The numbers belong to one read: shown only while the scope · level · range they were read for is the one picked
+  const readKey = `${wholeWorkload ? `w:${workload}` : `p:${podName}:${containerName}`}:${levelFilter}:${sinceMinutes}:${at ?? "now"}`;
+
   // A slow read for the previous pod must not land under the pod picked after it
   const requestSeq = useRef(0);
   const fetchLogs = useCallback(async () => {
-    if (!clusterId || !namespace || !podName) return;
+    if (!clusterId || !namespace || (!podName && !wholeWorkload)) return;
     const seq = ++requestSeq.current;
 
     // 현재 pod의 유효 컨테이너 목록 확인 (stale container name 방지)
@@ -148,11 +160,18 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     try {
       const token = await getApiToken();
       const data = await fetchJsonWithBearer<ObservabilityLogsResponse>(
-        apiUrl("/api/observability/logs", { clusterId, namespace, podName, limit: 300, sinceMinutes, at, container: safeContainer }),
+        // ERROR / WARN+ are filtered by the API over the whole window (the insights' rules) — never in the browser
+        // over whatever lines were loaded
+        apiUrl("/api/observability/logs", {
+          clusterId, namespace, limit: 300, sinceMinutes, at,
+          ...(wholeWorkload ? { workload } : { podName, container: safeContainer }),
+          level: levelFilter === "all" ? undefined : levelFilter,
+        }),
         token,
       );
       if (seq !== requestSeq.current) return;
       setLogs(data.logs);
+      setMeta({ ...data, key: readKey });
       setSource(data.source ?? null);
       setAttempts(data.attempts ?? []);
     } catch (e) {
@@ -160,13 +179,13 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [clusterId, namespace, podName, containerName, sinceMinutes, at, getApiToken, nsPodItems]);
+  }, [clusterId, namespace, podName, containerName, sinceMinutes, at, getApiToken, nsPodItems, wholeWorkload, workload, levelFilter, readKey]);
 
-  // A new pod / range reads at once; the page's refresh reads again
+  // A new pod / scope / level / range reads at once; the page's refresh reads again
   useEffect(() => {
-    if (!namespace || !podName) return;
+    if (!namespace || (!podName && !wholeWorkload)) return;
     void fetchLogs();
-  }, [fetchLogs, namespace, podName]);
+  }, [fetchLogs, namespace, podName, wholeWorkload]);
   const refreshAll = useCallback(() => { void fetchNamespaces(); void fetchLogs(); }, [fetchNamespaces, fetchLogs]);
   useRangeRefresh("logs", nonce, loading, refreshAll, report);
 
@@ -185,16 +204,18 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
     if (hasStreamInfo && streamFilter !== "all") {
       result = result.filter((l) => l.stream === streamFilter);
     }
-    if (levelFilter !== "all") result = result.filter((l) => passesLevel(l, levelFilter));
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((l) => l.logMessage.toLowerCase().includes(q));
     }
     return result;
-  }, [logs, hasStreamInfo, streamFilter, levelFilter, search]);
-  const levels = useMemo(() => levelCounts(logs), [logs]);
-  // Levels are known for Loki lines (its detected level) and for lines that state one — offer the filter when any is
-  const hasLevels = levels.error + levels.warn + levels.info > 0;
+  }, [logs, hasStreamInfo, streamFilter, search]);
+  // Numbers = Loki's counts over the window with the insights' rules (null = not counted — no number shown)
+  const current = meta?.key === readKey ? meta : null;
+  const nums = levelNumbers(current?.counts);
+  const windowRead = current?.windowMinutes ?? sinceMinutes;
+  const coverage = current ? coverageOf(current.coverage, windowRead, current.at ?? current.generatedAt) : { kind: "unknown" as const };
+  const lvLabel = (k: "all" | "warn" | "error", n: number | null) => (n === null ? t(`ob.pl.lv.${k}Plain`) : t(`ob.pl.lv.${k}`, { n: n.toLocaleString() }));
 
   function formatTime(ts: string) {
     const d = new Date(ts);
@@ -214,8 +235,12 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
       <div className={styles.plPick}>
         <Select label={t("hb.namespace")} value={namespace} onChange={setNamespace}
           options={namespaces.map((ns) => ({ value: ns, label: canRead(ns) ? ns : t("ob.logs.nsDenied", { ns }) }))} />
-        <Select label="Pod" value={podName} onChange={setPodName} placeholder={t("ob.logs.noPods")}
+        <Select label="Pod" value={podName} onChange={(p) => { setPodName(p); setPickedWorkload(""); setScope("pod"); }} placeholder={t("ob.logs.noPods")}
           options={podOptions.map((p) => ({ value: p, label: p }))} />
+        {workload ? (
+          <Segmented label={t("ob.pl.scope")} value={scope} onChange={setScope}
+            items={[{ id: "pod", label: t("ob.pl.scope.pod") }, { id: "workload", label: t("ob.pl.scope.workload", { w: workload }) }]} />
+        ) : null}
         {containerOptions.length > 1 ? (
           <Select label={t("ob.pl.container")} value={containerName} onChange={setContainerName}
             options={containerOptions.map((c) => ({ value: c, label: c }))} />
@@ -230,7 +255,7 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           workload picked there opens one of its pods in the viewer below. Only where this connection reads logs. */}
       {namespace && canRead(namespace) ? (
         <LogInsights clusterId={clusterId} namespace={namespace} range={range} nonce={nonce}
-          onPickWorkload={(w) => { const pod = firstPodOf(podOptions, w); if (pod) setPodName(pod); }} />
+          onPickWorkload={(w) => { const pod = firstPodOf(podOptions, w); if (pod) setPodName(pod); setPickedWorkload(w); setScope("workload"); }} />
       ) : null}
 
       {error ? <Notice tone="danger" title={t("ob.error")}>{error}</Notice> : null}
@@ -243,10 +268,20 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
       )}
 
       {/* The pod's lines — the same list grammar as the workload panel's stream; a row opens its details */}
-      <Panel title={t("ob.pl.title")} sub={podName ? `${podName} · ${t("ob.logs.lines", { n: filteredLogs.length })}${loading ? ` · ${t("common.loading")}` : ""}` : undefined}
+      <Panel title={t("ob.pl.title")} sub={podName || wholeWorkload ? `${wholeWorkload ? t("ob.pl.scope.workload", { w: workload }) : podName} · ${t("ob.logs.lines", { n: filteredLogs.length })}${loading ? ` · ${t("common.loading")}` : ""}` : undefined}
         actions={
-          // Where the lines came from — and why the other sources gave none
+          // How much of the window the lines are, then where they came from — and why the other sources gave none
           <span className={styles.plSources}>
+            {coverage.kind === "complete" ? (
+              <Chip level="ok" glyph={false} title={t("ob.pl.cov.completeHint")}>{t("ob.pl.cov.complete", { n: windowRead })}</Chip>
+            ) : coverage.kind === "partial" ? (
+              <Chip level="warn" title={t("ob.pl.cov.partialHint", { lines: logs.length, n: windowRead })}>
+                {t("ob.pl.cov.partial", { lines: logs.length, from: formatTime(coverage.from), m: coverage.minutes, n: windowRead })}
+              </Chip>
+            ) : null}
+            {current?.windowMinutes !== undefined && current.windowMinutes < sinceMinutes ? (
+              <Chip level="info" glyph={false} title={t("ob.pl.levelWindowHint")}>{t("ob.pl.levelWindow", { n: current.windowMinutes })}</Chip>
+            ) : null}
             {attempts.map((a) => (
               <Chip key={a.source} level={a.state === "ok" ? "ok" : a.state === "empty" || a.state === "notConfigured" || a.state === "pastRange" ? "neutral" : "warn"}
                 title={a.message ?? t(`ob.logs.state.${a.state}`)}>
@@ -255,16 +290,14 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
             ))}
           </span>
         }
-        footer={<span>{t(source === "loki" ? "ob.pl.footLoki" : "ob.pl.foot")}</span>}>
+        footer={<span>{nums.error !== null ? `${t("ob.pl.countsNote", { n: windowRead })} ` : ""}{t(source === "loki" ? "ob.pl.footLoki" : "ob.pl.foot")}</span>}>
         <div className={styles.plFilters}>
-          {hasLevels ? (
-            <Segmented label={t("ob.pl.level")} value={levelFilter} onChange={setLevelFilter}
-              items={[
-                { id: "all", label: t("ob.pl.lv.all", { n: logs.length }) },
-                { id: "warn", label: t("ob.pl.lv.warn", { n: levels.error + levels.warn }) },
-                { id: "error", label: t("ob.pl.lv.error", { n: levels.error }) },
-              ]} />
-          ) : null}
+          <Segmented label={t("ob.pl.level")} value={levelFilter} onChange={setLevelFilter}
+            items={[
+              { id: "all", label: lvLabel("all", null) },
+              { id: "warn", label: lvLabel("warn", nums.warnPlus) },
+              { id: "error", label: lvLabel("error", nums.error) },
+            ]} />
           {hasStreamInfo ? (
             <Select label={t("ob.logs.allStreams")} hideLabel value={streamFilter} onChange={(v) => setStreamFilter(v as "all" | "stdout" | "stderr")}
               options={[{ value: "all", label: t("ob.logs.allStreams") }, { value: "stdout", label: "stdout" }, { value: "stderr", label: "stderr" }]} />
@@ -273,8 +306,8 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           <Toggle checked={autoScroll} onChange={setAutoScroll}>{t("ob.logs.autoScroll")}</Toggle>
         </div>
         <div className={styles.plScroll} ref={containerRef}>
-          <PodLogList clusterId={clusterId} namespace={namespace} logs={filteredLogs}
-            empty={loading ? t("common.loading") : podOptions.length === 0 ? t("ob.logs.noRunningPods") : namespace && podName ? t("ob.logs.noLogs") : t("ob.logs.pick")} />
+          <PodLogList clusterId={clusterId} namespace={namespace} logs={filteredLogs} showPod={wholeWorkload}
+            empty={loading ? t("common.loading") : levelFilter !== "all" && source === "loki" ? t("ob.pl.noLevelLines", { n: windowRead }) : podOptions.length === 0 ? t("ob.logs.noRunningPods") : namespace && podName ? t("ob.logs.noLogs") : t("ob.logs.pick")} />
         </div>
       </Panel>
     </div>

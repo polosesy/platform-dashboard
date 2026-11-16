@@ -21,7 +21,7 @@ import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { getAppMetrics } from "../services/appRuntimes.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
-import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs } from "../services/lokiLogs.js";
+import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs, passesLevelRule, type LogLevelFilter } from "../services/lokiLogs.js";
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
@@ -381,13 +381,19 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
   router.get("/api/observability/logs", requireRole(env, "operator"), async (req: Request, res: Response) => {
     let clusterId: string;
     let namespace: string;
-    let podName: string;
+    // One pod (podName), or every pod of a workload (workload — Loki only, the scope the log insights count)
+    const podName = queryString(req, "podName") ?? "";
+    const workload = queryString(req, "workload");
+    const levelRaw = queryString(req, "level");
     try {
-      [, namespace, podName] = requireQuery(req, ["clusterId", "namespace", "podName"]) as [string, string, string];
+      [, namespace] = requireQuery(req, ["clusterId", "namespace"]) as [string, string];
       clusterId = queryArmResourceId(req, env, "clusterId");
+      if (!podName && !workload) throw new HttpError(400, "missing_param", "podName or workload is required");
+      if (levelRaw && levelRaw !== "error" && levelRaw !== "warn") throw new HttpError(400, "invalid_level", "level must be error or warn");
     } catch (e: unknown) {
       return sendError(res, e, "logs_failed");
     }
+    const level = (levelRaw || undefined) as LogLevelFilter | undefined;
     const container = queryString(req, "container");
     const limit = queryInt(req, "limit", 200, 10, 500);
     const sinceMinutes = queryInt(req, "sinceMinutes", 30, 1, 1440);
@@ -397,27 +403,42 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
     const allowed = podLogNamespaceAllowed(env, clusterId, namespace);
     const attempts: PodLogAttempt[] = [];
     let picked: { source: PodLogSource; logs: PodLogEntry[]; redactions: number } | null = null;
+    let counts: ObservabilityLogsResponse["counts"] = null;
+    let windowMinutes = sinceMinutes;
+    // kubelet / Container Insights give the newest lines; the level filter is the same rule, applied here — then the
+    // list is complete only when the source gave fewer lines than asked
+    let rawCount = 0;
+    const byLevel = (lines: PodLogEntry[]) => { rawCount = lines.length; return level ? lines.filter((l) => passesLevelRule(l.logMessage, level)) : lines; };
 
     try {
       // 1. Loki — every namespace the collector ships, with a time window
       if (!allowed) attempts.push({ source: "loki", state: "denied" });
       else {
-        const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, { namespace, pod: podName, container, minutes: sinceMinutes, limit, at });
+        const r = await getPodLogsFromLoki(env, req.auth?.bearerToken, clusterId, workload
+          ? { namespace, workload, minutes: sinceMinutes, limit, at, level }
+          : { namespace, pod: podName, container, minutes: sinceMinutes, limit, at, level });
+        windowMinutes = r.minutes;
+        counts = r.counts;
+        rawCount = r.lines.length;
         if (r.state === "ok") {
           // Over the body limit nothing is parsed: that is a failed read (narrow the range), not "no logs"
           attempts.push(r.truncated && !r.lines.length ? { source: "loki", state: "failed", message: "the answer was larger than the read limit — pick a shorter range" }
             : { source: "loki", state: r.lines.length ? "ok" : "empty" });
-          if (r.lines.length) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
+          // A level filter Loki answered with no lines is an answer (none in the window) — not a reason to tail kubelet's
+          // newest lines and filter those instead
+          if (r.lines.length || (level && !r.truncated)) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
         } else attempts.push({ source: "loki", state: r.state, ...(r.message ? { message: r.message } : {}) });
       }
       // 2. kubelet — needs a pods/log Role in that namespace (k8sReadSurface: never cluster-wide)
-      if (!picked) {
+      if (!picked && workload) {
+        attempts.push({ source: "kubelet", state: "lokiOnly" }, { source: "containerInsights", state: "lokiOnly" });
+      } else if (!picked) {
         if (!allowed) attempts.push({ source: "kubelet", state: "denied" });
         else if (at !== undefined) attempts.push({ source: "kubelet", state: "pastRange" });
         else {
           try {
             const raw = await readPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, { container, tailLines: limit });
-            const logs = parseKubeletLogs(raw, podName, container ?? "");
+            const logs = byLevel(parseKubeletLogs(raw, podName, container ?? ""));
             attempts.push({ source: "kubelet", state: logs.length ? "ok" : "empty" });
             if (logs.length) picked = { source: "kubelet", logs, redactions: 0 };
           } catch (e: unknown) {
@@ -427,13 +448,13 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
         }
       }
       // 3. Container Insights — ContainerLogV2 / ContainerLog, when the cluster's DCR collects them
-      if (!picked) {
+      if (!picked && !workload) {
         try {
           const { logs, containerInsightsAvailable } = await collectPodLogs(env, req.auth?.bearerToken, clusterId, namespace, podName, limit, sinceMinutes, at);
           if (!containerInsightsAvailable) attempts.push({ source: "containerInsights", state: "notConfigured" });
           else {
             let redactions = 0;
-            const masked = logs.map((l) => { const r = redactLogLine(l.logMessage); redactions += r.n; return { ...l, logMessage: r.line }; });
+            const masked = byLevel(logs).map((l) => { const r = redactLogLine(l.logMessage); redactions += r.n; return { ...l, logMessage: r.line }; });
             attempts.push({ source: "containerInsights", state: masked.length ? "ok" : "empty" });
             if (masked.length) picked = { source: "containerInsights", logs: masked, redactions };
           }
@@ -452,10 +473,15 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       logs: picked?.logs ?? [],
       podName,
       namespace,
-      hasMore: (picked?.logs.length ?? 0) >= limit,
+      hasMore: rawCount >= limit,
       source: picked?.source ?? null,
       attempts,
       redactions: picked?.redactions ?? 0,
+      scope: workload ? { kind: "workload", name: workload } : { kind: "pod", name: podName },
+      level: level ?? null,
+      windowMinutes,
+      counts: picked?.source === "loki" ? counts : null,
+      coverage: { complete: rawCount < limit, from: picked?.logs[0]?.timestamp ?? null },
     };
     res.json(data);
   });
