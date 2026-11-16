@@ -87,7 +87,7 @@ export function DependenciesView({ clusterId, range, nonce, report }: { clusterI
                     <td className={styles.redNum}><span className={styles.sloCellMain}>{mark(o.failed)}{errorRateText(o.errorRate)}</span><span className={styles.sloCellSub}>{t("ob.red.errorsN", { n: countText(o.failed, lc) })}</span></td>
                     <td className={styles.redNum}>{durationText(o.avg)}</td>
                     <td className={styles.redNum}>{durationText(o.max)}</td>
-                    <td className={styles.sloCellSub}>{o.statuses.map((s) => `${s.status || "—"} ${countText(s.requests, lc)}`).join(" · ")}</td>
+                    <td><span className={styles.sloCellSub}>{o.statuses.map((s) => `${s.status || "—"} ${countText(s.requests, lc)}`).join(" · ")}</span></td>
                   </tr>
                 ))}
               </tbody>

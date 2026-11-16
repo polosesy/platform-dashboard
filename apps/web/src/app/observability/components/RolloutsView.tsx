@@ -54,7 +54,7 @@ export function RolloutsView({ clusterId, range, nonce, report }: { clusterId: s
             <tbody>
               {d.rollouts.map((r) => (
                 <tr key={`${r.namespace}/${r.replicaset}`}>
-                  <td className={styles.sloCellSub}>{new Date(r.at).toLocaleString(lc)}</td>
+                  <td><span className={styles.sloCellSub}>{new Date(r.at).toLocaleString(lc)}</span></td>
                   <td>
                     <span className={styles.sloCellMain}>{r.deployment}</span>
                     <span className={styles.sloCellSub}>{r.namespace} · <Link href={`/observability?wl=${encodeURIComponent(`${r.namespace}/${r.deployment}`)}`}>{t("ob.apm.toWorkload")}</Link></span>
@@ -67,6 +67,7 @@ export function RolloutsView({ clusterId, range, nonce, report }: { clusterId: s
                       </span>
                     ))}
                     {r.images.length === 0 && (r.previousImages ?? []).length === 0 ? <span className={styles.sloCellSub}>{t("ob.ro.noImages")}</span> : null}
+                    {r.imagesAt === "rollout" ? <span className={styles.sloCellSub}>{t("ob.ro.replaced")}</span> : null}
                   </td>
                   <td>{r.service ? red(r.before, 30) : <span className={styles.sloCellSub}>{t("ob.ro.noService")}</span>}</td>
                   <td>{r.service ? (r.afterMinutes >= 1 ? red(r.after, r.afterMinutes) : <span className={styles.sloCellSub}>{t("ob.ro.tooRecent")}</span>) : null}</td>

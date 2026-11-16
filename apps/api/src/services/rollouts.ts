@@ -35,7 +35,9 @@ export function rolloutQueries(K: string, end: number, days: number): Record<str
     created: `max by (namespace, replicaset) (${k("kube_replicaset_created")}) > ${end - days * 86400}`,
     owners: `group by (namespace, replicaset, owner_name) (${k("kube_replicaset_owner", 'owner_kind="Deployment"')})`,
     podOwners: `group by (namespace, pod, owner_name) (${k("kube_pod_owner", 'owner_kind="ReplicaSet"')})`,
-    images: `group by (namespace, pod, container, image) (${k("kube_pod_container_info")})`,
+    // image_spec = what the pod spec asked for ("reg/path/repo:tag@sha256:…"); `image` is the status form, "repo:<sha256 hex>"
+    // for a digest-pinned pod (stg 2026-11-16: 50 of 52 pods) — unreadable as a version
+    images: `group by (namespace, pod, container, image, image_spec) (${k("kube_pod_container_info")})`,
     services: `group by (service_name) (traces_spanmetrics_calls_total)`,
   };
 }
@@ -70,9 +72,10 @@ export function rolloutsOf(raw: Record<string, PromRow[]>, services: ReadonlySet
   const imagesOfRs = new Map<string, Map<string, string>>();
   for (const r of raw.images ?? []) {
     const rs = rsOfPod.get(`${r.metric.namespace}/${r.metric.pod}`);
-    if (!rs || !r.metric.container || !r.metric.image) continue;
+    const image = r.metric.image_spec || r.metric.image;
+    if (!rs || !r.metric.container || !image) continue;
     const k = `${r.metric.namespace}/${rs}`;
-    (imagesOfRs.get(k) ?? imagesOfRs.set(k, new Map()).get(k)!).set(r.metric.container, r.metric.image);
+    (imagesOfRs.get(k) ?? imagesOfRs.set(k, new Map()).get(k)!).set(r.metric.container, image);
   }
   const out = [];
   for (const r of raw.created ?? []) {
@@ -93,7 +96,10 @@ export function rolloutsOf(raw: Record<string, PromRow[]>, services: ReadonlySet
 export function deploymentImagesAt(podOwners: PromRow[], images: PromRow[], namespace: string, replicasets: ReadonlySet<string>): Array<{ container: string; image: string }> {
   const pods = new Set(podOwners.filter((r) => r.metric.namespace === namespace && replicasets.has(r.metric.owner_name ?? "")).map((r) => r.metric.pod));
   const m = new Map<string, string>();
-  for (const r of images) if (r.metric.namespace === namespace && pods.has(r.metric.pod) && r.metric.container && r.metric.image) m.set(r.metric.container, r.metric.image);
+  for (const r of images) {
+    const image = r.metric.image_spec || r.metric.image;
+    if (r.metric.namespace === namespace && pods.has(r.metric.pod) && r.metric.container && image) m.set(r.metric.container, image);
+  }
   return [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([container, image]) => ({ container, image }));
 }
 
@@ -148,7 +154,8 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
 
     // Per rollout: the Deployment's images a minute before, and the service's spans before / after
     const buckets = new Set<number>();
-    const rollouts: Rollout[] = await Promise.all(compared.map(async (r) => {
+    const rollouts: Rollout[] = await Promise.all(compared.map(async (r0) => {
+      let r: typeof r0 & { imagesAt?: "rollout" } = r0;
       const t = Math.floor(Date.parse(r.at) / 1000);
       const afterMinutes = Math.max(0, Math.min(COMPARE_MIN, Math.floor((end - t) / 60)));
       const prevRun = await runAll(fetcher, target.endpoint, {
@@ -157,6 +164,14 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
       }, 2, String(t - 60), QUERY_TIMEOUT_MS);
       const older = new Set((run.rows.owners ?? []).filter((o) => o.metric.namespace === r.namespace && o.metric.owner_name === r.deployment && o.metric.replicaset !== r.replicaset).map((o) => o.metric.replicaset!));
       const previousImages = prevRun.gaps.length ? null : deploymentImagesAt(prevRun.rows.podOwners ?? [], prevRun.rows.images ?? [], r.namespace, older);
+      // A rollout replaced since (no pod now): the image it ran, read 3 minutes after it was created
+      if (!r.images.length) {
+        const thenRun = await runAll(fetcher, target.endpoint, {
+          podOwners: q.podOwners.replace("kube_pod_owner{", `kube_pod_owner{namespace=${promString(r.namespace)},`),
+          images: q.images.replace("kube_pod_container_info{", `kube_pod_container_info{namespace=${promString(r.namespace)},`),
+        }, 2, String(Math.min(end, t + 180)), QUERY_TIMEOUT_MS);
+        if (!thenRun.gaps.length) r = { ...r, images: deploymentImagesAt(thenRun.rows.podOwners ?? [], thenRun.rows.images ?? [], r.namespace, new Set([r.replicaset])), imagesAt: "rollout" as const };
+      }
       if (!r.service || S === null) return { ...r, previousImages, before: null, after: null, afterMinutes };
       const before = compareQueries(S, r.service, COMPARE_MIN);
       const after = afterMinutes >= 1 ? compareQueries(S, r.service, afterMinutes) : null;

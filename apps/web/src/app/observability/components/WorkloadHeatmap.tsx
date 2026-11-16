@@ -11,6 +11,7 @@
 // The window and its end come from the page's time picker (lib/timeRange heatWindowFor — over a day reads the range's
 // last 24 h, said beside the meta); 새로 고침 / auto refresh reload it through useRangeRefresh.
 
+import { useSearchParams } from "next/navigation";
 import { parseWorkloadParam } from "@/lib/aksConfigView";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { AppColumnId, AppMetricsResponse, AppRuntimeKind } from "@aud/types";
@@ -93,11 +94,13 @@ export function WorkloadHeatmap({ clusterId, layout = "tiles", range, nonce, rep
   const [showIdle, setShowIdle] = useState(false);
   const [allAttn, setAllAttn] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  // `?wl=<namespace>/<name>` (AKS 클러스터 › 워크로드 행의 '신호'): open that workload's panel — read once after mount
+  // `?wl=<namespace>/<name>` (AKS 클러스터 › 워크로드 행의 '신호', 서비스 (APM)의 '신호 →'): open that workload's panel —
+  // whenever the link changes, not only at mount (a link followed while this view is open)
+  const wlParam = useSearchParams().get("wl");
   useEffect(() => {
-    const wl = parseWorkloadParam(window.location.search);
+    const wl = parseWorkloadParam(wlParam ? `?wl=${encodeURIComponent(wlParam)}` : "");
     if (wl) setSelected(wl);
-  }, []);
+  }, [wlParam]);
   const [sort, setSort] = useState<TableSort>({ by: "worst", dir: "worse" });
   const lastTile = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);

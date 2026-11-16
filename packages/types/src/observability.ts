@@ -1206,6 +1206,8 @@ export type Rollout = {
   /** container → image of the new ReplicaSet's pods now (empty when none run) and of the Deployment's pods a minute before */
   images: Array<{ container: string; image: string }>;
   previousImages: Array<{ container: string; image: string }> | null;
+  /** "rollout" = `images` were read 3 minutes after the rollout (its pods are gone now — replaced since) */
+  imagesAt?: "rollout";
   /** the trace service of exactly the Deployment's name, when there is one */
   service: string | null;
   before: RolloutRed | null;

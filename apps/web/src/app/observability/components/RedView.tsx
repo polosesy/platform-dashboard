@@ -141,7 +141,7 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                       <span className={styles.sloCellMain}>{s.service}</span>
                       <span className={styles.sloCellSub}>{workloadOf(s)}</span>
                     </td>
-                    <td colSpan={6} className={styles.sloCellSub}>{t("ob.red.idleRow", { w: win, actuator: rate(s.actuatorRate) })}</td>
+                    <td colSpan={6}><span className={styles.sloCellSub}>{t("ob.red.idleRow", { w: win, actuator: rate(s.actuatorRate) })}</span></td>
                   </tr>
                 ))}
               </tbody>

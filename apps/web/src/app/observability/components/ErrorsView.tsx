@@ -69,8 +69,8 @@ export function ErrorsView({ clusterId, range, nonce, report }: { clusterId: str
                         {dailyBars(a).map((b) => <span key={b.day} className={styles.errBar} style={{ height: `${b.height}%` }} />)}
                       </span>
                     </td>
-                    <td className={styles.sloCellSub}>{when(a.firstSeen)}</td>
-                    <td className={styles.sloCellSub}>{when(a.lastSeen)}</td>
+                    <td><span className={styles.sloCellSub}>{when(a.firstSeen)}</span></td>
+                    <td><span className={styles.sloCellSub}>{when(a.lastSeen)}</span></td>
                     <td className={styles.redAction}>
                       {a.workload ? <Link href={`/observability?wl=${encodeURIComponent(`${a.workload.namespace}/${a.workload.name}`)}`} title={t("ob.err.toWorkloadHint")}>{t("ob.err.toWorkload")}</Link> : null}
                     </td>

@@ -2233,6 +2233,7 @@ export const OPS_T: Translations = {
   "ob.ro.req": { ko: "요청 {n} ({m}분)", en: "{n} requests ({m} min)" },
   "ob.ro.err": { ko: "오류 {r} ({n}건)", en: "errors {r} ({n})" },
   "ob.ro.unknown": { ko: "알 수 없음", en: "unknown" },
+  "ob.ro.replaced": { ko: "그 뒤 다른 배포로 교체됨 — 배포 3분 뒤의 이미지", en: "Replaced by a later rollout — the image 3 minutes after this one" },
   "ob.ro.notRunning": { ko: "지금 실행 안 함", en: "not running now" },
   "ob.ro.same": { ko: "같음", en: "same" },
   "ob.ro.noImages": { ko: "이미지 정보 없음 — 그때와 지금 이 ReplicaSet의 파드가 없음", en: "No image — no pods of this ReplicaSet then or now" },

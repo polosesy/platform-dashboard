@@ -2,12 +2,22 @@
 
 import type { AppErrorSeries, Rollout } from "@aud/types";
 
-/** The image's tag (or a short digest) — "registry/repo:1.2.3" → "1.2.3", "repo@sha256:abcd…" → "sha256:abcdef12" */
+const HEX64 = /^[0-9a-f]{64}$/;
+/**
+ * The image as a version people can compare: the tag, plus the digest's first 8 when the image is pinned ("latest ·
+ * 4b4ec230" — stg 2026-11-16: 44 app pods run `:latest@sha256:…`, so only the digest tells two versions apart).
+ * "reg/repo:1.2.3" → "1.2.3" · "reg/repo:1.2.3@sha256:4b4e…" → "1.2.3 · 4b4ec230" · "reg/repo@sha256:…" → "sha256 · 4b4ec230"
+ * · the status form "repo:<64 hex>" → "sha256 · 4b4ec230"
+ */
 export function imageTag(image: string): string {
   const at = image.indexOf("@");
-  if (at >= 0) { const d = image.slice(at + 1); return d.length > 15 ? d.slice(0, 15) : d; }
-  const slash = image.lastIndexOf("/"), colon = image.lastIndexOf(":");
-  return colon > slash ? image.slice(colon + 1) : "latest";
+  const digest = at >= 0 ? image.slice(at + 1).replace(/^sha256:/, "").slice(0, 8) : null;
+  const name = at >= 0 ? image.slice(0, at) : image;
+  const slash = name.lastIndexOf("/"), colon = name.lastIndexOf(":");
+  const tag = colon > slash ? name.slice(colon + 1) : null;
+  if (tag && HEX64.test(tag)) return `sha256 · ${tag.slice(0, 8)}`;
+  if (digest) return `${tag ?? "sha256"} · ${digest}`;
+  return tag ?? "latest";
 }
 /** The repository without registry and tag — "reg.io/team/app:1" → "team/app" */
 export function imageRepo(image: string): string {

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
   ObservabilityOverview,
   ObservabilitySourcesResponse,
@@ -41,7 +42,24 @@ export default function ObservabilityPage() {
 
 function ObservabilityView() {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTabState] = useState<Tab>("overview");
+  // `?wl=<ns>/<name>` (the "신호 →" links of 서비스 (APM) · AKS 클러스터): the workload panel lives in 클러스터 · 워크로드 —
+  // follow the link to that tab (2026-11-16: the tab is screen state, so a link clicked on another tab changed the URL and
+  // nothing else). Leaving that tab drops `wl`, so the same link works again.
+  const searchParams = useSearchParams();
+  const wlParam = searchParams.get("wl");
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => { if (wlParam) setTabState("overview"); }, [wlParam]);
+  const setTab = (next: Tab) => {
+    setTabState(next);
+    if (next !== "overview" && wlParam) {
+      const q = new URLSearchParams(window.location.search);
+      q.delete("wl");
+      const rest = q.toString();
+      router.replace(`${pathname}${rest ? `?${rest}` : ""}`, { scroll: false });
+    }
+  };
   // ?range · ?to · ?refresh — one range and one refresh for every tab (Grafana's dashboard time); each tab says
   // when it reads another span (heatmap ≤ 24 h, maintenance ≥ 1 day, logs ≤ 24 h, the stack's 10 minutes, Hubble now)
   const time = useTimeRange();

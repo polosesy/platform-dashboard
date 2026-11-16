@@ -76,7 +76,16 @@ test("rollouts: new ReplicaSets owned by a Deployment, images of today, the prev
   assert.deepEqual(deploymentImagesAt(before.podOwners, before.images, "app", new Set(["orders-6c5b"])), [{ container: "app", image: "reg.example.com/team/orders:1.3.9" }]);
   const ch = V.imageChanges({ images: ro[0]!.images, previousImages: [{ container: "app", image: "reg.example.com/team/orders:1.3.9" }] });
   assert.deepEqual(ch, [{ container: "app", from: "reg.example.com/team/orders:1.3.9", to: "reg.example.com/team/orders:1.4.0", changed: true }]);
-  assert.deepEqual([V.imageTag("reg.example.com/team/orders:1.4.0"), V.imageTag("repo@sha256:0123456789abcdef"), V.imageTag("repo"), V.imageRepo("reg.example.com:5000/team/orders:1")], ["1.4.0", "sha256:01234567", "latest", "team/orders"]);
+  assert.deepEqual([V.imageTag("reg.example.com/team/orders:1.4.0"), V.imageTag("repo@sha256:0123456789abcdef"), V.imageTag("repo"), V.imageRepo("reg.example.com:5000/team/orders:1")], ["1.4.0", "sha256 · 01234567", "latest", "team/orders"]);
+  // stg 2026-11-16: app pods run ":latest@sha256:…" (the digest is the version) and kube-state-metrics' `image` is the
+  // status form "repo:<64 hex>" — shown as a short digest, never 64 characters
+  const hex = "4b4ec230bc4bedf90d6beaa5b3a3ae559f0834eac7483e922e9e06455688260e";
+  assert.equal(V.imageTag(`reg.example.com/team/orders:latest@sha256:${hex}`), "latest · 4b4ec230");
+  assert.equal(V.imageTag(`orders:${hex}`), "sha256 · 4b4ec230");
+  assert.equal(V.imageTag(`reg.example.com:5000/team/orders:1.2.3@sha256:${hex}`), "1.2.3 · 4b4ec230");
+  // rollouts read image_spec (the spec's "repo:tag@digest") over the status `image`
+  const spec = rolloutsOf({ ...raw, images: [row({ namespace: "app", pod: "orders-7d9f-aaaaa", container: "app", image: `orders:${hex}`, image_spec: `reg.example.com/team/orders:latest@sha256:${hex}` }, 1)] }, new Set());
+  assert.equal(spec[0]!.images[0]!.image, `reg.example.com/team/orders:latest@sha256:${hex}`);
 
   const cq = compareQueries('cluster="c1"', "orders", 30);
   assert.match(cq.calls, /service_name="orders"/);
@@ -103,6 +112,20 @@ test("RED a week earlier: the same window at offset 7d — a fact beside the num
   assert.equal(V.ratioText(3, 0), null);
   assert.equal(aggregateRed({ ...raw, calls7d: [] }, 60).services[0]!.weekAgo, null, "no series a week ago");
   assert.equal(aggregateRed(raw, 60, new Set(["calls7d"])).services[0]!.weekAgo, null, "not read");
+});
+
+test("links and tables: '신호 →' opens the workload panel from any tab; a table cell is never block-styled", () => {
+  const page = read("../../web/src/app/observability/page.tsx");
+  assert.match(page, /useEffect\(\(\) => \{ if \(wlParam\) setTabState\("overview"\); \}, \[wlParam\]\);/, "the link brings 클러스터 · 워크로드 forward");
+  assert.match(page, /q\.delete\("wl"\)/, "leaving the tab drops wl, so the same link works again");
+  const heat = read("../../web/src/app/observability/components/WorkloadHeatmap.tsx");
+  assert.match(heat, /const wlParam = useSearchParams\(\)\.get\("wl"\);/);
+  assert.match(heat, /\}, \[wlParam\]\);/, "re-read on every link, not only at mount");
+  // a <td> with display:block (sloCellSub) falls out of the table — 2026-11-16 the errors view's "first / last" columns
+  // stacked under one header
+  for (const f of ["ErrorsView", "RolloutsView", "DependenciesView", "RedView", "EndpointsView"]) {
+    assert.doesNotMatch(read(`../../web/src/app/observability/components/${f}.tsx`), /<td[^>]*className=\{styles\.sloCell(Sub|Main)\}/, f);
+  }
 });
 
 test("wiring: routes, the two new views, the two-row switcher, the strings", () => {
