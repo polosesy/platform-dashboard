@@ -994,3 +994,56 @@ export type WorkloadRedResponse = {
   services: RedService[];
   gaps?: StackQueryGap[];
 };
+
+/**
+ * AKS 모니터링 › 서비스 (APM) › 서비스 맵 — who calls whom, from the trace pipeline's service graph
+ * (`traces_service_graph_request_total` · `_failed_total` · `_server_seconds_bucket` — OpenTelemetry Collector / Grafana
+ * Alloy `servicegraph` connector, Tempo metrics-generator: the same names on any cloud). An edge = a client span matched
+ * with its server span. Requests include the failed ones; duration is the server side, as the bucket holding the quantile.
+ */
+export type ServiceGraphEdgeKind = "direct" | "virtual" | "messaging" | "database" | "other";
+export type ServiceGraphEdge = {
+  client: string;
+  server: string;
+  /** connection_type: "" = both sides instrumented · virtual_node = one side is not (an uninstrumented caller or peer) */
+  kind: ServiceGraphEdgeKind;
+  requests: number;
+  rate: number;
+  failed: number;
+  /** null without requests */
+  errorRate: number | null;
+  p95: RedQuantile | null;
+  p99: RedQuantile | null;
+  /** under RED_MIN_REQUESTS in the window — shown, not judged */
+  lowTraffic: boolean;
+};
+export type ServiceGraphNode = {
+  service: string;
+  /** "user" / "unknown": the client side of a root span — callers outside the traced services */
+  entry: boolean;
+  /** the namespace the pipeline put on the server side (server_k8s_namespace_name), when it did */
+  namespace: string | null;
+  /** The workload of exactly that name (in `namespace` when known, else one only) — otherwise null */
+  workload: { namespace: string; name: string; kind: "Deployment" | "StatefulSet" | "DaemonSet" } | null;
+  inbound: { requests: number; failed: number; errorRate: number | null };
+  outbound: { requests: number; failed: number };
+};
+export type ServiceGraphResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowMinutes: RedWindow;
+  metricsState: WorkloadRedResponse["metricsState"];
+  message?: string;
+  /** whether service-graph series exist at all in this cluster's scope */
+  instrumented: boolean;
+  /** counter resets in the window over the request series — said beside the numbers; null = not read */
+  resets: number | null;
+  nodes: ServiceGraphNode[];
+  edges: ServiceGraphEdge[];
+  /** the server histogram's boundaries (seconds) */
+  buckets: number[];
+  /** the PromQL behind the numbers (the window's increase), for "how was this measured" */
+  queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};

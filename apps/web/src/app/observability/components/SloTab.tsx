@@ -27,6 +27,7 @@ import { useRangeRefresh } from "@/lib/useTimeRange";
 import { spanLabel } from "@/lib/sloSettingsView";
 import { ResetForm, SloSettingsView } from "./SloSettings";
 import { RedView } from "./RedView";
+import { ServiceMapView } from "./ServiceMapView";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
@@ -39,7 +40,7 @@ const MICROMETER_HINT = `management.metrics.distribution.percentiles-histogram.h
 management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
-type View = "services" | "red" | "settings" | "guide";
+type View = "map" | "services" | "red" | "settings" | "guide";
 
 export function SloTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
   const { t, locale } = useI18n();
@@ -55,13 +56,21 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   const settings = sq.data?.clusterId === clusterId ? sq.data : null;
   // A save or a reset changes the settings version — the SLO numbers' cache key — so both reload
   const changed = () => { sq.reload(); q.reload(); };
-  const [view, setView] = useState<View>("services");
+  const [view, setView] = useState<View>("map");
   const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
   const switcher = (
     <Segmented label={t("ob.slo.view")} value={view} onChange={setView}
-      items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "red", label: t("ob.slo.view.red") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
+      items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "services", label: t("ob.slo.view.services") }, { id: "red", label: t("ob.slo.view.red") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
   );
-  // RED reads spanmetrics, not Micrometer — it opens whatever the SLO data's state
+  // The service map reads the service graph, RED spanmetrics — not Micrometer: both open whatever the SLO data's state
+  if (view === "map") {
+    return (
+      <div className={styles.slo}>
+        <Toolbar start={switcher} />
+        <ServiceMapView clusterId={clusterId} range={range} nonce={nonce} report={report} />
+      </div>
+    );
+  }
   if (view === "red") {
     return (
       <div className={styles.slo}>
