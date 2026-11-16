@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { PromRow } from "../src/services/hubbleMetrics.js";
 import { aggregateDependencies, dependencyQueries, outboundFailed } from "../src/services/appDependencies.js";
-import { forQuery, metricsOf, objectOf, optionalMetricsOf, ruleVerdict, scopeExpression } from "../src/services/k8sRecommendedAlerts.js";
+import { forQuery, jobMismatches, metricsOf, objectOf, optionalMetricsOf, ruleGroupTemplate, ruleVerdict, scopeExpression } from "../src/services/k8sRecommendedAlerts.js";
+import { MS_RULE_FIXES } from "../src/services/msRuleFixes.js";
 import { MS_RECOMMENDED_RULES } from "../src/services/msRecommendedAlerts.js";
 import * as redNs from "../../web/src/lib/redView.ts";
 import * as depsNs from "../../web/src/lib/depsView.ts";
@@ -148,6 +149,63 @@ test("verdict: firing / clear / noData (which metric) / ambiguous / failed — '
   assert.equal(RA.objectText({ pod: "p", namespace: "n" }), "n / p");
 });
 
+test("job mismatch: a shipped job matcher no series of that metric carries here (kubelet → the collector's own job name)", () => {
+  const jobs = { kubelet_volume_stats_used_bytes: ["prometheus.scrape.kubelet"], kubelet_volume_stats_capacity_bytes: ["prometheus.scrape.kubelet"], kube_pod_status_phase: ["kube-state-metrics"] };
+  assert.deepEqual(jobMismatches(rule("KubePVUsageHigh").expression, jobs), [
+    { metric: "kubelet_volume_stats_used_bytes", expected: "kubelet", actual: ["prometheus.scrape.kubelet"] },
+    { metric: "kubelet_volume_stats_capacity_bytes", expected: "kubelet", actual: ["prometheus.scrape.kubelet"] },
+  ]);
+  assert.deepEqual(jobMismatches('kube_pod_status_phase{job="kube-state-metrics"} > 0', jobs), [], "same job: no mismatch");
+  assert.deepEqual(jobMismatches('kubelet_running_pods{job="kubelet"} > 0', jobs), [], "a metric not read here: not claimed");
+  assert.deepEqual(jobMismatches("kube_pod_status_phase > 0", jobs), [], "no job matcher: nothing to compare");
+});
+
+test("corrections: only where the original cannot evaluate; each keeps the original's meaning and scopes like it", () => {
+  assert.deepEqual(Object.keys(MS_RULE_FIXES).sort(), ["KubeJobFailed", "KubePVUsageHigh"]);
+  for (const [alert, f] of Object.entries(MS_RULE_FIXES)) {
+    assert.ok(MS_RECOMMENDED_RULES.some((r) => r.alert === alert), alert);
+    assert.match(f.expression, /job="[^"]+"/, `${alert}: written with job matchers so the same scoping applies`);
+    assert.doesNotMatch(scopeExpression(f.expression, () => 'cluster="c1"'), /job=/, alert);
+  }
+  const job = MS_RULE_FIXES.KubeJobFailed!.expression;
+  assert.doesNotMatch(job, /kube_job_failed\b/, "reads the metric the workspace has");
+  assert.match(job, /kube_job_status_failed[\s\S]*kube_job_status_succeeded[\s\S]*== 0[\s\S]*kube_job_status_active[\s\S]*== 0/, "a retried-then-succeeded Job is not failed");
+  const pv = MS_RULE_FIXES.KubePVUsageHigh!.expression;
+  assert.match(pv, /on\(namespace, persistentvolumeclaim, cluster, instance, job\)/);
+  assert.doesNotMatch(pv, /\bpod\b|\bcontainer\b/, "volume metrics carry no pod or container");
+});
+
+test("template: three rule groups in Microsoft's shape — evaluable rules scoped, corrections where only they evaluate, the rest excluded", () => {
+  const all = new Set(MS_RECOMMENDED_RULES.flatMap((r) => metricsOf(r.expression)));
+  const present = new Set([...all].filter((m) => m !== "kube_job_failed" && m !== "kube_resourcequota"));
+  const rules = MS_RECOMMENDED_RULES.map((r) => {
+    const v = ruleVerdict(r, present, new Set(), r.alert === "KubePVUsageHigh" ? "failed" : []);
+    if (v.state === "clear") v.expression = scopeExpression(r.expression, () => 'cluster="c1",job="prometheus.scrape.kubelet"');
+    const f = MS_RULE_FIXES[r.alert];
+    if (f) v.fix = { why: f.why, original: f.expression, expression: scopeExpression(f.expression, () => 'cluster="c1"'), state: "clear", firing: [] };
+    return v;
+  });
+  const t = ruleGroupTemplate(rules);
+  assert.deepEqual(t.fixed.sort(), ["KubeJobFailed", "KubePVUsageHigh"]);
+  assert.deepEqual(t.excluded.map((x) => [x.alert, x.reason, x.missing]), [["KubeCPUQuotaOvercommit", "noData", ["kube_resourcequota"]], ["KubeMemoryQuotaOvercommit", "noData", ["kube_resourcequota"]], ["KubeQuotaAlmostFull", "noData", ["kube_resourcequota"]]], "the three quota rules (stg: no kube_resourcequota)");
+  assert.equal(t.included.length + t.fixed.length + t.excluded.length, 30);
+  const doc = JSON.parse(t.json);
+  assert.deepEqual(Object.keys(doc.parameters).sort(), ["actionGroupResourceId", "azureMonitorWorkspaceResourceId", "clusterName", "clusterResourceId", "location"]);
+  assert.equal(doc.resources.length, 3);
+  for (const g of doc.resources) {
+    assert.deepEqual([g.type, g.apiVersion, g.properties.interval], ["Microsoft.AlertsManagement/prometheusRuleGroups", "2023-03-01", "PT1M"]);
+    assert.deepEqual(g.properties.scopes, ["[parameters('azureMonitorWorkspaceResourceId')]", "[parameters('clusterResourceId')]"]);
+    for (const r of g.properties.rules) {
+      assert.doesNotMatch(r.expression, /job="kubelet"|kube_job_failed\b/, r.alert);
+      assert.match(r.for, /^PT\d+M$/);
+      assert.deepEqual(r.actions, [{ actionGroupId: "[parameters('actionGroupResourceId')]" }]);
+    }
+  }
+  const byAlert = Object.fromEntries(doc.resources.flatMap((g: { properties: { rules: Array<{ alert: string; for: string; severity: number }> } }) => g.properties.rules).map((r: { alert: string }) => [r.alert, r]));
+  assert.deepEqual([byAlert.KubeJobStale.for, byAlert.KubeJobFailed.severity], ["PT360M", 3], "Microsoft's duration and severity kept");
+  assert.doesNotMatch(t.json, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, "no IDs — parameters only");
+});
+
 // ── 엔드포인트 ──
 
 test("endpoints: every service's endpoints in one table, sorted by errors / requests / p95 (above the last bucket = slowest)", () => {
@@ -173,7 +231,9 @@ test("wiring: routes, the 경고 신호 tab, the 서비스 (APM) views, every ru
   for (const v of ["map", "deps", "endpoints"]) assert.match(tab, new RegExp(`id: "${v}"`), v);
   assert.match(read("../../web/src/app/observability/components/ServiceMapView.tsx"), /deps=\{depsOf\(deps, sel\.id\)\}/, "the map panel lists the service's dependencies");
   const all = read("../../web/src/lib/i18nOps.ts") + read("../../web/src/lib/i18nMessages.ts");
-  const keys = [...MS_RECOMMENDED_RULES.map((r) => `ob.ra.rule.${r.alert}`), "obs.tab.signals", "ob.slo.view.deps", "ob.slo.view.endpoints", "ob.ra.noDataWhy", "ob.ra.failedWhy", "ob.ra.summary",
+  const keys = [...MS_RECOMMENDED_RULES.map((r) => `ob.ra.rule.${r.alert}`), "obs.tab.signals", "ob.slo.view.deps", "ob.slo.view.endpoints", "ob.ra.noDataWhy", "ob.ra.failedWhy", "ob.ra.summary", "ob.ra.jobMismatch", "ob.ra.chip.jobMismatch", "ob.ra.fix.state",
+    "ob.ra.fix.metricMissing", "ob.ra.fix.duplicateMatch", "ob.ra.fix.expr", "ob.ra.tpl.title", "ob.ra.tpl.summary", "ob.ra.tpl.fixed", "ob.ra.tpl.excluded",
+    "ob.ra.tpl.download", "ob.ra.tpl.deploy", "ob.ra.tpl.note",
     "ob.dep.title", "ob.dep.summary", "ob.dep.latencyHint", "ob.dep.conv.micrometer", "ob.dep.conv.observation", "ob.ep.title", "ob.ep.summary", "ob.apm.deps"];
   for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
 });

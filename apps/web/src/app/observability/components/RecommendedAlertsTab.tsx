@@ -16,6 +16,15 @@ import { useRangeRefresh } from "@/lib/useTimeRange";
 import { SEVERITY_NAME, objectText, orderRules, summarize } from "@/lib/recommendedAlertsView";
 import styles from "../styles.module.css";
 
+/** Placeholders only — the dashboard reads; deploying is the operator's (Azure CLI, Azure Monitor Contributor on the RG) */
+const DEPLOY_COMMAND = [
+  "az deployment group create \\",
+  "  --resource-group <rule-group-resource-group> \\",
+  "  --template-file aks-recommended-alerts-fixed.json \\",
+  "  --parameters clusterName=<aks-name> clusterResourceId=<aks-resource-id> \\",
+  "               azureMonitorWorkspaceResourceId=<monitor-workspace-resource-id> actionGroupResourceId=<action-group-resource-id>",
+].join("\n");
+
 const STATE_CHIP: Record<RecommendedAlertRule["state"], ChipLevel> = { firing: "warn", clear: "ok", noData: "unknown", ambiguous: "unknown", failed: "unknown" };
 
 export function RecommendedAlertsTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
@@ -40,8 +49,11 @@ export function RecommendedAlertsTab({ clusterId, range, nonce, report }: { clus
   }
   const s = summarize(d.rules);
   const rules = orderRules(d.rules);
-  const shown = rules.filter((r) => r.state !== "clear");
-  const clear = rules.filter((r) => r.state === "clear");
+  // A clear rule whose shipped job matcher matches nothing here stays in view — "clear" only because it was scoped
+  const shown = rules.filter((r) => r.state !== "clear" || r.jobMismatch?.length);
+  const clear = rules.filter((r) => r.state === "clear" && !r.jobMismatch?.length);
+  const mismatched = rules.filter((r) => r.jobMismatch?.length).length;
+  const tpl = d.template;
 
   const card = (r: RecommendedAlertRule) => (
     <li key={r.alert} className={styles.raRule} data-state={r.state}>
@@ -60,11 +72,21 @@ export function RecommendedAlertsTab({ clusterId, range, nonce, report }: { clus
       {r.state === "noData" && <p className={styles.sloCellSub}>{t("ob.ra.noDataWhy", { m: (r.missing ?? []).join(", ") })}</p>}
       {r.state === "ambiguous" && <p className={styles.sloCellSub}>{t("ob.ra.ambiguousWhy", { m: (r.missing ?? []).join(", ") })}</p>}
       {r.state === "failed" && <p className={styles.sloCellSub}>{t(r.reason === "tooCostly" ? "ob.ra.tooCostlyWhy" : r.reason === "timeout" || r.reason === "throttled" ? "ob.ra.timeoutWhy" : "ob.ra.failedWhy")}</p>}
+      {r.jobMismatch?.length ? (
+        <p className={styles.sloCellSub}>▲ {t("ob.ra.jobMismatch", { m: r.jobMismatch.map((x) => `${x.metric} job="${x.expected}" → ${x.actual.join(", ")}`).join(" · ") })}</p>
+      ) : null}
+      {r.fix ? (
+        <p className={styles.sloCellSub}>
+          <Chip level={r.fix.state === "firing" ? "warn" : r.fix.state === "clear" ? "ok" : "unknown"}>{t("ob.ra.fix.state", { s: t(`ob.ra.state.${r.fix.state}`) })}</Chip>{" "}
+          {t(`ob.ra.fix.${r.fix.why}`)}
+        </p>
+      ) : null}
       <LinkButton ariaExpanded={open === r.alert} onClick={() => setOpen(open === r.alert ? null : r.alert)}>{t(open === r.alert ? "ob.ra.hideExpr" : "ob.ra.showExpr")}</LinkButton>
       {open === r.alert && (
         <>
           <CodeBlock label={t("ob.ra.original")} code={r.original} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
           {r.expression ? <CodeBlock label={t("ob.ra.runHere")} code={r.expression} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} /> : null}
+          {r.fix ? <CodeBlock label={t("ob.ra.fix.expr")} code={r.fix.expression} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} /> : null}
         </>
       )}
     </li>
@@ -75,6 +97,7 @@ export function RecommendedAlertsTab({ clusterId, range, nonce, report }: { clus
       actions={<>
         {s.firing ? <Chip level="warn">{t("ob.ra.chip.firing", { n: s.firing, o: s.objects })}</Chip> : <Chip level="ok">{t("ob.ra.chip.none")}</Chip>}
         {s.noData + s.failed + s.ambiguous ? <Chip level="unknown">{t("ob.ra.chip.cannot", { n: s.noData + s.failed + s.ambiguous })}</Chip> : null}
+        {mismatched ? <Chip level="warn">{t("ob.ra.chip.jobMismatch", { n: mismatched })}</Chip> : null}
       </>}
       footer={<span>{t("ob.ra.foot", { at: new Date(d.at ?? d.generatedAt).toLocaleString(dateLocale(locale)), src: d.source })}</span>}>
       <p className={styles.sloText}>{t("ob.ra.summary", { total: s.total, ev: s.evaluated, f: s.firing, c: s.clear, nd: s.noData, fl: s.failed + s.ambiguous })}</p>
@@ -85,6 +108,20 @@ export function RecommendedAlertsTab({ clusterId, range, nonce, report }: { clus
         </p>
       ) : null}
       {showClear ? <ul className={styles.raList}>{clear.map(card)}</ul> : null}
+      {tpl ? (
+        <section className={styles.raTemplate}>
+          <h4 className={styles.depHead}>{t("ob.ra.tpl.title")}</h4>
+          <p className={styles.sloText}>{t("ob.ra.tpl.summary", { i: tpl.included.length, f: tpl.fixed.length, e: tpl.excluded.length })}</p>
+          {tpl.fixed.length ? <p className={styles.sloCellSub}>{t("ob.ra.tpl.fixed", { a: tpl.fixed.join(", ") })}</p> : null}
+          {tpl.excluded.length ? <p className={styles.sloCellSub}>{t("ob.ra.tpl.excluded", { a: tpl.excluded.map((x) => `${x.alert}${x.missing?.length ? ` (${x.missing.join(", ")})` : ""}`).join(", ") })}</p> : null}
+          <p className={styles.sloCellSub}>
+            <a href={`data:application/json;charset=utf-8,${encodeURIComponent(tpl.json)}`} download="aks-recommended-alerts-fixed.json">{t("ob.ra.tpl.download")}</a>
+          </p>
+          <CodeBlock label={t("ob.ra.tpl.deploy")} code={DEPLOY_COMMAND} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
+          <CodeBlock label="aks-recommended-alerts-fixed.json" code={tpl.json} maxHeight={360} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
+          <p className={styles.sloCellSub}>{t("ob.ra.tpl.note")}</p>
+        </section>
+      ) : null}
     </Panel>
   );
 }

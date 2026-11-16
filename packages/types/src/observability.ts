@@ -1142,6 +1142,29 @@ export type RecommendedAlertRule = {
   /** Microsoft's expression, and the one run here (job matchers replaced by this cluster's scope) */
   original: string;
   expression?: string;
+  /**
+   * A `job="…"` in Microsoft's expression that no series of that metric has here (stg 2026-11-16: kubelet series are
+   * job "prometheus.scrape.kubelet", not "kubelet") — deployed as shipped, the rule matches nothing
+   */
+  jobMismatch?: Array<{ metric: string; expected: string; actual: string[] }>;
+  /** This dashboard's correction (not Microsoft's), evaluated here like the original */
+  fix?: {
+    why: "metricMissing" | "duplicateMatch";
+    original: string;
+    expression: string;
+    state: "firing" | "clear" | "failed" | "noData";
+    firing: RecommendedAlertFiring[];
+  };
+};
+/** An ARM template of rule groups for this cluster: every rule that evaluates here, corrected where needed */
+export type RecommendedAlertsTemplate = {
+  json: string;
+  /** rules as Microsoft wrote them (job matchers set to this workspace's scope) */
+  included: string[];
+  /** rules replaced by this dashboard's correction */
+  fixed: string[];
+  /** rules left out and why (a metric not in the workspace, an expression that errors, several clusters) */
+  excluded: Array<{ alert: string; reason: "noData" | "failed" | "ambiguous"; missing?: string[] }>;
 };
 export type RecommendedAlertsResponse = {
   clusterId: string;
@@ -1151,6 +1174,7 @@ export type RecommendedAlertsResponse = {
   message?: string;
   source: string;
   rules: RecommendedAlertRule[];
+  template?: RecommendedAlertsTemplate;
   gaps?: StackQueryGap[];
 };
 

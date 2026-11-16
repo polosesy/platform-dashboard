@@ -38,7 +38,7 @@ covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.
 | 12 | 배포 추적 · 버전 비교 | Datadog deployment tracking · Dynatrace release | **✓ (2026-11-16)** | `kube_replicaset_created`·`_owner`·`kube_pod_container_info` (7일 롤아웃 70) | 서비스 (APM) › 배포 — 이미지 이전 → 지금, 서비스 직전 30분 vs 직후. 기존 ReplicaSet으로의 롤백은 잡히지 않음 |
 | 13 | 자동 기준선 · 이상 탐지 | AppD dynamic baselines · Dynatrace Davis | **△ 사실 비교 (2026-11-16)** | spanmetrics `offset 7d` 482 시계열 | RED에 '1주 전 같은 시각' 요청·오류·p95와 ×배 — 모델·색 없음. 학습형 기준선·이상 경보는 결정 대기 |
 | 14 | Kubernetes 상태 경고 신호 | Dynatrace warning signals · Recommendations | **✓ (2026-11-16)** | Microsoft 권장 30개 원문 평가 | 탭 '경고 신호' — 4절 |
-| 15 | 경고 규칙 작성 · 적용 현황 | 공통 | △ | Resource Graph 규칙 그룹 0개 조회 | '경고 신호'가 권장 규칙을 켜면 어떻게 될지(울림·평가 불가)를 보여 줌 — 규칙 작성은 아직 |
+| 15 | 경고 규칙 작성 · 적용 현황 | 공통 | △ | Resource Graph 규칙 그룹 0개 조회 | '경고 신호'가 권장 규칙을 켜면 어떻게 될지 + **이 클러스터용으로 고친 규칙 그룹 템플릿(복사용)** — 배포는 운영자 |
 | 16 | RUM · 합성 | 공통 | ✗ | 없음 | 범위 밖(브라우저 · 외부 프로브) |
 | 17 | 클라우드 중립 데이터 원천 | 공통(에이전트 기반) | ✗ | — | 1절 — Prometheus 호환 엔드포인트 추상화 |
 
@@ -125,6 +125,21 @@ stg 실측 결과(30개):
 
 '메트릭 없음'과 '식 오류'는 **켜도 이 클러스터에서 울리지 않는 규칙**입니다. 정상으로 세지 않습니다.
 
+**고친 규칙 그룹 (복사용, 2026-11-16 — 15번 '규칙 작성'의 첫 단계)**
+
+이 화면이 '울림/정상'이라고 말할 수 있는 것은 `job` 자리를 이 작업 영역 값으로 바꿔 평가했기 때문입니다. Microsoft 규칙 그룹을 **그대로** 켜면 다음 규칙은 이 클러스터에서 절대 울리지 않습니다.
+
+| 원인 | 규칙 | 고침 |
+|---|---|---|
+| job 이름 불일치 — kubelet 시계열의 job은 고객 Alloy가 붙인 `prometheus.scrape.kubelet` | KubePersistentVolumeFillingUp · KubePersistentVolumeInodesFillingUp · KubeletPodStartUpLatencyHigh · KubePVUsageHigh (4) | job을 이 작업 영역 값으로 (`jobMismatches`가 계열마다 실제 job 값과 비교) |
+| 메트릭 없음 | KubeJobFailed | `msRuleFixes.ts` — `kube_job_status_failed > 0` 이고 같은 Job의 성공·진행 중 파드 0 (재시도 뒤 성공한 Job은 제외) |
+| 짝 중복 | KubePVUsageHigh | 볼륨 메트릭에 없는 pod·container 대신 PVC 단위로 짝 (`on(namespace, persistentvolumeclaim, cluster, instance, job)`) |
+
+- 고침은 **원문이 평가되지 않을 때만** 씁니다. 원문 표 `msRecommendedAlerts.ts`는 그대로 둡니다.
+- `ruleGroupTemplate` = Microsoft와 같은 모양의 ARM 템플릿(규칙 그룹 3개 · apiVersion 2023-03-01 · `for`·등급 원문 그대로)입니다. 매개변수(클러스터·작업 영역·액션 그룹)는 운영자가 채웁니다. 대시보드는 Azure에 쓰지 않습니다.
+- stg 실측: 포함 25 + 고침 2 + 제외 3(쿼터 — `kube_resourcequota` 없음). 템플릿의 27개 식을 모두 작업 영역에서 실행해 오류 0, `job="kubelet"` 0개를 확인했습니다. KubeJobFailed 원문 = 메트릭 없음 → 고침 = 정상, KubePVUsageHigh 원문 = 식 오류 → 고침 = 정상.
+- 화면: 원문 job이 다른 규칙은 '정상'이어도 목록에 남기고 ▲ 표시, 고침이 있으면 그 판정 칩과 식, 아래 '이 클러스터용 고친 규칙 그룹'(JSON 받기 · 배포 명령 자리표시자 · 이미 켠 Microsoft 그룹은 꺼서 중복 경고를 막으라는 안내).
+
 **바로잡음**: kubernetes-ia 7.4에서 '✗ 15 중 13개는 데이터 있음'이라고 썼지만, 쿼터 규칙 2개는 `kube_resourcequota`가 없어 **11개**가 맞습니다.
 
 **벤더 중립 메모**: Azure Monitor 작업 영역은 라벨 값을 대소문자 구분 없이 비교합니다(실측: `phase=~"Running|Pending"`도 소문자 값 200개와 일치). Microsoft 식의 `phase="failed"`는 여기서는 맞지만, 일반 Prometheus(AMP·GMP)의 kube-state-metrics 값 `Failed`와는 맞지 않습니다. 17번 작업 때 규칙을 대소문자 무시 정규식으로 옮겨야 합니다.
@@ -172,7 +187,10 @@ stg 실측 결과(30개):
 4. ~~오류 묶음(9)의 메트릭 부분~~ — 4b절에서 구현
    - 남은 것: **예외 클래스별** 처음 본 시각.
    - 보류 이유: 메트릭에 예외 클래스가 없고, Loki로 긴 기간 정규식은 6시간 상한 원칙에 걸립니다.
-   - 방법 후보: 앱이 예외 클래스를 메트릭 태그로 내보내거나(Micrometer `exception` 태그가 붙는 카운터), Loki recording rule로 예외 클래스별 카운터를 만드는 것. 둘 다 고객 파이프라인 변경이라 결정이 필요합니다.
+   - **앱 수정 없이 인프라만으로 됩니다**(2026-11-16 실측). 6시간 ERROR 이벤트 43개(오류가 있던 앱 8개 전부)를 보니 예외 클래스가 있는 26개는 **모두 첫 줄**에 클래스가 있었고, 둘째 줄 이후에만 있는 것은 0개였습니다. 고객 Alloy의 `errmetrics` 갈래(첫 줄만 보고 `stage.metrics`로 ERROR 카운터를 만듦)에 `stage.regex`로 클래스를 뽑아 카운터 하나를 더하면 됩니다. 여러 줄 합치기는 필요 없습니다.
+   - 나머지 17개는 줄 어디에도 예외 클래스가 없습니다(`log.error("…")`만). 이것까지 클래스로 묶으려면 앱이 예외 객체를 함께 로깅해야 합니다 — 이것만 앱 수정입니다.
+   - 주의: 클래스 이름은 라벨 값이라 종류 수만큼 시계열이 생깁니다(앱 × 클래스). 짧은 이름만(패키지 제외) · 정규식에 안 맞으면 라벨 없음으로 상한을 둡니다. 고객 저장소 변경이라 이 저장소에서는 적용하지 않았습니다.
+   - Loki recording rule은 ruler가 설정돼 있지 않아 Alloy 쪽이 더 작습니다.
 5. **Prometheus 호환 엔드포인트**(17): 연결에 `prometheus {url, auth: azure | sigv4 | google | bearer}`
    - `resolvePrometheusTarget` 뒤로 숨깁니다. 질의 · 집계 코드는 그대로입니다.
    - 보류 이유: 검증할 AWS·GCP 환경이 없어, 확인하지 못한 인증 코드를 내보내지 않습니다.
@@ -180,7 +198,7 @@ stg 실측 결과(30개):
 6. **결정 대기**(구현하지 않은 이유)
    - 트레이스 검색 · 프로파일(10 · 11): 클러스터 안 Tempo·Pyroscope는 인증이 없습니다. 직접 읽지 않는다는 원칙이 있어 Grafana `/api/ds/query` 경유(연결별 opt-in · Viewer 역할 범위)로 할지 정해야 합니다.
    - 학습형 기준선 · 이상 경보(13): '1주 전 비교'는 사실이라 구현했습니다. 모델이 정하는 기준선은 '임계값 없이 색칠하지 않는다'는 원칙과 맞춰야 해서 결정이 필요합니다.
-   - 규칙 작성(15): 플랫폼이 읽기 전용이라 Azure에 쓰지 않습니다. '경고 신호'가 찾은 고칠 점(KubeJobFailed의 메트릭 이름, KubePVUsageHigh의 짝 중복)을 반영한 규칙 그룹 템플릿을 **복사용**으로 줄지 결정이 필요합니다.
+   - 규칙 작성(15): 고친 규칙 그룹 템플릿을 **복사용**으로 제공합니다(4절). 대시보드가 직접 배포하는 것은 플랫폼이 읽기 전용이라 하지 않습니다.
    - RUM · 합성(16): 브라우저와 외부 프로브가 필요해 범위 밖입니다.
 
 ## 출처

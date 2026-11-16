@@ -1101,3 +1101,6 @@
 /* 서비스 (APM) › 오류 — seven days as small bars (height = share of this app's busiest day) */
 .errBars { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; }
 .errBar { width: 6px; min-height: 1px; background: rgba(var(--ink-rgb), 0.35); border-radius: 0; }
+
+/* 경고 신호 — the corrected rule-group template under the rules */
+.raTemplate { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 8px; display: grid; gap: 8px; min-width: 0; }

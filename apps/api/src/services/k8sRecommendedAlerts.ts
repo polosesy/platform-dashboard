@@ -16,7 +16,7 @@
 // - Nothing is judged by us: the severity is the template's.
 
 import type { Env } from "../env.js";
-import type { RecommendedAlertFiring, RecommendedAlertRule, RecommendedAlertsResponse, StackQueryGap } from "@aud/types";
+import type { RecommendedAlertFiring, RecommendedAlertRule, RecommendedAlertsResponse, RecommendedAlertsTemplate, StackQueryGap } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getPrometheusFetcherAuto } from "../infra/azureClientFactory.js";
 import { HttpError } from "../infra/requestParams.js";
@@ -25,6 +25,7 @@ import { metricsStateOf } from "./hubbleMetrics.js";
 import { pickScope, scopeMatchers } from "./promScope.js";
 import { runAll } from "./observabilityStack.js";
 import { MS_RECOMMENDED_RULES, type MsRecommendedRule } from "./msRecommendedAlerts.js";
+import { MS_RULE_FIXES } from "./msRuleFixes.js";
 
 const QUERY_TIMEOUT_MS = 20_000;
 const METRIC = /(?:kube|kubelet|container|node|rest_client)_[A-Za-z0-9_:]*/y;
@@ -138,8 +139,88 @@ export function ruleVerdict(rule: MsRecommendedRule, present: ReadonlySet<string
   return { ...base, state: firing.length ? "firing" : "clear", firing };
 }
 
+/**
+ * Pure: the `job="…"` matchers of an expression that no series of that metric carries here (`jobsOf` = the job values
+ * the workspace has per metric). stg 2026-11-16: kubelet series are job "prometheus.scrape.kubelet" (the customer's
+ * Alloy), so every `job="kubelet"` rule matched nothing as shipped.
+ */
+export function jobMismatches(expr: string, jobsOf: Readonly<Record<string, string[]>>): Array<{ metric: string; expected: string; actual: string[] }> {
+  const out: Array<{ metric: string; expected: string; actual: string[] }> = [];
+  const re = /((?:kube|kubelet|container|node|rest_client)_[A-Za-z0-9_:]*)\s*\{([^}]*)\}/g;
+  for (let m = re.exec(expr); m; m = re.exec(expr)) {
+    const metric = m[1]!;
+    const job = /(?:^|,)\s*job\s*=\s*"([^"]*)"/.exec(m[2]!)?.[1];
+    const actual = jobsOf[metric] ?? [];
+    if (job === undefined || !actual.length || actual.includes(job)) continue;
+    if (!out.some((x) => x.metric === metric && x.expected === job)) out.push({ metric, expected: job, actual });
+  }
+  return out;
+}
+
+const isoFor = (minutes: number) => `PT${minutes}M`;
+const GROUP_TITLE = { cluster: "Cluster-level", node: "Node-level", pod: "Pod-level" } as const;
+/**
+ * Pure: an ARM template of three rule groups (cluster / node / pod, like Microsoft's) for this cluster — every rule that
+ * evaluates here with its job matchers set to the workspace's scope, a corrected rule where only the correction
+ * evaluates, the rest listed as excluded. Parameters are placeholders the operator fills; nothing is deployed from here.
+ */
+export function ruleGroupTemplate(rules: RecommendedAlertRule[]): RecommendedAlertsTemplate {
+  const included: string[] = [], fixed: string[] = [];
+  const excluded: RecommendedAlertsTemplate["excluded"] = [];
+  const byGroup: Record<"cluster" | "node" | "pod", Array<Record<string, unknown>>> = { cluster: [], node: [], pod: [] };
+  for (const r of rules) {
+    const usable = (r.state === "firing" || r.state === "clear") && !!r.expression;
+    const fixUsable = !!r.fix && (r.fix.state === "firing" || r.fix.state === "clear");
+    const expression = usable ? r.expression! : fixUsable ? r.fix!.expression : null;
+    if (!expression) {
+      excluded.push({ alert: r.alert, reason: r.state === "ambiguous" ? "ambiguous" : r.state === "noData" ? "noData" : "failed", ...(r.missing?.length ? { missing: r.missing } : {}) });
+      continue;
+    }
+    (usable ? included : fixed).push(r.alert);
+    byGroup[r.group].push({
+      alert: r.alert,
+      expression,
+      for: isoFor(r.forMinutes),
+      severity: r.severity,
+      labels: { source: "aud-recommended-fixed" },
+      annotations: { description: `${r.alert} - Microsoft recommended Kubernetes alert rule${usable ? "" : ` (corrected: ${r.fix!.why})`}, job matchers set to this cluster's metrics` },
+      enabled: true,
+      resolveConfiguration: { autoResolved: true, timeToResolve: "PT10M" },
+      actions: [{ actionGroupId: "[parameters('actionGroupResourceId')]" }],
+    });
+  }
+  const resources = (Object.keys(byGroup) as Array<keyof typeof byGroup>).filter((g) => byGroup[g].length).map((g) => ({
+    type: "Microsoft.AlertsManagement/prometheusRuleGroups",
+    apiVersion: "2023-03-01",
+    name: `[concat('KubernetesAlert-RecommendedFixed-', parameters('clusterName'), '-${GROUP_TITLE[g]}')]`,
+    location: "[parameters('location')]",
+    properties: {
+      description: `Kubernetes recommended alert rules (${GROUP_TITLE[g]}) - Microsoft's rules with job matchers set to this workspace and measured corrections`,
+      scopes: ["[parameters('azureMonitorWorkspaceResourceId')]", "[parameters('clusterResourceId')]"],
+      clusterName: "[parameters('clusterName')]",
+      interval: "PT1M",
+      enabled: true,
+      rules: byGroup[g],
+    },
+  }));
+  const template = {
+    $schema: "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    contentVersion: "1.0.0.0",
+    parameters: {
+      clusterName: { type: "string", metadata: { description: "The AKS cluster's name" } },
+      clusterResourceId: { type: "string", metadata: { description: "The AKS cluster's resource ID" } },
+      azureMonitorWorkspaceResourceId: { type: "string", metadata: { description: "The Azure Monitor workspace the cluster's Prometheus metrics go to" } },
+      actionGroupResourceId: { type: "string", metadata: { description: "The action group the alerts notify" } },
+      location: { type: "string", defaultValue: "[resourceGroup().location]", metadata: { description: "The rule groups' region - the cluster's" } },
+    },
+    resources,
+  };
+  return { json: JSON.stringify(template, null, 2), included, fixed, excluded };
+}
+
 const cache = new CacheManager<RecommendedAlertsResponse>(30, 60_000);
-const scopeCache = new CacheManager<Record<string, string | null | "ambiguous">>(30, 10 * 60_000);
+type ScopeFacts = { scopes: Record<string, string | null | "ambiguous">; jobs: Record<string, string[]> };
+const scopeCache = new CacheManager<ScopeFacts>(30, 10 * 60_000);
 const inflight = new Map<string, Promise<RecommendedAlertsResponse>>();
 
 export async function getRecommendedAlerts(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<RecommendedAlertsResponse> {
@@ -167,10 +248,12 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     const fetcher = await getPrometheusFetcherAuto(env, bearerToken, clusterId);
     const time = at === undefined ? undefined : String(at);
     const aks = clusterId.split("/").pop() ?? "";
-    // 1. Each metric family's scope in this workspace (presence + cluster / job / collector)
-    const all = [...new Set(MS_RECOMMENDED_RULES.flatMap((r) => metricsOf(r.expression)))];
+    // 1. Each metric family's scope in this workspace (presence + cluster / job / collector) — the corrections' too
+    const all = [...new Set([...MS_RECOMMENDED_RULES.map((r) => r.expression), ...Object.values(MS_RULE_FIXES).map((f) => f.expression)].flatMap(metricsOf))];
     const sKey = `${cachePrefix(bearerToken)}:msalerts-scope:${clusterId.toLowerCase()}`;
-    let scopes = scopeCache.get(sKey);
+    let facts = scopeCache.get(sKey);
+    let scopes = facts?.scopes;
+    let jobs: Record<string, string[]> = facts?.jobs ?? {};
     if (!scopes) {
       const run = await runAll(fetcher, target.endpoint, Object.fromEntries(all.map((m) => [m, `group by (cluster, job, collector) (${m})`])), 8, undefined, QUERY_TIMEOUT_MS);
       if (run.gaps.length === all.length) throw run.firstError;
@@ -180,14 +263,17 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
       const quiet = all.filter((m) => !run.gaps.some((g) => g.query === m) && !(run.rows[m] ?? []).length);
       const back = quiet.length ? await runAll(fetcher, target.endpoint, Object.fromEntries(quiet.map((m) => [m, `group by (cluster, job, collector) (last_over_time(${m}[1d]))`])), 8, undefined, QUERY_TIMEOUT_MS) : null;
       scopes = {};
+      jobs = {};
       const unknown = new Set([...run.gaps, ...(back?.gaps ?? [])].map((g) => g.query));
       for (const m of all) {
         if (unknown.has(m)) continue; // not read → not cached as absent
         const rows = (run.rows[m] ?? []).length ? run.rows[m]! : back?.rows[m] ?? [];
+        jobs[m] = [...new Set(rows.filter((r) => !r.metric.cluster || r.metric.cluster.toLowerCase() === aks.toLowerCase()).map((r) => r.metric.job).filter((x): x is string => !!x))].sort();
         const s = pickScope(rows.map((r) => ({ cluster: r.metric.cluster, job: r.metric.job, collector: r.metric.collector })), aks);
         scopes[m] = s === "ambiguous" ? "ambiguous" : s === null ? null : scopeMatchers(s);
       }
-      if (!unknown.size) scopeCache.set(sKey, scopes);
+      facts = { scopes, jobs };
+      if (!unknown.size) scopeCache.set(sKey, facts);
     }
     const present = new Set(Object.entries(scopes).filter(([, v]) => v !== null && v !== "ambiguous").map(([k]) => k));
     const ambiguous = new Set(Object.entries(scopes).filter(([, v]) => v === "ambiguous").map(([k]) => k));
@@ -200,14 +286,34 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
       scoped[r.alert] = scopeExpression(r.expression, (m) => (typeof scopes![m] === "string" ? (scopes![m] as string) : ""));
       queries[r.alert] = forQuery(scoped[r.alert]!, r.forMinutes);
     }
+    // The corrections, evaluated the same way (a correction is used only where the original cannot evaluate)
+    const scopeOf = (m: string) => (typeof scopes![m] === "string" ? (scopes![m] as string) : "");
+    const fixScoped: Record<string, string> = {};
+    for (const [alert, f] of Object.entries(MS_RULE_FIXES)) {
+      const rule = MS_RECOMMENDED_RULES.find((r) => r.alert === alert);
+      if (!rule) continue;
+      const v = ruleVerdict({ ...rule, expression: f.expression }, present, ambiguous, []);
+      if (v.state === "noData" || v.state === "ambiguous") continue;
+      fixScoped[alert] = scopeExpression(f.expression, scopeOf);
+      queries[`fix:${alert}`] = forQuery(fixScoped[alert]!, rule.forMinutes);
+    }
     const run = await runAll(fetcher, target.endpoint, queries, 4, time, QUERY_TIMEOUT_MS);
     const gaps: StackQueryGap[] = run.gaps;
     const rules = MS_RECOMMENDED_RULES.map((r) => {
       const gap = gaps.find((g) => g.query === r.alert);
-      const v = ruleVerdict(r, present, ambiguous, gap ? "failed" : (run.rows[r.alert] ?? []), gap?.reason);
-      return scoped[r.alert] ? { ...v, expression: scoped[r.alert]! } : v;
+      const v: RecommendedAlertRule = ruleVerdict(r, present, ambiguous, gap ? "failed" : (run.rows[r.alert] ?? []), gap?.reason);
+      if (scoped[r.alert]) v.expression = scoped[r.alert]!;
+      const mismatch = jobMismatches(r.expression, jobs);
+      if (mismatch.length) v.jobMismatch = mismatch;
+      const f = MS_RULE_FIXES[r.alert];
+      if (f) {
+        const fg = gaps.find((g) => g.query === `fix:${r.alert}`);
+        const fv = ruleVerdict({ ...r, expression: f.expression }, present, ambiguous, fg ? "failed" : (run.rows[`fix:${r.alert}`] ?? []), fg?.reason);
+        v.fix = { why: f.why, original: f.expression, expression: fixScoped[r.alert] ?? f.expression, state: fv.state === "ambiguous" ? "noData" : fv.state, firing: fv.firing };
+      }
+      return v;
     });
-    return { ...base, rules, ...(gaps.length ? { gaps } : {}) };
+    return { ...base, rules, template: ruleGroupTemplate(rules), ...(gaps.length ? { gaps } : {}) };
   } catch (e) {
     if (e instanceof HttpError && e.code === "signin_required") throw e;
     const { state, message } = metricsStateOf(e);
