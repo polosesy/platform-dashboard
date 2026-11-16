@@ -624,7 +624,11 @@ export function buildFaultImpacts(
   const links = edgeSpecs.filter((e) => e.evidence !== "inferred" && (e.edgeKind == null || IMPACT_EDGE_KINDS.has(e.edgeKind)));
 
   return sources.map(({ id, trigger }) => {
-    const touching = links.filter((e) => e.source === id || e.target === id);
+    // Who depends on the failing resource. A "routes" line points from the entry (LB / App Gateway) to its backends:
+    // a failing entry does not affect its backends — its callers are hurt (2026-11-16: an LB frontend with no
+    // healthy backend listed the backend node pools, the cause side, as "affected"); a failing backend still affects
+    // the entry that routes to it
+    const touching = links.filter((e) => e.target === id || (e.source === id && e.edgeKind !== "routes"));
     return {
       sourceNodeId: id,
       severity: "critical",

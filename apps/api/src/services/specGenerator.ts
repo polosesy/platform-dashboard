@@ -332,9 +332,16 @@ export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "ico
   if ((kind === "publicIP" || kind === "natGateway") && n.metadata?.unused === "true") return NOT_MEASURED;
   if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
   if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return { ...NODE_BINDINGS.frontDoorAfd!, ...afdProbeBindings(n.metadata?.originGroups) };
-  if (kind === "lb") return { ...NODE_BINDINGS.lb!, ...privateFrontendBindings(n.metadata?.frontends) };
+  if (kind === "lb") {
+    const dp = frontendDataPathBindings(n.metadata?.frontends);
+    // Frontends read one by one: the state is judged per frontend (healthEvidence.ts), not on the average
+    return { ...NODE_BINDINGS.lb!, ...privateFrontendBindings(n.metadata?.frontends), ...dp, ...(Object.keys(dp).length ? { health: LB_HEALTH_PER_FRONTEND } : {}) };
+  }
   return NODE_BINDINGS[kind] ?? n.bindings ?? NOT_MEASURED;
 }
+
+/** LB health when each frontend's data path is read (`dp<i>`): the average's rule goes — healthEvidence judges per frontend */
+const LB_HEALTH_PER_FRONTEND = health(...atLeast("backend", 99, 1), rule("snatFail", "<", 1, "warning"));
 
 /**
  * Probe health of the origin groups an active route uses with probes on (`probe<i>` = metadata originGroups'
@@ -371,6 +378,26 @@ export function privateFrontendBindings(frontendsJson: string | undefined): Reco
     const filter = `FrontendIPAddress eq '${monEsc(ip)}' and Direction eq 'In'`;
     out[`feIn${i}`] = mon("ByteCount", "total", { filter, window: "PT1H", optional: true });
     out[`feSyn${i}`] = mon("SYNCount", "total", { filter, window: "PT1H", optional: true });
+  });
+  return out;
+}
+
+/**
+ * Data path availability per rule-bound frontend (`dp<i>`, this order) — 2026-11-16: an internal LB with six rules
+ * (frontend IP × port) read 83.3 % = five at 100 % and one at 0 % (a Service whose pods were scaled to zero), and the
+ * whole LB was painted "fault source" with its backend node pools as "affected". Azure averages the unsplit metric over
+ * every frontend IP × port, so the average is no loss rate; each frontend IP is read on its own (its ports averaged).
+ */
+export const MAX_DATA_PATH_FRONTENDS = 8;
+export function dataPathFrontendIps(frontendsJson: string | undefined): string[] {
+  let fes: Array<{ ip?: string; ruleBound?: boolean }> = [];
+  try { fes = JSON.parse(frontendsJson ?? "[]") as typeof fes; } catch { return []; }
+  return [...new Set(fes.filter((f) => f.ruleBound && f.ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(f.ip)).map((f) => f.ip!))].slice(0, MAX_DATA_PATH_FRONTENDS);
+}
+export function frontendDataPathBindings(frontendsJson: string | undefined): Record<string, MetricBinding> {
+  const out: Record<string, MetricBinding> = {};
+  dataPathFrontendIps(frontendsJson).forEach((ip, i) => {
+    out[`dp${i}`] = mon("VipAvailability", "avg", { filter: `FrontendIPAddress eq '${monEsc(ip)}'`, optional: true });
   });
   return out;
 }

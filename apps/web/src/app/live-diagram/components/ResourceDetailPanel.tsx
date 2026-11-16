@@ -24,6 +24,8 @@ import { shortNamesWithParts } from "@/lib/liveNames";
 import { NameParts } from "./NameParts";
 import { PrivateLinkUsageSection } from "./detail/PrivateLinkUsage";
 import { LbInboundSection } from "./detail/LbInboundSection";
+import { LbDataPathSection } from "./detail/LbDataPathSection";
+import { isDataPathFrontendKey, lbDataPath } from "@/lib/lbDataPath";
 import { LifecycleSection } from "./detail/LifecycleSection";
 import { evaluationParts, firedMinutes } from "@/lib/liveAlerts";
 import { isFrontendInboundKey } from "@/lib/lbInbound";
@@ -186,14 +188,19 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
   // The card's two metrics first (same order as the card), then the rest the API reads for the kind
   // WAF verdict counts are shown in the WAF panel: "no block recorded" is not "unmeasured"
   // … and an internal LB's per-frontend inbound hour is shown in its own section (LbInboundSection)
-  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k) && !isFrontendInboundKey(k));
+  const allBound = [...specBound, ...Object.keys(metrics).filter((k) => !specBound.includes(k))].filter((k) => !WAF_METRICS.has(k) && !isFrontendInboundKey(k) && !isDataPathFrontendKey(k));
   const first = cardCells(node.resourceKind ?? node.icon, allBound);
   const bound = [...first.filter((k) => allBound.includes(k)), ...allBound.filter((k) => !first.includes(k))];
   const rules: HealthRule[] = node.bindings.health?.rules ?? [];
   const failing = (health === "warning" || health === "critical")
     ? rules.find((r) => !(r.op === ">" && r.threshold === 0) && metrics[r.metric] != null && !passes(metrics[r.metric]!, r))
     : undefined;
-  const reason = failing
+  // A load balancer judged per frontend (API healthEvidence): name the frontends, not the average
+  const dpFacts = kind === "lb" && (health === "warning" || health === "critical") ? lbDataPath(node.metadata?.frontends, metrics) : null;
+  const dpDown = dpFacts?.frontends.filter((f) => f.level === "down" || f.level === "low") ?? [];
+  const reason = dpDown.length
+    ? t("ld.lbdp.reason", { bad: dpDown.length, total: dpFacts!.measured, ips: dpDown.map((f) => `${f.ip} ${f.value == null ? "" : formatMetric("dataPath", f.value).value + "%"}`).join(", ") })
+    : failing
     ? (() => {
         const v = formatMetric(failing.metric, metrics[failing.metric]!);
         const thr = formatMetric(failing.metric, failing.threshold);
@@ -414,6 +421,7 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
         <PrivateLinkUsageSection node={node} spec={spec} usage={usage} loading={usageLoading} nameOf={nameOf} onSelectNode={onSelectNode} />
 
         {/* Internal LB: who sends traffic in (configured / observed callers, the measured hour) */}
+        {kind === "lb" ? <LbDataPathSection node={node} metrics={metrics} /> : null}
         <LbInboundSection node={node} spec={spec} metrics={metrics} measured={metricsState === "ok"} usage={usage} loading={usageLoading} nameOf={nameOf} onSelectNode={onSelectNode} />
 
         {/* Specification: SKU, version, capacity, HA, access settings (resourceSpec.ts) */}

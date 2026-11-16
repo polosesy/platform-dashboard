@@ -5,7 +5,11 @@
 //   risk (worst wins)  quality rules · an active Azure Monitor alert (Sev0/1 critical, Sev2 warning — Azure's own
 //                      verdict, basis "alert") · Resource Health Degraded (warning) / Unavailable (critical) ·
 //                      configuration faults — provisioning Failed, a PE connection Rejected / Disconnected — at most
-//                      warning (a configuration fact must not start a fault-impact spread)
+//                      warning (a configuration fact must not start a fault-impact spread) · a load balancer's data
+//                      path per rule-bound frontend (`dp<i>`): every frontend below 90 % = critical (the LB carries
+//                      nothing), some below 99 % = warning (those rules are down — usually no healthy backend behind
+//                      them; the LB itself works). The unsplit average is never judged: it averages frontend × port
+//                      (2026-11-16: 5 × 100 % + 1 × 0 % = 83.3 % painted a working LB "fault source")
 //   positive (first)   quality rules passed → metric · Resource Health Available → resourceHealth (ok) ·
 //                      traffic both ways in the window → observed (health stays unknown: "inferred normal", not ok) ·
 //                      provisioned (and, for a PE, approved) with nothing observed → configured (idle / no series /
@@ -66,6 +70,11 @@ export function resolveEvidence(i: EvidenceInput): Evidence {
   if (alertRisk !== "unknown") {
     if (rank(alertRisk) > rank(risk) || risk === "unknown") { risk = alertRisk; riskBasis = "alert"; }
     reasons.push("ld.ev.alertFired");
+  }
+  if (i.kind === "lb") {
+    const dps = Object.entries(i.metrics).filter(([k, v]) => /^dp\d+$/.test(k) && v != null).map(([, v]) => v!);
+    if (dps.length && dps.every((v) => v < 90)) { risk = worst(risk, "critical"); reasons.push("ld.ev.lbDataPathDown"); }
+    else if (dps.some((v) => v < 99)) { risk = worst(risk, "warning"); reasons.push("ld.ev.lbFrontendPartial"); }
   }
   if (i.rh === "Unavailable") { risk = worst(risk, "critical"); reasons.push("ld.ev.rhUnavailable"); riskBasis = "resourceHealth"; }
   if (i.rh === "Degraded") { risk = worst(risk, "warning"); reasons.push("ld.ev.rhDegraded"); if (riskBasis !== "resourceHealth" && riskBasis !== "alert" && !i.judged) riskBasis = "resourceHealth"; }
