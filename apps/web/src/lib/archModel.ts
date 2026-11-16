@@ -110,6 +110,8 @@ export type ArchRegion = {
   unresolvedPublicIps: ArchCleanupItem[];
   /** NSGs associated with nothing */
   unusedNsgs: ArchCleanupItem[];
+  /** NAT Gateways no subnet uses (EDGE-01 absent) — the tile stays, listed for cleanup (billed with its public IPs) */
+  unusedNatGateways: ArchCleanupItem[];
   /** Unassociated NSGs an AKS cluster owns (its node resource group) — shown apart, not cleanup */
   managedNsgs: ArchManagedNsg[];
 };
@@ -150,7 +152,7 @@ export type ArchModel = {
   sites: Map<string, ArchSite>;
   totals: {
     regions: number; vnets: number; subnets: number; tiles: number; vms: number; publicIpResources: number;
-    privateEndpoints: number; unusedPublicIps: number; unresolvedPublicIps: number; unusedNsgs: number; managedNsgs: number; otherNics: number;
+    privateEndpoints: number; unusedPublicIps: number; unresolvedPublicIps: number; unusedNsgs: number; unusedNatGateways: number; managedNsgs: number; otherNics: number;
   };
 };
 
@@ -327,8 +329,8 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   }
 
   // NSGs: subnet badge, VM badge via NIC, subnet badge via a VM-less NIC, else "unused"
-  const cleanup = new Map<string, { unusedPublicIps: ArchCleanupItem[]; unresolvedPublicIps: ArchCleanupItem[]; unusedNsgs: ArchCleanupItem[]; managedNsgs: ArchManagedNsg[] }>();
-  const bucket = (k: string) => cleanup.get(k) ?? cleanup.set(k, { unusedPublicIps: [], unresolvedPublicIps: [], unusedNsgs: [], managedNsgs: [] }).get(k)!;
+  const cleanup = new Map<string, { unusedPublicIps: ArchCleanupItem[]; unresolvedPublicIps: ArchCleanupItem[]; unusedNsgs: ArchCleanupItem[]; unusedNatGateways: ArchCleanupItem[]; managedNsgs: ArchManagedNsg[] }>();
+  const bucket = (k: string) => cleanup.get(k) ?? cleanup.set(k, { unusedPublicIps: [], unresolvedPublicIps: [], unusedNsgs: [], unusedNatGateways: [], managedNsgs: [] }).get(k)!;
   const aksNodeRgs = aksByNodeResourceGroup(byId);
   const pushUnique = (arr: string[], v: string) => { if (!arr.includes(v)) arr.push(v); };
   for (const [id, n] of byId) {
@@ -347,6 +349,16 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     if (managed) bucket(regionKey(n.location)).managedNsgs.push({ id, name: n.name, ...managed });
     else bucket(regionKey(n.location)).unusedNsgs.push({ id, name: n.name });
     account(id, "counted");
+  }
+
+  // NAT Gateways: attached = some subnet names it (EDGE-01). One no subnet uses sends nothing — its tile stays (it
+  // exists, it is billed) and it is listed for cleanup; no outbound line (2026-11-16: a replaced NAT read "not an exit —
+  // every attached subnet leaves through a UDR" with no subnet attached)
+  const natAttached = new Set<string>();
+  for (const [id, n] of byId) {
+    if (n.kind !== "natGateway") continue;
+    if (inOf(id).some((e) => kindOf(e.source) === "subnet")) { natAttached.add(id); continue; }
+    bucket(regionKey(n.location)).unusedNatGateways.push({ id, name: n.name, ...(n.endpoint ? { detail: n.endpoint } : {}) });
   }
 
   const edges: ArchEdge[] = [];
@@ -405,7 +417,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       if (ok !== "natGateway" && !noInbound && !closed) addEdge(ENTRY_KINDS.has(ok) ? "ingress" : "exposure", internetId(r.region), owner);
       // NAT gateway with a public IP: the subnets' outbound path to the Internet (configuration, never traffic)
       // to the Internet on the right (outbound), only when some subnet's first exit is this NAT (NET-09)
-      if (ok === "natGateway" && (!egressKnown || natUsed.has(owner))) addEdge("egress", owner, internetOutId(r.region));
+      if (ok === "natGateway" && natAttached.has(owner) && (!egressKnown || natUsed.has(owner))) addEdge("egress", owner, internetOutId(r.region));
       continue;
     }
     const viaNic = nicSubnet.get(ownerId);
@@ -513,6 +525,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
     reg.unusedPublicIps.sort(byItem);
     reg.unresolvedPublicIps.sort(byItem);
     reg.unusedNsgs.sort(byItem);
+    reg.unusedNatGateways.sort(byItem);
     reg.managedNsgs.sort(byItem);
   }
   for (const r of resources.values()) { r.privateIps.sort(); r.publicIps.sort(); r.nsgs.sort(); r.nodePools.sort(); r.instances.sort(); }
@@ -549,7 +562,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
   edges.sort((a, b) => a.id.localeCompare(b.id));
 
   const flow = computeFlowRanks(resources, edges);
-  const all = <K extends "unusedPublicIps" | "unresolvedPublicIps" | "unusedNsgs" | "managedNsgs">(key: K) =>
+  const all = <K extends "unusedPublicIps" | "unresolvedPublicIps" | "unusedNsgs" | "unusedNatGateways" | "managedNsgs">(key: K) =>
     regionList.reduce((n, r) => n + r[key].length, 0) + (globalCleanup?.[key].length ?? 0);
   return {
     nodes: byId,
@@ -574,6 +587,7 @@ export function buildArchModel(graph: ArchitectureGraph): ArchModel {
       unusedPublicIps: all("unusedPublicIps"),
       unresolvedPublicIps: all("unresolvedPublicIps"),
       unusedNsgs: all("unusedNsgs"),
+      unusedNatGateways: all("unusedNatGateways"),
       managedNsgs: all("managedNsgs"),
       otherNics: [...subnets.values()].reduce((n, s) => n + s.otherNics, 0),
     },

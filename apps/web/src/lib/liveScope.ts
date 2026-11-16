@@ -58,6 +58,8 @@ const isGroup = (n: DiagramNodeSpec) => n.nodeType === "group";
  *    as is; a neighbour inside another VNet becomes a ghost stub — no parent chain is pulled in, so
  *    exactly the selected VNets appear as boxes. Guessed links widen it only with `includeInferred`
  *    (the "추정 의존성" layer on), so a guess never adds anything to the default view.
+ * 3. Unused · detached resources with no line at all join the selected VNets of the same resource group and region
+ *    (`scopeBasis: "sameResourceGroup"`).
  * The result does not depend on edge order. Nothing selected → the whole diagram.
  */
 export function scopeSpec(
@@ -103,6 +105,21 @@ export function scopeSpec(
           ? node
           : { ...node, parentId: undefined, metadata: { ...node.metadata, ghostOf: root.label } },
       );
+    }
+  }
+
+  // 3. Unused · detached resources outside every VNet (an unattached public IP, a NAT Gateway no subnet uses) have no
+  //    line to widen along, so a VNet view never showed them (2026-11-16: the replaced NAT vanished instead of joining
+  //    the "unused" lane). They join the selected VNets that share their resource group AND region — the basis the
+  //    generator already uses for a detached NSG — marked `scopeBasis` so the panel says why (not a configured link).
+  const homes = new Set(spec.nodes.filter((n) => isGroup(n) && !n.parentId && core.has(n.id) && n.resourceGroup && n.location)
+    .map((n) => `${n.resourceGroup!.toLowerCase()}|${n.location!.toLowerCase()}`));
+  if (selectedVnets.size && homes.size) {
+    for (const n of spec.nodes) {
+      if (core.has(n.id) || extra.has(n.id) || isGroup(n) || n.parentId) continue;
+      if (n.metadata?.unused !== "true" && n.metadata?.detached !== "true") continue;
+      if (!n.resourceGroup || !n.location || !homes.has(`${n.resourceGroup.toLowerCase()}|${n.location.toLowerCase()}`)) continue;
+      extra.set(n.id, { ...n, metadata: { ...n.metadata, scopeBasis: "sameResourceGroup" } });
     }
   }
 

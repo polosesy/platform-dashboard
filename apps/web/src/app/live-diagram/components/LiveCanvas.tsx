@@ -29,7 +29,7 @@ import type {
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiToken } from "@/lib/useApiToken";
 import { useI18n } from "@/lib/i18n";
-import { isUnusedBadge, liveLayout, LIVE, type LayoutBox } from "@/lib/liveLayout";
+import { isUnusedBadge, liveLayout, LIVE, unusedReasonKey, type LayoutBox } from "@/lib/liveLayout";
 import { routeEdges } from "@/lib/liveRoute";
 import { recentAlertChip } from "@/lib/liveAlerts";
 import { colsTargetFor, commitPlan, livePlan, type ArrangeContainer, type ColsTarget, type LivePlan } from "@/lib/liveArrange";
@@ -487,7 +487,7 @@ function LiveCanvasInner({
           style: { width: LIVE.NSG_W, height: LIVE.NSG_H },
           data: {
             label: n.label, icon: n.icon, resourceKind: n.resourceKind, azureResourceId: n.azureResourceId, detached: unused,
-            ...(unused ? { reasonKey: kind === "nsg" ? "ld.nsgDetached" : n.metadata?.unusedReason === "nicNoVm" ? "ld.unusedPipNicNoVm" : kind === "publicIP" ? "ld.unusedPipHint" : "ld.unusedHint" } : {}),
+            ...(unused ? { reasonKey: unusedReasonKey(n) } : {}),
           } satisfies NsgBadgeData,
         });
         continue;

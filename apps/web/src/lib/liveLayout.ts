@@ -149,6 +149,14 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Card size as LiveNode draws it */
 /** Unused / detached resources (unattached public IPs, NSGs on nothing): one compact badge each, whatever the kind */
 export const isUnusedBadge = (n: DiagramNodeSpec) => !isGroup(n) && (n.metadata?.unused === "true" || n.metadata?.detached === "true");
+/** Why an unused badge is unused (i18n key) — the badge tooltip and the panel say the same */
+export function unusedReasonKey(n: Pick<DiagramNodeSpec, "resourceKind" | "icon" | "metadata">): string {
+  const k = n.resourceKind ?? n.icon;
+  if (k === "nsg") return "ld.nsgDetached";
+  if (n.metadata?.unusedReason === "natNoSubnet") return "ld.unusedNatNoSubnet";
+  if (n.metadata?.unusedReason === "nicNoVm") return "ld.unusedPipNicNoVm";
+  return k === "publicIP" ? "ld.unusedPipHint" : "ld.unusedHint";
+}
 
 export function cardSize(n: DiagramNodeSpec): { w: number; h: number } {
   const k = kindOf(n);
@@ -173,8 +181,9 @@ const cardRank = (n: DiagramNodeSpec) => {
   return i < 0 ? CARD_ORDER.length - 1 : i;
 };
 const byCard = (a: DiagramNodeSpec, b: DiagramNodeSpec) => cardRank(a) - cardRank(b) || cmp(a.label, b.label) || cmp(a.id, b.id);
-const UNUSED_RANK: Record<string, number> = { publicIP: 0, nsg: 1 };
-const byUnused = (a: DiagramNodeSpec, b: DiagramNodeSpec) => (UNUSED_RANK[kindOf(a)] ?? 2) - (UNUSED_RANK[kindOf(b)] ?? 2) || cmp(kindOf(a), kindOf(b)) || cmp(a.label, b.label) || cmp(a.id, b.id);
+/** Billed while unused first (public IPs, NAT Gateways), then NSGs (free), then the rest */
+const UNUSED_RANK: Record<string, number> = { publicIP: 0, natGateway: 1, nsg: 2 };
+const byUnused = (a: DiagramNodeSpec, b: DiagramNodeSpec) => (UNUSED_RANK[kindOf(a)] ?? 3) - (UNUSED_RANK[kindOf(b)] ?? 3) || cmp(kindOf(a), kindOf(b)) || cmp(a.label, b.label) || cmp(a.id, b.id);
 
 /** Subnet tie-break order: entry (0) → compute (1) → data / Private Endpoints (2) → management (3) → empty (4) */
 export function subnetTier(subnet: DiagramNodeSpec, cards: DiagramNodeSpec[]): number {
@@ -717,7 +726,7 @@ export function liveLayout(spec: DiagramSpec, opts: LiveLayoutOptions = {}): Liv
     const segs = kind === "unused" ? [["_", members] as [string, DiagramNodeSpec[]]] : segments(members);
     return segs.map(([key, list]) => {
       const base = `lane:${kind}${category ? ":" + category : ""}`;
-      // Unused · detached: public IPs first (billed while unused), then NSGs, then the rest — by name within a kind
+      // Unused · detached: public IPs and NAT Gateways first (billed while unused), then NSGs, then the rest — by name
       const cards = list.slice().sort(kind === "unused" ? byUnused : byCard);
       // The user's column count (1–2) for the lanes whose order is theirs too — one per kind, every segment
       const u = kind === "paas" || kind === "outside" || kind === "ghost" ? opts.arrangement?.grid.get(base)?.cols : undefined;

@@ -9,7 +9,7 @@
 //   positive (first)   quality rules passed → metric · Resource Health Available → resourceHealth (ok) ·
 //                      traffic both ways in the window → observed (health stays unknown: "inferred normal", not ok) ·
 //                      provisioned (and, for a PE, approved) with nothing observed → configured (idle / no series /
-//                      one way) · Azure defines no state (NSG, an unused public IP) → notApplicable · else none
+//                      one way) · Azure defines no state (NSG, an unused public IP / NAT Gateway) → notApplicable · else none
 // Learn: Resource Health states https://learn.microsoft.com/azure/service-health/resource-health-overview ·
 // "Only private endpoints in an approved state can be used to send traffic" https://learn.microsoft.com/azure/private-link/private-endpoint-overview ·
 // zeros vs NULLs are the provider's choice https://learn.microsoft.com/azure/azure-monitor/metrics/metrics-aggregation-explained
@@ -29,7 +29,7 @@ export type EvidenceInput = {
   /** Private Endpoint: approval state of each connection */
   peConnections?: string[];
   rh?: RhState;
-  /** Public IP attached to nothing */
+  /** Public IP attached to nothing, NAT Gateway no subnet uses */
   unused?: boolean;
   /** Severities of the resource's active (Fired, not Closed) Azure Monitor alerts */
   alerts?: AlertSeverity[];
@@ -82,7 +82,7 @@ export function resolveEvidence(i: EvidenceInput): Evidence {
   if (i.rh === "Available") return { health: "ok", basis: "resourceHealth", reasons: [...reasons, "ld.ev.rhAvailable"] };
   if (i.rh === "Unknown") reasons.push("ld.ev.rhUnknown");
 
-  if (i.kind === "nsg" || (i.kind === "publicIP" && i.unused)) return { health: "unknown", basis: "notApplicable", reasons: [...reasons, "ld.ev.notApplicable"] };
+  if (i.kind === "nsg" || ((i.kind === "publicIP" || i.kind === "natGateway") && i.unused)) return { health: "unknown", basis: "notApplicable", reasons: [...reasons, "ld.ev.notApplicable"] };
 
   const keys = TRAFFIC[i.kind];
   if (keys) {

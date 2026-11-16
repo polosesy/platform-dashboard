@@ -59,6 +59,8 @@ type LinkFacts = {
   peTargets: Map<string, string[]>; peSources: Map<string, number>; integratedFrom: Map<string, string[]>;
   /** NAT / appliance → names of the subnets whose first exit it is; egressKnown = the API read the exits */
   exitsVia: Map<string, string[]>; egressKnown: boolean;
+  /** NAT Gateways no subnet uses (the model's cleanup list) */
+  natUnused: Set<string>;
   /** VNet → its peerings (count, not Connected) */
   peerings: Map<string, { n: number; down: number }>;
 };
@@ -89,7 +91,8 @@ function linkFacts(model: ArchModel): LinkFacts {
       (integratedFrom.get(e.target) ?? integratedFrom.set(e.target, []).get(e.target)!).push(model.nodes.get(e.source)?.name ?? e.source);
     }
   }
-  return { peTargets, peSources, integratedFrom, exitsVia, egressKnown, peerings };
+  const natUnused = new Set(model.regions.flatMap((r) => r.unusedNatGateways.map((x) => x.id)));
+  return { peTargets, peSources, integratedFrom, exitsVia, egressKnown, natUnused, peerings };
 }
 
 /** Region marker (a location pin, not the subscription key) — inline SVG, colour from the palette */
@@ -114,6 +117,7 @@ function boxData(model: ArchModel, sh: Extract<ArchPlaced, { shape: "box" }>, t:
     if (reg.unusedPublicIps.length) badges.push({ text: t("arch.unusedPip", { n: reg.unusedPublicIps.length }), tone: "warn" });
     if (reg.unresolvedPublicIps.length) badges.push({ text: t("arch.unresolvedPip", { n: reg.unresolvedPublicIps.length }), tone: "muted" });
     if (reg.unusedNsgs.length) badges.push({ text: t("arch.unusedNsg", { n: reg.unusedNsgs.length }), tone: "muted" });
+    if (reg.unusedNatGateways.length) badges.push({ text: t("arch.unusedNat", { n: reg.unusedNatGateways.length }), tone: "warn" });
     const title = regionName(reg.key, t);
     return { shape: sh, title, sub: reg.key, icon: REGION_ICON, badges, ariaLabel: `${t("arch.box.region")} ${title}`, variant: "region" };
   }
@@ -251,7 +255,9 @@ function tileData(model: ArchModel, sh: Exclude<ArchPlaced, { shape: "box" }>, t
   if (integrated?.length) badges.push({ text: t("arch.badge.vnetInt"), tone: "muted", title: integrated.join(", ") });
   // NET-09: which subnets actually leave through this NAT / appliance (the first exit only)
   const exits = links.exitsVia.get(r.id);
-  if (k === "natGateway" && links.egressKnown) {
+  // A NAT no subnet uses: "not an exit" said "every attached subnet leaves through a UDR" — there is none
+  if (k === "natGateway" && links.natUnused.has(r.id)) badges.push({ text: t("arch.badge.natNoSubnet"), tone: "warn", title: t("arch.badge.natNoSubnetHint") });
+  else if (k === "natGateway" && links.egressKnown) {
     badges.push(exits?.length
       ? { text: t("arch.badge.exitSubnets", { n: exits.length }), tone: "muted", title: exits.join(", ") }
       : { text: t("arch.badge.notExit"), tone: "warn", title: t("arch.badge.notExitHint") });

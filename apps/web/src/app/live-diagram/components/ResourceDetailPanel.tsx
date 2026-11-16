@@ -39,6 +39,7 @@ import { relationLabel } from "@/lib/liveStyle";
 import { getAzureIconUrl } from "../utils/azureIcons";
 import { formatAzureRegion } from "../utils/regionFormat";
 import { cardStatus } from "@/lib/liveStatus";
+import { unusedReasonKey } from "@/lib/liveLayout";
 import { Spark } from "./Spark";
 import { ConnRow, CopyButton, Group, KV, Section, StaticSection, useRelativeTime } from "./detail/primitives";
 import { gatewayFrontends, isOutboundOnlyLb, unresolvedBackends } from "@/lib/liveBackends";
@@ -522,8 +523,9 @@ function NodePanel({ spec, nodeSpec: node, liveNode, alerts, alertRules, alertHi
           {armId ? <KV label={t("detail.azureId")} mono copy={armId}>{maskGuids(shortArmId(armId))}</KV> : null}
           {node.metadata?.placement === "rg-guess" ? <div className={styles.dpMuted}>{t("ld.panel.rgGuess")}</div> : null}
           {node.metadata?.unused === "true" || node.metadata?.detached === "true" ? (
-            <KV label={t("ld.unused")}>{t(kind === "nsg" ? "ld.nsgDetached" : node.metadata?.unusedReason === "nicNoVm" ? "ld.unusedPipNicNoVm" : kind === "publicIP" ? "ld.unusedPipHint" : "ld.unusedHint")}</KV>
+            <KV label={t("ld.unused")}>{t(unusedReasonKey(node))}</KV>
           ) : null}
+          {node.metadata?.scopeBasis === "sameResourceGroup" ? <div className={styles.dpMuted}>{t("ld.panel.sameRgScope")}</div> : null}
           {tags.length ? (
             <KV label={t("ld.panel.tags", { n: tags.length })}>
               <span className={styles.dpTagList}>{tags.map(([k, v]) => <Badge key={k}>{k}: {maskGuids(v)}</Badge>)}</span>

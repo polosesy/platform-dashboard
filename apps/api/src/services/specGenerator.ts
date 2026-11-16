@@ -324,11 +324,12 @@ const NOT_MEASURED: Record<string, MetricBinding> = { health: { source: "composi
 /**
  * The bindings the server reads for a node. Known kinds always get the current table (a diagram saved in the
  * browser keeps whatever it was generated with, and changed thresholds or metric names must still reach it);
- * an unused public IP and a SQL logical server (not a database) get none; unknown kinds keep the spec's.
+ * an unused public IP or NAT Gateway (nothing flows through it) and a SQL logical server (not a database) get none;
+ * unknown kinds keep the spec's.
  */
 export function effectiveBindings(n: Pick<DiagramNodeSpec, "resourceKind" | "icon" | "bindings" | "azureResourceId" | "metadata">): Record<string, MetricBinding> {
   const kind = n.resourceKind ?? n.icon;
-  if (kind === "publicIP" && n.metadata?.unused === "true") return NOT_MEASURED;
+  if ((kind === "publicIP" || kind === "natGateway") && n.metadata?.unused === "true") return NOT_MEASURED;
   if (kind === "sql" && n.azureResourceId && !/\/databases\//i.test(n.azureResourceId)) return NOT_MEASURED;
   if (kind === "frontDoor" && /\/providers\/microsoft\.cdn\/profiles\//i.test(n.azureResourceId ?? "")) return { ...NODE_BINDINGS.frontDoorAfd!, ...afdProbeBindings(n.metadata?.originGroups) };
   if (kind === "lb") return { ...NODE_BINDINGS.lb!, ...privateFrontendBindings(n.metadata?.frontends) };
@@ -1428,9 +1429,14 @@ export async function generateDiagramSpec(
       natGwToPips.set(edge.source, arr);
     }
   }
-  // PIPs that belong to an embedded NAT GW — excluded from external resource rendering
+  // A NAT Gateway no subnet uses (no EDGE-01): it sends nothing (NET-09 — a NAT is an exit only for the subnets
+  // associated with it), but it and its public IPs are still billed. 2026-11-16: after a NAT swap the old NAT (0 subnets,
+  // 1 public IP) became an egress card with an "NAT → Internet" line and a separate "outside" public IP card, and under a
+  // VNet scope both vanished — never in the "unused · detached" lane
+  const unusedNatGwOrigIds = new Set(graph.nodes.filter((n) => n.kind === "natGateway" && !natGwToSubnets.has(n.id)).map((n) => n.id));
+  // PIPs of a NAT GW (used or not) are its sub-resources — excluded from external resource rendering (PIP-02)
   const natGwPipOrigIds = new Set<string>();
-  for (const natGwOrigId of embeddedNatGwOrigIds) {
+  for (const natGwOrigId of [...embeddedNatGwOrigIds, ...unusedNatGwOrigIds]) {
     for (const pipId of natGwToPips.get(natGwOrigId) ?? []) {
       natGwPipOrigIds.add(pipId);
     }
@@ -1556,6 +1562,18 @@ export async function generateDiagramSpec(
         } else if (pubIp) {
           subs.push({ id: `${nicShort}/publicip`, label: "Public IP", kind: "publicIP" as SubResourceKind, endpoint: pubIp });
         }
+      }
+    }
+    // An unused NAT GW keeps its public IPs as chips (still billed — they leave with it); a used one is built in the
+    // subnet loop with the same chips
+    if (unusedNatGwOrigIds.has(nodeOrigId)) {
+      for (const pipOrigId of natGwToPips.get(nodeOrigId) ?? []) {
+        const pipNode = graph.nodes.find((n) => n.id === pipOrigId);
+        if (!pipNode) continue;
+        subs.push({
+          id: `${idMap.get(nodeOrigId) ?? shortId(nodeOrigId)}/pip/${subs.length}`, label: pipNode.name, kind: "publicIP" as SubResourceKind,
+          endpoint: pipNode.endpoint, azureResourceId: pipNode.azureId,
+        });
       }
     }
     const feIPs = appGwFrontendIPs.get(nodeOrigId);
@@ -2340,6 +2358,7 @@ export async function generateDiagramSpec(
           const row = Math.floor(i / 4);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
           const isUnusedPip = res.kind === "publicIP" && (res.metadata?.unused === true || pipOnVmlessNic(res));
+          const isUnusedNat = unusedNatGwOrigIds.has(res.id);
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -2353,11 +2372,13 @@ export async function generateDiagramSpec(
             resourceGroup: res.resourceGroup,
             tags: res.tags,
             position: { x: baseX + col * (NODE_W + NODE_GAP), y: baseY + row * (NODE_H + NODE_GAP) },
-            bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+            // An unused NAT carries no traffic: no metric reads (effectiveBindings says the same when a diagram is read)
+            bindings: (isUnusedNat ? undefined : NODE_BINDINGS[res.kind]) ?? { health: { source: "composite", rules: [] } },
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
               ...(isUnusedPip ? { unused: "true", unusedReason: res.metadata?.unused === true ? "notAttached" : "nicNoVm" } : {}),
+              ...(isUnusedNat ? { unused: "true", unusedReason: "natNoSubnet", publicIpCount: String(natGwToPips.get(res.id)?.length ?? 0) } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -2372,6 +2393,7 @@ export async function generateDiagramSpec(
           const row = Math.floor(i / cols);
           const isDetachedNsg = res.kind === "nsg" && standaloneNsgIds.has(res.id);
           const isUnusedPip = res.kind === "publicIP" && (res.metadata?.unused === true || pipOnVmlessNic(res));
+          const isUnusedNat = unusedNatGwOrigIds.has(res.id);
           const extArchMeta = archMetaMap.get(res.id);
           diagramNodes.push({
             id: sid,
@@ -2385,11 +2407,13 @@ export async function generateDiagramSpec(
             resourceGroup: res.resourceGroup,
             tags: res.tags,
             position: { x: 40 + col * (NODE_W + NODE_GAP + 20), y: cursorY + row * (NODE_H + NODE_GAP) },
-            bindings: NODE_BINDINGS[res.kind] ?? { health: { source: "composite", rules: [] } },
+            // An unused NAT carries no traffic: no metric reads (effectiveBindings says the same when a diagram is read)
+            bindings: (isUnusedNat ? undefined : NODE_BINDINGS[res.kind]) ?? { health: { source: "composite", rules: [] } },
             subResources: collectSubResources(res.id),
             metadata: {
               ...(isDetachedNsg ? { detached: "true" } : {}),
               ...(isUnusedPip ? { unused: "true", unusedReason: res.metadata?.unused === true ? "notAttached" : "nicNoVm" } : {}),
+              ...(isUnusedNat ? { unused: "true", unusedReason: "natNoSubnet", publicIpCount: String(natGwToPips.get(res.id)?.length ?? 0) } : {}),
               ...(extArchMeta ? { archRole: extArchMeta.archRole, archGroupId: extArchMeta.archGroupId, flowHint: extArchMeta.flowHint } : {}),
             },
           });
@@ -2738,8 +2762,10 @@ export async function generateDiagramSpec(
     outboundSourceSet.add(ngwShortId);
   }
   // Standalone NAT GW resource cards (not embedded as subnet badge)
+  const unusedNatShortIds = new Set([...unusedNatGwOrigIds].map((o) => idMap.get(o)).filter((x): x is string => !!x));
   for (const n of diagramNodes) {
-    if (n.resourceKind !== "natGateway" || outboundSourceSet.has(n.id)) continue;
+    // A NAT no subnet uses is no exit (NET-09) — no "NAT → Internet" line for it, whichever branch drew its card
+    if (n.resourceKind !== "natGateway" || outboundSourceSet.has(n.id) || unusedNatShortIds.has(n.id)) continue;
     outboundSources.push({ id: n.id, label: "NAT Gateway", deprecated: false });
     outboundSourceSet.add(n.id);
     // NAT GW is external (no parentId) — resolve VNet via attached subnet edges

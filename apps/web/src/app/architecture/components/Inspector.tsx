@@ -76,6 +76,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
       [t("arch.unusedPip", { n: "" }).trim(), model.regions.flatMap((r) => r.unusedPublicIps.map((x) => ({ ...x, region: r.key })))],
       [t("arch.unresolvedPip", { n: "" }).trim(), model.regions.flatMap((r) => r.unresolvedPublicIps.map((x) => ({ ...x, region: r.key })))],
       [t("arch.unusedNsg", { n: "" }).trim(), model.regions.flatMap((r) => r.unusedNsgs.map((x) => ({ ...x, region: r.key })))],
+      [t("arch.unusedNat", { n: "" }).trim(), model.regions.flatMap((r) => r.unusedNatGateways.map((x) => ({ ...x, region: r.key })))],
     ];
     // NSGs an AKS cluster owns (its node resource group): not cleanup — why nothing uses them now
     const managed = model.regions.flatMap((r) => r.managedNsgs.map((x) => ({ ...x, region: r.key })));
@@ -288,6 +289,7 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
             <Row k={t("arch.unusedPip", { n: "" }).trim()}>{reg.unusedPublicIps.map((x) => x.name).join(", ") || "—"}</Row>
             <Row k={t("arch.unresolvedPip", { n: "" }).trim()}>{reg.unresolvedPublicIps.map((x) => `${x.name} (${x.detail})`).join(", ") || "—"}</Row>
             <Row k={t("arch.unusedNsg", { n: "" }).trim()}>{reg.unusedNsgs.map((x) => x.name).join(", ") || "—"}</Row>
+            <Row k={t("arch.unusedNat", { n: "" }).trim()}>{reg.unusedNatGateways.map((x) => x.name).join(", ") || "—"}</Row>
           </dl>
         ) : null}
       </aside>

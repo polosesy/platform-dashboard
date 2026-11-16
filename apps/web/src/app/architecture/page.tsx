@@ -487,7 +487,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
     });
 
   const totals = model.totals;
-  const cleanup = totals.unusedPublicIps + totals.unresolvedPublicIps + totals.unusedNsgs;
+  const cleanup = totals.unusedPublicIps + totals.unresolvedPublicIps + totals.unusedNsgs + totals.unusedNatGateways;
   const regionHasNothing = region !== "all" && !vm.regions.some((r) => r.key === region && (regionTiles(r) > 0 || r.vnets.length > 0)) && vm.global.length === 0;
   const counts = useMemo(() => categoryCounts(model, region), [model, region]);
   // Filter banner numbers, scoped to the current region (+ global services)

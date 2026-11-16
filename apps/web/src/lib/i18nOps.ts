@@ -873,6 +873,8 @@ export const OPS_T: Translations = {
   "ld.unusedPipHint": { ko: "리소스에 연결되지 않은 미사용 공용 IP", en: "Public IP not attached to any resource" },
   "ld.unusedPipNicNoVm": { ko: "VM이 쓰지 않는 NIC에 연결된 공용 IP — 트래픽이 갈 곳이 없음 (NIC와 함께 정리 대상)", en: "Public IP on a NIC no VM uses — traffic has nowhere to go (clean up with the NIC)" },
   "ld.unusedHint": { ko: "어디에도 연결되지 않은 리소스", en: "Not attached to anything" },
+  "ld.unusedNatNoSubnet": { ko: "어떤 서브넷에도 연결되지 않은 NAT 게이트웨이 — 아무 트래픽도 내보내지 않지만 NAT와 붙은 공용 IP는 계속 과금됨 (정리 대상)", en: "NAT Gateway attached to no subnet — it sends no traffic, but the NAT and its public IPs are still billed (clean up)" },
+  "ld.panel.sameRgScope": { ko: "선택한 VNet과 같은 리소스 그룹·리전이라 이 화면에 표시함 (구성 연결 아님)", en: "Shown here because it shares the selected VNet's resource group and region (not a configured link)" },
   "ld.collapse": { ko: "접기", en: "Collapse" },
   "ld.showInstances": { ko: "인스턴스 보기", en: "Show instances" },
   "ld.natExpand": { ko: "클릭하여 카드 펼치기", en: "click to expand the card" },
