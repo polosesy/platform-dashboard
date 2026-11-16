@@ -33,7 +33,7 @@ covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.
 | 7 | **외부 호출 · 의존성**(HTTP 클라이언트 · DB) | Datadog external services · AppD backends · NR externals | **✓ (2026-11-16)** | `http_client_requests_seconds` 두 규약(앱·대상 32쌍) · hikaricp 풀 11 | 서비스 (APM) › 의존성 + 서비스 맵 카드 패널 — 히스토그램이 없어 평균·최대만 |
 | 8 | **메시징 지연**(Kafka 소비 지연) | Datadog Data Streams · Dynatrace queues | **✓ (2026-11-16)** | `kafka_consumer_fetch_manager_records_lag_max` (앱·토픽 9) | 의존성 보기 · 맵 패널 — 지금과 기간 중 최고 |
 | 9 | 오류 추적(예외 묶음) | Datadog Error Tracking · NR Errors inbox | **✓ 메트릭 부분 (2026-11-16)** · 예외 클래스는 △ | `log4j2_events_total` 앱 17 · 25일+ / Loki 예외 클래스(≤6시간) | 서비스 (APM) › 오류 — 앱별 ERROR·FATAL·WARN, 7일 날짜별, 처음·마지막 시각, 24시간 새로 생김. 예외 클래스 라벨은 메트릭에 없음 → 로그 지표(Loki) |
-| 10 | 분산 트레이스 검색 · 워터폴 | Datadog Trace Explorer · AppD snapshots · NR distributed tracing | ✗(링크만) | Tempo(클러스터 안) | 인증 없는 백엔드를 직접 읽지 않는 원칙 — Grafana `/api/ds/query` 연결별 opt-in(관측 스택 절 2단계)으로 |
+| 10 | 분산 트레이스 검색 · 워터폴 | Datadog Trace Explorer · AppD snapshots · NR distributed tracing | **✓ (2026-11-16)** | Tempo — **Grafana 데이터 원본 프록시 경유** | 4c절 — 연결별 opt-in · 운영자 · 연결 신원의 Grafana Viewer |
 | 11 | 지속 프로파일링 | Datadog Continuous Profiler · Dynatrace | ✗(링크만) | Pyroscope(클러스터 안) | 10과 같은 길 |
 | 12 | 배포 추적 · 버전 비교 | Datadog deployment tracking · Dynatrace release | **✓ (2026-11-16)** | `kube_replicaset_created`·`_owner`·`kube_pod_container_info` (7일 롤아웃 70) | 서비스 (APM) › 배포 — 이미지 이전 → 지금, 서비스 직전 30분 vs 직후. 기존 ReplicaSet으로의 롤백은 잡히지 않음 |
 | 13 | 자동 기준선 · 이상 탐지 | AppD dynamic baselines · Dynatrace Davis | **△ 사실 비교 (2026-11-16)** | spanmetrics `offset 7d` 482 시계열 | RED에 '1주 전 같은 시각' 요청·오류·p95와 ×배 — 모델·색 없음. 학습형 기준선·이상 경보는 결정 대기 |
@@ -181,6 +181,30 @@ stg 실측 결과(30개):
 
 **1주 전 비교**: RED가 같은 창을 `offset 7d`로 다시 읽어 서비스마다 요청·오류율·p95와 ×배를 보여 줍니다. 대조: 1주 전 요청 18,310 = 18,310. 그 시각 지금은 3,417로, 1주 전의 0.19배였습니다.
 
+## 4c. 구현 — 트레이스 검색 · 워터폴 (2026-11-16, 4차)
+
+**원칙 유지**: 클러스터 안 Tempo는 인증이 없어 직접 읽지 않습니다. 고객의 Azure Managed Grafana가 문입니다.
+
+- 경로: `GET <grafana>/api/datasources/proxy/uid/<tempo>/api/search?q=<TraceQL>&start&end&limit&spss` · `…/api/v2/traces/<id>` (Grafana 12.4에서 실측 — `/api/ds/query`보다 Tempo 원래 응답이 그대로 와서 단순함)
+- 인증: 클러스터 연결의 신원으로 Managed Grafana 토큰(알림 센터 'Grafana에서 가져오기'와 같은 대상). 그 신원에 Grafana Viewer가 있어야 합니다. delegated · Lighthouse 연결은 고객 Grafana용 앱 토큰이 없어 `unsupportedMode`.
+- 켜기: 연결 파일 `aks.observability.grafana.traces: true` + `datasources.tempo` UID. 기본 꺼짐.
+- 문: **운영자만** — 스팬에 URL·속성·예외 문구가 있어 Pod 로그와 같은 문. 속성 값·상태 메시지·예외(스택 4,000자 상한)는 로그 가리기 규칙(`logRedaction`)을 거칩니다.
+- API `GET /api/observability/traces?clusterId&service&namespace&name&errorsOnly&minDurationMs&minutes&at&limit` · `GET /api/observability/trace?clusterId&traceId` → `services/grafanaTraces.ts`. 필터 값은 모양 검사(400) 후에만 TraceQL에 들어갑니다(이스케이프로 넣지 않음).
+- 상태: ok · notConfigured · forbidden(Grafana 401/403) · unsupportedMode · notFound(보존·샘플링) · failed — 빈 결과와 '못 읽음'을 섞지 않습니다.
+- 화면: 서비스 (APM) › **트레이스** — 서비스 · 네임스페이스 · 스팬 이름 · 스팬 길이 · 오류만 → 트레이스 목록(루트 스팬 · 길이 · 스팬/오류 수 · 서비스) → 누르면 워터폴(부모 아래 자식, 이 트레이스의 시간 축 막대, 오류 스팬 ▲) → 스팬 속성 · 예외 · 이벤트, 'Grafana에서 열기'. 엔드포인트 표의 '트레이스 →'가 그 서비스·엔드포인트로 검색을 엽니다.
+
+**검증 (stg, 2026-11-16 — 내 Entra 토큰, Grafana Viewer)**
+
+| 대조 | 집계 | 독립 확인 |
+|---|---|---|
+| `{ status = error }` 1시간 상위 20개 | 행 20 | Tempo 원래 응답 20 |
+| 트레이스 10개의 스팬 수 · 오류 스팬 수 · 길이 · 부모 연결 | 10개 모두 일치 | 다른 API(v1 `/api/traces`, base64 `batches`)를 따로 센 값과 검색의 `serviceStats` |
+| 서비스 필터 | 20행 모두 그 서비스 포함 | — |
+
+- Tempo의 `metrics.completedJobs < totalJobs`는 '한도에 차서 일찍 멈춤'이라 화면은 '더 있을 수 있음'으로만 말합니다.
+- **미검증**: 시험 배포의 연결 신원(고객 앱)에 Grafana Viewer가 있는지는 확인하지 못했습니다. 경로 · 토큰 대상 · 상태는 단위 테스트(`grafanaTraces.test.ts`)로만 확인했습니다.
+- 기능 × 권한 카탈로그에는 아직 없습니다(Grafana 데이터 평면 미모델 — Graph와 같음).
+
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 
 1. ~~외부 호출 · 의존성(7)~~ · ~~Kubernetes 경고 신호(14)~~ · ~~메시징 지연(8)~~ · ~~엔드포인트 표(3)~~ — 4절에서 구현
@@ -196,7 +220,7 @@ stg 실측 결과(30개):
    - 보류 이유: 검증할 AWS·GCP 환경이 없어, 확인하지 못한 인증 코드를 내보내지 않습니다.
    - 먼저 할 것: 시험용 EKS/AMP 또는 GKE/GMP, 또는 자체 Prometheus 하나와 대소문자 규칙 전환(4절 메모).
 6. **결정 대기**(구현하지 않은 이유)
-   - 트레이스 검색 · 프로파일(10 · 11): 클러스터 안 Tempo·Pyroscope는 인증이 없습니다. 직접 읽지 않는다는 원칙이 있어 Grafana `/api/ds/query` 경유(연결별 opt-in · Viewer 역할 범위)로 할지 정해야 합니다.
+   - ~~트레이스 검색(10)~~ — 4c절에서 Grafana 경유로 구현. 프로파일(11)은 같은 길(Pyroscope 데이터 원본 프록시)로 할 수 있지만 화면(플레임 그래프)이 커서 다음 차례입니다.
    - 학습형 기준선 · 이상 경보(13): '1주 전 비교'는 사실이라 구현했습니다. 모델이 정하는 기준선은 '임계값 없이 색칠하지 않는다'는 원칙과 맞춰야 해서 결정이 필요합니다.
    - 규칙 작성(15): 고친 규칙 그룹 템플릿을 **복사용**으로 제공합니다(4절). 대시보드가 직접 배포하는 것은 플랫폼이 읽기 전용이라 하지 않습니다.
    - RUM · 합성(16): 브라우저와 외부 프로브가 필요해 범위 밖입니다.

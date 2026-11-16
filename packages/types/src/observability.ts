@@ -1253,3 +1253,81 @@ export type RolloutsResponse = {
   queries: Record<string, string>;
   gaps?: StackQueryGap[];
 };
+// ── 서비스 (APM) › 트레이스 — Tempo through the customer's Azure Managed Grafana (services/grafanaTraces.ts) ──
+
+/**
+ * Why a trace read gave nothing: notConfigured (no Grafana / Tempo datasource / `traces` opt-in on the connection) ·
+ * forbidden (the connection's identity has no Grafana role — Grafana Viewer) · unsupportedMode (delegated or
+ * Lighthouse connection: no app token for Grafana) · notFound (trace ID not in Tempo — retention or sampling) · failed
+ */
+export type TraceState = "ok" | "notConfigured" | "forbidden" | "unsupportedMode" | "notFound" | "failed";
+
+export type TraceSearchQuery = {
+  service?: string;
+  namespace?: string;
+  /** span name, e.g. "GET /orders/{id}" */
+  name?: string;
+  errorsOnly?: boolean;
+  minDurationMs?: number;
+};
+
+export type TraceSummary = {
+  traceId: string;
+  rootService: string | null;
+  rootName: string | null;
+  start: string;
+  durationMs: number | null;
+  /** per service: spans and error spans of the whole trace (Tempo serviceStats) */
+  services: Array<{ name: string; spans: number; errors: number }>;
+  /** spans of this trace that matched the query (Tempo `matched`) */
+  matched: number;
+};
+
+export type TraceSearchResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: TraceState;
+  message?: string;
+  /** the TraceQL the dashboard sent — run it in Grafana to compare */
+  traceql: string;
+  from: string;
+  to: string;
+  traces: TraceSummary[];
+  /** Tempo answered from part of its blocks (completedJobs < totalJobs) — more traces may exist */
+  partial: boolean;
+  limit: number;
+  exploreUrl?: string;
+};
+
+export type TraceSpan = {
+  spanId: string;
+  parentId: string | null;
+  service: string | null;
+  namespace: string | null;
+  pod: string | null;
+  name: string;
+  kind: "server" | "client" | "internal" | "producer" | "consumer" | "unspecified";
+  /** ms since the trace's first span */
+  offsetMs: number;
+  durationMs: number;
+  status: "ok" | "error" | "unset";
+  statusMessage?: string;
+  attributes: Array<{ key: string; value: string }>;
+  events: Array<{ name: string; offsetMs: number; attributes: Array<{ key: string; value: string }> }>;
+};
+
+export type TraceDetailResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: TraceState;
+  message?: string;
+  traceId: string;
+  start?: string;
+  durationMs?: number;
+  spans: TraceSpan[];
+  /** more spans than the dashboard shows (cap) */
+  truncated?: number;
+  /** values masked by the log redaction rules (tokens, keys …) */
+  redacted: number;
+  exploreUrl?: string;
+};

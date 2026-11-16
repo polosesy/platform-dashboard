@@ -10,7 +10,7 @@ import type { WorkloadRedResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { EmptyState, ErrorNotice, LoadingState, Notice, Panel, SearchInput, Segmented } from "@/components/ui";
+import { EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel, SearchInput, Segmented } from "@/components/ui";
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { RED_WINDOWS, countText, endpointLabel, endpointRows, errorRateText, quantileText, type EndpointSort } from "@/lib/redView";
@@ -18,7 +18,7 @@ import styles from "../styles.module.css";
 
 const SHOW = 300;
 
-export function EndpointsView({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
+export function EndpointsView({ clusterId, range, nonce, report, onTraces }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; onTraces?: (seed: { service: string; name: string; errorsOnly: boolean }) => void }) {
   const { t, locale } = useI18n();
   const fit = fitWindow(range, RED_WINDOWS);
   const atQ = atParam(range);
@@ -61,7 +61,12 @@ export function EndpointsView({ clusterId, range, nonce, report }: { clusterId: 
             <tbody>
               {rows.slice(0, SHOW).map((r) => (
                 <tr key={`${r.service}|${r.name}`}>
-                  <td><span className={styles.redEndpoint} title={r.name}>{endpointLabel(r.name)}</span></td>
+                  <td>
+                    <span className={styles.redEndpoint} title={r.name}>{endpointLabel(r.name)}</span>
+                    {onTraces && !/["\\\r\n\t]/.test(r.name) ? (
+                      <span className={styles.sloCellSub}><LinkButton onClick={() => onTraces({ service: r.service, name: r.name, errorsOnly: r.errors > 0 })} title={t("ob.ep.tracesHint")}>{t("ob.ep.traces")}</LinkButton></span>
+                    ) : null}
+                  </td>
                   <td>
                     <span className={styles.sloCellMain}>{r.service}</span>
                     {r.workload ? <span className={styles.sloCellSub}><Link href={`/observability?wl=${encodeURIComponent(`${r.workload.namespace}/${r.workload.name}`)}`}>{r.workload.namespace}/{r.workload.name} →</Link></span> : null}

@@ -29,6 +29,7 @@ import { getWorkloadVpa } from "../services/workloadVpa.js";
 import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs, passesLevelRule, type LogLevelFilter } from "../services/lokiLogs.js";
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
+import { getTrace, searchTraces } from "../services/grafanaTraces.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
@@ -155,6 +156,35 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       }));
     } catch (e: unknown) {
       sendError(res, e, "workload_logs_failed", "observability");
+    }
+  });
+
+  // 서비스 (APM) › 트레이스: Tempo through the customer's Managed Grafana (connection opt-in `grafana.traces`, the
+  // connection's identity needs Grafana Viewer). Operators only — spans carry URLs, attributes and exception texts
+  // (masked like log lines), the same door as pod logs.
+  router.get("/api/observability/traces", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const min = queryString(req, "minDurationMs");
+      res.json(await searchTraces(env, req.auth?.bearerToken, clusterId, {
+        ...(queryString(req, "service") ? { service: queryString(req, "service")! } : {}),
+        ...(queryString(req, "namespace") ? { namespace: queryString(req, "namespace")! } : {}),
+        ...(queryString(req, "name") ? { name: queryString(req, "name")! } : {}),
+        ...(queryString(req, "errorsOnly") === "true" ? { errorsOnly: true } : {}),
+        ...(min !== undefined && min !== "" ? { minDurationMs: Number(min) } : {}),
+      }, queryInt(req, "minutes", 60, 5, 1440), queryPastTime(req, "at"), queryInt(req, "limit", 20, 1, 50)));
+    } catch (e: unknown) {
+      sendError(res, e, "traces_failed", "observability");
+    }
+  });
+
+  router.get("/api/observability/trace", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [traceId] = requireQuery(req, ["traceId"]);
+      res.json(await getTrace(env, req.auth?.bearerToken, clusterId, traceId!));
+    } catch (e: unknown) {
+      sendError(res, e, "trace_failed", "observability");
     }
   });
 

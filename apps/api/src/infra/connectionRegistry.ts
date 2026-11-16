@@ -93,7 +93,8 @@ const ConnectionSchema = z.object({
    *   podLogNamespaces   namespaces whose pod logs may be read from the cluster (kubelet); others → Container Insights.
    *                      Unset: every namespace for the home connection, none for customer connections
    *   observability.grafana  the customer's Azure Managed Grafana: endpoint + datasource UIDs — links into Explore
-   *                      only (AKS 모니터링 › 관측 스택); nothing is read from Grafana
+   *                      (AKS 모니터링 › 관측 스택); with `traces: true` (and a tempo UID) the trace search reads Tempo
+   *                      through Grafana's datasource proxy as the connection's identity (Grafana Viewer)
    *   observability.loki     the cluster's own Loki, read in-cluster (workload logs, Hubble drops from
    *                      hubble-flow-exporter) — cluster-internal URL only, behind the pod-log gate
    *   observability.hubbleUi  the cluster's Hubble UI (kube-system/hubble-ui), read in-cluster: its backend already
@@ -122,6 +123,9 @@ const ConnectionSchema = z.object({
           tempo: z.string().regex(/^[\w.-]{1,64}$/).optional(),
           pyroscope: z.string().regex(/^[\w.-]{1,64}$/).optional(),
         }).strict().default({}),
+        // Read traces from the Tempo datasource THROUGH this Grafana (services/grafanaTraces.ts) with the connection's
+        // identity (Grafana Viewer) — off by default; Tempo inside the cluster has no authentication and is never read
+        traces: z.boolean().optional(),
       }).strict().optional(),
       loki: z.object({
         // In-cluster only: <svc>.<ns>[.svc[.cluster.local]] or a private address — never a public endpoint
