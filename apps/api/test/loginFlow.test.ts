@@ -39,6 +39,28 @@ test("sign-in: MSAL failures → the reason the page explains", () => {
   }
 });
 
+test("sign-in: a remembered account is not a session — expired token offers sign-in again, never 'continue' (2026-11-16 loop)", () => {
+  const v = (session: "checking" | "ok" | "expired" | "failed", extra: Partial<{ configured: boolean; hasAccount: boolean; noRole: boolean }> = {}) =>
+    lf.loginView({ configured: true, hasAccount: true, noRole: false, session, ...extra });
+  // The bug: account cached + refresh token past sign-in frequency (AADSTS70043) showed "signed in · continue" →
+  // the screen's token request failed → /login?reason=expired → again
+  assert.equal(v("expired"), "expired");
+  assert.equal(v("checking"), "checking", "no 'continue' before a token came back");
+  assert.equal(v("failed"), "signIn");
+  assert.equal(v("ok"), "signedIn");
+  assert.equal(v("ok", { noRole: true }), "noRole");
+  assert.equal(v("expired", { noRole: true }), "expired", "no role is judged only on a working session");
+  assert.equal(v("checking", { hasAccount: false }), "signIn");
+  assert.equal(v("ok", { configured: false }), "notConfigured");
+  // The page uses the view (not the account) for 'continue', and checks with a silent token
+  const page = readFileSync(new URL("../../web/src/app/login/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /loginView\(/);
+  assert.match(page, /acquireTokenSilent/);
+  assert.doesNotMatch(page, /const signedIn = !!user/);
+  const keys = msg.T as Record<string, { ko: string; en: string }>;
+  for (const k of ["login.checking", "login.again", "login.expired.d"]) assert.ok(keys[k]?.ko && keys[k]?.en, k);
+});
+
 test("quick open: every screen once, words must all match, label hits first, ↑↓ wrap", () => {
   const t = (k: string) => (msg.T as Record<string, { ko: string }>)[k]?.ko ?? k;
   const screens = cp.paletteScreens(t);

@@ -7,12 +7,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { InteractionStatus } from "@azure/msal-browser";
+import { InteractionRequiredAuthError, InteractionStatus } from "@azure/msal-browser";
 import { useMsal } from "@azure/msal-react";
 import { Button, Notice, Segmented } from "@/components/ui";
 import { BrandMark } from "@/components/BrandMark";
 import { useI18n } from "@/lib/i18n";
-import { LOGIN_KEYS, loginReason, safeNext, type LoginReason } from "@/lib/loginFlow";
+import { LOGIN_KEYS, loginReason, loginView, safeNext, type LoginReason, type SessionCheck } from "@/lib/loginFlow";
 import { loginErrorMessage, loginRequestFor } from "@/lib/msal";
 import { signInConfigured } from "@/lib/runtimeConfig";
 import { useMe } from "@/lib/useMe";
@@ -45,9 +45,37 @@ export default function LoginPage() {
     fetch("/healthz").then((r) => r.json()).then((j: { version?: string }) => setVersion(j.version ?? null)).catch(() => undefined);
   }, []);
 
+  // A remembered account is not a session: ask MSAL for the API token once (silently). Only a token that comes back
+  // means "signed in" — an expired one (sign-in frequency) must offer sign-in again, not "continue" (loginView)
+  const [session, setSession] = useState<SessionCheck>("checking");
+  const accountId = user?.homeAccountId ?? "";
+  const apiScope = config.apiScope;
+  useEffect(() => {
+    if (!accountId || !configured || inProgress !== InteractionStatus.None) return;
+    let live = true;
+    setSession("checking");
+    (async () => {
+      try {
+        await instance.initialize();
+        const account = instance.getAccount({ homeAccountId: accountId }) ?? undefined;
+        if (!account) { if (live) setSession("expired"); return; }
+        await instance.acquireTokenSilent({ account, scopes: apiScope ? [apiScope] : ["openid", "profile"] });
+        if (live) setSession("ok");
+      } catch (e) {
+        if (live) setSession(e instanceof InteractionRequiredAuthError ? "expired" : "failed");
+      }
+    })();
+    return () => { live = false; };
+  }, [accountId, apiScope, configured, inProgress, instance]);
+
   const busy = going || inProgress === InteractionStatus.HandleRedirect;
-  const noRole = !!user && !!me && !me.anonymous && !me.role;
-  const signedIn = !!user && !noRole;
+  const view = loginView({
+    configured, hasAccount: !!user, session,
+    noRole: session === "ok" && !!me && !me.anonymous && !me.role,
+  });
+  const signedIn = view === "signedIn";
+  const noRole = view === "noRole";
+  const expired = view === "expired";
 
   const signIn = async () => {
     setError(null);
@@ -56,7 +84,12 @@ export default function LoginPage() {
       window.sessionStorage.setItem(LOGIN_KEYS.redirecting, "1");
     } catch { /* storage blocked — the bridge check then cannot tell; the redirect still works without popups in use */ }
     try {
-      await instance.loginRedirect({ ...loginRequestFor(config), redirectStartPage: new URL(next, window.location.origin).href });
+      // Signing in again after expiry: the same account (no account picker) — Entra asks for what its policy needs
+      await instance.loginRedirect({
+        ...loginRequestFor(config),
+        ...(expired && user?.username ? { loginHint: user.username } : {}),
+        redirectStartPage: new URL(next, window.location.origin).href,
+      });
     } catch (e) {
       try { window.sessionStorage.removeItem(LOGIN_KEYS.redirecting); } catch { /* ignore */ }
       setGoing(false);
@@ -69,6 +102,8 @@ export default function LoginPage() {
   const notice = !configured ? <Notice tone="warning" title={t("login.notConfigured.t")}>{t("auth.notConfigured")}</Notice>
     : error ? <Notice tone="danger" title={t("login.failed")}>{error}</Notice>
     : noRole ? <Notice tone="warning" title={t("login.norole.t")}>{t("login.norole.d")}</Notice>
+    : view === "checking" ? <Notice tone="info" title={t("login.checking")}>{user?.name ?? user?.username ?? ""}</Notice>
+    : expired ? <Notice tone="info" title={t("login.reason.expired.t")}>{t("login.expired.d", { name: user?.name ?? user?.username ?? "" })}</Notice>
     : signedIn ? <Notice tone="success" title={t("login.signedIn.t")}>{t("login.signedIn.d", { name: user?.name ?? user?.username ?? "" })}</Notice>
     : reason ? <Notice tone={reason === "expired" ? "info" : "danger"} title={t(`login.reason.${reason}.t`)}>{t(`login.reason.${reason}.d`)}</Notice>
     : null;
@@ -102,6 +137,16 @@ export default function LoginPage() {
                 </>
               ) : noRole ? (
                 <Button size="lg" onClick={signOut}>{t("login.otherAccount")}</Button>
+              ) : view === "checking" ? (
+                <Button size="lg" variant="primary" disabled>{t("login.checking")}</Button>
+              ) : expired ? (
+                <>
+                  <Button size="lg" variant="primary" onClick={signIn} disabled={busy}>
+                    <span className={s.msMark} aria-hidden="true"><i /><i /><i /><i /></span>
+                    {busy ? t("login.going") : t("login.again")}
+                  </Button>
+                  <Button variant="ghost" onClick={signOut}>{t("login.otherAccount")}</Button>
+                </>
               ) : (
                 <>
                   <Button size="lg" variant="primary" onClick={signIn} disabled={!configured || busy}>
@@ -113,7 +158,7 @@ export default function LoginPage() {
               )}
             </div>
 
-            {!signedIn ? (
+            {!signedIn && !expired && view !== "checking" ? (
               <>
                 <div className={s.or}><span>{t("login.or")}</span></div>
                 <div className={s.actions}>

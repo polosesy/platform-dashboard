@@ -42,6 +42,29 @@ export function loginUrl(next: string, reason?: LoginReason | null): string {
   return s ? `/login?${s}` : "/login";
 }
 
+/**
+ * What a silent token request for the API said on /login: "ok" = the session really works; "expired" = MSAL wants the
+ * user again (InteractionRequired — sign-in frequency, revoked or expired refresh token); "failed" = anything else.
+ */
+export type SessionCheck = "checking" | "ok" | "expired" | "failed";
+
+/** What /login shows */
+export type LoginView = "notConfigured" | "checking" | "signedIn" | "expired" | "noRole" | "signIn";
+
+/**
+ * Pure: the /login state. A remembered account is NOT a session — MSAL keeps the account after its refresh token has
+ * expired (Conditional Access sign-in frequency, AADSTS70043), and "you are signed in · continue" then bounced between
+ * the screen (token refused → /login?reason=expired) and here forever (2026-11-16). Only a token that came back counts.
+ */
+export function loginView(i: { configured: boolean; hasAccount: boolean; session: SessionCheck; noRole: boolean }): LoginView {
+  if (!i.configured) return "notConfigured";
+  if (!i.hasAccount) return "signIn";
+  if (i.session === "checking") return "checking";
+  if (i.session === "expired") return "expired";
+  if (i.session === "failed") return "signIn";
+  return i.noRole ? "noRole" : "signedIn";
+}
+
 /** Pure: an MSAL failure → the reason the page explains (consent and a wrong redirect address have their own words) */
 export function reasonOfError(e: unknown): LoginReason {
   const code = (e as { errorCode?: string })?.errorCode ?? "";
