@@ -72,7 +72,7 @@ export async function resolvePrometheusTarget(env: Env, bearerToken: string | un
     if (err instanceof HttpError && err.code === "signin_required") throw err;
     const message = safeMessage(err);
     debug(`[prometheus] endpoint resolve error: ${message.slice(0, 160)}`);
-    const forbidden = (err instanceof HttpError && (err.status === 401 || err.status === 403)) || /^ARM 40[13]/.test(message);
+    const forbidden = (err instanceof HttpError && (err.status === 401 || err.status === 403)) || /^ARM 40[13]\b/.test(message);
     target = { state: forbidden ? "forbidden" : "failed", message };
   }
   if (target.state === "ok" || target.state === "noWorkspace") targetCache.set(cacheKey, target);

@@ -32,7 +32,7 @@ export function useAzurePathTitle() {
 }
 
 /** Pure: a gap's message in words — the Resource Graph quota (429) is "try again", not an error to read */
-export const gapIsThrottle = (message: string) => /429|RateLimiting|throttl/i.test(message);
+export const gapIsThrottle = (message: string) => /\b429\b|RateLimiting|throttl/i.test(message);
 
 export function AzureRiskPanel({ data, error, loading, onReload }: { data: AzureRiskResponse | undefined; error: string | null | undefined; loading: boolean; onReload?: () => void }) {
   const { t } = useI18n();
