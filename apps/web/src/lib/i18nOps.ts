@@ -2757,6 +2757,8 @@ export const OPS_T: Translations = {
   "ops.rec.hour": { ko: "{n}시간", en: "{n} h" },
   "ops.rec.day": { ko: "{n}일", en: "{n} d" },
   "ops.rec.state.partial": { ko: "일부만 읽음", en: "Read in part" },
+  "ops.rec.gapCode.rgOnly": { ko: "이 연결의 신원은 구독 전체 읽기 권한이 없어 읽을 수 있는 리소스 그룹의 경고만 보입니다 — 구독 Reader(또는 Monitoring Reader)가 있으면 전부 보임", en: "this connection's identity has no subscription-wide read, so only the alerts of the resource groups it can read are shown — Reader (or Monitoring Reader) on the subscription shows them all" },
+  "ops.rec.gapCode.truncated": { ko: "경고가 5,000건을 넘어 오래된 것은 읽지 않음", en: "more than 5,000 alerts — the oldest were not read" },
   "ops.rec.state.failed": { ko: "경고 기록을 읽지 못함 — 0건이 아님", en: "Could not read the alerts — not zero" },
   "ops.rec.src.azureMonitor": { ko: "Azure Monitor", en: "Azure Monitor" },
   "ops.rec.src.alertCenter": { ko: "알림 센터", en: "Alert centre" },

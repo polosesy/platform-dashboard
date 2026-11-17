@@ -173,6 +173,7 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
   - 알림 센터: `history`의 firing → 다음 resolved 쌍마다 발생 하나 → `centerFirings`(파드 이름의 해시 꼬리는 대상에서 뺌)
   - 순수 `recurrenceGroups` — 키 `az|ac:` + sha256(규칙|대상) 16자, 발생·지금 울림(부터)·처음·마지막·해소 분 중앙값/최대·최근 10, 사례(연결/규칙)·런북(규칙), 합계(재발·사례 없는 재발·런북 없는 재발)
   - 상태 ok · partial(구독 일부·알림 센터 실패 — `gaps`) · failed(아무것도 못 읽음 — 0 아님)
+  - **권한 범위**(배포 검증에서 발견): Azure는 호출자가 읽을 수 있는 리소스의 경고만 준다. stg 시험 배포의 연결 신원은 구독 수준 권한이 없고 리소스 그룹 2개만 읽어 같은 구독에서 **3건**(구독 Reader인 계정은 38건)이었다. 구독마다 `Microsoft.Authorization/permissions`를 보고 구독 전체 읽기(`*/read`·`*`·`Microsoft.AlertsManagement/alerts/read`, notActions 제외)가 없으면 `gaps` `rgOnly` → 화면 '일부만 읽음 — 구독 Reader(또는 Monitoring Reader)가 있으면 전부'. 숫자를 구독 전체처럼 보이지 않는다.
 - 사례: `recurrenceKey`·`timeline[]`(≤200, 1,000자)·`followUps[]`(≤30, id 고유, 기한 날짜) — 저장 때 가리기, 타임라인 시각순 정렬, 완료 시각 자동
 - 화면 `/runbooks` 탭 **재발**: 기간 1·7·30일 · 재발만/전체 · 찾기 · 한 줄 요약('재발 n 중 사례 없음 · 런북 없음') · 묶음 행(규칙·등급·출처·횟수·지금 울림·대상·마지막·해소 시간·사례/런북) → 펼치면 최근 발생 + '이 묶음으로 사례 기록'(타임라인·신호·범위·심각도 자동) · '이 규칙의 런북 쓰기' · '비슷한 경험 찾기'
 - 사례 편집기: 타임라인·후속 조치 편집, 사례 상세: 후속 조치 바로 완료(rev), 타임라인 표시

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { NotifyAlert, OpsCase, OpsRecurrenceGroup, OpsRunbook } from "@aud/types";
 import type { AzureAlert } from "../src/services/alertsCollector.js";
-import { azureFirings, centerFirings, recurrenceGroups, recurrenceKey, recurrenceUrl } from "../src/services/opsRecurrence.js";
+import { azureFirings, centerFirings, readsAlertsWide, recurrenceGroups, recurrenceKey, recurrenceUrl } from "../src/services/opsRecurrence.js";
 import { CaseBody, RunbookBody } from "../src/services/opsKnowledgeStore.js";
 import * as webNs from "../../web/src/lib/opsKnowledge.ts";
 
@@ -155,4 +155,16 @@ test("wiring: the 재발 tab, its i18n, operator-only actions", () => {
   for (const k of ["azureMonitor", "alertCenter"]) used.add(`ops.rec.src.${k}`);
   for (const k of ["alert", "change", "action", "note", "status"]) used.add(`ops.kb.tl.kind.${k}`);
   for (const k of used) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
+});
+
+test("scope: an identity with resource-group roles only sees those groups' alerts — told apart (stg: 3 of 38)", () => {
+  assert.equal(readsAlertsWide([]), false, "no subscription-scope permission (resource-group roles only)");
+  assert.equal(readsAlertsWide(["*/read"]), true, "Reader");
+  assert.equal(readsAlertsWide(["*"]), true, "Owner / Contributor");
+  assert.equal(readsAlertsWide(["Microsoft.AlertsManagement/alerts/read"]), true, "Monitoring Reader's alert action");
+  assert.equal(readsAlertsWide(["*/read"], ["Microsoft.AlertsManagement/alerts/read"]), false, "taken away by notActions");
+  assert.equal(readsAlertsWide(["Microsoft.Compute/*/read"]), false);
+  const view = read("../../web/src/app/runbooks/RecurrenceView.tsx");
+  assert.match(view, /ops\.rec\.gapCode\./);
+  assert.match(read("../../web/src/lib/i18nOps.ts"), /"ops\.rec\.gapCode\.rgOnly": \{ ko: "[^"]+", en: "[^"]+" \}/);
 });

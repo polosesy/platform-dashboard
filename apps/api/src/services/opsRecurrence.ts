@@ -156,6 +156,22 @@ export const recurrenceUrl = (subscriptionId: string, days: RecurrenceDays) =>
   `https://management.azure.com/subscriptions/${subscriptionId}/providers/Microsoft.AlertsManagement/alerts` +
   `?api-version=${ALERTS_API_VERSION}&timeRange=${TIME_RANGE[days]}&pageCount=250&includeContext=false`;
 
+/** Pure: whether permissions granted at subscription scope (inherited included) read alerts there */
+export function readsAlertsWide(actions: string[], notActions: string[] = []): boolean {
+  const hit = (list: string[]) => list.some((a) => /^\*$|^\*\/read$|^microsoft\.alertsmanagement\/(\*|alerts\/(\*|read))$/i.test(a));
+  return hit(actions) && !notActions.some((a) => /^microsoft\.alertsmanagement\/(\*|alerts\/(\*|read))$/i.test(a));
+}
+
+async function subscriptionWideRead(arm: { fetchJson: <T>(url: string) => Promise<T> }, sub: string): Promise<boolean> {
+  try {
+    const p = await arm.fetchJson<{ value?: Array<{ actions?: string[]; notActions?: string[] }> }>(
+      `https://management.azure.com/subscriptions/${sub}/providers/Microsoft.Authorization/permissions?api-version=2022-04-01`);
+    return (p.value ?? []).some((x) => readsAlertsWide(x.actions ?? [], x.notActions ?? []));
+  } catch {
+    return true; // could not tell — the alerts themselves were read; do not claim a limit we did not see
+  }
+}
+
 type RawRead = { firings: Firing[]; gaps: OpsRecurrenceResponse["gaps"]; read: number };
 const rawCache = new CacheManager<RawRead>(50, 5 * 60_000);
 
@@ -177,11 +193,14 @@ export async function azureRecurrenceFirings(env: Env, bearerToken: string, days
         out.push(...(page.value ?? []));
         url = page.nextLink;
       }
-      if (url) gaps.push({ source: "azureMonitor", scope: `subscription ${i + 1}`, reason: `more than ${MAX_PAGES * 250} alerts — the oldest were not read` });
+      if (url) gaps.push({ source: "azureMonitor", scope: `subscription ${i + 1}`, code: "truncated", reason: `more than ${MAX_PAGES * 250} alerts — the oldest were not read` });
+      // Azure returns only the alerts on resources the caller can read: an identity with resource-group roles only sees
+      // those groups' alerts — say so (never shown as the subscription's whole history)
+      if (!(await subscriptionWideRead(arm, sub))) gaps.push({ source: "azureMonitor", scope: `subscription ${i + 1}`, code: "rgOnly", reason: "no subscription-wide read — only the resource groups this identity can read" });
       read++;
       return azureFirings(out);
     } catch (e: unknown) {
-      gaps.push({ source: "azureMonitor", scope: `subscription ${i + 1}`, reason: safeMessage(e) });
+      gaps.push({ source: "azureMonitor", scope: `subscription ${i + 1}`, code: "failed", reason: safeMessage(e) });
       return [];
     }
   }));

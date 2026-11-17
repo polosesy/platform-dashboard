@@ -52,7 +52,7 @@ export function RecurrenceView({ data, canWrite, onOpenCase, onOpenRunbook, onNe
     <div className={s.stack}>
       {d.state !== "ok" ? (
         <Notice tone={d.state === "failed" ? "danger" : "warning"} title={t(`ops.rec.state.${d.state}`)}>
-          {d.gaps.map((g) => `${t(`ops.rec.src.${g.source}`)} ${g.scope}: ${g.reason}`).join(" · ")}
+          {d.gaps.map((g) => `${t(`ops.rec.src.${g.source}`)} ${g.scope}: ${g.code && g.code !== "failed" ? t(`ops.rec.gapCode.${g.code}`) : g.reason}`).join(" · ")}
         </Notice>
       ) : null}
       <Panel title={t("ops.rec.title")} sub={t("ops.rec.sub", { days })} flush actions={

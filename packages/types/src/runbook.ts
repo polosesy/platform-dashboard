@@ -205,7 +205,11 @@ export type OpsRecurrenceResponse = {
   days: number;
   /** ok = every source answered; partial = some subscription or the alert centre failed (listed in gaps) */
   state: "ok" | "partial" | "failed";
-  gaps: Array<{ source: "azureMonitor" | "alertCenter"; scope: string; reason: string }>;
+  /**
+   * What was not read, or read in part. `code` rgOnly = the identity reads that subscription only through resource-group
+   * roles: Azure returns only those groups' alerts (stg 2026-11-17: 3 of 38) · truncated = more pages than read · failed
+   */
+  gaps: Array<{ source: "azureMonitor" | "alertCenter"; scope: string; reason: string; code?: "rgOnly" | "truncated" | "failed" }>;
   totals: {
     alerts: number;
     groups: number;
