@@ -121,6 +121,11 @@ test("exact counts: no dcount (an estimate) — in the team queries or the overv
   assert.doesNotMatch(Object.values(TEAM_Q).join("\n"), /dcount/);
   assert.doesNotMatch(read("../src/services/securityPosture.ts").replace(/\/\/.*$/gm, ""), /dcount\(/);
   assert.match(TEAM_Q.alerts, /iff\(array_length\(ri\) > 0, ri, pack_array\(dynamic\(\{\}\)\)\)/);
+  // regression (stg): an alert's AzureResourceId says "/resourceGroups/" — the lower-case pattern must see a lower-cased id
+  // every extract of the group reads an id that was lower-cased first (rid is `tolower(...)` in the assessments queries)
+  for (const q of Object.values(TEAM_Q)) for (const m of q.matchAll(/extract\('\/resourcegroups\/\(\[\^\/\]\+\)', 1, (\w+)/g)) assert.ok(m[1] === "tolower" || m[1] === "rid", m[0]);
+  assert.match(TEAM_Q.affected, /rid = tolower\(/);
+  assert.match(TEAM_Q.alerts, /extract\('\/resourcegroups\/\(\[\^\/\]\+\)', 1, tolower\(tostring\(r\.AzureResourceId\)\)\)/);
 });
 
 test("wiring: signed-in route; the overview uses the team scope, shares the issue list's chosen team; i18n", () => {

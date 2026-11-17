@@ -32,7 +32,8 @@ export const TEAM_Q = {
   // An alert without ResourceIdentifiers keeps its row (mv-expand drops empty arrays) — it has no group
   alerts: "securityresources | where type == 'microsoft.security/locations/alerts' | where tostring(properties.Status) in ('Active','InProgress')" +
     " | extend ri = properties.ResourceIdentifiers | extend ri = iff(array_length(ri) > 0, ri, pack_array(dynamic({})))" +
-    " | mv-expand r = ri | extend rg = tolower(extract('/resourcegroups/([^/]+)', 1, tostring(r.AzureResourceId)))" +
+    // lower-case BEFORE the match: alert ids say "/resourceGroups/" (stg: the one active alert went to "no group")
+    " | mv-expand r = ri | extend rg = extract('/resourcegroups/([^/]+)', 1, tolower(tostring(r.AzureResourceId)))" +
     " | summarize rgs = make_set(rg) by id, sev = tostring(properties.Severity)",
 } as const;
 
