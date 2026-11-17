@@ -106,7 +106,7 @@ last-verified: 2026-11-13
 
 | 일 | 어디에 적혀 있나 |
 |---|---|
-| 예시 데이터는 익명 + 예시 모드에서만, 로그인 사용자에게는 503 | error-catalog AUTH-010, [container.md](../deployment/container.md) 9절 |
+| 예시 데이터는 익명 + 예시 모드에서만, 로그인 사용자에게는 503 | error-catalog AUTH-013, [container.md](../deployment/container.md) 9절 |
 | 받지 못한 값을 0·"Running"·"Succeeded"로 채우던 기본값 제거(예산·예약·노드 파드 수·AKS 객체 목록·노드 풀 상태) | `CLAUDE.md` '사실만 보인다', 테스트 `factsOnly.test.ts` |
 | 비용 '지난달 대비' = 같은 기간 비교, '월말 예상 (단순 계산)' 표시 | `CLAUDE.md` Web Pages `/cost` |
 | 위협 탐지 경고 문구 한국어(문장 표 → 번역기 → 영어 표시) | [security-operations-guide.md](../security/security-operations-guide.md) 11절 |

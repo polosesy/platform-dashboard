@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-15
+last-verified: 2026-11-12
 ---
 # 문제 해결 — 로그인·연결 오류 코드
 
@@ -12,6 +12,7 @@ last-verified: 2026-10-15
 | 코드 (HTTP) | 화면 문장 | 원인 | 조치 | 카탈로그 |
 |---|---|---|---|---|
 | `signin_required` (401) | 로그인이 필요합니다 / 예시 데이터 | 로그인 안 함 | 로그인 | AUTH-007 |
+| `live_data_unavailable` (503) | 보여 줄 실제 데이터가 없습니다 | 로그인 사용자인데 그 기능이 꺼져 있거나 읽을 구독이 없음 — 예시를 대신 보이지 않음 | 기능 스위치(`AZURE_*_ENABLED`)·연결의 구독 확인 | AUTH-013 |
 | `invalid_token` · `token_expired` (401) | 다시 로그인하세요 | 토큰 위조·만료 | 다시 로그인 | AUTH-006 |
 | `no_platform_role` (403) | 플랫폼 역할이 없습니다 | 앱 역할 미할당 | [sso.md](./sso.md) 역할 할당 | AUTH-011 |
 | `role_required` (403) | 내 플랫폼 역할로는 사용할 수 없습니다 | 조회자가 운영자·관리자 기능 호출 | 역할 상향 | AUTH-012 |
