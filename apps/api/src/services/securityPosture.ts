@@ -279,7 +279,7 @@ export function mapAlerts(rows: AlertRow[]): PostureAlert[] {
 
 // ── Resource Graph ──
 
-async function query<T>(arm: Pick<ArmFetcher, "postJson">, subscriptions: string[], q: string): Promise<T[]> {
+export async function query<T>(arm: Pick<ArmFetcher, "postJson">, subscriptions: string[], q: string): Promise<T[]> {
   const all: T[] = [];
   let skipToken: string | undefined;
   for (let page = 0; page < 10; page++) {

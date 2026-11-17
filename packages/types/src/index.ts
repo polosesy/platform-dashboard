@@ -6,6 +6,7 @@ export * from "./reservations.js";
 export * from "./cost.js";
 export * from "./security.js";
 export * from "./securityPosture.js";
+export * from "./azureRisk.js";
 export * from "./health.js";
 export * from "./governance.js";
 export * from "./alerts.js";

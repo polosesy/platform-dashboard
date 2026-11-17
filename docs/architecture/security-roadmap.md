@@ -263,10 +263,33 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 | Wiz | 핵심 메커니즘 | 여기 | 다음 |
 |---|---|---|---|
 | Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | **✓ 2026-11-17 보안 › 무엇부터 › 그래프 탐색(`/security/explore`)** — `/policies?tab=explore`와 같은 패널·같은 순수 모델(`lib/securityGraph.ts`), 감시 질문 이슈 링크가 이 화면으로, 워크로드·네트워크·위험 조합 링크는 AKS 보안 점검(`?row=`·`?net=`·`?issue=`) | 다음: Azure 리소스 쪽 노드(구독 단위)를 그래프에 |
-| Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) | Azure 리소스 쪽 조합(공용 노출 + 높은 권고 + 특권 ID)을 이슈로 |
+| Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) + **✓ 2026-11-17 Azure 위험 조합**(5.4) | 다음: 공격 경로(③) |
 | Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) | Azure 리소스 경로(구성도 노출 선 + Defender 권고 + 역할) |
 | Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 | 리소스 하나의 '보안 카드'(권고·경고·노출·ID 한 곳) |
 | Project/Owner | 팀별 범위·담당 | 이슈 팀(연결 파일 `owners`) | 보안 개요를 팀 범위로 거르기 |
 | 데이터 신선도 | 스캔 시각 | 출처 칩·피드 시각(이번에 사실로) | 화면마다 '읽은 시각'과 원본 시각 분리 |
 
 원칙은 그대로: 사실만(추정 점수·색 없음), 모르면 '—'와 이유, 읽기 전용(고치기는 명령 복사·출처 안내).
+
+### 5.4 Azure 위험 조합 (2026-11-17, ②)
+
+`GET /api/security/azure-risk?subscriptionId=` → `services/azureRiskCombos.ts` → 이슈 목록 출처 `azure` + 통합 위험 화면 'Azure 위험 조합' 패널.
+
+| 요인 | 원본 | 판정 (기존 판정기 재사용) | 모름 |
+|---|---|---|---|
+| 인터넷 노출 | VM: 구성도 그래프의 NSG 판정(`nsgExposure`) · PaaS: `publicNetworkAccess` + 본문 네트워크 규칙 | open = 예 · scoped(지정 출발지만) = 예 + **제한적**(등급 한 단계 낮춤) · closed·noNsg·Disabled·Deny = 아니요 · 그 밖 해당 없음 | NSG 못 읽음 · 공용 액세스 값 없음 · 규칙이 하위 리소스(SQL 등) · 그래프/쿼리 실패 |
+| 높음 권고 | `securityresources` 비정상 + 심각도 High, **리소스별 전수** | 1건 이상 = 예(건수·이름 3) | 쿼리 실패 |
+| 특권 ID | 리소스 `identity`(시스템·사용자 할당 → UAMI principal) → `authorizationresources` 역할 할당 | Owner·Contributor·User Access Administrator·RBAC Administrator(정의 ID) = 예 + 범위 | ID·역할 쿼리 실패 |
+
+- 조합 = 한 리소스에 '예' 둘 이상: 노출+권고+ID 위험 · 노출+ID 높음 · 노출+권고 높음 · 권고+ID 중간 (노출이 제한적이면 한 단계 낮춤). 점수 없음.
+- '예' 하나 + '모름' = **판단 불가**로 셈(조용히 빼지 않음). 요인을 못 읽은 응답(gaps)이면 저장된 이슈를 '더 이상 탐지 안 됨'으로 세지 않음.
+- 이슈 키 `azure:<rg>/<공급자/유형>/<이름>`(구독 없음 — 상태 파일이 구독별). 조인은 소문자 ARM ID(이름 추측 없음). ID 파서는 중첩 유형까지(`registries/x/repositories/y`) — 한 단계만 읽던 첫 구현은 stg에서 높음 권고 리소스 699개 중 669개를 버렸음(검증에서 발견).
+
+**검증** (stg 구독 3개, 대시보드 전체 경로 vs 원본 행을 따로 조인한 코드):
+
+| | 구독 1 | 구독 2 | 구독 3 |
+|---|---|---|---|
+| 높음 권고 리소스 | 699 = 699 | 13 = 13 | 5 = 5 |
+| 특권 ID 리소스 | 3 = 3 | 0 = 0 | 0 = 0 |
+| 높음 ∧ 특권 | 1 = 1 | 0 = 0 | 0 = 0 |
+| 조합 | 6 (노출+권고 5 — 모두 지정 출발지만 열린 VM · 권고+ID 1 — 리소스 그룹 Contributor) | 0 | 0 |

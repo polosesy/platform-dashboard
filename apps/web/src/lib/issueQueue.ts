@@ -5,12 +5,12 @@
 // exception is open again (expired). Keys are printable ASCII without spaces (the API validates `source:scope:id`).
 
 import type {
-  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, SavedQuery, WorkloadIdentityResponse,
+  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, SavedQuery, WorkloadIdentityResponse, AzureRiskCombo, AzureRiskResponse,
 } from "@aud/types";
 import { groupAlerts } from "./alertGroups";
 import { buildGraph, decodeQuery, runQuery } from "./securityGraph";
 
-export type IssueSource = "combo" | "wi" | "alert" | "vuln" | "query";
+export type IssueSource = "combo" | "wi" | "alert" | "vuln" | "query" | "azure";
 export type IssueSev = "critical" | "high" | "medium" | "low";
 
 /**
@@ -64,6 +64,10 @@ export type QueueInput = {
   queries?: SavedQuery[] | null;
   /** Team rules of the subscription's connection */
   owners?: OwnerRule[];
+  /** Azure resource combinations of the subscription (exposure × High recommendation × privileged identity) */
+  azureRisk?: AzureRiskResponse | null;
+  /** The issue title of a combination (the page's language — this module has no translations) */
+  azureTitle?: (c: AzureRiskCombo) => string;
   now: Date;
 };
 
@@ -76,7 +80,7 @@ export type IssueQueue = {
 
 const SEV_RANK: Record<IssueSev, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const STATUS_RANK: Record<IssueStatus, number> = { open: 0, inProgress: 1, accepted: 2, resolved: 3 };
-const SOURCE_RANK: Record<IssueSource, number> = { combo: 0, wi: 1, query: 2, vuln: 3, alert: 4 };
+const SOURCE_RANK: Record<IssueSource, number> = { combo: 0, azure: 1, wi: 2, query: 3, vuln: 4, alert: 5 };
 const EV_RANK: Record<EvidenceKind, number> = { unk: 0, cfg: 1, perm: 2, obs: 3 };
 
 /** "/subscriptions/x/resourceGroups/RG/providers/…/managedClusters/AKS1" → "rg/aks1" (the state file is per subscription) */
@@ -185,6 +189,17 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
       }
     }
   }
+  // ⑥ Azure resource combinations (the subscription — one issue per resource, the key fixed by rg / type / name)
+  if (input.azureRisk) {
+    for (const c of input.azureRisk.combos) {
+      raw.push({
+        key: c.key, source: "azure", sev: c.sev, title: input.azureTitle ? input.azureTitle(c) : c.kind,
+        target: `${c.name} (${c.resourceGroup})`, evidence: c.exposure.state === "yes" || c.high.state === "yes" ? "cfg" : "perm",
+        href: `/security/risk#azure-${c.key.slice(6).replace(/[^a-z0-9-]/g, "-")}`, seenAt: input.azureRisk.generatedAt,
+        namespaces: [], resourceGroups: [c.resourceGroup],
+      });
+    }
+  }
   // ⑤ Defender active alerts (the subscription — one issue per detection, instances inside)
   if (input.alerts) {
     for (const g of groupAlerts(input.alerts)) {
@@ -210,8 +225,10 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
 
   // Stored states of this scope that no source produced now — only for sources that were actually read
   const read = (k: string) => (k.startsWith("query:") ? !!input.insights && !!input.queries && watched.some((q) => k.startsWith(`query:${scope}:${q.id}/`))
-    : k.startsWith("combo:") ? !!input.insights : k.startsWith("wi:") ? !!input.wi : k.startsWith("vuln:") ? !!input.advisories : k.startsWith("alert:") ? !!input.alerts : false);
-  const inScope = (k: string) => k.startsWith("alert:") || (!!scope && k.split(":")[1] === scope);
+    : k.startsWith("combo:") ? !!input.insights : k.startsWith("wi:") ? !!input.wi : k.startsWith("vuln:") ? !!input.advisories : k.startsWith("alert:") ? !!input.alerts
+      // a combination's factor that could not be read does not make its issue "not detected"
+      : k.startsWith("azure:") ? !!input.azureRisk && !input.azureRisk.gaps.length : false);
+  const inScope = (k: string) => k.startsWith("alert:") || k.startsWith("azure:") || (!!scope && k.split(":")[1] === scope);
   const notDetected = Object.keys(input.states).filter((k) => inScope(k) && read(k) && !seen.has(k)).length;
 
   const counts = { open: 0, openCritical: 0, inProgress: 0, accepted: 0, resolved: 0 };

@@ -7,6 +7,7 @@ import { defaultSubscriptions } from "../infra/azureClientFactory.js";
 import { queryArmResourceId, querySubscriptionId, respondWithFallback, sendError } from "../infra/requestParams.js";
 import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
+import { getAzureRiskCombos } from "../services/azureRiskCombos.js";
 import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
@@ -17,6 +18,19 @@ export function registerSecurityRoutes(router: Router, env: Env) {
   // (2026-11-13) the old /api/security/score and /api/security/alerts are gone: nothing called them (the web reads
   // /api/security/posture — score, controls and alerts together), and the score filled a missing value with 0/100.
   // Defender posture via Resource Graph — recommendations, controls, compliance, plans, alerts (OBO or SP)
+  // Azure 위험 조합 (Wiz toxic combinations on Azure resources): exposure × High recommendation × privileged managed
+  // identity, per resource — signed in, one subscription (the authorize middleware checks the caller may use it)
+  router.get("/api/security/azure-risk", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env) ?? defaultSubscriptions(env, req.auth.bearerToken)[0];
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      res.json(await getAzureRiskCombos(env, req.auth.bearerToken, subscriptionId));
+    } catch (e: unknown) {
+      sendError(res, e, "azure_risk_failed", "security");
+    }
+  });
+
   router.get("/api/security/posture", (req: Request, res: Response) =>
     respondWithFallback(
       res,

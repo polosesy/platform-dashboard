@@ -2,11 +2,12 @@
 
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, SavedQueriesResponse, WorkloadIdentityResponse } from "@aud/types";
+import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, SavedQueriesResponse, WorkloadIdentityResponse, AzureRiskResponse } from "@aud/types";
 import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Select, Stat } from "@/components/ui";
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { buildIssueQueue, type IssueSource, type QueueItem } from "@/lib/issueQueue";
+import { AzureRiskPanel, useAzureTitle } from "./AzureRiskPanel";
 import { joinRisk, type RiskRow } from "@/lib/riskJoin";
 import { useApiToken } from "@/lib/useApiToken";
 import { IssueQueue, type SaveResult, type SourceState } from "./IssueQueue";
@@ -55,6 +56,12 @@ export default function SecurityRiskPage() {
   const wiQ = useApiQuery(live ? `k8s-wi:${clusterId}:${locale}:false` : null, (token) =>
     fetchJsonWithBearer<WorkloadIdentityResponse>(apiUrl("/api/kubernetes/policies/workload-identity", { clusterId, lang: locale }), token),
   );
+  // Azure resource combinations of the subscription (not tied to a cluster)
+  const azQ = useApiQuery(ready && !sample ? `azure-risk:${subscriptionId}` : null, (token) =>
+    fetchJsonWithBearer<AzureRiskResponse>(apiUrl("/api/security/azure-risk", { subscriptionId: sub }), token),
+  );
+  const azureRisk = !azQ.loading && azQ.data && (!sub || azQ.data.subscriptionId.toLowerCase() === sub.toLowerCase()) ? azQ.data : undefined;
+  const azureTitle = useAzureTitle();
   const advQ = useApiQuery(live ? `advisories:${clusterId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<AdvisoriesResponse>(apiUrl("/api/security/advisories", { clusterId, lang: locale }), token),
   );
@@ -74,7 +81,8 @@ export default function SecurityRiskPage() {
     clusterId: cluster?.id ?? null, insights, wi, advisories: adv, queries: queriesQ.data?.queries ?? null,
     alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
     alertsAt: freshPosture?.generatedAt ?? null, states, owners: statesQ.data?.owners ?? [], now: new Date(),
-  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners]);
+    azureRisk: azureRisk ?? null, azureTitle,
+  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners, azureRisk, azureTitle]);
   const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
   const sources: Record<IssueSource, SourceState> = {
     combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
@@ -84,6 +92,7 @@ export default function SecurityRiskPage() {
     query: !live ? "off" : queriesQ.loading ? "loading" : queriesQ.error ? "failed" : !queriesQ.data?.queries.some((q) => q.watch) ? "off"
       : srcState(insightsQ.loading, insightsQ.error, insights, true),
     alert: postureLoading ? "loading" : !freshPosture || freshPosture.gaps.some((g) => g.section === "alerts") ? "failed" : "ok",
+    azure: sample || !ready ? "off" : azQ.loading ? "loading" : azQ.error ? "failed" : azureRisk ? (azureRisk.gaps.length ? "failed" : "ok") : "loading",
   };
   const saveState = async (item: QueueItem, change: { status: IssueStatus; note?: string; assignee?: string; until?: string }): Promise<SaveResult> => {
     try {
@@ -136,6 +145,7 @@ export default function SecurityRiskPage() {
         <IssueQueue queue={queue} sources={sources} durable={statesQ.data?.durable ?? true} canWrite={statesQ.data?.canWrite ?? false}
           signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} teams={[...new Set((statesQ.data?.owners ?? []).map((o) => o.team))]} />
       ) : null}
+      {!sample && ready ? <AzureRiskPanel data={azureRisk} error={azQ.error} loading={azQ.loading} /> : null}
       {body}
     </div>
   );
