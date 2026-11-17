@@ -118,7 +118,7 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
     try { await call("POST", "/api/ops/feeds/check", {}); await q.reload(); } catch (e) { setErr(errText(t, e)); } finally { setBusy(false); }
   };
   const feedName = (id: string) => f?.feeds.find((x) => x.id === id)?.name ?? "";
-  const items = (f?.items ?? []).filter((i) => !onlyIncident || i.matched.length);
+  const items = (f?.items ?? []).filter((i) => !onlyIncident || i.candidate);
   return (
     <div className={s.stack}>
       <Panel title={t("ops.learn.lib.title", { n: lib.length })} sub={t("ops.learn.lib.sub")} flush>
@@ -193,7 +193,8 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
                 <div className={s.itemHead}>
                   <a href={it.url} target="_blank" rel="noreferrer noopener">{it.title}</a>
                   <span className={s.sub}>{feedName(it.feedId)} · {when(it.publishedAt)} · {t("ops.learn.items.seen", { at: when(it.firstSeenAt) })}</span>
-                  {it.matched.length ? <Badge tone="medium">{it.matched.slice(0, 3).join(" · ")}</Badge> : null}
+                  {it.candidate ? <Badge tone="medium">{t(`ops.learn.items.basis.${it.candidateBasis ?? "title"}`)}</Badge> : null}
+                  {it.matched.length ? <span className={s.sub}>{t("ops.learn.items.words", { w: it.matched.slice(0, 4).join(", ") })}</span> : null}
                   {it.decision ? <Chip level={it.decision === "case" ? "ok" : "neutral"}>{t(`ops.learn.items.decision.${it.decision}`)}</Chip> : null}
                 </div>
                 {it.summary ? <p className={s.sub}>{it.summary.slice(0, 240)}</p> : null}

@@ -70,6 +70,17 @@ export function incidentWords(text: string): string[] {
   return INCIDENT_WORDS.filter((w) => (/^[a-z -]+$/.test(w) ? new RegExp(`(^|[^a-z])${w.replace(/[-]/g, "[- ]?")}([^a-z]|$)`).test(t) : t.includes(w)));
 }
 
+/** A status page's incident (status.<host>/…/incidents/… · …/status/history/…trackingId=) */
+export const isIncidentUrl = (url: string) => /^https:\/\/status\.[^/]+\/(.*\/)?incidents?\//i.test(url) || /\/status\/history\/\?trackingId=/i.test(url);
+
+/** Pure: is the post an incident write-up candidate — and why (the title's words · a status page incident) */
+export function candidateOf(title: string, url: string): { candidate: boolean; candidateBasis?: "title" | "incidentUrl" } {
+  // AWS's Post-Event Summaries are titled "Summary of the Amazon <service> Event …" (no incident word)
+  if (incidentWords(title).length || /^summary of the .+ event\b/i.test(title)) return { candidate: true, candidateBasis: "title" };
+  if (isIncidentUrl(url)) return { candidate: true, candidateBasis: "incidentUrl" };
+  return { candidate: false };
+}
+
 /** Private, loopback, link-local, CGNAT, unique-local, metadata, multicast — never fetched */
 export function isPublicAddress(ip: string): boolean {
   if (isIP(ip) === 4) {
@@ -177,7 +188,7 @@ export async function checkFeeds(env: Env, fetcher: FeedFetch = guardedFetch, on
           const id = idOf(`${f.id}|${p.url}`);
           if (s.items[id]) continue;
           const summary = redactLogText(p.summary.slice(0, 400)).text;
-          s.items[id] = { id, feedId: f.id, title: p.title.slice(0, 300), url: p.url.slice(0, 500), publishedAt: p.publishedAt, firstSeenAt: at, summary, matched: incidentWords(`${p.title} ${p.summary}`) };
+          s.items[id] = { id, feedId: f.id, title: p.title.slice(0, 300), url: p.url.slice(0, 500), publishedAt: p.publishedAt, firstSeenAt: at, summary, matched: incidentWords(`${p.title} ${p.summary}`), ...candidateOf(p.title, p.url) };
           added++;
         }
         // keep the newest per feed
@@ -240,7 +251,9 @@ export async function feedsResponse(env: Env, canWrite: boolean): Promise<OpsFee
     ...feedsConfig(env), lastCheckAt: s.lastCheckAt, durable: !!feedsDir(env), canWrite, rev: s.rev,
     feeds: s.feeds.map((f) => ({ ...f, state: s.status[f.id]?.state ?? "unchecked", checkedAt: s.status[f.id]?.checkedAt ?? null, ...(s.status[f.id]?.detail ? { detail: s.status[f.id]!.detail } : {}), items: Object.values(s.items).filter((i) => i.feedId === f.id).length })),
     // incident posts first, then newest
-    items: Object.values(s.items).sort((a, b) => Number(!!b.matched.length) - Number(!!a.matched.length) || ((b.publishedAt ?? b.firstSeenAt) > (a.publishedAt ?? a.firstSeenAt) ? 1 : -1)).slice(0, 300),
+    // candidates first (recomputed — the rule may be newer than a stored post), then newest
+    items: Object.values(s.items).map((i) => ({ ...i, ...candidateOf(i.title, i.url) }))
+      .sort((a, b) => Number(b.candidate) - Number(a.candidate) || ((b.publishedAt ?? b.firstSeenAt) > (a.publishedAt ?? a.firstSeenAt) ? 1 : -1)).slice(0, 300),
     presets: FEED_PRESETS,
   };
 }

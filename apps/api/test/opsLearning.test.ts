@@ -9,7 +9,7 @@ import { correlateChanges, getChanges, ownedBy } from "../src/services/opsChange
 import { changeLines, podLines, takeEvidence } from "../src/services/opsEvidence.js";
 import { CaseBody, OPS_ID, attachEvidence, clearOpsMemory, readKnowledge, writeOps } from "../src/services/opsKnowledgeStore.js";
 import { LIBRARY } from "../src/services/opsLibrary.js";
-import { FEED_PRESETS, checkFeeds, clearFeedsMemory, decideItem, feedUrlProblem, feedsResponse, incidentWords, isPublicAddress, parseFeed, setFeeds } from "../src/services/opsFeeds.js";
+import { FEED_PRESETS, candidateOf, isIncidentUrl, checkFeeds, clearFeedsMemory, decideItem, feedUrlProblem, feedsResponse, incidentWords, isPublicAddress, parseFeed, setFeeds } from "../src/services/opsFeeds.js";
 import * as okNs from "../../web/src/lib/opsKnowledge.ts";
 
 const OK = ((okNs as unknown as { default?: typeof okNs }).default ?? okNs) as typeof okNs;
@@ -121,6 +121,28 @@ test("feeds: RSS and Atom, https links only, plain text; incident words are word
   assert.deepEqual(incidentWords("Post-incident review: DNS outage — root cause"), ["outage", "incident", "post-incident", "root cause"]);
   assert.deepEqual(incidentWords("Incidental widgets; Grace period"), [], "incidental is not incident, 'grace' is not RCA");
   assert.deepEqual(incidentWords("서비스 장애 사후 분석"), ["장애", "사후 분석"]);
+  // candidates: the title or a status page incident — not words in the text (stg 2026-11-17: 22 posts with a word, 1 report)
+  assert.deepEqual(candidateOf("Kubernetes v1.37: Garhwal", "https://kubernetes.io/blog/2026/v1-37/"), { candidate: false });
+  assert.deepEqual(candidateOf("Cloudflare outage on November 18, 2025", "https://blog.cloudflare.com/18-november-2025-outage/"), { candidate: true, candidateBasis: "title" });
+  assert.deepEqual(candidateOf("RESOLVED: Multiple services were experiencing issues in the europe-west2 region.", "https://status.cloud.google.com/incidents/abc"), { candidate: true, candidateBasis: "incidentUrl" });
+  assert.equal(isIncidentUrl("https://azure.status.microsoft/en-us/status/history/?trackingId=YKYN-BWZ"), true);
+  assert.equal(isIncidentUrl("https://status.openai.com/incidents/ctrsv3lwd797"), true);
+  // recall on the published postmortems checked for the library (their real titles and addresses): every incident report
+  // is a candidate; Uber's reliability essay (not a postmortem) is not
+  const reports: Array<[string, string]> = [
+    ["API, ChatGPT & Sora Facing Issues", "https://status.openai.com/incidents/ctrsv3lwd797"],
+    ["A postmortem of three recent issues", "https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues"],
+    ["Summary of the Amazon DynamoDB Service Disruption in the Northern Virginia (US-EAST-1) Region", "https://aws.amazon.com/message/101925/"],
+    ["Summary of the Amazon Kinesis Event in the Northern Virginia (US-EAST-1) Region", "https://aws.amazon.com/message/11201/"],
+    ["Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region", "https://aws.amazon.com/message/41926/"],
+    ["Multiple GCP products are experiencing Service issues.", "https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW"],
+    ["Post Incident Review (PIR) – Azure Front Door – Connectivity issues across multiple regions", "https://azure.status.microsoft/en-us/status/history/?trackingId=YKYN-BWZ"],
+    ["Cloudflare outage on November 18, 2025", "https://blog.cloudflare.com/18-november-2025-outage/"],
+    ["2023-03-08 Incident: Infrastructure connectivity issue affecting multiple regions", "https://www.datadoghq.com/blog/2023-03-08-multiregion-infrastructure-connectivity-issue/"],
+    ["Slack's Outage on January 4th 2021", "https://slack.engineering/slacks-outage-on-january-4th-2021/"],
+  ];
+  for (const [t, u] of reports) assert.equal(candidateOf(t, u).candidate, true, t);
+  assert.equal(candidateOf("How Uber Protects Against Retry Storms", "https://www.uber.com/us/en/blog/protecting-against-retry-storms/").candidate, false);
 });
 
 test("feeds: the URL guard — https, a public host name; addresses that resolve inside are refused", () => {
@@ -143,7 +165,7 @@ test("feeds: a check keeps new posts with first-seen times (secrets masked), a d
   assert.deepEqual(await checkFeeds(env, async () => RSS, undefined, new Date(AT)), { added: 2 });
   assert.deepEqual(await checkFeeds(env, async () => RSS, undefined, new Date(AT)), { added: 0 }, "seen posts are not new again");
   let r = await feedsResponse(env, true);
-  assert.deepEqual(r.items.map((i) => [i.title, i.matched.length > 0, i.firstSeenAt]), [["Post-incident review: DNS outage on May 3", true, AT], ["Launching widgets", false, AT]], "incident posts first");
+  assert.deepEqual(r.items.map((i) => [i.title, i.candidate, i.firstSeenAt]), [["Post-incident review: DNS outage on May 3", true, AT], ["Launching widgets", false, AT]], "incident candidates first");
   assert.doesNotMatch(r.items[0]!.summary, /abcdefabcdefabcdefabcdefabcdef/, "a token in a post is masked like any case text");
   assert.equal(await decideItem(env, r.items[1]!.id, "ignored", "op"), true);
   r = await feedsResponse(env, true);
@@ -155,7 +177,7 @@ test("feeds: a check keeps new posts with first-seen times (secrets masked), a d
 });
 
 test("a post → a case form → a body the API accepts (source = reference, the post's own link)", () => {
-  const form = OK.emptyCase(new Date(AT), OK.feedItemPrefill({ id: "i", feedId: "f", title: "Post-incident review: DNS outage", url: "https://eng.example.com/p/dns", publishedAt: "2026-05-05T10:00:00Z", firstSeenAt: AT, summary: "Root cause …", matched: ["outage"] }, "Eng"));
+  const form = OK.emptyCase(new Date(AT), OK.feedItemPrefill({ id: "i", feedId: "f", title: "Post-incident review: DNS outage", url: "https://eng.example.com/p/dns", publishedAt: "2026-05-05T10:00:00Z", firstSeenAt: AT, summary: "Root cause …", matched: ["outage"], candidate: true, candidateBasis: "title" }, "Eng"));
   const body = OK.caseBody({ ...form, resolution: "Rotated certs" }, null);
   const parsed = CaseBody.safeParse(body);
   assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));

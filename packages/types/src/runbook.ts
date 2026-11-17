@@ -141,6 +141,13 @@ export type OpsFeedItem = {
   summary: string;
   /** Incident words the title / summary carries (outage · postmortem · root cause · 장애 …) — a fact, not a score */
   matched: string[];
+  /**
+   * An incident write-up candidate: an incident word in the TITLE, or a status page's incident address. Words only in
+   * the summary don't make one — stg 2026-11-17: 22 posts carried a word, 1 was an incident report (release notes and
+   * product posts say "disruption", "degraded", "downtime", "root cause" in passing)
+   */
+  candidate: boolean;
+  candidateBasis?: "title" | "incidentUrl";
   decision?: "case" | "ignored";
   caseId?: string;
   decidedBy?: string;
