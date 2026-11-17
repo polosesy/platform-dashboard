@@ -7,7 +7,8 @@ import { usePathname } from "next/navigation";
 // (one request per subscription, not one per page).
 
 import { useI18n } from "@/lib/i18n";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { useTeamScope, type TeamScopeState } from "./TeamScope";
 import type { AzureSubscriptionOption, SecurityPostureResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -23,7 +24,12 @@ type SecurityState = {
   /** The subscription list has loaded (subscriptionId is final) */
   ready: boolean;
   reload: () => void;
+  /** 팀 범위 (security-roadmap 5.7): one choice for 보안 개요 · 보안 권고 · ID·권한 · 위협 탐지 (and the issue list) */
+  team: TeamScopeState;
 };
+
+/** The pages whose numbers split by resource group (the rest are subscription-level or cluster-scoped) */
+const TEAM_PAGES = ["/security", "/security/findings", "/security/identity", "/security/threats"];
 
 const SecurityCtx = createContext<SecurityState | null>(null);
 
@@ -32,13 +38,16 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   // The recommendation texts come in the app's language (Microsoft's own Korean texts — API services/assessmentTexts.ts)
   const { locale } = useI18n();
   // 그래프 탐색 reads the cluster, not the Defender posture — no posture read there
-  const needsPosture = !usePathname().startsWith("/security/explore");
+  const path = usePathname();
+  const needsPosture = !path.startsWith("/security/explore");
   const q = useApiQuery(loaded && needsPosture ? `posture:${subscriptionId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<SecurityPostureResponse>(apiUrl("/api/security/posture", { subscriptionId: subscriptionId || undefined, lang: locale }), token),
   );
+  const recs = useMemo(() => q.data?.recommendations ?? [], [q.data]);
+  const team = useTeamScope(subscriptionId, !!q.data && q.data.source !== "mock" && TEAM_PAGES.includes(path), recs);
   return (
     <SecurityCtx.Provider
-      value={{ subscriptions, subscriptionId, setSubscriptionId, posture: q.data, error: q.error, loading: q.loading || !loaded, ready: loaded, reload: q.reload }}
+      value={{ subscriptions, subscriptionId, setSubscriptionId, posture: q.data, error: q.error, loading: q.loading || !loaded, ready: loaded, reload: q.reload, team }}
     >
       {children}
     </SecurityCtx.Provider>

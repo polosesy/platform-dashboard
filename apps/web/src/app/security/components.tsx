@@ -89,7 +89,8 @@ export function useGap(section: PostureSection): boolean {
 
 /* ── Findings table: one row per recommendation, expandable ── */
 
-export function FindingsTable({ recommendations, showDomain = true }: { recommendations: PostureRecommendation[]; showDomain?: boolean }) {
+/** `scoped`: the counts are one team's findings (보안 개요 팀 범위) — healthy counts aren't split, so "n / total" isn't shown */
+export function FindingsTable({ recommendations, showDomain = true, scoped = false }: { recommendations: PostureRecommendation[]; showDomain?: boolean; scoped?: boolean }) {
   const { t } = useI18n();
   const label = useLabel();
   const [sev, setSev] = useState<PostureSeverity | "all">("all");
@@ -140,7 +141,7 @@ export function FindingsTable({ recommendations, showDomain = true }: { recommen
                     {showDomain ? <span className={s.chip}>{label("sec.domain", r.domain)}</span> : null}
                     {r.threats.slice(0, 2).map((th) => <span key={th} className={s.chipThreat}>{label("sec.threat", th)}</span>)}
                   </span>
-                  <span className={s.rowCount} title={t("sec.col.affected")}>{t("sec.unhealthyOf", { u: r.unhealthy, t: total })}</span>
+                  <span className={s.rowCount} title={t("sec.col.affected")}>{scoped ? t("sec.team.findingsN", { n: r.unhealthy.toLocaleString() }) : t("sec.unhealthyOf", { u: r.unhealthy, t: total })}</span>
                 </button>
                 {expanded ? (
                   <div id={panelId} className={s.rowBody}>

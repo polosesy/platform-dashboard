@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
 import type { PostureDomain } from "@aud/types";
 import { EmptyState, LoadingState, Panel, Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { useSecurity } from "./SecurityContext";
 import { DOMAINS, PostureNotices, SecurityHeader, SeverityBadge, useGap, useLabel } from "./components";
-import { ScopePicker, TeamSummaryPanel, bucketName, useTeamScope } from "./TeamScope";
+import { TeamScopeBar, TeamSummaryPanel, bucketName } from "./TeamScope";
 import s from "./security.module.css";
 
 /**
@@ -18,7 +17,7 @@ import s from "./security.module.css";
 export default function SecurityOverviewPage() {
   const { t } = useI18n();
   const label = useLabel();
-  const { posture, subscriptionId } = useSecurity();
+  const { posture, team } = useSecurity();
   const recGap = useGap("recommendations");
   const complianceGap = useGap("compliance");
   const plansGap = useGap("plans");
@@ -26,8 +25,7 @@ export default function SecurityOverviewPage() {
   const scoreGap = useGap("score");
   const controlsGap = useGap("controls");
 
-  const recs = useMemo(() => posture?.recommendations ?? [], [posture]);
-  const team = useTeamScope(subscriptionId, !!posture && posture.source !== "mock", recs);
+  const recs = posture?.recommendations ?? [];
   const b = team.bucket; // null = the whole subscription
   const teamNote = b ? t("sec.team.subscriptionWide") : null;
   // Findings = sum of unhealthy over recommendations (a resource once per recommendation); resources = distinct ids
@@ -56,12 +54,7 @@ export default function SecurityOverviewPage() {
     <div className={s.page}>
       <SecurityHeader />
       <PostureNotices />
-      {posture && posture.source !== "mock" ? (
-        <div className={s.scopeBar}>
-          <ScopePicker view={team.view} scope={team.scope} pick={team.pick} />
-          {b ? <span className={s.dim}>{t("sec.team.scopeHint", { name: bucketName(t, b.id), g: b.groups.length })}</span> : null}
-        </div>
-      ) : null}
+      {posture && posture.source !== "mock" ? <TeamScopeBar team={team} /> : null}
 
       {!posture ? (
         <LoadingState />

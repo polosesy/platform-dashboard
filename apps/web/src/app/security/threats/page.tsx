@@ -7,6 +7,8 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { groupAlerts, matchesAlert } from "@/lib/alertGroups";
 import { useSecurity } from "../SecurityContext";
 import { PostureNotices, SecurityHeader, SeverityBadge, relativeTime, useGap, useLabel } from "../components";
+import { TeamScopeBar } from "../TeamScope";
+import { alertBuckets } from "@/lib/teamScope";
 import s from "../security.module.css";
 
 type SevFilter = "all" | PostureAlert["severity"];
@@ -19,7 +21,8 @@ const SEVS: PostureAlert["severity"][] = ["High", "Medium", "Low", "Informationa
 export default function SecurityThreatsPage() {
   const { t, locale } = useI18n();
   const label = useLabel();
-  const { posture } = useSecurity();
+  const { posture, team } = useSecurity();
+  const b = team.bucket;
   const alertsGap = useGap("alerts");
   const freePlans = (posture?.plans ?? []).filter((p) => p.tier !== "Standard").map((p) => p.name);
   // No plan rows = the plans are not visible at this scope (subscription-level): coverage is unknown, not complete
@@ -28,15 +31,23 @@ export default function SecurityThreatsPage() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
 
-  const groups = useMemo(() => groupAlerts(posture?.alerts ?? []), [posture]);
+  // 팀 범위: the alerts naming the team's resources (the API's rule — an alert naming two teams is in both)
+  const alerts = useMemo(() => {
+    const list = posture?.alerts ?? [];
+    return b ? list.filter((a) => alertBuckets(a, team.rules).includes(b.id)) : list;
+  }, [posture, b, team.rules]);
+  const groups = useMemo(() => groupAlerts(alerts), [alerts]);
   const shown = groups.filter((g) => (sev === "all" || g.severity === sev) && matchesAlert(g, q));
-  const count = (v: SevFilter) => (v === "all" ? posture?.alerts.length ?? 0 : (posture?.alerts ?? []).filter((a) => a.severity === v).length);
+  const count = (v: SevFilter) => (v === "all" ? alerts.length : alerts.filter((a) => a.severity === v).length);
+  // The list holds the newest 200 alerts; the team's own count comes from every active alert (team-scope)
+  const teamTotal = b?.alerts?.total ?? null;
   const when = (iso: string) => new Date(iso).toLocaleString(dateLocale(locale));
 
   return (
     <div className={s.page}>
       <SecurityHeader />
       <PostureNotices />
+      {posture && posture.source !== "mock" ? <TeamScopeBar team={team} note={b ? (teamTotal !== null && teamTotal > alerts.length ? t("sec.team.alertsMore", { n: alerts.length, total: teamTotal }) : t("sec.team.alertsNote")) : undefined} /> : null}
       {freePlans.length ? (
         <Notice tone="warning">
           {t("sec.freePlans")} {freePlans.join(", ")}
@@ -46,10 +57,10 @@ export default function SecurityThreatsPage() {
         <LoadingState />
       ) : alertsGap ? (
         <EmptyState title={t("sec.collectFailed")} />
-      ) : posture.alerts.length === 0 ? (
+      ) : alerts.length === 0 ? (
         <EmptyState title={t("sec.noAlerts")}>{freePlans.length ? t("sec.noAlertsCaveat") : plansUnknown ? t("sec.noAlertsPlansUnknown") : null}</EmptyState>
       ) : (
-        <Panel title={t("sec.alerts")} sub={`${t("sec.alert.groups", { n: posture.alerts.length, g: groups.length })}${posture.alertsTruncated ? ` · ${t("sec.alertsTruncated", { n: posture.alerts.length })}` : ""}`}>
+        <Panel title={t("sec.alerts")} sub={`${t("sec.alert.groups", { n: alerts.length, g: groups.length })}${posture.alertsTruncated ? ` · ${t("sec.alertsTruncated", { n: posture.alerts.length })}` : ""}`}>
           <div className={s.alertBar}>
             <Segmented label={t("sec.col.severity")} value={sev} onChange={setSev}
               items={(["all", ...SEVS] as SevFilter[]).filter((v) => v === "all" || count(v) > 0).map((v) => ({

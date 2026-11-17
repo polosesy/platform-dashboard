@@ -85,6 +85,33 @@ test("domains and 'fix first' per team come from the posture recommendations by 
   assert.deepEqual([p.findings!.High, p.findings!.Low, p.findings!.total], [41, 2, 43]);
 });
 
+test("보안 권고 · ID·권한 with a team: its recommendations only, counted in its groups, samples its own; 위협 탐지: alerts naming its groups", () => {
+  const recs: PostureRecommendation[] = [
+    { ...rec("k-cve", "High", "container"), unhealthy: 50, healthy: 3, samples: [{ name: "img-a", type: "registries", resourceGroup: "RG-PAY-API" }, { name: "c1", type: "managedClusters", resourceGroup: "rg-aks" }] },
+    { ...rec("k-tls", "Medium", "network"), unhealthy: 9, healthy: 1, samples: [] },
+    { ...rec("k-tag", "Low", "other"), unhealthy: 2, healthy: 0, samples: [] },
+  ];
+  const v = TS.teamScopeView(raw(), recs);
+  const pay = v.buckets.find((b) => b.id === "payments")!;
+  const scoped = TS.recsInBucket(recs, pay, RULES);
+  assert.deepEqual(scoped.map((r) => [r.key, r.unhealthy, r.samples.map((x) => x.name)]), [["k-cve", 41, ["img-a"]], ["k-tag", 2, []]], "k-tls has no finding in payments' groups");
+  assert.equal(scoped.reduce((n, r) => n + r.unhealthy, 0), pay.findings!.total, "the table adds up to the overview's team findings");
+  // regression (stg: 280 rows for 259 keys — Σ 11,151 for a team with 9,516 findings): one key answered at two
+  // severities is two rows; each gets its own severity's count, never the key's total twice
+  const twoSev = [{ ...rec("k-img", "High", "container"), unhealthy: 7 }, { ...rec("k-img", "Low", "container"), unhealthy: 3 }];
+  const d = raw({ findings: [{ rg: "rg-pay-api", key: "k-img", sev: "High", n: 5 }, { rg: "rg-pay-db", key: "k-img", sev: "Low", n: 2 }] });
+  const pb = TS.teamScopeView(d, twoSev).buckets.find((b) => b.id === "payments")!;
+  assert.deepEqual(TS.recsInBucket(twoSev, pb, RULES).map((r) => [r.severity, r.unhealthy]), [["High", 5], ["Low", 2]]);
+  assert.deepEqual(pb.top.map((x) => [x.severity, x.n]), [["High", 5], ["Low", 2]]);
+  // alerts: the same buckets the API counted (raw() alerts → payments 1, platform 2, unowned 1, no group 1)
+  const posted = [
+    { resources: [{ resourceGroup: "rg-aks" }] }, { resources: [{ resourceGroup: "RG-PAY-API" }, { resourceGroup: "rg-aks" }] },
+    { resources: [] }, { resources: [{ resourceGroup: "rg-misc" }] },
+  ];
+  const inBucket = (id: string) => posted.filter((a) => TS.alertBuckets(a, RULES).includes(id)).length;
+  for (const b of v.buckets) assert.equal(inBucket(b.id), b.alerts!.total, b.id);
+});
+
 test("a section not read is null for every bucket (shown as '—'), never 0", () => {
   const r = { ...raw(), gaps: [{ section: "alerts", message: "ARM 403" }, { section: "affected", message: "x" }] } as SecurityTeamScopeResponse;
   const v = TS.teamScopeView(r, RECS);
@@ -131,13 +158,23 @@ test("exact counts: no dcount (an estimate) — in the team queries or the overv
 test("wiring: signed-in route; the overview uses the team scope, shares the issue list's chosen team; i18n", () => {
   assert.match(read("../src/routes/security.ts"), /"\/api\/security\/team-scope"[\s\S]{0,200}signin_required[\s\S]{0,400}getSecurityTeamScope/);
   const page = read("../../web/src/app/security/page.tsx");
-  assert.match(page, /useTeamScope\(subscriptionId/);
+  // one team state for every /security page that splits by resource group (the layout's context)
+  const ctx = read("../../web/src/app/security/SecurityContext.tsx");
+  assert.match(ctx, /useTeamScope\(subscriptionId, [^)]*TEAM_PAGES\.includes\(path\)/);
+  for (const p of ["/security", "/security/findings", "/security/identity", "/security/threats"]) assert.ok(ctx.includes(`"${p}"`), p);
   assert.match(page, /<TeamSummaryPanel /);
+  const findings = read("../../web/src/app/security/findings/page.tsx");
+  const identity = read("../../web/src/app/security/identity/page.tsx");
+  const threats = read("../../web/src/app/security/threats/page.tsx");
+  for (const f of [page, findings, identity, threats]) assert.match(f, /<TeamScopeBar team=\{team\}/);
+  assert.match(findings, /recsInBucket\(all, b, team\.rules\)/);
+  assert.match(identity, /recsInBucket\(all, b, team\.rules\)/);
+  assert.match(threats, /alertBuckets\(a, team\.rules\)\.includes\(b\.id\)/);
   const comp = read("../../web/src/app/security/TeamScope.tsx");
   assert.match(comp, /const TEAM_KEY = "aud\.issues\.team"/);
   assert.match(read("../../web/src/app/security/risk/IssueQueue.tsx"), /const TEAM_KEY = "aud\.issues\.team"/, "one choice for both screens");
   const all = read("../../web/src/lib/i18nMessages.ts");
-  const keys = new Set([...page.matchAll(/t\("(sec\.team\.[\w.]+)"/g), ...comp.matchAll(/t\("(sec\.team\.[\w.]+)"/g)].map((m) => m[1]!));
-  assert.ok(keys.size > 15);
+  const keys = new Set([page, comp, findings, identity, threats].flatMap((f) => [...f.matchAll(/t\("(sec\.team\.[\w.]+)"/g)].map((m) => m[1]!)));
+  assert.ok(keys.size > 18);
   for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
 });

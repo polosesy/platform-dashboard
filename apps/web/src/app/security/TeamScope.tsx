@@ -27,7 +27,20 @@ export function useTeamScope(subscriptionId: string, enabled: boolean, recs: Pos
     if (v !== NO_GROUP) try { localStorage.setItem(TEAM_KEY, v); } catch { /* storage blocked */ }
   };
   const bucket: ScopeBucket | null = view && scope !== ALL ? view.buckets.find((x) => x.id === scope) ?? null : null;
-  return { q, data: q.data, view, scope: bucket ? scope : ALL, pick, bucket };
+  return { q, data: q.data, view, scope: bucket ? scope : ALL, pick, bucket, rules: q.data?.owners ?? [] };
+}
+export type TeamScopeState = ReturnType<typeof useTeamScope>;
+
+/** The scope picker + what the chosen scope covers — the same on every /security page that splits by team */
+export function TeamScopeBar({ team, note }: { team: TeamScopeState; note?: string }) {
+  const { t } = useI18n();
+  if (!team.view && !team.q.error) return null;
+  return (
+    <div className={s.scopeBar}>
+      {team.q.error ? <span className={s.dim}>{t("sec.team.unread")}</span> : <ScopePicker view={team.view} scope={team.scope} pick={team.pick} />}
+      {team.bucket ? <span className={s.dim}>{t("sec.team.scopeHint", { name: bucketName(t, team.bucket.id), g: team.bucket.groups.length })}{note ? ` · ${note}` : ""}</span> : null}
+    </div>
+  );
 }
 
 export function bucketName(t: (k: string, v?: Record<string, string | number>) => string, id: string): string {

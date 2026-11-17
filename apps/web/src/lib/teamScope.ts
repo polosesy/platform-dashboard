@@ -40,6 +40,9 @@ export type TeamScopeView = {
 };
 
 const SEV_RANK: Record<PostureSeverity, number> = { High: 0, Medium: 1, Low: 2 };
+const SEP = "\u0000";
+/** A recommendation row's identity: key + severity */
+export const recId = (key: string, severity: PostureSeverity) => `${key}${SEP}${severity}`;
 const zero = (): Sev3 => ({ High: 0, Medium: 0, Low: 0 });
 
 /** The bucket of a resource group: its team (resource-group rules, issue-list order), else unowned; "" = no group */
@@ -51,7 +54,9 @@ export function bucketOf(rg: string, rules: OwnerRule[]): string {
 export function teamScopeView(data: SecurityTeamScopeResponse, recs: PostureRecommendation[]): TeamScopeView {
   const rules = data.owners ?? [];
   const gap = (s: SecurityTeamScopeResponse["gaps"][number]["section"]) => data.gaps.some((g) => g.section === s);
-  const byKey = new Map(recs.map((r) => [r.key, r]));
+  // Defender answers one recommendation key per severity on some resources (the overview groups by key, title and
+  // severity — stg: 280 rows for 259 keys): match on key + severity, never key alone (it counted a team twice)
+  const byKey = new Map(recs.map((r) => [recId(r.key, r.severity), r]));
   const teams = [...new Set(rules.map((r) => r.team))];
   const ids: Array<[string, ScopeBucket["kind"]]> = [...teams.map((t) => [t, "team"] as [string, ScopeBucket["kind"]]), [NO_TEAM, "unowned"], [NO_GROUP, "noGroup"], [ALL, "all"]];
   const make = (id: string, kind: ScopeBucket["kind"]): ScopeBucket => ({
@@ -80,15 +85,16 @@ export function teamScopeView(data: SecurityTeamScopeResponse, recs: PostureReco
     for (const x of into(id)) {
       if (x.findings) { x.findings[f.severity] += f.n; x.findings.total += f.n; }
       const m = perKey.get(x.id) ?? perKey.set(x.id, new Map()).get(x.id)!;
-      m.set(f.key, (m.get(f.key) ?? 0) + f.n);
+      const k = recId(f.key, f.severity);
+      m.set(k, (m.get(k) ?? 0) + f.n);
     }
   }
   for (const x of b.values()) {
     if (!x.findings) continue;
     const m = perKey.get(x.id) ?? new Map<string, number>();
-    const rows = [...m].map(([key, n]) => {
-      const r = byKey.get(key);
-      const sev = r?.severity ?? data.findings.find((f) => f.key === key)?.severity ?? "Low";
+    const rows = [...m].map(([id, n]) => {
+      const [key, sev] = id.split(SEP) as [string, PostureSeverity];
+      const r = byKey.get(id);
       return { key, n, title: r?.title ?? key, severity: sev, domain: (r?.domain ?? "other") as PostureDomain };
     });
     const domains = new Map<PostureDomain, ScopeDomain>();
@@ -118,4 +124,27 @@ export function teamScopeView(data: SecurityTeamScopeResponse, recs: PostureReco
     rgRuleCount: rules.reduce((n, r) => n + (r.resourceGroups?.length ?? 0), 0),
     alertsShared,
   };
+}
+
+// ── The same scope on 보안 권고 · ID·권한 · 위협 탐지 ──
+
+/** A recommendation's unhealthy count inside a bucket (0 = none of its findings are in the bucket's groups) */
+export function teamCounts(bucket: ScopeBucket): Map<string, number> {
+  return new Map(bucket.top.map((x) => [recId(x.key, x.severity), x.n]));
+}
+
+/** The recommendations with findings in the bucket, each with its unhealthy count there (samples: the bucket's only) */
+export function recsInBucket(recs: PostureRecommendation[], bucket: ScopeBucket, rules: OwnerRule[]): PostureRecommendation[] {
+  const n = teamCounts(bucket);
+  return recs.filter((r) => (n.get(recId(r.key, r.severity)) ?? 0) > 0).map((r) => ({
+    ...r,
+    unhealthy: n.get(recId(r.key, r.severity))!,
+    samples: r.samples.filter((x) => bucketOf((x.resourceGroup ?? "").toLowerCase(), rules) === bucket.id),
+  }));
+}
+
+/** The buckets an alert counts in — the groups of the resources it names (none = no group): the API's own rule */
+export function alertBuckets(alert: { resources: Array<{ resourceGroup: string }> }, rules: OwnerRule[]): string[] {
+  const rgs = [...new Set(alert.resources.map((r) => (r.resourceGroup ?? "").toLowerCase()).filter(Boolean))];
+  return rgs.length ? [...new Set(rgs.map((rg) => bucketOf(rg, rules)))] : [NO_GROUP];
 }
