@@ -1296,6 +1296,10 @@ export type TraceSearchResponse = {
   /** Tempo answered from part of its blocks (completedJobs < totalJobs) — more traces may exist */
   partial: boolean;
   limit: number;
+  /** the window's start (epoch s) — later pages keep it */
+  since: number;
+  /** the next page's end (epoch s): pass `before` = this and `since` — null = this was the last page */
+  next: number | null;
   exploreUrl?: string;
 };
 

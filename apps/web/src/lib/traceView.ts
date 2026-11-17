@@ -2,10 +2,10 @@
 // trace as a waterfall (span tree in start order, bars on the trace's own time axis), durations as text. No colour from
 // thresholds — a span is marked only by its own status (ERROR = ▲).
 
-import type { TraceSpan, TraceSummary } from "@aud/types";
+import type { RedService, TraceSpan, TraceSummary } from "@aud/types";
 
-/** Search windows (minutes) — the page's time range picks the one that covers it (fitWindow) */
-export const TRACE_WINDOWS = [15, 60, 360, 1440] as const;
+/** Search windows (minutes) = RED's, so a problem group's count (spanmetrics) and its traces cover the same minutes */
+export const TRACE_WINDOWS = [5, 15, 60, 360, 1440] as const;
 /** "at least" choices for a trace's slowest matching span (ms; 0 = any) */
 export const TRACE_MIN_DURATIONS = [0, 100, 500, 1000, 5000] as const;
 
@@ -70,3 +70,50 @@ export function exceptionOf(s: TraceSpan): { type: string | null; message: strin
   const v = (k: string) => e.attributes.find((a) => a.key === k)?.value ?? null;
   return { type: v("exception.type"), message: v("exception.message"), stack: v("exception.stacktrace") };
 }
+
+/**
+ * A problem group = one endpoint (service × span name) from spanmetrics — complete counts, not limited like a trace
+ * search. errors: endpoints with error spans, most first. slow: the slowest p95 buckets (above the last bucket first);
+ * its trace filter is the p95 bucket's lower edge, so the traces shown are the ones at or above p95's bucket.
+ */
+export type ProblemGroup = {
+  kind: "errors" | "slow";
+  service: string;
+  name: string;
+  /** errors: error spans in the window · slow: requests in the window */
+  count: number;
+  requests: number;
+  p95: { le: number | null } | null;
+  /** slow: the p95 bucket's lower edge (ms) — the trace filter */
+  minDurationMs?: number;
+};
+
+/** the API's span-name rule (no quotes, backslashes, line breaks) — other names get no trace link */
+const SAFE_NAME = /^[^"\\\r\n\t]{1,200}$/;
+
+export function problemGroups(services: RedService[], buckets: number[], top = 8): { errors: ProblemGroup[]; slow: ProblemGroup[] } {
+  const eps = services.flatMap((s) => s.endpoints.filter((e) => SAFE_NAME.test(e.name)).map((e) => ({ s, e })));
+  const errors = eps.filter(({ e }) => e.errors > 0)
+    .sort((a, z) => z.e.errors - a.e.errors || z.e.requests - a.e.requests || (a.e.name < z.e.name ? -1 : 1))
+    .slice(0, top)
+    .map(({ s, e }): ProblemGroup => ({ kind: "errors", service: s.service, name: e.name, count: e.errors, requests: e.requests, p95: e.p95 }));
+  const sorted = [...buckets].sort((a, z) => a - z);
+  const lowerEdge = (le: number | null) => (le === null ? sorted[sorted.length - 1] ?? 0 : [...sorted].reverse().find((b) => b < le) ?? 0);
+  const rank = (le: number | null) => (le === null ? Infinity : le);
+  const slow = eps.filter(({ e }) => e.p95 && e.requests >= 1)
+    .sort((a, z) => rank(z.e.p95!.le) - rank(a.e.p95!.le) || z.e.requests - a.e.requests || (a.e.name < z.e.name ? -1 : 1))
+    .slice(0, top)
+    .map(({ s, e }): ProblemGroup => ({ kind: "slow", service: s.service, name: e.name, count: e.requests, requests: e.requests, p95: e.p95, minDurationMs: Math.floor(lowerEdge(e.p95!.le) * 1000) }));
+  return { errors, slow };
+}
+
+/** Pure: pages joined in order, a trace once (pages overlap by one second) */
+export function mergePages(pages: TraceSummary[][]): TraceSummary[] {
+  const seen = new Set<string>();
+  const out: TraceSummary[] = [];
+  for (const p of pages) for (const t of p) if (!seen.has(t.traceId)) { seen.add(t.traceId); out.push(t); }
+  return out;
+}
+
+/** Pure: spans that matched the filters, over the loaded traces (compare with a group's spanmetrics count) */
+export const matchedSpans = (rows: TraceSummary[]) => rows.reduce((n, t) => n + t.matched, 0);

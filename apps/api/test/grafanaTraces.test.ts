@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { loadEnv } from "../src/env.js";
 import { createCredentialProvider, setCredentialProviderForTests } from "../src/infra/connectionCredentials.js";
 import { clearConnectionTokens } from "../src/infra/azureClientFactory.js";
-import { getTrace, searchRows, searchTraces, tempoExploreUrl, traceHex, traceSpans, traceqlFor, validTraceQuery } from "../src/services/grafanaTraces.js";
+import { MOST_RECENT, getTrace, nextPageEnd, searchRows, searchTraces, tempoExploreUrl, traceHex, traceSpans, traceqlFor, validTraceQuery } from "../src/services/grafanaTraces.js";
 import * as tvNs from "../../web/src/lib/traceView.ts";
 
 const TV = ((tvNs as unknown as { default?: typeof tvNs }).default ?? tvNs) as typeof tvNs;
@@ -142,7 +142,16 @@ test("reading: through Grafana's datasource proxy with the connection identity's
     assert.equal(r.traces.length, 2);
     const u = new URL(seen[0]!.url);
     assert.equal(`${u.origin}${u.pathname}`, `${GRAFANA}/api/datasources/proxy/uid/tempo-uid/api/search`);
-    assert.deepEqual([u.searchParams.get("q"), u.searchParams.get("start"), u.searchParams.get("end"), u.searchParams.get("limit")], ['{ resource.service.name = "orders" && status = error }', String(1_794_800_000 - 3600), "1794800000", "20"]);
+    assert.deepEqual([u.searchParams.get("q"), u.searchParams.get("start"), u.searchParams.get("end"), u.searchParams.get("limit")], ['{ resource.service.name = "orders" && status = error } with (most_recent=true)', String(1_794_800_000 - 3600), "1794800000", "20"]);
+    assert.equal(r.since, 1_794_800_000 - 3600);
+    assert.equal(r.next, null, "2 rows < limit 20: the last page");
+    // a later page keeps the window start and ends at `before`
+    const r2 = await searchTraces(e, OPERATOR, CLUSTER, { service: "orders", errorsOnly: true }, 60, 1_794_800_000, 2, { since: 1_794_800_000 - 3600, before: 1_794_799_000 });
+    const u2 = new URL(seen.at(-1)!.url);
+    assert.deepEqual([u2.searchParams.get("start"), u2.searchParams.get("end")], [String(1_794_800_000 - 3600), "1794799000"]);
+    assert.equal(r2.next, 1_794_798_999, "2 rows = limit: a next page — never past this page's end (the fixture's rows are newer than `before`)");
+    await assert.rejects(searchTraces(e, OPERATOR, CLUSTER, {}, 60, undefined, 20, { since: 10, before: 5 }), (x: { status?: number }) => x.status === 400);
+    await assert.rejects(searchTraces(e, OPERATOR, CLUSTER, {}, 60, undefined, 20, { since: 1_794_700_000, before: 1_794_800_000 }), (x: { status?: number }) => x.status === 400, "wider than the window");
     assert.match(seen[0]!.auth ?? "", /^Bearer /);
     assert.ok(scopes.includes("ce34e7e5-485f-4d76-964f-b3d2b16d1e4f/.default"), "the Managed Grafana audience");
     assert.ok(r.exploreUrl?.startsWith(`${GRAFANA}/explore?`));
@@ -168,6 +177,29 @@ test("reading: through Grafana's datasource proxy with the connection identity's
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("paging: most_recent (gapless — measured), the next page's end = oldest start + 1, never past this page or the window", () => {
+  assert.equal(MOST_RECENT, " with (most_recent=true)");
+  const at = (sec: number) => ({ start: new Date(sec * 1000).toISOString() });
+  assert.equal(nextPageEnd([at(1000), at(990)], 3, 900, 1100), null, "fewer than the limit: the last page");
+  assert.equal(nextPageEnd([at(1000), at(990), at(950)], 3, 900, 1100), 951);
+  assert.equal(nextPageEnd([at(1099), at(1099)], 2, 900, 1100), 1099, "all in this page's last second: still moves back");
+  assert.equal(nextPageEnd([at(900), at(900)], 2, 900, 1100), null, "reached the window start");
+});
+
+test("problem groups: endpoints by errors and by p95 bucket (spanmetrics), the slow filter = the p95 bucket's lower edge; pages merged once", () => {
+  const ep = (name: string, requests: number, errors: number, le: number | null | undefined) => ({ name, requests, errors, p95: le === undefined ? null : { le } });
+  const svc = (service: string, endpoints: ReturnType<typeof ep>[]) => ({
+    service, workload: null, sameName: 0, requests: 0, rate: 0, errors: 0, errorRate: null, p50: null, p95: null, p99: null, actuatorRate: 0, lowTraffic: false, endpoints,
+  });
+  const services = [svc("orders", [ep("GET /orders/{id}", 100, 3, 0.25), ep('GET /bad"name', 5, 9, 1)]), svc("pay", [ep("POST /pay", 40, 7, null), ep("GET /ping", 9, 0, 0.1)])];
+  const g = TV.problemGroups(services, [0.1, 0.25, 0.5, 1, 2.5]);
+  assert.deepEqual(g.errors.map((x) => [x.service, x.name, x.count]), [["pay", "POST /pay", 7], ["orders", "GET /orders/{id}", 3]], "a name the API refuses is left out");
+  assert.deepEqual(g.slow.map((x) => [x.name, x.minDurationMs]), [["POST /pay", 2500], ["GET /orders/{id}", 100], ["GET /ping", 0]], "> last bucket first; ≤0.25 s → from 100 ms");
+  const r = (id: string, matched = 1) => ({ traceId: id, rootService: null, rootName: null, start: "", durationMs: null, services: [], matched });
+  assert.deepEqual(TV.mergePages([[r("a"), r("b")], [r("b"), r("c", 2)]]).map((x) => x.traceId), ["a", "b", "c"]);
+  assert.equal(TV.matchedSpans([r("a"), r("c", 2)]), 3);
 });
 
 test("waterfall: each span under its parent, siblings by start, a missing parent starts its own branch; bars on the trace axis", () => {
@@ -199,4 +231,8 @@ test("wiring: operator-gated routes, the opt-in in the connection schema, the �
   for (const k of ["ok", "error", "unset"]) keys.add(`ob.tr.status.${k}`);
   for (const k of [...keys, "ob.slo.view.traces", "ob.ep.traces", "ob.ep.tracesHint"]) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
   assert.doesNotMatch(view, /<button/, "kit buttons only");
+  // 2026-11-17: the trace opened at the end of a long list — now a row right after its trace row, scrolled into view
+  assert.match(view, /return open \? \[row, \(\s*<tr key=\{`\$\{r\.traceId\}:detail`\} className=\{styles\.trDetailRow\}>\s*<td colSpan=\{5\}>/);
+  assert.match(view, /scrollIntoView\(\{ block: tall \? "start" : "nearest"/);
+  assert.doesNotMatch(view, /\{traceId \? <TraceDetail/, "no detail after the list");
 });

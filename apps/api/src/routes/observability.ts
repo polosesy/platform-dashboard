@@ -172,7 +172,9 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
         ...(queryString(req, "name") ? { name: queryString(req, "name")! } : {}),
         ...(queryString(req, "errorsOnly") === "true" ? { errorsOnly: true } : {}),
         ...(min !== undefined && min !== "" ? { minDurationMs: Number(min) } : {}),
-      }, queryInt(req, "minutes", 60, 5, 1440), queryPastTime(req, "at"), queryInt(req, "limit", 20, 1, 50)));
+      }, queryInt(req, "minutes", 60, 5, 1440), queryPastTime(req, "at"), queryInt(req, "limit", 20, 1, 50),
+      // a later page: the first page's window start + the previous page's `next` (epoch seconds)
+      queryString(req, "before") ? { since: queryInt(req, "since", 0, 1_000_000_000, 9_999_999_999), before: queryInt(req, "before", 0, 1_000_000_000, 9_999_999_999) } : undefined));
     } catch (e: unknown) {
       sendError(res, e, "traces_failed", "observability");
     }

@@ -230,29 +230,53 @@ const failMessage = (status: number) =>
 const searchCache = new CacheManager<TraceSearchResponse>(50, 30_000);
 const traceCache = new CacheManager<TraceDetailResponse>(100, 5 * 60_000);
 
-export async function searchTraces(env: Env, bearerToken: string | undefined, clusterId: string, query: TraceSearchQuery, minutes: number, at?: number, limit = 20): Promise<TraceSearchResponse> {
+/**
+ * Tempo ≥ 2.x without `most_recent` stops as soon as `limit` traces are found in whatever blocks answered first — not
+ * the newest (stg Tempo 3.1.1, 2026-11-17: 5 of 8 jobs, traces up to 37 min old while newer ones existed). With the hint
+ * every block is searched and the newest `limit` come back, so paging by start time is gapless: an hour of
+ * `{ status = error }` paged 30 at a time = 60 traces = one request of 2000 (0 missing, 0 extra) = spanmetrics' 60.
+ */
+export const MOST_RECENT = " with (most_recent=true)";
+
+/** Pure: the next page's end (epoch s) — the oldest start + 1 (dedupe by trace ID), never past this page's end */
+export function nextPageEnd(rows: Array<{ start: string }>, limit: number, start: number, end: number): number | null {
+  if (rows.length < limit) return null;
+  const oldest = Math.min(...rows.map((r) => Math.floor(Date.parse(r.start) / 1000)));
+  if (oldest <= start) return null; // reached the window's start — another page would repeat this one
+  const next = Math.min(oldest + 1, end - 1);
+  return next > start ? next : null;
+}
+
+export async function searchTraces(env: Env, bearerToken: string | undefined, clusterId: string, query: TraceSearchQuery, minutes: number, at?: number, limit = 20,
+  page?: { since: number; before: number }): Promise<TraceSearchResponse> {
   const q = validTraceQuery(query);
-  const traceql = traceqlFor(q);
-  // `at` = epoch seconds (queryPastTime — the page's time picker), absent = now
-  const end = at ?? Math.floor(Date.now() / 1000);
-  const start = end - minutes * 60;
+  const traceql = `${traceqlFor(q)}${MOST_RECENT}`;
+  // `at` = epoch seconds (queryPastTime — the page's time picker), absent = now. A later page keeps the first page's
+  // window start (`since`) and ends where the previous page's oldest trace began (`before`).
+  if (page && !(page.since < page.before && page.before - page.since <= (minutes + 1) * 60)) {
+    throw new HttpError(400, "invalid_page", "since < before, within the window");
+  }
+  const end = page?.before ?? at ?? Math.floor(Date.now() / 1000);
+  const start = page?.since ?? end - minutes * 60;
   const lim = Math.max(1, Math.min(TRACE_SEARCH_LIMIT, limit));
   const base: TraceSearchResponse = {
     clusterId, generatedAt: new Date().toISOString(), state: "ok", traceql,
     from: new Date(start * 1000).toISOString(), to: new Date(end * 1000).toISOString(), traces: [], partial: false, limit: lim,
+    since: start, next: null,
   };
   const s = setup(env, bearerToken, clusterId);
   if ("state" in s) return { ...base, state: s.state, message: s.message };
   base.exploreUrl = tempoExploreUrl(s.endpoint, s.tempo, traceql, String(start * 1000), String(end * 1000));
   // `at` absent: the minute is the key (a 30-second cache must not freeze "now")
-  const key = `${cachePrefix(bearerToken)}:traces:${clusterId.toLowerCase()}:${traceql}:${minutes}:${at !== undefined ? end : Math.floor(end / 60)}:${lim}`;
+  const key = `${cachePrefix(bearerToken)}:traces:${clusterId.toLowerCase()}:${traceql}:${minutes}:${page ? `${start}-${end}` : at !== undefined ? end : Math.floor(end / 60)}:${lim}`;
   const hit = searchCache.get(key);
   if (hit) return hit;
   try {
     const params = new URLSearchParams({ q: traceql, start: String(start), end: String(end), limit: String(lim), spss: "3" });
     const r = await grafanaGet(s, `/api/search?${params}`, SEARCH_TIMEOUT_MS);
     if (r.status !== 200) return { ...base, state: stateOfStatus(r.status) === "notFound" ? "failed" : stateOfStatus(r.status), message: failMessage(r.status) };
-    const out = { ...base, ...searchRows(r.body) };
+    const rows = searchRows(r.body);
+    const out = { ...base, ...rows, next: nextPageEnd(rows.traces, lim, start, end) };
     searchCache.set(key, out);
     return out;
   } catch (e: unknown) {
