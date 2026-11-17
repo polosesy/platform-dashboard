@@ -264,7 +264,7 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 |---|---|---|---|
 | Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | **✓ 2026-11-17 보안 › 무엇부터 › 그래프 탐색(`/security/explore`)** — `/policies?tab=explore`와 같은 패널·같은 순수 모델(`lib/securityGraph.ts`), 감시 질문 이슈 링크가 이 화면으로, 워크로드·네트워크·위험 조합 링크는 AKS 보안 점검(`?row=`·`?net=`·`?issue=`) | 다음: Azure 리소스 쪽 노드(구독 단위)를 그래프에 |
 | Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) + **✓ 2026-11-17 Azure 위험 조합**(5.4) | 다음: 공격 경로(③) |
-| Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) | Azure 리소스 경로(구성도 노출 선 + Defender 권고 + 역할) |
+| Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) + **✓ 2026-11-17 Azure 공격 경로**(5.5) | 다음: 리소스 보안 카드(④) |
 | Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 | 리소스 하나의 '보안 카드'(권고·경고·노출·ID 한 곳) |
 | Project/Owner | 팀별 범위·담당 | 이슈 팀(연결 파일 `owners`) | 보안 개요를 팀 범위로 거르기 |
 | 데이터 신선도 | 스캔 시각 | 출처 칩·피드 시각(이번에 사실로) | 화면마다 '읽은 시각'과 원본 시각 분리 |
@@ -293,3 +293,21 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 | 특권 ID 리소스 | 3 = 3 | 0 = 0 | 0 = 0 |
 | 높음 ∧ 특권 | 1 = 1 | 0 = 0 | 0 = 0 |
 | 조합 | 6 (노출+권고 5 — 모두 지정 출발지만 열린 VM · 권고+ID 1 — 리소스 그룹 Contributor) | 0 | 0 |
+
+### 5.5 Azure 공격 경로 (2026-11-17, ③)
+
+같은 응답(`/api/security/azure-risk`)의 `paths` → 순수 `attackPaths` → 통합 위험 화면 'Azure 공격 경로' 패널 + 데이터·특권까지 닿는 경로는 이슈(`path:<rg>/<유형>/<이름>`).
+
+**사슬** — 근거가 있는 연결만, 끊긴 곳은 '여기서 끝남':
+
+1. 인터넷 → **진입점**: 노출 '예'인 리소스(5.4의 노출 판정, 지정 출발지만 = 제한적)
+2. → **취약점**: 그 리소스의 높음 권고(전수)
+3. → **ID 역할**: 그 리소스 관리 ID(시스템·사용자 할당)의 역할, 정의 ID로 — 특권 4종 · Key Vault·Storage 데이터 역할(`DATA_ROLES`) · **키·정책 역할**(`KEY_ROLES` — Storage Account Key Operator·Storage Account Contributor = listKeys, Key Vault Contributor = 접근 정책 쓰기)
+4. → **도달 데이터**: 이 구독의 Key Vault·Storage·DB(SQL·Cosmos·PostgreSQL·MySQL) 중 역할 범위 ARM ID 아래(같은 접두사의 형제 `rg`/`rg2`는 아님), 데이터 역할은 자기 서비스만
+
+등급: 데이터·특권에 닿음 + 취약점 = 위험, 닿음만 = 높음, 진입점에서 끝남(취약점만) = 중간, 지정 출발지만 노출이면 한 단계 낮춤. 노출만 있고 취약점·도달이 없으면 경로 아님. ID·역할을 못 읽으면 `identityUnknown`('더 이어질 수 있음').
+
+**검증·발견** (stg, 제 계정):
+- 첫 구독 경로 5개 — 모두 **진입점에서 끝남**(지정 출발지만 열린 VM + 높음 권고, 관리 ID의 역할은 Reader 하나씩). 데이터까지 닿는 경로는 stg에 없어, 도달 규칙은 단위 테스트로 고정(`azureRiskCombos.test.ts` — 범위 경계·서비스 한정·키 역할·모름).
+- VM 관리 ID들이 실제로 가진 역할을 이름으로 확인: Storage Blob Data Reader/Contributor · Key Vault Secrets User · Crypto User/Officer · **Storage Account Key Operator Service Role**(데이터 역할 표에 없지만 listKeys = 데이터 → `KEY_ROLES` 추가) · Reader.
+- 다른 구독의 데이터는 세지 않음(구독 하나씩 읽음) — 화면 꼬리에 명시.

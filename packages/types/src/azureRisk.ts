@@ -33,12 +33,55 @@ export type AzureRiskCombo = {
   portalUrl: string;
 };
 
+/** A data store a role can reach (a crown jewel) */
+export type AzureJewelKind = "keyVault" | "storage" | "database";
+
+/**
+ * One role of the entry's managed identity on a path: privileged (control of its scope — Owner, Contributor, User
+ * Access Administrator, RBAC Administrator) or a data role (Key Vault / Storage data plane, by definition ID), and the
+ * data stores of this subscription inside its scope.
+ */
+export type AzurePathRole = {
+  kind: "privileged" | "data";
+  /** privileged: owner · contributor · uaa · rbacAdmin; data: keyVault · storage */
+  role: string;
+  /** data roles: write (Contributor / Officer / Owner) or read only */
+  write?: boolean;
+  /** reaches the data through the service's keys or access policies (listKeys · accessPolicies/write), not a data-plane role */
+  viaKeys?: boolean;
+  scope: "managementGroup" | "subscription" | "resourceGroup" | "resource";
+  /** the resource group or resource name the scope names (none for subscription / management group) */
+  scopeName?: string;
+  /** data stores of this subscription inside the scope the role reaches (data roles: their service only) */
+  reaches: Array<{ kind: AzureJewelKind; count: number; names: string[] }>;
+};
+
+/**
+ * Internet → entry (exposure evidence) → its High findings → its managed identity's roles → the data inside their scope.
+ * Only links with evidence; where the chain stops is said (`ends`).
+ */
+export type AzureAttackPath = {
+  key: string;
+  entry: { name: string; type: string; resourceGroup: string; detail?: string; limited?: boolean };
+  vuln: { count: number; names: string[] } | null;
+  roles: AzurePathRole[];
+  /** data = reaches a data store · control = a privileged role with no data store found in scope · entry = stops at the entry (vulnerable, no identity reach) */
+  ends: "data" | "control" | "entry";
+  sev: "critical" | "high" | "medium";
+  /** the identity could not be judged (identities / roles unread) — the path may go further than shown */
+  identityUnknown?: boolean;
+  /** why it stops where it does: the entry's managed identities, and its roles that are neither privileged nor data roles */
+  identity: { principals: number; otherRoles: number };
+};
+
 export type AzureRiskResponse = {
   subscriptionId: string;
   generatedAt: string;
   combos: AzureRiskCombo[];
+  /** attack paths from the Internet through exposed entries (security-roadmap 5.3 ③) */
+  paths: AzureAttackPath[];
   /** Per factor: resources "yes" — and the resources that could become a combination but a factor is unknown */
-  counts: { exposed: number; high: number; privileged: number; combos: number; undetermined: number };
+  counts: { exposed: number; high: number; privileged: number; combos: number; undetermined: number; paths: number };
   /** Sections that failed (their factor is "unknown" everywhere) */
-  gaps: Array<{ section: "exposureVm" | "exposurePaas" | "findings" | "identities" | "roles"; message: string }>;
+  gaps: Array<{ section: "exposureVm" | "exposurePaas" | "findings" | "identities" | "roles" | "jewels"; message: string }>;
 };

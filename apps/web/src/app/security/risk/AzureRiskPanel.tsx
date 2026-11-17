@@ -6,7 +6,7 @@
 // resources that could be a combination but a factor is unknown are counted. Each combination is also an issue above.
 
 import { useCallback } from "react";
-import type { AzureRiskCombo, AzureRiskFactor, AzureRiskResponse } from "@aud/types";
+import type { AzureAttackPath, AzureRiskCombo, AzureRiskFactor, AzureRiskResponse } from "@aud/types";
 import { Badge, Chip, EmptyState, ErrorNotice, LoadingState, Notice, Panel } from "@/components/ui";
 import type { ChipLevel } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
@@ -22,8 +22,13 @@ export function useAzureTitle() {
   return useCallback((c: AzureRiskCombo) => t(`azr.kind.${c.kind}`, { name: c.name }), [t]);
 }
 
-/** The same anchor the issue's link points at */
-export const comboAnchor = (key: string) => `azure-${key.slice(6).replace(/[^a-z0-9-]/g, "-")}`;
+/** The same anchor the issue's link points at (azure:… combinations, path:… attack paths) */
+export const comboAnchor = (key: string) => `azure-${key.replace(/^(azure|path):/, "").replace(/[^a-z0-9-]/g, "-")}`;
+
+export function useAzurePathTitle() {
+  const { t } = useI18n();
+  return useCallback((p: AzureAttackPath) => t(`azp.ends.${p.ends}`, { name: p.entry.name }), [t]);
+}
 
 export function AzureRiskPanel({ data, error, loading }: { data: AzureRiskResponse | undefined; error: string | null | undefined; loading: boolean }) {
   const { t } = useI18n();

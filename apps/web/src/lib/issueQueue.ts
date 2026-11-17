@@ -5,7 +5,7 @@
 // exception is open again (expired). Keys are printable ASCII without spaces (the API validates `source:scope:id`).
 
 import type {
-  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, SavedQuery, WorkloadIdentityResponse, AzureRiskCombo, AzureRiskResponse,
+  AdvisoriesResponse, EvidenceKind, IssueState, IssueStatus, OwnerRule, PolicyInsightsResponse, PostureAlert, SavedQuery, WorkloadIdentityResponse, AzureAttackPath, AzureRiskCombo, AzureRiskResponse,
 } from "@aud/types";
 import { groupAlerts } from "./alertGroups";
 import { buildGraph, decodeQuery, runQuery } from "./securityGraph";
@@ -68,6 +68,8 @@ export type QueueInput = {
   azureRisk?: AzureRiskResponse | null;
   /** The issue title of a combination (the page's language — this module has no translations) */
   azureTitle?: (c: AzureRiskCombo) => string;
+  /** The issue title of an attack path that reaches data or control */
+  azurePathTitle?: (p: AzureAttackPath) => string;
   now: Date;
 };
 
@@ -199,6 +201,17 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
         namespaces: [], resourceGroups: [c.resourceGroup],
       });
     }
+    // Attack paths that reach data or control: an issue of their own (a data role is not a combination's identity
+    // factor — a path Internet → entry → Storage data role → storage is found here only)
+    for (const p of input.azureRisk.paths ?? []) {
+      if (p.ends === "entry") continue;
+      raw.push({
+        key: p.key, source: "azure", sev: p.sev, title: input.azurePathTitle ? input.azurePathTitle(p) : `path ${p.entry.name}`,
+        target: `${p.entry.name} (${p.entry.resourceGroup})`, evidence: "perm",
+        href: `/security/risk#azure-${p.key.slice(5).replace(/[^a-z0-9-]/g, "-")}-path`, seenAt: input.azureRisk.generatedAt,
+        namespaces: [], resourceGroups: [p.entry.resourceGroup],
+      });
+    }
   }
   // ⑤ Defender active alerts (the subscription — one issue per detection, instances inside)
   if (input.alerts) {
@@ -227,8 +240,8 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
   const read = (k: string) => (k.startsWith("query:") ? !!input.insights && !!input.queries && watched.some((q) => k.startsWith(`query:${scope}:${q.id}/`))
     : k.startsWith("combo:") ? !!input.insights : k.startsWith("wi:") ? !!input.wi : k.startsWith("vuln:") ? !!input.advisories : k.startsWith("alert:") ? !!input.alerts
       // a combination's factor that could not be read does not make its issue "not detected"
-      : k.startsWith("azure:") ? !!input.azureRisk && !input.azureRisk.gaps.length : false);
-  const inScope = (k: string) => k.startsWith("alert:") || k.startsWith("azure:") || (!!scope && k.split(":")[1] === scope);
+      : k.startsWith("azure:") || k.startsWith("path:") ? !!input.azureRisk && !input.azureRisk.gaps.length : false);
+  const inScope = (k: string) => k.startsWith("alert:") || k.startsWith("azure:") || k.startsWith("path:") || (!!scope && k.split(":")[1] === scope);
   const notDetected = Object.keys(input.states).filter((k) => inScope(k) && read(k) && !seen.has(k)).length;
 
   const counts = { open: 0, openCritical: 0, inProgress: 0, accepted: 0, resolved: 0 };

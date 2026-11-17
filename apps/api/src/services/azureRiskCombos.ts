@@ -10,7 +10,7 @@
 // A combination = two or more "yes". "unknown" is never "no": a resource with one "yes" and an unknown factor is
 // counted as undetermined, not dropped silently. No score — the kind and its evidence.
 
-import type { AzureFactorState, AzureRiskCombo, AzureRiskResponse, InboundExposure } from "@aud/types";
+import type { AzureAttackPath, AzureFactorState, AzureJewelKind, AzurePathRole, AzureRiskCombo, AzureRiskResponse, InboundExposure } from "@aud/types";
 import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
@@ -19,7 +19,7 @@ import { tryGetArchitectureGraphFromAzure } from "./azure.js";
 import { networkRulesOf } from "./azureEndpoints.js";
 import { paasExposure } from "./policyInsights.js";
 import { query } from "./securityPosture.js";
-import { PRIVILEGED_ROLES } from "./workloadIdentity.js";
+import { DATA_ROLES, PRIVILEGED_ROLES } from "./workloadIdentity.js";
 
 type Props = Record<string, unknown>;
 export type ExposureIn = { id: string; name: string; type: string; resourceGroup: string; state: AzureFactorState; detail?: string; reason?: string; limited?: boolean };
@@ -35,7 +35,38 @@ export type CombosInput = {
   roles: RoleIn[] | null;
   /** a part of the exposure read failed: VMs (the diagram) or PaaS (publicNetworkAccess) — missing ones are unknown, not n/a */
   exposureUnread?: { vm: boolean; paas: boolean };
+  /** this subscription's data stores (Key Vault · Storage · databases); null = not read */
+  jewels?: Array<{ id: string; name: string; type: string }> | null;
 };
+
+/**
+ * Management roles that reach the data anyway (by definition ID): storage keys can be listed (listKeys → full data
+ * access), a vault's access policies can be written (vaults on the access-policy model). stg 2026-11-17: a VM identity
+ * held the Storage Account Key Operator role — invisible to a data-role-only check.
+ */
+export const KEY_ROLES: Record<string, { svc: "keyVault" | "storage" }> = {
+  "81a9662b-bebf-436f-a333-f67b29880f12": { svc: "storage" },  // Storage Account Key Operator Service Role (listKeys / regenerateKey)
+  "17d1049b-9a84-46fb-8f53-869881c3d3ab": { svc: "storage" },  // Storage Account Contributor (listKeys)
+  "f25e0fa2-a7c8-4377-a976-54943a77a395": { svc: "keyVault" }, // Key Vault Contributor (accessPolicies/write)
+};
+
+/** Data stores a path can end at, by ARM type */
+export const JEWEL_TYPES: Record<string, AzureJewelKind> = {
+  "microsoft.keyvault/vaults": "keyVault",
+  "microsoft.storage/storageaccounts": "storage",
+  "microsoft.sql/servers": "database",
+  "microsoft.documentdb/databaseaccounts": "database",
+  "microsoft.dbforpostgresql/flexibleservers": "database",
+  "microsoft.dbformysql/flexibleservers": "database",
+};
+const JEWEL_ORDER: AzureJewelKind[] = ["keyVault", "storage", "database"];
+
+/** Pure: a resource id lies inside a role's scope (the scope itself, or below it — never a sibling with the same prefix) */
+export function inScope(resourceId: string, scope: string): boolean {
+  const r = lc(resourceId), sc = lc(scope).replace(/\/+$/, "");
+  if (scopeKind(sc) === "managementGroup") return true; // a management group above this subscription covers all of it
+  return r === sc || r.startsWith(`${sc}/`);
+}
 
 const lc = (s: string) => s.toLowerCase();
 const ascii = (s: string, max = 400) => s.normalize("NFKD").replace(/[^\x21-\x7e]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, max);
@@ -90,7 +121,7 @@ const SEV: Record<AzureRiskCombo["kind"], AzureRiskCombo["sev"]> = { exposedHigh
 const LOWER: Record<AzureRiskCombo["sev"], AzureRiskCombo["sev"]> = { critical: "high", high: "medium", medium: "medium" };
 
 /** Pure: the combinations — every resource with a factor "yes", judged on all three; two or more = a combination */
-export function judgeCombos(input: CombosInput, subscriptionId: string): Pick<AzureRiskResponse, "combos" | "counts"> {
+export function judgeCombos(input: CombosInput, subscriptionId: string): { combos: AzureRiskCombo[]; counts: Omit<AzureRiskResponse["counts"], "paths"> } {
   type Res = { name: string; type: string; resourceGroup: string };
   const all = new Map<string, Res>();
   const expo = new Map((input.exposure ?? []).map((e) => [lc(e.id), e]));
@@ -144,6 +175,59 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): Pick<Az
   return { combos, counts: { exposed, high, privileged, combos: combos.length, undetermined } };
 }
 
+/**
+ * Pure: attack paths — for every exposed entry, Internet → entry → its High findings → its managed identity's
+ * privileged and data roles → this subscription's data stores inside each role's scope. Only evidence links:
+ * a role must be the entry's own identity's, a data store must lie inside the role's scope (ARM id prefix), a data role
+ * reaches its own service only. An exposed entry with neither a finding nor a role that reaches anything is not a path.
+ */
+export function attackPaths(input: CombosInput): AzureAttackPath[] {
+  const byPrincipal = new Map<string, RoleIn[]>();
+  for (const r of input.roles ?? []) (byPrincipal.get(lc(r.principalId)) ?? byPrincipal.set(lc(r.principalId), []).get(lc(r.principalId))!).push(r);
+  const jewels = (input.jewels ?? []).map((j) => ({ ...j, kind: JEWEL_TYPES[lc(j.type)] })).filter((j): j is { id: string; name: string; type: string; kind: AzureJewelKind } => !!j.kind);
+  const out: AzureAttackPath[] = [];
+  for (const e of input.exposure ?? []) {
+    if (e.state !== "yes") continue;
+    const id = lc(e.id);
+    const h = input.high?.get(id);
+    const principals = input.identities?.get(id)?.principals ?? [];
+    const identityUnknown = input.identities === null || (principals.length > 0 && input.roles === null);
+    const roles: AzurePathRole[] = [];
+    let otherRoles = 0;
+    for (const p of principals) {
+      for (const r of byPrincipal.get(lc(p)) ?? []) {
+        const priv = PRIVILEGED_ROLES[lc(r.roleDefGuid)];
+        const keys = KEY_ROLES[lc(r.roleDefGuid)];
+        const data = DATA_ROLES[lc(r.roleDefGuid)] ?? (keys ? { svc: keys.svc, write: true } : undefined);
+        if (!priv && !data) { otherRoles++; continue; }
+        const inside = jewels.filter((j) => inScope(j.id, r.scope) && (!data || priv || j.kind === data.svc));
+        const sk = scopeKind(r.scope);
+        const scopeName = sk === "resourceGroup" || sk === "resource" ? r.scope.split("/").filter(Boolean).pop() : undefined;
+        const role: AzurePathRole = {
+          kind: priv ? "privileged" : "data", role: priv ?? data!.svc, ...(data && !priv ? { write: data.write } : {}), ...(keys && !priv ? { viaKeys: true } : {}), scope: sk,
+          ...(scopeName ? { scopeName } : {}),
+          reaches: JEWEL_ORDER.map((k) => { const l = inside.filter((j) => j.kind === k); return { kind: k, count: l.length, names: l.slice(0, 5).map((j) => j.name) }; }).filter((x) => x.count > 0),
+        };
+        if (!roles.some((x) => x.kind === role.kind && x.role === role.role && x.scope === role.scope && x.scopeName === role.scopeName && x.write === role.write && x.viaKeys === role.viaKeys)) roles.push(role);
+      }
+    }
+    const reachesData = roles.some((r) => r.reaches.length > 0);
+    const control = roles.some((r) => r.kind === "privileged");
+    if (!h && !reachesData && !control && !identityUnknown) continue; // exposed only — a fact on its own, not a path
+    const ends: AzureAttackPath["ends"] = reachesData ? "data" : control ? "control" : "entry";
+    let sev: AzureAttackPath["sev"] = ends !== "entry" ? (h ? "critical" : "high") : "medium";
+    if (e.limited) sev = sev === "critical" ? "high" : "medium";
+    out.push({
+      key: azureRiskKey(e.resourceGroup, e.type, e.name).replace(/^azure:/, "path:"),
+      entry: { name: e.name, type: e.type, resourceGroup: e.resourceGroup, ...(e.detail ? { detail: e.detail } : {}), ...(e.limited ? { limited: true } : {}) },
+      vuln: h ? { count: h.count, names: h.names } : null,
+      roles, ends, sev, ...(identityUnknown ? { identityUnknown: true } : {}), identity: { principals: principals.length, otherRoles },
+    });
+  }
+  const rank = { critical: 0, high: 1, medium: 2 } as const;
+  return out.sort((a, b) => rank[a.sev] - rank[b.sev] || (a.ends === b.ends ? 0 : a.ends === "data" ? -1 : b.ends === "data" ? 1 : 0) || a.key.localeCompare(b.key));
+}
+
 // ── Reading ──
 
 const HIGH_Q = "securityresources | where type == 'microsoft.security/assessments' and properties.status.code == 'Unhealthy' and properties.metadata.severity == 'High'" +
@@ -153,6 +237,7 @@ const PUBLIC_Q = "resources | where isnotempty(properties.publicNetworkAccess) o
   " | project id = tolower(id), name, type = tolower(type), resourceGroup, properties | limit 3000";
 const IDENTITY_Q = "resources | where isnotempty(identity) and (identity.type contains 'SystemAssigned' or identity.type contains 'UserAssigned')" +
   " | project id = tolower(id), name, type = tolower(type), resourceGroup, sp = tostring(identity.principalId), ua = bag_keys(identity.userAssignedIdentities) | limit 3000";
+const JEWELS_Q = `resources | where type in~ (${Object.keys(JEWEL_TYPES).map((t) => `'${t}'`).join(",")}) | project id = tolower(id), name, type = tolower(type) | limit 3000`;
 const UAMI_Q = "resources | where type =~ 'microsoft.managedidentity/userassignedidentities' | project id = tolower(id), principalId = tostring(properties.principalId)";
 const ROLES_Q = (principals: string[]) => "authorizationresources | where type =~ 'microsoft.authorization/roleassignments'" +
   ` | extend p = tolower(tostring(properties.principalId)) | where p in (${principals.map((x) => `'${x.replace(/[^0-9a-f-]/gi, "")}'`).join(",")})` +
@@ -178,12 +263,13 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
       ...vmExposure(n.metadata?.inboundExposure as InboundExposure | undefined),
     }));
   }));
-  const [vms, paas, highRows, idRows, uamis] = await Promise.all([
+  const [vms, paas, highRows, idRows, uamis, jewels] = await Promise.all([
     vmExpo,
     read("exposurePaas", () => query<{ id: string; name: string; type: string; resourceGroup: string; properties?: Props }>(arm, subs, PUBLIC_Q)),
     read("findings", () => query<{ rid: string; count: number; names: string[] }>(arm, subs, HIGH_Q)),
     read("identities", () => query<{ id: string; name: string; type: string; resourceGroup: string; sp?: string; ua?: string[] }>(arm, subs, IDENTITY_Q)),
     read("identities", () => query<{ id: string; principalId: string }>(arm, subs, UAMI_Q)),
+    read("jewels", () => query<{ id: string; name: string; type: string }>(arm, subs, JEWELS_Q)),
   ]);
   const uamiPrincipal = new Map((uamis ?? []).map((u) => [lc(u.id), u.principalId]));
   const identities = idRows && uamis ? new Map(idRows.map((r) => [r.id, {
@@ -204,9 +290,12 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
     ...(vms ?? []),
     ...(paas ?? []).map((r) => ({ id: r.id, name: r.name, type: r.type, resourceGroup: r.resourceGroup, ...paasExposureFactor(r.type, r.properties ?? {}) })),
   ];
+  const input: CombosInput = { exposure, high, identities, roles, exposureUnread: { vm: vms === null, paas: paas === null }, jewels };
+  const judged = judgeCombos(input, subscriptionId);
+  const paths = attackPaths(input);
   const out: AzureRiskResponse = {
     subscriptionId, generatedAt: new Date().toISOString(),
-    ...judgeCombos({ exposure, high, identities, roles, exposureUnread: { vm: vms === null, paas: paas === null } }, subscriptionId), gaps,
+    combos: judged.combos, paths, counts: { ...judged.counts, paths: paths.length }, gaps,
   };
   if (!gaps.length && !deps) cache.set(key, out);
   return out;

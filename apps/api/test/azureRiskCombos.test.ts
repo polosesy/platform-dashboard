@@ -147,3 +147,68 @@ test("wiring: signed-in route, the queue's source list, the evidence panel, i18n
   keys.add("iq.source.azure");
   for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
 });
+
+// ── 공격 경로 (5.3 ③) ──
+import { attackPaths, inScope } from "../src/services/azureRiskCombos.js";
+const KV = "microsoft.keyvault/vaults", ST = "microsoft.storage/storageaccounts";
+const jewels = [
+  { id: id("rg", KV, "kv-1"), name: "kv-1", type: KV }, { id: id("rg", ST, "st-1"), name: "st-1", type: ST },
+  { id: id("rg2", ST, "st-2"), name: "st-2", type: ST }, { id: id("other", "microsoft.sql/servers", "sql-1"), name: "sql-1", type: "microsoft.sql/servers" },
+];
+const entry = (n: string, e = ex("open")) => ({ id: id("rg", VM, n), ...res("rg", VM, n), ...vmExposure(e) });
+const pathInput = (roles: CombosInput["roles"], over: Partial<CombosInput> = {}): CombosInput => ({
+  exposure: [entry("web")], high: new Map(), identities: new Map([[id("rg", VM, "web"), { principals: ["pw"], ...res("rg", VM, "web") }]]), roles, jewels, ...over,
+});
+
+test("scope: a role's scope covers itself and what is below — never a sibling sharing the prefix (rg vs rg2)", () => {
+  assert.equal(inScope(id("rg", ST, "st-1"), `/subscriptions/${SUB}/resourceGroups/RG`), true);
+  assert.equal(inScope(id("rg2", ST, "st-2"), `/subscriptions/${SUB}/resourceGroups/rg`), false);
+  assert.equal(inScope(id("rg", ST, "st-1"), id("rg", ST, "st-1")), true);
+  assert.equal(inScope(id("rg", ST, "st-1"), `/subscriptions/${SUB}/`), true);
+});
+
+test("paths: data roles reach their service only, inside the scope; privileged reaches every store in scope; key roles reach via keys", () => {
+  const blobReader = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1", kvSecretsUser = "4633458b-17de-408a-b874-0445c86b69e6", keyOperator = "81a9662b-bebf-436f-a333-f67b29880f12";
+  const [p] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: blobReader, scope: `/subscriptions/${SUB}/resourceGroups/rg` }]));
+  assert.deepEqual([p!.ends, p!.sev, p!.roles[0]!.kind, p!.roles[0]!.role, p!.roles[0]!.write], ["data", "high", "data", "storage", false]);
+  assert.deepEqual(p!.roles[0]!.reaches, [{ kind: "storage", count: 1, names: ["st-1"] }], "not the Key Vault in the same group, not st-2 in rg2");
+  const [k] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: kvSecretsUser, scope: id("rg", KV, "kv-1") }]));
+  assert.deepEqual(k!.roles[0]!.reaches, [{ kind: "keyVault", count: 1, names: ["kv-1"] }]);
+  const [o] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_OWNER, scope: `/subscriptions/${SUB}` }]));
+  assert.deepEqual(o!.roles[0]!.reaches.map((x) => [x.kind, x.count]), [["keyVault", 1], ["storage", 2], ["database", 1]]);
+  const [ko] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: keyOperator, scope: `/subscriptions/${SUB}/resourceGroups/rg2` }]));
+  assert.deepEqual([ko!.roles[0]!.viaKeys, ko!.roles[0]!.write, ko!.roles[0]!.reaches], [true, true, [{ kind: "storage", count: 1, names: ["st-2"] }]],
+    "Storage Account Key Operator: listKeys = the data (a data-role-only check missed it on stg)");
+  const [hi] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_OWNER, scope: `/subscriptions/${SUB}` }], { high: new Map([[id("rg", VM, "web"), { count: 2, names: ["x"], ...res("rg", VM, "web") }]]) }));
+  assert.deepEqual([hi!.sev, hi!.vuln?.count], ["critical", 2], "exposed + vulnerable + reaches data");
+});
+
+test("paths: where the chain stops is a fact; scoped exposure one level lower; unread identities said, not hidden", () => {
+  assert.deepEqual(attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_READER, scope: `/subscriptions/${SUB}` }])), [], "exposed, no finding, no reach — not a path");
+  const high = new Map([[id("rg", VM, "web"), { count: 1, names: ["x"], ...res("rg", VM, "web") }]]);
+  const [e] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_READER, scope: `/subscriptions/${SUB}` }], { high }));
+  assert.deepEqual([e!.ends, e!.sev, e!.identity], ["entry", "medium", { principals: 1, otherRoles: 1 }], "stg's 5 paths: exposed VM, High finding, a Reader role only");
+  const [l] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_OWNER, scope: `/subscriptions/${SUB}` }], { exposure: [entry("web", ex("scoped"))], high }));
+  assert.deepEqual([l!.ends, l!.sev], ["data", "high"], "critical lowered one step: listed sources only");
+  const [u] = attackPaths(pathInput(null));
+  assert.deepEqual([u!.identityUnknown, u!.ends], [true, "entry"], "roles unread: the path may go further — said");
+  assert.deepEqual(attackPaths(pathInput([], { exposure: [entry("web", ex("closed"))] })), [], "not exposed: no path from the Internet");
+});
+
+test("issue list: paths that reach data or control are issues (path:…); a path stopping at the entry is not", () => {
+  const blobReader = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1";
+  const reach = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: blobReader, scope: `/subscriptions/${SUB}/resourceGroups/rg` }]));
+  const stop = attackPaths(pathInput([], { exposure: [entry("db")], high: new Map([[id("rg", VM, "db"), { count: 1, names: ["x"], ...res("rg", VM, "db") }]]) }));
+  const resp = { subscriptionId: SUB, generatedAt: "2026-11-17T00:00:00Z", combos: [], paths: [...reach, ...stop], counts: { exposed: 2, high: 1, privileged: 0, combos: 0, undetermined: 0, paths: 2 }, gaps: [] };
+  const q = IQ.buildIssueQueue({ clusterId: null, states: {}, now: new Date(), azureRisk: resp as never, azurePathTitle: (p) => `${p.entry.name} → ${p.ends}` });
+  assert.deepEqual(q.items.map((i) => [i.key, i.title]), [["path:rg/microsoft.compute/virtualmachines/web", "web → data"]]);
+  assert.match(q.items[0]!.key, ISSUE_KEY);
+  assert.match(q.items[0]!.href, /#azure-rg-microsoft-compute-virtualmachines-web-path$/);
+  const panel = read("../../web/src/app/security/risk/AzurePathsPanel.tsx");
+  const all = read("../../web/src/lib/i18nMessages.ts");
+  const keys = new Set([...panel.matchAll(/t\("(azp\.[\w.]+)"/g)].map((m) => m[1]!));
+  for (const k of ["data", "control", "entry"]) keys.add(`azp.ends.${k}`);
+  for (const k of ["keyVault", "storage", "database"]) keys.add(`azp.jewel.${k}`);
+  for (const k of ["keyVault", "storage"]) keys.add(`azp.data.${k}`);
+  for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\.")}": \{ ko: "[^"]+", en: "[^"]+" \}`), k);
+});

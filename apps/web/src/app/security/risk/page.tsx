@@ -7,7 +7,8 @@ import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Select, St
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { buildIssueQueue, type IssueSource, type QueueItem } from "@/lib/issueQueue";
-import { AzureRiskPanel, useAzureTitle } from "./AzureRiskPanel";
+import { AzureRiskPanel, useAzurePathTitle, useAzureTitle } from "./AzureRiskPanel";
+import { AzurePathsPanel } from "./AzurePathsPanel";
 import { joinRisk, type RiskRow } from "@/lib/riskJoin";
 import { useApiToken } from "@/lib/useApiToken";
 import { IssueQueue, type SaveResult, type SourceState } from "./IssueQueue";
@@ -62,6 +63,7 @@ export default function SecurityRiskPage() {
   );
   const azureRisk = !azQ.loading && azQ.data && (!sub || azQ.data.subscriptionId.toLowerCase() === sub.toLowerCase()) ? azQ.data : undefined;
   const azureTitle = useAzureTitle();
+  const azurePathTitle = useAzurePathTitle();
   const advQ = useApiQuery(live ? `advisories:${clusterId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<AdvisoriesResponse>(apiUrl("/api/security/advisories", { clusterId, lang: locale }), token),
   );
@@ -81,8 +83,8 @@ export default function SecurityRiskPage() {
     clusterId: cluster?.id ?? null, insights, wi, advisories: adv, queries: queriesQ.data?.queries ?? null,
     alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
     alertsAt: freshPosture?.generatedAt ?? null, states, owners: statesQ.data?.owners ?? [], now: new Date(),
-    azureRisk: azureRisk ?? null, azureTitle,
-  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners, azureRisk, azureTitle]);
+    azureRisk: azureRisk ?? null, azureTitle, azurePathTitle,
+  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners, azureRisk, azureTitle, azurePathTitle]);
   const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
   const sources: Record<IssueSource, SourceState> = {
     combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
@@ -145,6 +147,7 @@ export default function SecurityRiskPage() {
         <IssueQueue queue={queue} sources={sources} durable={statesQ.data?.durable ?? true} canWrite={statesQ.data?.canWrite ?? false}
           signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} teams={[...new Set((statesQ.data?.owners ?? []).map((o) => o.team))]} />
       ) : null}
+      {!sample && ready ? <AzurePathsPanel data={azureRisk} /> : null}
       {!sample && ready ? <AzureRiskPanel data={azureRisk} error={azQ.error} loading={azQ.loading} /> : null}
       {body}
     </div>
