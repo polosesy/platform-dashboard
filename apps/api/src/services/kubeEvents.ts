@@ -17,8 +17,26 @@ import { redactLogLine } from "./logRedaction.js";
 
 const NAME = /^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$/;
 
-/** The events that belong to a workload: the workload itself, its ReplicaSets and pods (name prefix), HPA/PDB of it */
+/**
+ * Pure: a Kubernetes object named for the workload — itself, its ReplicaSet (`<wl>-<hash>`), a Deployment pod
+ * (`<wl>-<hash>-<5>`), a StatefulSet pod (`<wl>-<n>`), a DaemonSet / Job pod (`<wl>-<5>`). Kubernetes' generated
+ * suffixes use "bcdfghjklmnpqrstvwxz2456789" (no vowels, no 0 1 3) — so `orders-db-0` is the orders-db StatefulSet, not
+ * orders. stg 2026-11-17, every Deployment / StatefulSet / DaemonSet × every pod of its namespace (7,361 pairs) against
+ * owner references: this rule 0 wrong, a bare name prefix 16 wrong.
+ */
+export function ownedBy(name: string, workload: string): boolean {
+  if (name === workload) return true;
+  if (!name.startsWith(`${workload}-`)) return false;
+  const rest = name.slice(workload.length + 1);
+  return /^[bcdfghjklmnpqrstvwxz2456789]{5,10}(-[bcdfghjklmnpqrstvwxz2456789]{5})?$/.test(rest) || /^\d+$/.test(rest);
+}
+
+/**
+ * The events that belong to a workload: pods and ReplicaSets by the generated-name rule (ownedBy); other kinds (HPA,
+ * PDB, the workload itself …) by name or the workload's name prefix — their names are chosen by people, not generated
+ */
 export function eventBelongs(e: { name: string; kind: string }, workload: string): boolean {
+  if (e.kind === "Pod" || e.kind === "ReplicaSet") return ownedBy(e.name, workload);
   return e.name === workload || e.name.startsWith(`${workload}-`);
 }
 

@@ -193,6 +193,8 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 | **C 증거 스냅샷** | `POST /api/ops/cases/evidence?id=`(운영자) → `services/opsEvidence.ts`: 변경 · 파드(그 워크로드 — 단계·Ready·재시작·대기/마지막 종료 사유) · Warning 이벤트(메시지 — 운영자) · 로그 ERROR/WARN 수(`aks.podLogNamespaces`가 허용할 때만) | 클러스터에 아무것도 실행·쓰지 않음. 섹션마다 ok·failed·notAllowed·empty·notApplicable, 줄은 가리기(`redactLogText`). 사례와 **따로** 저장(`attachEvidence` — rev 안 올림: 열린 편집기가 그대로 저장, 최대 5개, 사례 PUT이 보존, 본문으로는 못 씀). 새 사례에 클러스터가 있으면 저장 직후 자동으로 찍음 |
 | **D 알림 → 재발** | `GET /api/ops/recurrence/alert?id=` → 알림 센터 알림 상세 '최근 30일 이 규칙 × 대상의 n번째 (모두 m번) · 지난 사례 · 런북' | 재발 탭과 같은 키(`recurrenceKey`): Grafana·Alertmanager = 알림 센터 기록, Azure = Azure Monitor 원본(대상 리소스 ID). 사례 링크 `/runbooks?tab=cases&id=` |
 
+**검증**(시험 배포 7815044, 배포 코드·신원 vs 내 신원의 kubectl): 가장 최근 롤아웃 +5분의 변경 상관 — 같은 네임스페이스의 새 ReplicaSet 4 = 4, 그 워크로드 4 = 4, 맨 위 = 그 롤아웃(같은 워크로드, 5분 전) · 지금 클러스터 Warning 이벤트(창과 겹침) 4 = 4 · 증거의 파드 1 = 소유자 참조로 센 파드 1(같은 파드), 로그 수 = 그 네임스페이스는 `notAllowed`(설정대로) · 워크로드 소속 규칙: 클러스터의 Deployment·StatefulSet·DaemonSet 89 × 그 네임스페이스 파드(201개, 7,361쌍)를 소유자 참조와 대조 — 생성 꼬리 규칙 **0 틀림**, 이름 접두사만 보면 **16 틀림** → 기존 K8s 이벤트의 워크로드 필터(`kubeEvents.eventBelongs`)도 파드·ReplicaSet은 같은 규칙으로 고침(사람이 이름 짓는 HPA·PDB 등은 접두사 유지) · 알림 센터 재발: 받은 알림 2 → 발생 7 = 기록의 발생 7, 묶음 1 · 블로그 감시: 확인된 공식 피드 7개 모두 클러스터에서 읽힘, 글 수 = 원본 항목 수(40개 상한까지).
+
 ## 11. 외부 학습 — 공개 사례·기술 블로그 (2026-11-17)
 
 **목표**: 우리 사례가 아직 적을 때(stg 0건) "누가 이걸 겪었나"를 검증된 공개 사후 분석으로 답하고, 새 사후 분석을 놓치지 않는다.

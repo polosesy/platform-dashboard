@@ -330,6 +330,10 @@ test("events: Warning only, the workload's objects, newest first, message only f
   const operator = mapEvents(items as never, { workload: "api", messages: true });
   assert.equal(operator[1]!.message, "probe failed token=[REDACTED]");
   assert.ok(eventBelongs({ name: "api-0", kind: "Pod" }, "api"));
+  // regression (stg 2026-11-17: 16 of 7,361 pod × workload pairs wrong with a bare prefix): another workload's pod
+  assert.equal(eventBelongs({ name: "api-db-0", kind: "Pod" }, "api"), false);
+  assert.equal(eventBelongs({ name: "api-worker-7d9f8c6b5-bcdfg", kind: "Pod" }, "api"), false);
+  assert.equal(eventBelongs({ name: "api-pdb", kind: "PodDisruptionBudget" }, "api"), true, "people-named kinds keep the prefix");
 });
 
 test("events: count is cumulative from the first occurrence; time is the last (the TTL runs from it)", () => {

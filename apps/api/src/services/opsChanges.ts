@@ -12,7 +12,9 @@ import type { Env } from "../env.js";
 import { safeMessage } from "../infra/requestParams.js";
 import { getRollouts } from "./rollouts.js";
 import { getNodeMaintenance } from "./nodeMaintenance.js";
-import { listWarningEvents } from "./kubeEvents.js";
+import { listWarningEvents, ownedBy } from "./kubeEvents.js";
+
+export { ownedBy };
 
 /** Before the incident; a change a little after it (the incident's own start is rounded) still counts */
 export const WINDOW_MIN = 120;
@@ -22,19 +24,6 @@ export const EVENT_TTL_MIN = 60;
 const MAX_CHANGES = 30;
 
 const MATCH_RANK = { workload: 0, namespace: 1, cluster: 2 } as const;
-/**
- * Pure: a Kubernetes object named for the workload — itself, its ReplicaSet (`<wl>-<hash>`), a Deployment pod
- * (`<wl>-<hash>-<5>`), a StatefulSet pod (`<wl>-<n>`), a DaemonSet / Job pod (`<wl>-<5>`). A bare prefix is not enough:
- * `orders-db-0` is the orders-db StatefulSet, not orders
- */
-export function ownedBy(name: string, workload: string): boolean {
-  if (name === workload) return true;
-  if (!name.startsWith(`${workload}-`)) return false;
-  const rest = name.slice(workload.length + 1);
-  // Kubernetes' generated suffixes use "bcdfghjklmnpqrstvwxz2456789" (no vowels, no 0 1 3) — a word like "db" or
-  // "worker" is another workload's name
-  return /^[bcdfghjklmnpqrstvwxz2456789]{5,10}(-[bcdfghjklmnpqrstvwxz2456789]{5})?$/.test(rest) || /^\d+$/.test(rest);
-}
 const belongs = ownedBy;
 
 /** Pure: the changes in [at − window, at + after] that touch the scope, nearest scope first then nearest time */
