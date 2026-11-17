@@ -22,6 +22,8 @@ export default function SecurityThreatsPage() {
   const { posture } = useSecurity();
   const alertsGap = useGap("alerts");
   const freePlans = (posture?.plans ?? []).filter((p) => p.tier !== "Standard").map((p) => p.name);
+  // No plan rows = the plans are not visible at this scope (subscription-level): coverage is unknown, not complete
+  const plansUnknown = !!posture && posture.plans.length === 0;
   const [sev, setSev] = useState<SevFilter>("all");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
@@ -45,9 +47,9 @@ export default function SecurityThreatsPage() {
       ) : alertsGap ? (
         <EmptyState title={t("sec.collectFailed")} />
       ) : posture.alerts.length === 0 ? (
-        <EmptyState title={t("sec.noAlerts")}>{freePlans.length ? t("sec.noAlertsCaveat") : null}</EmptyState>
+        <EmptyState title={t("sec.noAlerts")}>{freePlans.length ? t("sec.noAlertsCaveat") : plansUnknown ? t("sec.noAlertsPlansUnknown") : null}</EmptyState>
       ) : (
-        <Panel title={t("sec.alerts")} sub={t("sec.alert.groups", { n: posture.alerts.length, g: groups.length })}>
+        <Panel title={t("sec.alerts")} sub={`${t("sec.alert.groups", { n: posture.alerts.length, g: groups.length })}${posture.alertsTruncated ? ` · ${t("sec.alertsTruncated", { n: posture.alerts.length })}` : ""}`}>
           <div className={s.alertBar}>
             <Segmented label={t("sec.col.severity")} value={sev} onChange={setSev}
               items={(["all", ...SEVS] as SevFilter[]).filter((v) => v === "all" || count(v) > 0).map((v) => ({

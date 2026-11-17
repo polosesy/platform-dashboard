@@ -138,17 +138,22 @@ export async function fetchOfficial(url: string, opts: { maxBytes?: number; time
   return text;
 }
 
-const feedCache = new CacheManager<unknown>(50, 6 * 3_600_000);
-const inflight = new Map<string, Promise<unknown>>();
+const feedCache = new CacheManager<{ v: unknown; at: string }>(50, 6 * 3_600_000);
+const inflight = new Map<string, Promise<{ v: unknown; at: string }>>();
+/** When each feed key was last fetched — a source's checkedAt (the page said "just checked" for 6-hour-old data) */
+const fetchedAt = new Map<string, string>();
 function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   const hit = feedCache.get(key);
-  if (hit !== undefined && hit !== null) return Promise.resolve(hit as T);
+  if (hit !== undefined && hit.v !== null && hit.v !== undefined) { fetchedAt.set(key, hit.at); return Promise.resolve(hit.v as T); }
   const run = inflight.get(key);
-  if (run) return run as Promise<T>;
-  const job = load().then((v) => { feedCache.set(key, v); return v; }).finally(() => inflight.delete(key));
+  if (run) return run.then((r) => r.v as T);
+  const job = load().then((v) => { const r = { v: v as unknown, at: new Date().toISOString() }; feedCache.set(key, r); fetchedAt.set(key, r.at); return r; }).finally(() => inflight.delete(key));
   inflight.set(key, job);
-  return job;
+  return job.then((r) => r.v as T);
 }
+/** The fetch time of the newest cache entry a source used (keys start with the source id) */
+export const feedFetchedAt = (prefix: string, fallback: string) =>
+  [...fetchedAt].filter(([k]) => k.startsWith(prefix)).map(([, at]) => at).sort().pop() ?? fallback;
 
 export type FeedBundle = {
   sources: AdvisorySource[];
@@ -169,7 +174,9 @@ export async function loadFeeds(env: Env): Promise<FeedBundle> {
   }
   const settle = async <T>(id: AdvisorySourceId, url: string, fn: () => Promise<T>): Promise<{ v: T | null; s: AdvisorySource }> => {
     try {
-      return { v: await fn(), s: { id, state: "ok", checkedAt: now, url } };
+      const v = await fn();
+      // when the data was fetched (it may come from the 6-hour cache), not when this request asked
+      return { v, s: { id, state: "ok", checkedAt: feedFetchedAt(id === "nodejs" ? "node" : id, now), url } };
     } catch (e) {
       debug(`[advisories] ${id} failed: ${safeMessage(e)}`);
       return { v: null, s: { id, state: "failed", checkedAt: now, url, detail: safeMessage(e).slice(0, 120) } };

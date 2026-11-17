@@ -6,7 +6,7 @@ import path from "node:path";
 import type { AdvisoriesResponse, IssueState, PolicyInsightsResponse, PostureAlert, WorkloadIdentityResponse } from "@aud/types";
 import { ISSUE_KEY, clearIssueStateMemory, issueStateDir, readIssueStates, validateChange, writeIssueState } from "../src/services/issueStateStore.js";
 import * as iq from "../../web/src/lib/issueQueue.ts";
-const { buildIssueQueue, clusterScope, effectiveStatus, teamOf } = ((iq as { default?: typeof iq }).default ?? iq) as typeof iq;
+const { buildIssueQueue, clusterScope, effectiveStatus, teamOf, vulnSeverity } = ((iq as { default?: typeof iq }).default ?? iq) as typeof iq;
 
 const SUB = "00000000-0000-0000-0000-0000000000aa";
 const CLUSTER = `/subscriptions/${SUB}/resourceGroups/RG-AKS/providers/Microsoft.ContainerService/managedClusters/AKS1`;
@@ -87,7 +87,12 @@ const wi = { clusterId: CLUSTER, generatedAt: "2026-10-30T00:00:00Z", findings: 
   { id: "WI-06:fic:x:aud", rule: "WI-06", sev: "low", ev: "cfg", title: "audience", refs: [] },
 ] } as unknown as WorkloadIdentityResponse;
 const advisories = { clusterId: CLUSTER, generatedAt: "2026-10-30T00:00:00Z", items: [
-  { key: "vendor:nodejs:2026-10-21", status: "affected", title: "Node.js 보안 릴리스", cves: [{ id: "CVE-2026-1", kev: { dateAdded: "x" }, exploitation: null, cvss: null }], targets: [{ where: "이 대시보드", status: "affected" }] },
+  // an image running in the cluster, exploited in the wild → critical
+  { key: "vendor:nodejs:2026-10-21", status: "affected", title: "Node.js 보안 릴리스", cves: [{ id: "CVE-2026-1", kev: { dateAdded: "x" }, exploitation: null, cvss: null }],
+    targets: [{ where: "shop/orders", status: "affected", evidence: "imageTag", workloads: ["shop/orders"] }] },
+  // 2026-11-17: the dashboard's own runtime and a Defender finding on an image no workload here runs are not this cluster's
+  { key: "vendor:nodejs:runtime", status: "affected", title: "x", cves: [{ id: "CVE-2026-3", kev: null, exploitation: null, cvss: { score: 9.8 } }],
+    targets: [{ where: "이 대시보드", status: "affected", evidence: "runtime", workloads: [] }, { where: "repo/img:1", status: "affected", evidence: "defender", workloads: [] }] },
   { key: "kev:CVE-2026-2", status: "clear", title: "x", cves: [], targets: [] },
 ] } as unknown as AdvisoriesResponse;
 const alert = (title: string, severity: PostureAlert["severity"], at: string): PostureAlert => ({ id: `${title}${at}`, title, severity, status: "Active", detectedAt: at, description: "", resources: [{ name: "aks1", type: "managedClusters", resourceGroup: "rg-aks" }] });
@@ -103,6 +108,17 @@ test("queue: four sources, one key each (ASCII), severity mapped, informational 
   assert.equal(al.evidence, "obs");
   assert.match(q.items.find((i) => i.source === "combo")!.href, /issue=standing%3Acrit/);
   assert.deepEqual(q.counts, { open: 6, openCritical: 3, inProgress: 0, accepted: 0, resolved: 0 });
+  assert.ok(!q.items.some((i) => i.key.includes("runtime")), "not queued under this cluster");
+});
+
+test("vulnerability issue severity: exploited = critical, else the highest CVSS (≥9 · ≥7 · ≥4), unscored = medium — never 'high' by default", () => {
+  assert.equal(vulnSeverity([{ kev: { dateAdded: "x" }, cvss: { score: 3 } }]), "critical");
+  assert.equal(vulnSeverity([{ exploitation: "active", cvss: null }]), "critical");
+  assert.equal(vulnSeverity([{ cvss: { score: 9.1 } }]), "critical");
+  assert.equal(vulnSeverity([{ cvss: { score: 7.5 } }, { cvss: { score: 4.0 } }]), "high");
+  assert.equal(vulnSeverity([{ cvss: { score: 4.3 } }]), "medium");
+  assert.equal(vulnSeverity([{ cvss: { score: 2 } }]), "low");
+  assert.equal(vulnSeverity([{ cvss: null }]), "medium");
 });
 
 test("queue: stored states apply by key; states of issues no longer found count as 'not detected' only for sources that were read", () => {

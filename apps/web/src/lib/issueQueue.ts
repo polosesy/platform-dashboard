@@ -13,6 +13,19 @@ import { buildGraph, decodeQuery, runQuery } from "./securityGraph";
 export type IssueSource = "combo" | "wi" | "alert" | "vuln" | "query";
 export type IssueSev = "critical" | "high" | "medium" | "low";
 
+/**
+ * Pure: an urgent vulnerability's issue severity — exploited (CISA KEV or SSVC active) = critical, else the highest
+ * CVSS: ≥ 9 critical · ≥ 7 high · ≥ 4 medium · else low; no score anywhere = medium (stated as unscored on the page,
+ * never "high" by default — every affected advisory used to be "high", a CVSS 4 too).
+ */
+export function vulnSeverity(cves: Array<{ kev?: unknown; exploitation?: string | null; cvss?: { score?: number | null } | null }>): IssueSev {
+  if (cves.some((c) => c.kev || c.exploitation === "active")) return "critical";
+  const scores = cves.map((c) => c.cvss?.score).filter((x): x is number => typeof x === "number");
+  if (!scores.length) return "medium";
+  const top = Math.max(...scores);
+  return top >= 9 ? "critical" : top >= 7 ? "high" : top >= 4 ? "medium" : "low";
+}
+
 export type QueueItem = {
   key: string;
   source: IssueSource;
@@ -140,14 +153,16 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
   if (scope && input.advisories) {
     for (const a of input.advisories.items) {
       if (a.status !== "affected") continue;
-      const exploited = a.cves.some((c) => c.kev || c.exploitation === "active");
-      const critical = exploited || a.cves.some((c) => (c.cvss?.score ?? 0) >= 9);
-      const where = [...new Set(a.targets.filter((x) => x.status === "affected").map((x) => x.where))];
+      // Only what runs in this cluster: an image of its workloads. The dashboard's own runtime (evidence "runtime") and a
+      // Defender finding on an image no workload here runs are not this cluster's (they were queued under it and its team)
+      const inCluster = a.targets.filter((x) => x.status === "affected" && x.evidence !== "runtime" && (x.evidence === "imageTag" || x.workloads.length > 0));
+      if (!inCluster.length) continue;
+      const where = [...new Set(inCluster.map((x) => x.where))];
       raw.push({
-        key: `vuln:${scope}:${ascii(a.key, 400)}`, source: "vuln", sev: critical ? "critical" : "high",
+        key: `vuln:${scope}:${ascii(a.key, 400)}`, source: "vuln", sev: vulnSeverity(a.cves),
         title: a.title, target: where.slice(0, 2).join(", ") + (where.length > 2 ? ` +${where.length - 2}` : ""), evidence: "cfg",
         href: "/security/advisories", seenAt: input.advisories.generatedAt,
-        namespaces: uniq(a.targets.flatMap((x) => x.workloads).map(nsOf)), resourceGroups: uniq([clusterRg]),
+        namespaces: uniq(inCluster.flatMap((x) => x.workloads).map(nsOf)), resourceGroups: uniq([clusterRg]),
       });
     }
   }

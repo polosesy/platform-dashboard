@@ -200,8 +200,8 @@ const vulnCache = new CacheManager<OsvVuln | "missing">(20_000, 24 * 3_600_000);
 const coordKey = (c: Coord) => `${c.ecosystem}|${c.name}|${c.version}`;
 
 /** Which advisories apply to each entry (OSV querybatch, 500 per call), then their details (time-boxed) */
-export async function osvScan(env: Env, entries: SbomEntry[], deadlineMs = 15_000): Promise<{ matches: Array<{ entry: SbomEntry; vuln: OsvVuln }>; pending: number; failed: boolean; queried: number }> {
-  if (!env.AUD_ADVISORY_FEEDS || !entries.length) return { matches: [], pending: 0, failed: false, queried: 0 };
+export async function osvScan(env: Env, entries: SbomEntry[], deadlineMs = 15_000): Promise<{ matches: Array<{ entry: SbomEntry; vuln: OsvVuln }>; pending: number; failed: boolean; partial: boolean; queried: number }> {
+  if (!env.AUD_ADVISORY_FEEDS || !entries.length) return { matches: [], pending: 0, failed: false, partial: false, queried: 0 };
   const todo = entries.filter((e) => idsCache.get(coordKey(e)) === undefined);
   let failed = false;
   for (let i = 0; i < todo.length; i += 500) {
@@ -231,5 +231,6 @@ export async function osvScan(env: Env, entries: SbomEntry[], deadlineMs = 15_00
       matches.push({ entry: e, vuln: v });
     }
   }
-  return { matches, pending, failed: failed && !matches.length, queried: entries.length };
+  // partial = some batch failed but others matched — the matches are real, "nothing else" is not known
+  return { matches, pending, failed: failed && !matches.length, partial: failed && matches.length > 0, queried: entries.length };
 }

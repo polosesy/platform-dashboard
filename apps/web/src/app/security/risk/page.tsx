@@ -259,7 +259,7 @@ function RiskTable({ rows, recGap, alertGap, label, muted = false }: { rows: Ris
                       {sev(r, "Medium") ? <Badge tone={muted ? "neutral" : "medium"}>M {sev(r, "Medium")}</Badge> : null}
                       {sev(r, "Low") ? <Badge tone={muted ? "neutral" : "low"}>L {sev(r, "Low")}</Badge> : null}
                     </>
-                  ) : <span className={s.dim}>0</span>}
+                  ) : <span className={s.dim} title={t("risk.noLinkedFindingHint")}>—</span>}
                 </span>
                 <span className={s.cell} data-label={t("risk.col.alerts")}>{alertGap ? t("risk.unknown") : r.alerts.length}</span>
                 <span className={s.cell} data-label={t("risk.col.issues")}>{r.issues.length}</span>

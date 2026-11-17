@@ -5,10 +5,10 @@
 // Groups follow the scope a page works on: Azure resources, network (VNet and Pod
 // layers side by side), Kubernetes, security, cost.
 // A group with one item renders as a direct link; two or more render as a dropdown.
-// Security follows the Wiz/CNAPP axes that have data: posture overview, findings (CSPM),
-// identity (CIEM), threats, compliance — and cluster security (KSPM). Settings (Azure connections) close the bar. The integrated view that joins
-// Azure and cluster evidence comes first, under its own section. Items may carry a
-// `section` (i18n key) that is shown as a heading where the section changes.
+// Security is ordered by the question a person comes with (Wiz: Issues first, then domains) — what to fix first
+// (overview, issues) · vulnerabilities · configuration and exposure (cloud CSPM, cluster KSPM) · identity and threats ·
+// audit (compliance). Each domain shows Azure and the cluster side by side; where the data comes from is not a menu
+// level. Settings (Azure connections) close the bar. Items may carry a `section` (i18n key) shown as a heading.
 // ──────────────────────────────────────────────────────────────
 
 export type NavIcon =
@@ -48,15 +48,16 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     key: "security", labelKey: "nav.group.security", icon: "lock", items: [
-      item("/security/risk", "securityRisk", "radar", "nav.section.crossRisk"),
-      // Urgent vulnerability news (CISA KEV · NVD · Node.js · PHP) checked against this platform's runtime, images and Defender
-      item("/security/advisories", "securityAdvisories", "megaphone", "nav.section.crossRisk"),
-      item("/security", "securityOverview", "shieldCheck", "nav.section.azureSecurity"),
-      item("/security/findings", "securityFindings", "listChecks", "nav.section.azureSecurity"),
-      item("/security/identity", "securityIdentity", "fingerprint", "nav.section.azureSecurity"),
-      item("/security/threats", "securityThreats", "siren", "nav.section.azureSecurity"),
-      item("/security/compliance", "securityCompliance", "scale", "nav.section.azureSecurity"),
-      item("/policies", "clusterSecurity", "clipboardCheck", "nav.section.clusterSecurity"),
+      // By the question a person comes with (Wiz: Issues → domains), not by where the data comes from — 2026-11-17.
+      // Each domain holds the Azure and the cluster view side by side.
+      item("/security", "securityOverview", "shieldCheck", "nav.section.secPriority"),
+      item("/security/risk", "securityRisk", "radar", "nav.section.secPriority"),
+      item("/security/advisories", "securityAdvisories", "megaphone", "nav.section.secVulns"),
+      item("/security/findings", "securityFindings", "listChecks", "nav.section.secPosture"),
+      item("/policies", "clusterSecurity", "clipboardCheck", "nav.section.secPosture"),
+      item("/security/identity", "securityIdentity", "fingerprint", "nav.section.secAccess"),
+      item("/security/threats", "securityThreats", "siren", "nav.section.secAccess"),
+      item("/security/compliance", "securityCompliance", "scale", "nav.section.secAudit"),
     ],
   },
   { key: "cost", labelKey: "nav.group.cost", icon: "coins", items: [item("/cost", "costManagement", "wallet")] },

@@ -12,7 +12,7 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useAksClusters } from "@/lib/useAksClusters";
 import { useApiQuery } from "@/lib/useApiQuery";
-import { cveOrgUrl, cvssTone, filterFindings, findingCounts, kevHitsUs, maxCvss, mergeWatch, parseWatch, splitItems, targetCounts, type FindingFilter } from "@/lib/advisoryView";
+import { cveOrgUrl, cvssTone, filterFindings, findingCounts, kevHitsUs, maxCvss, mergeWatch, osvChecked, parseWatch, splitItems, targetCounts, type FindingFilter } from "@/lib/advisoryView";
 import s from "./advisories.module.css";
 
 const MOCK_SUB = "/subscriptions/00000000-0000-0000-0000-000000000000/";
@@ -146,7 +146,7 @@ function ComponentsPanel({ d }: { d: AdvisoriesResponse }) {
         <Segmented label={t("adv.sbom.where")} value={f.where} onChange={(v) => setF({ ...f, where: v })}
           items={[{ id: "all" as const, label: t("adv.sbom.whereAll") }, { id: "platform" as const, label: `${t("adv.sbom.platform")} ${counts.platform}` }, { id: "cluster" as const, label: `${t("adv.sbom.cluster")} ${counts.cluster}` }]} />
       </div>
-      {rows.length === 0 ? <EmptyState title={d.components.platform + d.components.cluster === 0 ? t("adv.sbom.none") : t("adv.sbom.clean")} /> : (
+      {rows.length === 0 ? <EmptyState title={d.components.platform + d.components.cluster === 0 ? t("adv.sbom.none") : osvChecked(d) ? t("adv.sbom.clean") : t("adv.sbom.notChecked")} /> : (
         <div className={s.tableWrap}>
           <table className={s.table}>
             <thead>
@@ -243,7 +243,11 @@ export default function SecurityAdvisoriesPage() {
           <div className={s.stats}>
             <Stat label={t("adv.kpi.affected")} value={d.summary.affected} tone={d.summary.affected ? "high" : undefined} hint={t("adv.kpi.affectedHint")} />
             <Stat label={t("adv.kpi.unknown")} value={d.summary.unknown} tone={d.summary.unknown ? "medium" : undefined} hint={t("adv.kpi.unknownHint")} />
-            <Stat label={t("adv.kpi.findings")} value={d.summary.findingsSevere} tone={d.summary.findingsSevere ? "high" : undefined} hint={t("adv.kpi.findingsHint", { n: d.components.platform + d.components.cluster })} />
+            {/* OSV not (fully) checked: a found count is a lower bound, none found is not "0" */}
+            <Stat label={t("adv.kpi.findings")}
+              value={osvChecked(d) ? d.summary.findingsSevere : d.summary.findingsSevere ? `${d.summary.findingsSevere}+` : "—"}
+              tone={d.summary.findingsSevere ? "high" : undefined}
+              hint={osvChecked(d) ? t("adv.kpi.findingsHint", { n: d.components.platform + d.components.cluster }) : t("adv.kpi.findingsUnchecked")} />
             <Stat label={t("adv.kpi.kev")} value={d.summary.kevRecent} hint={t("adv.kpi.kevHint")} />
           </div>
 

@@ -103,7 +103,10 @@ export async function collectAdvisories(
     try {
       const arm = await getArmFetcherAuto(env, bearerToken);
       type Row = { cve: string; pkg: string; ver: string; fixed: string; registry: string; repo: string; tag: string; digest: string };
-      const rows = (await arm.postJson<{ data?: Row[] }>(ARG, { query: defenderQuery(defenderCves), options: { resultFormat: "objectArray", $top: 1000 } }, { timeoutMs: 20_000 })).data ?? [];
+      // A cluster is chosen: its subscription only — without `subscriptions` Resource Graph reads every subscription the
+      // caller can, and another subscription's image findings were shown (and queued as issues) under this cluster
+      const clusterSub = opts.clusterId ? /^\/subscriptions\/([0-9a-f-]{36})\//i.exec(opts.clusterId)?.[1] : undefined;
+      const rows = (await arm.postJson<{ data?: Row[] }>(ARG, { query: defenderQuery(defenderCves), ...(clusterSub ? { subscriptions: [clusterSub] } : {}), options: { resultFormat: "objectArray", $top: 1000 } }, { timeoutMs: 20_000 })).data ?? [];
       defender = rows.filter((r) => r.repo).map((r) => ({ cve: r.cve.toUpperCase(), image: imageRef(r), pkg: r.pkg, version: r.ver, fixed: r.fixed || null }));
       sources.push({ id: "defender", state: rows.length ? "ok" : "noData", checkedAt: at,
         detail: rows.length ? tr(`발견 ${rows.length}건`, `${rows.length} findings`) : tr("해당 CVE의 컨테이너 취약점 결과 없음 — Defender for Containers 스캔이 없거나 해당 없음", "No container findings for these CVEs — no Defender for Containers scan, or not present") });
@@ -125,10 +128,10 @@ export async function collectAdvisories(
   }
   const platformCount = sbom.filter((e) => e.kind === "npm" || e.kind === "os").length;
   const osvOn = env.AUD_ADVISORY_FEEDS && env.AUD_ADVISORY_OSV;
-  const osv = bearerToken && osvOn ? await osvScan(env, sbom) : { matches: [], pending: 0, failed: false, queried: 0 };
+  const osv = bearerToken && osvOn ? await osvScan(env, sbom) : { matches: [], pending: 0, failed: false, partial: false, queried: 0 };
   sources.push(!bearerToken ? { id: "osv", state: "signin", checkedAt: null }
     : !osvOn ? { id: "osv", state: "disabled", checkedAt: null }
-    : { id: "osv", state: osv.failed ? "failed" : "ok", checkedAt: at, url: "https://osv.dev/",
+    : { id: "osv", state: osv.failed || osv.partial ? "failed" : "ok", checkedAt: at, url: "https://osv.dev/",
         detail: tr(`패키지 ${osv.queried}개 대조 · 일치 ${osv.matches.length}${osv.pending ? ` · 상세 대기 ${osv.pending}` : ""}`, `${osv.queried} packages checked · ${osv.matches.length} matches${osv.pending ? ` · ${osv.pending} details pending` : ""}`) });
 
   // CVE details: the CVE.org record first (CNA score, CISA ADP SSVC), NVD only for a score CVE.org lacks; KEV flag

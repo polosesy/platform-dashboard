@@ -154,6 +154,42 @@ export function mapRecommendations(rows: RecommendationRow[]): PostureRecommenda
   return out.sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || b.unhealthy - a.unhealthy || a.title.localeCompare(b.title));
 }
 
+/** The most alerts a posture carries (newest first); `alertsTruncated` says there were more */
+export const ALERTS_SHOWN = 200;
+
+/**
+ * Pure: per-subscription rows of the same control / standard / plan made one (several subscriptions are read when no
+ * one subscription is chosen — they came back as duplicates, summed twice in "failed controls" and repeated in plans)
+ */
+export function mergeControls(list: SecureScoreControl[]): SecureScoreControl[] {
+  const by = new Map<string, SecureScoreControl>();
+  for (const c of list) {
+    const p = by.get(c.controlName);
+    by.set(c.controlName, p ? {
+      ...p, currentScore: Math.round((p.currentScore + c.currentScore) * 100) / 100, maxScore: p.maxScore + c.maxScore,
+      healthyResourceCount: p.healthyResourceCount + c.healthyResourceCount, unhealthyResourceCount: p.unhealthyResourceCount + c.unhealthyResourceCount,
+    } : c);
+  }
+  return [...by.values()].sort((a, b) => b.maxScore - b.currentScore - (a.maxScore - a.currentScore) || b.unhealthyResourceCount - a.unhealthyResourceCount);
+}
+export function mergeCompliance(list: PostureComplianceStandard[]): PostureComplianceStandard[] {
+  const by = new Map<string, PostureComplianceStandard>();
+  for (const c of list) {
+    const p = by.get(c.name);
+    by.set(c.name, p ? { ...p, state: p.state === c.state ? p.state : "Mixed", passed: p.passed + c.passed, failed: p.failed + c.failed, skipped: p.skipped + c.skipped } : c);
+  }
+  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+/** A plan counts as on only where it is on in every subscription read (coverage must not claim a subscription it misses) */
+export function mergePlans(list: PostureDefenderPlan[]): PostureDefenderPlan[] {
+  const by = new Map<string, PostureDefenderPlan>();
+  for (const x of list) {
+    const p = by.get(x.name);
+    by.set(x.name, p ? { ...p, tier: p.tier === "Standard" && x.tier === "Standard" ? "Standard" : p.tier === x.tier ? p.tier : "Mixed" } : x);
+  }
+  return [...by.values()].sort((a, b) => Number(b.tier === "Standard") - Number(a.tier === "Standard") || a.name.localeCompare(b.name));
+}
+
 export function mapControls(rows: ControlRow[]): SecureScoreControl[] {
   return rows
     .filter((r) => r.dn)
@@ -286,7 +322,8 @@ const Q = {
     " | project id, dn=tostring(properties.AlertDisplayName), sev=tostring(properties.Severity), st=tostring(properties.Status)," +
     " intent=tostring(properties.Intent), t=tostring(properties.TimeGeneratedUtc), dsc=tostring(properties.Description), rids=properties.ResourceIdentifiers," +
     " rem=properties.RemediationSteps, ce=tostring(properties.CompromisedEntity), ent=properties.Entities, t0=tostring(properties.StartTimeUtc), uri=tostring(properties.AlertUri)" +
-    " | order by t desc | take 200",
+    // 201 = one more than shown: tells "200+" apart from exactly 200 (the page said 200 as if it were all)
+    ` | order by t desc | take ${ALERTS_SHOWN + 1}`,
 };
 
 
@@ -362,16 +399,17 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson"> & Partial
     generatedAt: new Date().toISOString(),
     source: "azure",
     score: scoreRows.length ? { current: Math.round(current * 100) / 100, max, percentage: max > 0 ? Math.round((current / max) * 1000) / 10 : 0 } : null,
-    controls: mapControls(controls),
+    controls: mergeControls(mapControls(controls)),
     recommendations: mapRecommendations(rec),
     affected: gaps.some((g) => g.section === "affected") ? null : {
       High: num(affected.find((r) => r.sev === "High")?.n),
       Medium: num(affected.find((r) => r.sev === "Medium")?.n),
       Low: num(affected.find((r) => r.sev === "Low")?.n),
     },
-    compliance: mapCompliance(compliance),
-    plans: mapPlans(plans),
-    alerts: mapAlerts(arm.fetchJson ? await unmaskAlertRows({ fetchJson: arm.fetchJson }, subs, alerts) : alerts),
+    compliance: mergeCompliance(mapCompliance(compliance)),
+    plans: mergePlans(mapPlans(plans)),
+    alerts: mapAlerts(arm.fetchJson ? await unmaskAlertRows({ fetchJson: arm.fetchJson }, subs, alerts.slice(0, ALERTS_SHOWN)) : alerts.slice(0, ALERTS_SHOWN)),
+    ...(alerts.length > ALERTS_SHOWN ? { alertsTruncated: true } : {}),
     gaps,
   };
 }

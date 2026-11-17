@@ -25,7 +25,7 @@ export default function SecurityCompliancePage() {
             {complianceGap ? (
               <EmptyState title={t("sec.collectFailed")} />
             ) : posture.compliance.length === 0 ? (
-              <EmptyState title={t("sec.noStandards")} />
+              <EmptyState title={t("sec.noStandardsVisible")}>{t("sec.scoreNotVisible")}</EmptyState>
             ) : (
               <>
                 <div className={s.legend}>

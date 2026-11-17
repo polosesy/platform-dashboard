@@ -1,8 +1,8 @@
 ---
 status: draft
 owner: platform-security
-last-verified: 2026-10-30
-covers: [apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+last-verified: 2026-11-17
+covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts, apps/web/src/app/security, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -214,3 +214,58 @@ covers: [apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadId
 2. 그래프는 왼쪽 → 오른쪽 = 공격 방향, 같은 권한·같은 대상은 노드 하나로 묶고 '외 n개'로 생략을 밝힘
 3. 숫자에는 단위('선 n개', '계정 n개', '스캔 n/m')
 4. 같은 사실 = 같은 등급(히트맵 · 조합 · 경로 · KBOM), 테스트로 고정
+
+## 5. 보안 탭 감사와 메뉴 재구성 (2026-11-17)
+
+### 5.1 사실 감사 — 숫자가 원본과 같은가
+
+**원본 대조** (`collectPosture`를 구독마다 실행 vs 같은 구독의 독립 Resource Graph KQL, stg 구독 2개):
+
+| 값 | 결과 |
+|---|---|
+| 심각도별 권고 종수 · 발견 합(Σ비정상) · 영향 리소스(dcount) | 175/104/32 · 7,584/2,349/1,569 · 697/540/529 — **같음** (다른 구독 150/80/31 · 394/176/49 · 14/27/21 — 같음) |
+| 보안 점수 current/max | 21.35/43 · 21.23/41 — 같음 |
+| 활성 경고 · 플랜(Standard/Free) · 컨트롤 수 | 2 · 4/15 · 13 / 4 · 14/4 · 13 — 같음 |
+| 세 번째 구독 | 모든 조회 400 → 대시보드도 오류(0으로 채우지 않음) — 맞음 |
+
+숫자 자체는 맞았다. 결함은 **라벨·단위·'모름'의 표현**에 있었다(코드 감사, 모두 코드에서 확인 후 수정):
+
+| # | 결함 | 사용자에게 보인 것 | 수정 |
+|---|---|---|---|
+| 1 | '영향 리소스' 조회가 실패하면 발견 합으로 대체 | 같은 라벨에 수십 배 부풀린 수(7,584 vs 697의 차이) | '—' + '영향 리소스 수를 읽지 못함 — 발견 n건(리소스 수 아님)' |
+| 2 | 긴급 취약점 이슈가 고른 클러스터에 붙음 — Defender 조회에 구독 범위 없음 + 대시보드 자신의 런타임(Node.js)도 대상 | 다른 구독 이미지·플랫폼 런타임이 이 클러스터·이 팀의 이슈로 | Defender 조회 = 클러스터 구독만, 이슈 = 그 클러스터 워크로드가 쓰는 이미지만(`imageTag` 또는 워크로드 있음) |
+| 3 | OSV 대조 실패·일부 실패·꺼짐인데 '일치하는 취약점 없음'·0 | 확인 못 한 것을 깨끗하다고 | `partial` → 출처 '실패', KPI '—' 또는 'n+', 빈 화면 '확인하지 못함(깨끗하다는 뜻 아님)' |
+| 4 | 구독 수준 데이터(플랜·규정 표준)가 안 보일 때 | 플랜 '0 / 0' · '할당된 규정 표준 없음' · 위협 '경고 없음'에 플랜 경고 없음 | '—' + '구독 Reader 필요', '보이는 표준 없음(구독 범위)', '플랜이 안 보여 탐지 범위를 알 수 없음' |
+| 5 | 통합 위험 행의 Defender 권고 '0' | 연결 근거(권고당 표본 5개)가 없는 것을 0건으로 | '—' + 툴팁 |
+| 6 | 취약점 이슈 등급 — 악용 아니고 CVSS < 9면 모두 '높음' | CVSS 4도 '높음' | `vulnSeverity`: 악용 = 치명 · CVSS ≥9/≥7/≥4 · 점수 없음 = 중간 |
+| 7 | 피드 `checkedAt` = 요청 시각(데이터는 6시간 캐시) | 6시간 전 데이터가 '방금 확인' | 가져온 시각(`feedFetchedAt`) |
+| 8 | 경고 200건 상한을 말하지 않음 | 200건이 전부처럼 | 201건 읽어 넘치면 `alertsTruncated` → '200+'·'최근 200건만 — 더 있음' |
+| 9 | 구독을 하나도 고르지 않으면 컨트롤·표준·플랜이 구독마다 한 줄 | 실패 컨트롤 두 번 합산·플랜 반복 | 이름으로 합침(플랜은 모든 구독에서 켜졌을 때만 Standard, 아니면 Mixed) |
+| — | 컨트롤 '이슈 n' | 실제 값은 비정상 리소스 수 | '비정상 리소스 n' |
+
+### 5.2 메뉴 — 데이터 출처가 아니라 질문으로
+
+예전: `Azure + 클러스터`(통합 위험·긴급 취약점) / `Azure 보안`(개요·권고·ID·위협·규정) / `클러스터 보안`(AKS 보안 점검). 사용자는 먼저 '이 데이터가 Azure에서 오나 클러스터에서 오나'를 알아야 했다.
+
+지금(Wiz: Issues → 영역):
+
+| 소제목 | 화면 | 답하는 질문 |
+|---|---|---|
+| 무엇부터 | 보안 개요 · **이슈·통합 위험** | 지금 무엇을 먼저 고치나 |
+| 취약점 | 긴급 취약점 | 우리가 쓰는 것에 알려진 취약점이 있나 |
+| 구성·노출 | **클라우드 구성 권고**(CSPM) · AKS 보안 점검(KSPM) | 잘못 설정되었거나 열려 있는 곳 — 클라우드와 클러스터를 나란히 |
+| ID·위협 | ID·권한 · 위협 탐지 | 누가 무엇에 접근하나 · 지금 공격받나 |
+| 감사 | 규정 준수 | 감사에 통과하나 |
+
+### 5.3 Wiz를 목표로 할 때 필요한 메커니즘 (남은 것)
+
+| Wiz | 핵심 메커니즘 | 여기 | 다음 |
+|---|---|---|---|
+| Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | 클러스터 범위 그래프 탐색(`/policies?tab=explore`) + 통신하는 Azure 리소스 | **보안 메뉴에서 바로 닿게**(지금은 AKS 보안 점검 안 탭) — 메뉴는 경로 1:1이라 별도 화면이 필요 |
+| Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) | Azure 리소스 쪽 조합(공용 노출 + 높은 권고 + 특권 ID)을 이슈로 |
+| Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) | Azure 리소스 경로(구성도 노출 선 + Defender 권고 + 역할) |
+| Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 | 리소스 하나의 '보안 카드'(권고·경고·노출·ID 한 곳) |
+| Project/Owner | 팀별 범위·담당 | 이슈 팀(연결 파일 `owners`) | 보안 개요를 팀 범위로 거르기 |
+| 데이터 신선도 | 스캔 시각 | 출처 칩·피드 시각(이번에 사실로) | 화면마다 '읽은 시각'과 원본 시각 분리 |
+
+원칙은 그대로: 사실만(추정 점수·색 없음), 모르면 '—'와 이유, 읽기 전용(고치기는 명령 복사·출처 안내).

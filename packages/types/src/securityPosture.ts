@@ -93,6 +93,8 @@ export type SecurityPostureResponse = {
   compliance: PostureComplianceStandard[];
   plans: PostureDefenderPlan[];
   alerts: PostureAlert[];
+  /** More active alerts than `alerts` carries (the newest ALERTS_SHOWN) — counts on screen are "n+" */
+  alertsTruncated?: boolean;
   /** Per-section failures (messages have IDs masked); the rest of the response is still valid. */
   gaps: PostureGap[];
   note?: string;

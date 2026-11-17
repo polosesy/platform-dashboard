@@ -66,9 +66,9 @@ export default function SecurityOverviewPage() {
                 <Link key={sev} href="/security/findings" className={s.statLink}>
                   <Stat
                     label={t(`sec.affected${sev}`)}
-                    value={recGap ? "—" : (n ?? findings(sev)).toLocaleString()}
+                    value={recGap || n === null ? "—" : n.toLocaleString()}
                     hint={recGap ? notCollected : n === null
-                      ? t("sec.recTypes", { n: kinds(sev) })
+                      ? t("sec.affectedUnread", { n: kinds(sev), f: findings(sev).toLocaleString() })
                       : t("sec.affectedHint", { n: kinds(sev), f: findings(sev).toLocaleString() })}
                     tone={sev === "High" ? "high" : sev === "Medium" ? "medium" : undefined}
                   />
@@ -76,7 +76,8 @@ export default function SecurityOverviewPage() {
               );
             })}
             <Link href="/security/threats" className={s.statLink}>
-              <Stat label={t("sec.activeThreats")} value={alertsGap ? "—" : posture.alerts.length} hint={alertsGap ? notCollected : t("sec.alertsHint")} />
+              <Stat label={t("sec.activeThreats")} value={alertsGap ? "—" : `${posture.alerts.length}${posture.alertsTruncated ? "+" : ""}`}
+                hint={alertsGap ? notCollected : posture.alertsTruncated ? t("sec.alertsTruncated", { n: posture.alerts.length }) : t("sec.alertsHint")} />
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
               <Stat
@@ -86,7 +87,8 @@ export default function SecurityOverviewPage() {
               />
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
-              <Stat label={t("sec.coverage")} value={plansGap ? "—" : `${paidPlans} / ${posture.plans.length}`} hint={plansGap ? notCollected : t("sec.coverageHint", { n: posture.plans.length })} />
+              <Stat label={t("sec.coverage")} value={plansGap || !posture.plans.length ? "—" : `${paidPlans} / ${posture.plans.length}`}
+                hint={plansGap ? notCollected : posture.plans.length ? t("sec.coverageHint", { n: posture.plans.length }) : t("sec.plansNotVisible")} />
             </Link>
           </div>
 
@@ -135,7 +137,7 @@ export default function SecurityOverviewPage() {
               {controls.map((c) => (
                 <div key={c.controlName} className={s.control}>
                   <span>{c.controlName}</span>
-                  <span className={s.num}>{c.currentScore} / {c.maxScore} · {t("sec.issues", { n: c.unhealthyResourceCount })}</span>
+                  <span className={s.num}>{c.currentScore} / {c.maxScore} · {t("sec.unhealthyResources", { n: c.unhealthyResourceCount })}</span>
                   <span className={s.track} aria-hidden="true">
                     <span className={s.fill} style={{ display: "block", width: `${(c.currentScore / c.maxScore) * 100}%` }} />
                   </span>

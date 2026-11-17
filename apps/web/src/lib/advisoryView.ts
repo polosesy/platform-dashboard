@@ -59,3 +59,6 @@ export function findingCounts(findings: DependencyFinding[]): { all: number; sev
 }
 
 export const cveOrgUrl = (id: string) => `https://www.cve.org/CVERecord?id=${encodeURIComponent(id)}`;
+
+/** Pure: OSV answered for every package (a failed, partial, disabled or signed-out check is not "none found") */
+export const osvChecked = (d: { sources: Array<{ id: string; state: string }> }) => d.sources.find((x) => x.id === "osv")?.state === "ok";

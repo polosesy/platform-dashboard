@@ -67,7 +67,7 @@ test("group order and shape: 7 slots, single-item groups are direct links", () =
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble"]);
   assert.deepEqual(
     NAV_GROUPS.find((g) => g.key === "security")!.items.map((i) => i.href),
-    ["/security/risk", "/security/advisories", "/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance", "/policies"],
+    ["/security", "/security/risk", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"],
   );
 });
 
@@ -80,8 +80,11 @@ test("sections: only in the security group, contiguous, translated, never repeat
     secs.forEach((s, i) => {
       if (s !== secs[i - 1]) { assert.ok(!seen.has(s!), `section ${s} is contiguous`); seen.add(s!); }
     });
-    assert.deepEqual([...seen], ["nav.section.crossRisk", "nav.section.azureSecurity", "nav.section.clusterSecurity"]);
-    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.crossRisk", null, "nav.section.azureSecurity", null, null, null, null, "nav.section.clusterSecurity"]);
+    // 2026-11-17: by the question (what first · vulnerabilities · configuration & exposure · identity & threats · audit),
+    // not by data source — the cluster's posture sits next to the cloud's
+    assert.deepEqual([...seen], ["nav.section.secPriority", "nav.section.secVulns", "nav.section.secPosture", "nav.section.secAccess", "nav.section.secAudit"]);
+    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.secPriority", null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
+    assert.deepEqual(g.items.map((i) => i.href), ["/security", "/security/risk", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"]);
     for (const it of g.items) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[it.section!]!.ko, `${it.href} label differs from its section heading`);
   }
 });
