@@ -77,9 +77,10 @@ export function ResourceSecurityCard({ resourceId }: { resourceId: string }) {
         : <p className={s.dim}>{e?.detail ?? (e?.reason ? t("azr.unknownWhy", { r: e.reason }) : "—")}</p>}
 
       <h4 className={s.h}>{t("rsc.canDo")}</h4>
+      {d.access.aboveHidden ? <p className={s.dim}>{t("rsc.aboveHidden")}</p> : null}
       {d.identity.state === "failed" ? unread : d.identity.state === "na" ? <p className={s.dim}>{t("rsc.noIdentity")}</p> : d.identity.roles.length ? (
         <ul className={s.list}>{d.identity.roles.map((r, i) => <li key={i}><Chip level={CLASS_CHIP[r.class]!} glyph={false}>{t(`rsc.class.${r.class}`)}</Chip> {r.roleName} @ {t(`azr.scope.${r.scope}`)}{r.scopeName ? ` ${r.scopeName}` : ""}</li>)}</ul>
-      ) : <p className={s.dim}>{t("rsc.noRoles", { n: d.identity.principals })}</p>}
+      ) : <p className={s.dim}>{d.access.aboveHidden ? t("rsc.noRolesVisible", { n: d.identity.principals }) : t("rsc.noRoles", { n: d.identity.principals })}</p>}
 
       <h4 className={s.h}>{t("rsc.whoCan")}</h4>
       {d.access.state !== "ok" ? unread : d.access.byClass.length ? (
@@ -87,7 +88,7 @@ export function ResourceSecurityCard({ resourceId }: { resourceId: string }) {
           <p className={s.dim}>{d.access.byClass.map((c) => t("rsc.byClass", { c: t(`rsc.class.${c.class}`), a: c.assignments, p: c.principals })).join(" · ")}</p>
           <ul className={s.list}>{d.access.items.map((r, i) => <li key={i}><Chip level={CLASS_CHIP[r.class]!} glyph={false}>{t(`rsc.class.${r.class}`)}</Chip> {r.roleName} · {r.principalType} …{r.principalTail} @ {t(`azr.scope.${r.scope}`)}</li>)}</ul>
         </>
-      ) : <p className={s.dim}>{t("rsc.noAccess")}</p>}
+      ) : <p className={s.dim}>{d.access.aboveHidden ? t("rsc.noAccessVisible") : t("rsc.noAccess")}</p>}
       <p className={s.foot}>{t("rsc.foot", { at: when(d.generatedAt) })}</p>
     </section>
   );

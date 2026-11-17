@@ -48,7 +48,7 @@ export function AzurePathsPanel({ data }: { data: AzureRiskResponse | undefined 
                   </li>
                 ))}
                 {p.ends === "entry" ? (
-                  <li><span className={s.dim}>{p.identityUnknown ? t("azp.stopUnknown") : p.identity.principals ? t("azp.stopRoles", { p: p.identity.principals, o: p.identity.otherRoles }) : t("azp.stopNoIdentity")}</span></li>
+                  <li><span className={s.dim}>{p.identityUnknown ? (data.rolesAboveHidden ? t("azp.stopAboveHidden") : t("azp.stopUnknown")) : p.identity.principals ? t("azp.stopRoles", { p: p.identity.principals, o: p.identity.otherRoles }) : t("azp.stopNoIdentity")}</span></li>
                 ) : null}
               </ol>
             </li>

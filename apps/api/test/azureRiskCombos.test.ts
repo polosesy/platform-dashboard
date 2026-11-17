@@ -97,6 +97,35 @@ test("unknown is never 'no': unread sources make their factor unknown (and the r
   assert.ok(appOnly.counts.undetermined >= 1, "PaaS public access unread: a privileged app is undetermined");
 });
 
+test("assignments above the resource groups not visible (Reader on groups only): 'no privileged role' becomes unknown", async () => {
+  const b = base();
+  b.identities!.set(id("rg", VM, "scoped-vm"), { principals: ["p-3"], ...res("rg", VM, "scoped-vm") }); // a Reader only
+  const hidden = judgeCombos({ ...b, rolesAboveHidden: true }, SUB);
+  assert.equal(judgeCombos(b, SUB).combos.find((c) => c.name === "scoped-vm")!.identity.detail, "no privileged role", "visible: a fact");
+  const all = [...hidden.combos.map((c) => c.identity), ...hidden.undetermined.flatMap((u) => u.unknown.filter((x) => x.factor === "identity"))];
+  assert.ok(hidden.combos.every((c) => c.identity.detail !== "no privileged role"), "never 'no privileged role' when the subscription level can't be seen ('no managed identity' stays a fact)");
+  assert.ok(all.some((f) => f.reason === "rolesAboveHidden"));
+  assert.ok(judgeCombos(base(), SUB).combos.some((c) => c.identity.state === "no" || c.identity.state === "yes"));
+  const [p] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: P_READER, scope: `/subscriptions/${SUB}/resourceGroups/rg` }], { rolesAboveHidden: true }));
+  assert.deepEqual([p!.identityUnknown, p!.ends], [true, "entry"], "the chain may go further through a role we can't see — said, not dropped");
+  // reading: one probe for any subscription-level assignment; none back = hidden (stg deployed identity: 46 assignments, none above)
+  const env = loadEnv({ AZURE_AD_TENANT_ID: "11111111-1111-1111-1111-111111111111", AZURE_AD_CLIENT_ID: "c", AZURE_AD_CLIENT_SECRET: "s", AZURE_SUBSCRIPTION_IDS: SUB });
+  const arm = (aboveRows: unknown[]) => ({
+    postJson: async (_u: string, b: { query: string }) => {
+      if (/take 1 \| project x = 1/.test(b.query)) return { data: aboveRows };
+      if (/authorizationresources/.test(b.query)) return { data: [] };
+      if (/isnotempty\(identity\)/.test(b.query)) return { data: [{ id: id("rg", VM, "open-vm"), name: "open-vm", type: VM, resourceGroup: "rg", sp: "11111111-1111-1111-1111-111111111111", ua: [] }] };
+      if (/severity == 'High'/.test(b.query)) return { data: [{ rid: id("rg", VM, "open-vm"), count: 2, names: ["x"] }] };
+      return { data: [] };
+    },
+  });
+  const vm = async () => [{ id: id("rg", VM, "open-vm"), ...res("rg", VM, "open-vm"), ...vmExposure(ex("open")) }];
+  const h = await getAzureRiskCombos(env, "t-hidden", SUB, { arm: arm([]), graphExposure: vm });
+  assert.deepEqual([h.rolesAboveHidden, h.combos[0]!.identity.state, h.combos[0]!.identity.reason], [true, "unknown", "rolesAboveHidden"]);
+  const v = await getAzureRiskCombos(env, "t-visible", SUB, { arm: arm([{ x: 1 }]), graphExposure: vm });
+  assert.deepEqual([v.rolesAboveHidden, v.combos[0]!.identity.state], [undefined, "no"]);
+});
+
 test("reading: Resource Graph queries scoped to the one subscription; a failed section is a gap, its factor unknown", async () => {
   const seen: string[] = [];
   const arm = {

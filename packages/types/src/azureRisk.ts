@@ -82,6 +82,9 @@ export type AzureRiskResponse = {
   generatedAt: string;
   combos: AzureRiskCombo[];
   /** The resources counted as undetermined: one factor yes, another unknown — and why (≤ 50) */
+  /** no subscription / management-group level role assignment is visible to the connection identity (Reader on resource
+   * groups only) — identities without a privileged role found are "can't tell", not "no" */
+  rolesAboveHidden?: boolean;
   undetermined: Array<{ name: string; type: string; resourceGroup: string; yes: Array<"exposure" | "high" | "identity">; unknown: Array<{ factor: "exposure" | "high" | "identity"; reason?: string }> }>;
   /** attack paths from the Internet through exposed entries (security-roadmap 5.3 ③) */
   paths: AzureAttackPath[];
@@ -122,6 +125,9 @@ export type ResourceSecurityCard = {
     state: CardSectionState;
     /** per role class: assignments and distinct principals */
     byClass: Array<{ class: "privileged" | "data" | "keys"; assignments: number; principals: number }>;
+    /** no subscription / management-group level assignment is visible: both role sections show resource-group and
+     * resource level only — an empty list is not "none" */
+    aboveHidden: boolean;
     items: Array<{ roleName: string; class: "privileged" | "data" | "keys"; principalType: string; principalTail: string; scope: "managementGroup" | "subscription" | "resourceGroup" | "resource" }>;
   };
   /** the combination and attack path it belongs to (same keys as the issue list) */

@@ -37,6 +37,10 @@ export type CombosInput = {
   exposureUnread?: { vm: boolean; paas: boolean };
   /** this subscription's data stores (Key Vault · Storage · databases); null = not read */
   jewels?: Array<{ id: string; name: string; type: string }> | null;
+  /** no subscription / management-group level assignment is visible to the connection identity: a Reader on resource
+   * groups only sees those groups' assignments (stg deployed identity: 46, none above), so "no privileged role" can't
+   * be said — an Owner on the subscription would be invisible */
+  rolesAboveHidden?: boolean;
 };
 
 /**
@@ -188,7 +192,7 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
       const rs = ids.principals.flatMap((p) => rolesOf.get(lc(p)) ?? []);
       identity = rs.length
         ? { state: "yes", roles: rs.map((r) => ({ role: PRIVILEGED_ROLES[lc(r.roleDefGuid)]!, scope: scopeKind(r.scope) })).filter((r, i, l) => l.findIndex((x) => x.role === r.role && x.scope === r.scope) === i) }
-        : { state: "no", detail: "no privileged role" };
+        : input.rolesAboveHidden ? { state: "unknown", reason: "rolesAboveHidden" } : { state: "no", detail: "no privileged role" };
     }
     if (exposure.state === "yes") exposed++;
     if (hi.state === "yes") high++;
@@ -237,7 +241,7 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
     const id = lc(e.id);
     const h = input.high?.get(id);
     const principals = input.identities?.get(id)?.principals ?? [];
-    const identityUnknown = input.identities === null || (principals.length > 0 && input.roles === null);
+    const identityUnknown = input.identities === null || (principals.length > 0 && (input.roles === null || !!input.rolesAboveHidden));
     const roles: AzurePathRole[] = [];
     let otherRoles = 0;
     for (const p of principals) {
@@ -306,6 +310,11 @@ const ROLES_Q = (principals: string[]) => "authorizationresources | where type =
   ` | extend p = tolower(tostring(properties.principalId)) | where p in (${principals.map((x) => `'${x.replace(/[^0-9a-f-]/gi, "")}'`).join(",")})` +
   " | project principalId = p, roleDefGuid = tolower(tostring(split(properties.roleDefinitionId, '/')[-1])), scope = tostring(properties.scope)";
 
+/** One row if any subscription- or management-group-level role assignment is visible to the caller */
+export const ABOVE_Q = (sub: string) => "authorizationresources | where type =~ 'microsoft.authorization/roleassignments'" +
+  " | extend s = tolower(trim_end('/', tostring(properties.scope)))" +
+  ` | where s == '/subscriptions/${lc(sub).replace(/[^0-9a-f-]/g, "")}' or s startswith '/providers/microsoft.management/managementgroups/' | take 1 | project x = 1`;
+
 const cache = new CacheManager<AzureRiskResponse>(30, 5 * 60_000);
 /** Child-rule reads per request (ARM GET each) */
 const CHILD_READS = 20;
@@ -350,6 +359,9 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
       return out;
     });
   }
+  // can this identity see assignments above the resource groups? (none visible = can't say "no privileged role")
+  const above = roles && identities && principals.length ? await read("roles", () => query<{ x: number }>(arm, subs, ABOVE_Q(subscriptionId))) : [];
+  const rolesAboveHidden = above !== null && above.length === 0 && !!identities && principals.length > 0;
   const high = highRows ? rollUpHigh(highRows) : null;
   const paasFacts = (paas ?? []).map((r) => ({ id: r.id, name: r.name, type: r.type, resourceGroup: r.resourceGroup, ...paasExposureFactor(r.type, r.properties ?? {}) }));
   // Rules kept in child resources (PostgreSQL / MySQL / SQL firewall rules …): read them for the resources that matter —
@@ -371,12 +383,13 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
     }
   }
   const exposure: ExposureIn[] | null = vms === null && paas === null ? null : [...(vms ?? []), ...paasFacts];
-  const input: CombosInput = { exposure, high, identities, roles, exposureUnread: { vm: vms === null, paas: paas === null }, jewels };
+  const input: CombosInput = { exposure, high, identities, roles, exposureUnread: { vm: vms === null, paas: paas === null }, jewels, ...(rolesAboveHidden ? { rolesAboveHidden } : {}) };
   const judged = judgeCombos(input, subscriptionId);
   const paths = attackPaths(input);
   const out: AzureRiskResponse = {
     subscriptionId, generatedAt: new Date().toISOString(),
     combos: judged.combos, undetermined: judged.undetermined, paths, counts: { ...judged.counts, paths: paths.length }, gaps,
+    ...(rolesAboveHidden ? { rolesAboveHidden } : {}),
   };
   if (!gaps.length && !deps) cache.set(key, out);
   return out;

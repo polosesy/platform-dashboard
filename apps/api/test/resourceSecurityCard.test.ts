@@ -56,6 +56,18 @@ test("card: every section from the resource id — child entities counted, High 
   assert.deepEqual(c.identity.roles.map((r) => [r.roleName, r.class, r.scope]), [["Storage Account Key Operator Service Role", "keys", "resourceGroup"], ["Reader", "other", "subscription"]]);
   assert.deepEqual(c.access.byClass, [{ class: "privileged", assignments: 1, principals: 1 }, { class: "data", assignments: 1, principals: 1 }], "the sibling group's Owner and the Reader are not counted");
   assert.deepEqual(c.access.items.map((x) => [x.roleName, x.principalTail]), [["Owner", "1111"], ["Storage Blob Data Reader", "4444"]]);
+  assert.equal(c.access.aboveHidden, false, "subscription-level assignments came back: visible");
+});
+
+test("an identity that sees resource-group assignments only: the role sections say so — an empty list is not 'none'", async () => {
+  const base = answers();
+  const rgOnly = { ...base, postJson: async (u: string, b: { query: string }) => /trim_end/.test(b.query)
+    ? { data: [{ def: "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1", scope: `/subscriptions/${SUB}/resourceGroups/rg`, ptype: "ServicePrincipal", pid: "s-5555" }] } : base.postJson(u, b) };
+  const c = await getResourceSecurityCard(env, "t", ACR, { arm: rgOnly });
+  assert.deepEqual([c.access.state, c.access.aboveHidden, c.access.byClass.map((x) => x.class)], ["ok", true, ["data"]]);
+  const card = read("../../web/src/components/ResourceSecurityCard.tsx");
+  assert.match(card, /aboveHidden \? t\("rsc\.noAccessVisible"\)/);
+  assert.match(card, /aboveHidden \? t\("rsc\.noRolesVisible"/);
 });
 
 test("a section not read is 'failed' (never 'none'), the others still answer", async () => {
@@ -87,5 +99,6 @@ test("wiring: signed-in route; the card in 통합 위험 (combinations, paths) a
   for (const k of ["data", "control", "entry"]) keys.add(`rsc.path.${k}`);
   for (const k of ["privileged", "data", "keys", "other"]) keys.add(`rsc.class.${k}`);
   for (const k of ["High", "Medium", "Low"]) keys.add(`rsc.sev.${k}`);
+  keys.add("rsc.aboveHidden"); keys.add("azr.reason.rolesAboveHidden"); keys.add("azp.stopAboveHidden");
   for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\\.")}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), k);
 });

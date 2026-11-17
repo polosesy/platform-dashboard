@@ -149,6 +149,8 @@ export async function getResourceSecurityCard(env: Env, bearerToken: string, res
         const l = relevant.filter((r) => roleClass(r.def) === c);
         return { class: c, assignments: l.length, principals: new Set(l.map((r) => r.pid)).size };
       }).filter((x) => x.assignments > 0),
+      // the inbound read asks for every subscription / management-group assignment: none back = this identity can't see them
+      aboveHidden: !!inbound && !inbound.some((r) => { const k = scopeKind(r.scope); return k === "subscription" || k === "managementGroup"; }),
       items: relevant.slice(0, 40).map((r) => ({ roleName: roleName(r.def), class: roleClass(r.def) as "privileged" | "data" | "keys", principalType: r.ptype || "Unknown", principalTail: r.pid.slice(-4), scope: scopeKind(r.scope) })),
     },
     combo: risk?.combos.find((c) => c.key === ck) ?? null,

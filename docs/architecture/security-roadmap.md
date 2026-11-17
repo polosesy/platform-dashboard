@@ -348,3 +348,6 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 | PostgreSQL | 2 = 2 | 0 = 0 | 0 = 0 | 8 = 8 |
 
 검증에서 발견: 경고 조회식이 `summarize take_any(properties) by id`(잘못된 Resource Graph 쿼리), 고친 뒤에도 `distinct …, title, …`(열 이름 `title`이 파싱 실패) — 모든 카드의 경고가 '읽지 못함'이었음 → 열 이름 `dn`. 회귀 테스트로 고정.
+
+**시험 배포 신원으로 다시 대조**(5ad5423): 위험 조합 3개(레지스트리·AKS·PostgreSQL)의 카드 = 같은 신원 독립 KQL — 비정상 권고 8,901 = 8,901 · 579 = 579 · 2 = 2, 경고 0·1·0 = 같음, 관리 ID 0·1·0 = 같음, 그 역할 0·3·0 = 같음, 특권 접근 0·0·0 = 같음, 익명 401.
+**거기서 발견 — 보이지 않는 것을 '없음'으로 말함**: 배포 신원은 리소스 그룹 Reader라 Resource Graph의 역할 할당이 **리소스 그룹·리소스 수준 46개뿐**(구독·관리 그룹 수준 0 — 내 토큰은 구독 수준 포함 8개). 그 상태로 카드는 '특권 할당 없음', 위험 조합은 '특권 역할 없음(아니요)', 공격 경로는 '여기서 끝남'이라고 말했음 — 구독 Owner가 있어도 안 보이는데. 고침: 구독·관리 그룹 수준 할당이 하나도 안 보이면(`ABOVE_Q` 한 줄 확인, 카드는 이미 읽은 행으로) 카드 두 역할 절에 '구독 수준은 보이지 않음 — 보이는 범위(RG·리소스)에는 없음', 위험 조합의 '특권 역할 없음' → 판단 불가 `rolesAboveHidden`(관리 ID 없음은 그대로 '아니요'), 공격 경로 `identityUnknown`('구독 수준 역할이 보이지 않아 더 이어지는지 모름'). 응답 `rolesAboveHidden`·카드 `access.aboveHidden`. 구독 Reader를 주면 사라짐.
