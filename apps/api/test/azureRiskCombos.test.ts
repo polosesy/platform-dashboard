@@ -212,3 +212,55 @@ test("issue list: paths that reach data or control are issues (path:…); a path
   for (const k of ["keyVault", "storage"]) keys.add(`azp.data.${k}`);
   for (const k of keys) assert.match(all, new RegExp(`"${k.replace(/\./g, "\.")}": \{ ko: "[^"]+", en: "[^"]+" \}`), k);
 });
+
+// ── 판단 불가 572 진단 (2026-11-17): 429 · child entities · child rules ──
+import { aksExposureFactor, rollUpHigh, rulesExposure, topLevelId } from "../src/services/azureRiskCombos.js";
+import { isRgThrottle, query } from "../src/services/securityPosture.js";
+
+test("Resource Graph quota (429): waited and retried — stg's 'can't tell 572' came from one throttled identity read", async () => {
+  assert.equal(isRgThrottle(new Error("ARM 429: RateLimiting: Please provide below info")), true);
+  assert.equal(isRgThrottle(new Error("ARM 403: AuthorizationFailed")), false);
+  let calls = 0;
+  const waits: number[] = [];
+  const flaky = { postJson: async () => { calls++; if (calls < 3) throw new Error("ARM 429: RateLimiting"); return { data: [{ x: 1 }] }; } };
+  assert.deepEqual(await query(flaky as never, [SUB], "q", async (ms) => { waits.push(ms); }), [{ x: 1 }]);
+  assert.deepEqual([calls, waits.length], [3, 2]);
+  const denied = { postJson: async () => { calls++; throw new Error("ARM 403: AuthorizationFailed"); } };
+  calls = 0;
+  await assert.rejects(query(denied as never, [SUB], "q", async () => {}), /403/);
+  assert.equal(calls, 1, "a refusal is not retried");
+  const always = { postJson: async () => { throw new Error("ARM 429: RateLimiting"); } };
+  await assert.rejects(query(always as never, [SUB], "q", async () => {}), /429/, "three tries, then the gap is real");
+});
+
+test("child entities roll up: an image / container finding is its registry's / cluster's (669 of 699 were such entities)", () => {
+  const reg = id("rg", "microsoft.containerregistry/registries", "acr1");
+  assert.deepEqual(topLevelId(`${reg}/securityentitydata/abc`), { id: reg, child: true });
+  assert.deepEqual(topLevelId(reg), { id: reg, child: false });
+  const m = rollUpHigh([{ rid: `${reg}/securityentitydata/a`, count: 3, names: ["zlib"] }, { rid: `${reg}/securityentitydata/b`, count: 2, names: ["zlib", "curl"] }, { rid: reg, count: 1, names: ["admin user"] }]);
+  assert.deepEqual(m.get(reg), { count: 6, names: ["zlib", "curl", "admin user"], children: 2, resourceGroup: "rg", type: "microsoft.containerregistry/registries", name: "acr1" });
+});
+
+test("exposure rule, one for all: any address = yes; public IP allow list = yes, limited; VNet rules only = no; AKS private = no", () => {
+  const rules = (da: "Allow" | "Deny", ips: number) => ({ defaultAction: da, ipRules: ips, vnetRules: 0, source: "networkAcls" }) as never;
+  assert.equal(rulesExposure("Enabled", rules("Allow", 0)).state, "yes");
+  assert.deepEqual([rulesExposure("Enabled", rules("Deny", 2)).state, rulesExposure("Enabled", rules("Deny", 2)).limited], ["yes", true], "like an NSG 'scoped'");
+  assert.equal(rulesExposure("Enabled", rules("Deny", 0)).state, "no");
+  assert.equal(rulesExposure("Disabled", rules("Allow", 0)).state, "no");
+  assert.equal(aksExposureFactor({ apiServerAccessProfile: { enablePrivateCluster: true } }).state, "no");
+  assert.deepEqual(aksExposureFactor({ apiServerAccessProfile: { enablePrivateCluster: false, authorizedIPRanges: ["1.2.3.4/32"] } }).limited, true);
+  assert.equal(aksExposureFactor({}).state, "yes", "public API server, no authorized ranges");
+  assert.equal(paasExposureFactor("microsoft.containerservice/managedclusters", { apiServerAccessProfile: { enablePrivateCluster: true } }).state, "no");
+});
+
+test("undetermined is listed with the factor and the reason — and the child-rule types are read, not left unknown", () => {
+  const pg = "microsoft.dbforpostgresql/flexibleservers";
+  const r = judgeCombos({
+    exposure: [{ id: id("rg", pg, "pg1"), ...res("rg", pg, "pg1"), ...paasExposureFactor(pg, { network: { publicNetworkAccess: "Enabled" } }) }],
+    high: new Map([[id("rg", pg, "pg1"), { count: 1, names: ["x"], ...res("rg", pg, "pg1") }]]), identities: new Map(), roles: [],
+  }, SUB);
+  assert.deepEqual(r.undetermined, [{ name: "pg1", type: pg, resourceGroup: "rg", yes: ["high"], unknown: [{ factor: "exposure", reason: "childRules" }] }]);
+  const svc = read("../src/services/azureRiskCombos.ts");
+  assert.match(svc, /readChildRules\(fetcher as never, f\.id, f\.type\)/, "PostgreSQL / MySQL / SQL firewall rules read for resources with a finding or identity");
+  assert.doesNotMatch(svc, /await Promise\.all\(\[\s*vmExpo,/, "the reads go one after another (quota)");
+});

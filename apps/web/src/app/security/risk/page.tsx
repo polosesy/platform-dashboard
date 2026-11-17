@@ -148,7 +148,7 @@ export default function SecurityRiskPage() {
           signedIn={statesQ.data?.signedIn ?? false} onSave={saveState} teams={[...new Set((statesQ.data?.owners ?? []).map((o) => o.team))]} />
       ) : null}
       {!sample && ready ? <AzurePathsPanel data={azureRisk} /> : null}
-      {!sample && ready ? <AzureRiskPanel data={azureRisk} error={azQ.error} loading={azQ.loading} /> : null}
+      {!sample && ready ? <AzureRiskPanel data={azureRisk} error={azQ.error} loading={azQ.loading} onReload={azQ.reload} /> : null}
       {body}
     </div>
   );

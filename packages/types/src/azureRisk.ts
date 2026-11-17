@@ -28,7 +28,8 @@ export type AzureRiskCombo = {
   kind: "exposedHighIdentity" | "exposedIdentity" | "exposedHigh" | "highIdentity";
   sev: "critical" | "high" | "medium";
   exposure: AzureRiskFactor;
-  high: AzureRiskFactor & { count?: number };
+  /** count = High assessments on the resource and its child entities (images / containers); children = how many entities */
+  high: AzureRiskFactor & { count?: number; children?: number };
   identity: AzureRiskFactor & { roles?: Array<{ role: "owner" | "contributor" | "uaa" | "rbacAdmin"; scope: "managementGroup" | "subscription" | "resourceGroup" | "resource" }> };
   portalUrl: string;
 };
@@ -78,6 +79,8 @@ export type AzureRiskResponse = {
   subscriptionId: string;
   generatedAt: string;
   combos: AzureRiskCombo[];
+  /** The resources counted as undetermined: one factor yes, another unknown — and why (≤ 50) */
+  undetermined: Array<{ name: string; type: string; resourceGroup: string; yes: Array<"exposure" | "high" | "identity">; unknown: Array<{ factor: "exposure" | "high" | "identity"; reason?: string }> }>;
   /** attack paths from the Internet through exposed entries (security-roadmap 5.3 ③) */
   paths: AzureAttackPath[];
   /** Per factor: resources "yes" — and the resources that could become a combination but a factor is unknown */

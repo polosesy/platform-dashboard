@@ -279,15 +279,30 @@ export function mapAlerts(rows: AlertRow[]): PostureAlert[] {
 
 // ── Resource Graph ──
 
-export async function query<T>(arm: Pick<ArmFetcher, "postJson">, subscriptions: string[], q: string): Promise<T[]> {
+/**
+ * Pure: whether a Resource Graph failure is the per-user quota (429 RateLimiting — 15 queries per 5 seconds, measured
+ * on stg: `x-ms-user-quota-resets-after 00:00:05`) and worth waiting for
+ */
+export const isRgThrottle = (e: unknown) => /\b429\b|RateLimiting|throttl/i.test(e instanceof Error ? e.message : String(e));
+
+/** Retry waits (ms) past the quota window: 5 s, then 10 s — three tries in all */
+export const RG_RETRY_WAITS = [5_500, 10_000];
+
+export async function query<T>(arm: Pick<ArmFetcher, "postJson">, subscriptions: string[], q: string, wait: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))): Promise<T[]> {
   const all: T[] = [];
   let skipToken: string | undefined;
+  const post = async (body: unknown) => {
+    for (let i = 0; ; i++) {
+      try {
+        return await arm.postJson<{ data?: T[]; $skipToken?: string }>(RG_URL, body, { timeoutMs: 25_000 });
+      } catch (e) {
+        if (!isRgThrottle(e) || i >= RG_RETRY_WAITS.length) throw e;
+        await wait(RG_RETRY_WAITS[i]!);
+      }
+    }
+  };
   for (let page = 0; page < 10; page++) {
-    const res = await arm.postJson<{ data?: T[]; $skipToken?: string }>(
-      RG_URL,
-      { subscriptions, query: q, options: { resultFormat: "objectArray", $top: 1000, ...(skipToken ? { $skipToken: skipToken } : {}) } },
-      { timeoutMs: 25_000 },
-    );
+    const res = await post({ subscriptions, query: q, options: { resultFormat: "objectArray", $top: 1000, ...(skipToken ? { $skipToken: skipToken } : {}) } });
     all.push(...(res.data ?? []));
     skipToken = res.$skipToken;
     if (!skipToken) break;

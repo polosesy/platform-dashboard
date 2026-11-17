@@ -137,7 +137,7 @@ export function firewallRules(armType: string, rules: Array<{ properties?: { sta
   return { defaultAction: all || (noneMeansAll && rules.length === 0) ? "Allow" : "Deny", ipRules: rules.length, vnetRules: null, source: "firewallRules" };
 }
 
-const CHILD_RULES: Record<string, string> = {
+export const CHILD_RULES: Record<string, string> = {
   "microsoft.dbforpostgresql/flexibleservers": "/firewallRules?api-version=2022-12-01",
   "microsoft.dbformysql/flexibleservers": "/firewallRules?api-version=2023-12-30",
   "microsoft.sql/servers": "/firewallRules?api-version=2021-11-01",
@@ -150,7 +150,7 @@ const MAX_CHILD_READS = 40;
 
 type Fetcher = { fetchJson: <T>(url: string, opts?: { timeoutMs?: number }) => Promise<T> };
 
-async function readChildRules(arm: Fetcher, id: string, armType: string): Promise<{ network: PaasNetworkRules | null; keyAuth?: "on" | "off" | null }> {
+export async function readChildRules(arm: Fetcher, id: string, armType: string): Promise<{ network: PaasNetworkRules | null; keyAuth?: "on" | "off" | null }> {
   if (armType === "microsoft.cache/redisenterprise") {
     // Key access lives on the database, not the cluster
     const db = await arm.fetchJson<{ properties?: { accessKeysAuthentication?: string } }>(`https://management.azure.com${id}/databases/default?api-version=2024-10-01`, { timeoutMs: 8_000 });

@@ -16,7 +16,7 @@ import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getArmFetcher, type ArmFetcher } from "../infra/azureClientFactory.js";
 import { safeMessage } from "../infra/requestParams.js";
 import { tryGetArchitectureGraphFromAzure } from "./azure.js";
-import { networkRulesOf } from "./azureEndpoints.js";
+import { CHILD_RULES, networkRulesOf, readChildRules } from "./azureEndpoints.js";
 import { paasExposure } from "./policyInsights.js";
 import { query } from "./securityPosture.js";
 import { DATA_ROLES, PRIVILEGED_ROLES } from "./workloadIdentity.js";
@@ -27,8 +27,8 @@ export type RoleIn = { principalId: string; roleDefGuid: string; scope: string }
 export type CombosInput = {
   /** VM and PaaS exposure verdicts (resources not listed: exposure n/a) */
   exposure: ExposureIn[] | null;
-  /** lower-case resource id → High unhealthy assessments (count + up to 3 names); null = not read */
-  high: Map<string, { count: number; names: string[]; name: string; type: string; resourceGroup: string }> | null;
+  /** lower-case top-level resource id → High unhealthy assessments (own + its child entities'); null = not read */
+  high: Map<string, { count: number; names: string[]; name: string; type: string; resourceGroup: string; children?: number }> | null;
   /** lower-case resource id → its managed identity principals; null = not read */
   identities: Map<string, { principals: string[]; name: string; type: string; resourceGroup: string }> | null;
   /** role assignments of those principals; null = not read */
@@ -105,15 +105,51 @@ export function vmExposure(e: InboundExposure | undefined): Pick<ExposureIn, "st
 }
 
 /** Pure: a PaaS resource's exposure factor from its body (the same verdict the cluster graph uses for PaaS it reaches) */
+/**
+ * Pure: an AKS cluster's API server exposure from its body — private cluster = no; public with authorized IP ranges =
+ * yes, limited; public without = yes (any Internet address reaches the API server — it still asks for credentials)
+ */
+export function aksExposureFactor(p: Props): Pick<ExposureIn, "state" | "detail" | "reason" | "limited"> {
+  const api = (p.apiServerAccessProfile ?? {}) as Props;
+  if (api.enablePrivateCluster === true) return { state: "no", detail: "private cluster" };
+  if (p.publicNetworkAccess === "Disabled") return { state: "no", detail: "publicNetworkAccess Disabled" };
+  const ranges = Array.isArray(api.authorizedIPRanges) ? api.authorizedIPRanges.length : 0;
+  if (api.enablePrivateCluster === false || api.enablePrivateCluster === undefined) {
+    return ranges ? { state: "yes", limited: true, detail: `API server · ${ranges} authorized IP ranges` } : { state: "yes", detail: "API server · any address" };
+  }
+  return { state: "unknown", reason: "aksAccessUnknown" };
+}
+
+/**
+ * Pure: the top-level resource a finding belongs to — Defender's per-image / per-container entities
+ * (`…/registries/r/securityentitydata/x`, `…/managedClusters/c/securityentitydata/x`) are their registry's / cluster's
+ * (stg 2026-11-17: 669 of 699 High-finding "resources" were such entities — no identity, no exposure of their own)
+ */
+export function topLevelId(rid: string): { id: string; child: boolean } {
+  const m = /^(\/subscriptions\/[^/]+(?:\/resourcegroups\/[^/]+)?\/providers\/[^/]+\/[^/]+\/[^/]+)(\/.*)?$/i.exec(rid);
+  return m ? { id: lc(m[1]!), child: !!m[2] } : { id: lc(rid), child: false };
+}
+
 export function paasExposureFactor(armType: string, p: Props): Pick<ExposureIn, "state" | "detail" | "reason" | "limited"> {
+  if (armType === "microsoft.containerservice/managedclusters") return aksExposureFactor(p);
   const pna = typeof p.publicNetworkAccess === "string" ? p.publicNetworkAccess : typeof (p.network as Props | undefined)?.publicNetworkAccess === "string" ? String((p.network as Props).publicNetworkAccess) : null;
   if (pna === "Disabled") return { state: "no", detail: "publicNetworkAccess Disabled" };
   if (pna === null) return { state: "unknown", reason: "publicAccessUnset" };
   const rules = networkRulesOf(armType, p);
   if (!rules) return { state: "unknown", reason: "childRules" };
+  return rulesExposure(pna, rules);
+}
+
+/**
+ * Pure: exposure from public access + network rules — the VMs' rule applied to PaaS: any address = yes; public IP
+ * allow rules only = yes, limited (like an NSG "scoped"); VNet rules only / closed = no
+ */
+export function rulesExposure(pna: string | null, rules: ReturnType<typeof networkRulesOf>): Pick<ExposureIn, "state" | "detail" | "reason" | "limited"> {
   const v = paasExposure(pna, rules);
-  return v === "open" ? { state: "yes", detail: `publicNetworkAccess ${pna} · ${rules.noIpFirewall ? "no IP firewall" : `defaultAction ${rules.defaultAction ?? "?"}`}` }
-    : v === "unknown" ? { state: "unknown", reason: "rulesUnknown" } : { state: "no", detail: v };
+  if (v === "open") return { state: "yes", detail: `publicNetworkAccess ${pna} · ${rules?.noIpFirewall ? "no IP firewall" : "any address allowed"}` };
+  if (v === "restricted" && (rules?.ipRules ?? 0) > 0) return { state: "yes", limited: true, detail: `publicNetworkAccess ${pna} · ${rules!.ipRules} IP allow rules` };
+  if (v === "unknown") return { state: "unknown", reason: "rulesUnknown" };
+  return { state: "no", detail: v === "restricted" ? "virtual network rules only" : v };
 }
 
 const KIND: Record<string, AzureRiskCombo["kind"]> = { "111": "exposedHighIdentity", "101": "exposedIdentity", "110": "exposedHigh", "011": "highIdentity" };
@@ -121,7 +157,7 @@ const SEV: Record<AzureRiskCombo["kind"], AzureRiskCombo["sev"]> = { exposedHigh
 const LOWER: Record<AzureRiskCombo["sev"], AzureRiskCombo["sev"]> = { critical: "high", high: "medium", medium: "medium" };
 
 /** Pure: the combinations — every resource with a factor "yes", judged on all three; two or more = a combination */
-export function judgeCombos(input: CombosInput, subscriptionId: string): { combos: AzureRiskCombo[]; counts: Omit<AzureRiskResponse["counts"], "paths"> } {
+export function judgeCombos(input: CombosInput, subscriptionId: string): { combos: AzureRiskCombo[]; counts: Omit<AzureRiskResponse["counts"], "paths">; undetermined: AzureRiskResponse["undetermined"] } {
   type Res = { name: string; type: string; resourceGroup: string };
   const all = new Map<string, Res>();
   const expo = new Map((input.exposure ?? []).map((e) => [lc(e.id), e]));
@@ -132,6 +168,7 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
   for (const r of input.roles ?? []) if (PRIVILEGED_ROLES[lc(r.roleDefGuid)]) (rolesOf.get(lc(r.principalId)) ?? rolesOf.set(lc(r.principalId), []).get(lc(r.principalId))!).push(r);
 
   const combos: AzureRiskCombo[] = [];
+  const pending: AzureRiskResponse["undetermined"] = [];
   let exposed = 0, high = 0, privileged = 0, undetermined = 0;
   for (const [id, res] of all) {
     const e = expo.get(id);
@@ -141,7 +178,7 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
       : unread ? { state: "unknown", reason: "exposureUnread" } : { state: "na" };
     const h = input.high?.get(id);
     const hi: AzureRiskCombo["high"] = input.high === null ? { state: "unknown", reason: "findingsUnread" }
-      : h ? { state: "yes", count: h.count, detail: h.names.join(" · ") } : { state: "no" };
+      : h ? { state: "yes", count: h.count, ...(h.children ? { children: h.children } : {}), detail: h.names.join(" · ") } : { state: "no" };
     const ids = input.identities?.get(id);
     let identity: AzureRiskCombo["identity"];
     if (input.identities === null) identity = { state: "unknown", reason: "identitiesUnread" };
@@ -160,7 +197,15 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
     const n = yes.filter(Boolean).length;
     if (n < 2) {
       // one "yes" and a factor we could not tell → could be a combination: said, not dropped
-      if (n === 1 && [exposure, hi, identity].some((f) => f.state === "unknown")) undetermined++;
+      if (n === 1 && [exposure, hi, identity].some((f) => f.state === "unknown")) {
+        undetermined++;
+        const named = [["exposure", exposure], ["high", hi], ["identity", identity]] as const;
+        if (pending.length < 50) pending.push({
+          name: res.name, type: res.type, resourceGroup: res.resourceGroup,
+          yes: named.filter(([, f]) => f.state === "yes").map(([k]) => k),
+          unknown: named.filter(([, f]) => f.state === "unknown").map(([k, f]) => ({ factor: k, ...(f.reason ? { reason: f.reason } : {}) })),
+        });
+      }
       continue;
     }
     const kind = KIND[yes.map((b) => (b ? "1" : "0")).join("")]!;
@@ -172,7 +217,7 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
   }
   const rank = { critical: 0, high: 1, medium: 2 } as const;
   combos.sort((a, b) => rank[a.sev] - rank[b.sev] || (b.high.count ?? 0) - (a.high.count ?? 0) || a.key.localeCompare(b.key));
-  return { combos, counts: { exposed, high, privileged, combos: combos.length, undetermined } };
+  return { combos, counts: { exposed, high, privileged, combos: combos.length, undetermined }, undetermined: pending };
 }
 
 /**
@@ -228,12 +273,29 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
   return out.sort((a, b) => rank[a.sev] - rank[b.sev] || (a.ends === b.ends ? 0 : a.ends === "data" ? -1 : b.ends === "data" ? 1 : 0) || a.key.localeCompare(b.key));
 }
 
+/** Pure: High findings per top-level resource — a child entity's (image, container) count toward its parent */
+export function rollUpHigh(rows: Array<{ rid: string; count: number; names?: string[] }>): NonNullable<CombosInput["high"]> {
+  const out: NonNullable<CombosInput["high"]> = new Map();
+  for (const r of rows) {
+    const top = topLevelId(r.rid);
+    const p = fromId(top.id);
+    if (!p) continue;
+    const cur = out.get(top.id) ?? { count: 0, names: [], children: 0, ...p };
+    cur.count += Number(r.count) || 0;
+    if (top.child) cur.children = (cur.children ?? 0) + 1;
+    for (const n of r.names ?? []) if (cur.names.length < 3 && !cur.names.includes(n)) cur.names.push(n);
+    out.set(top.id, cur);
+  }
+  for (const v of out.values()) if (!v.children) delete v.children;
+  return out;
+}
+
 // ── Reading ──
 
 const HIGH_Q = "securityresources | where type == 'microsoft.security/assessments' and properties.status.code == 'Unhealthy' and properties.metadata.severity == 'High'" +
   " | extend rid = tolower(tostring(properties.resourceDetails.Id)), dn = tostring(properties.displayName)" +
   " | where rid has '/providers/' | summarize count = count(), names = make_set(dn, 3) by rid";
-const PUBLIC_Q = "resources | where isnotempty(properties.publicNetworkAccess) or isnotempty(properties.network.publicNetworkAccess)" +
+const PUBLIC_Q = "resources | where isnotempty(properties.publicNetworkAccess) or isnotempty(properties.network.publicNetworkAccess) or type =~ 'microsoft.containerservice/managedclusters'" +
   " | project id = tolower(id), name, type = tolower(type), resourceGroup, properties | limit 3000";
 const IDENTITY_Q = "resources | where isnotempty(identity) and (identity.type contains 'SystemAssigned' or identity.type contains 'UserAssigned')" +
   " | project id = tolower(id), name, type = tolower(type), resourceGroup, sp = tostring(identity.principalId), ua = bag_keys(identity.userAssignedIdentities) | limit 3000";
@@ -244,6 +306,8 @@ const ROLES_Q = (principals: string[]) => "authorizationresources | where type =
   " | project principalId = p, roleDefGuid = tolower(tostring(split(properties.roleDefinitionId, '/')[-1])), scope = tostring(properties.scope)";
 
 const cache = new CacheManager<AzureRiskResponse>(30, 5 * 60_000);
+/** Child-rule reads per request (ARM GET each) */
+const CHILD_READS = 20;
 
 export async function getAzureRiskCombos(env: Env, bearerToken: string, subscriptionId: string, deps?: { arm?: Pick<ArmFetcher, "postJson">; graphExposure?: () => Promise<ExposureIn[] | null> }): Promise<AzureRiskResponse> {
   const key = `${cachePrefix(bearerToken)}:azure-risk:${lc(subscriptionId)}`;
@@ -263,14 +327,14 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
       ...vmExposure(n.metadata?.inboundExposure as InboundExposure | undefined),
     }));
   }));
-  const [vms, paas, highRows, idRows, uamis, jewels] = await Promise.all([
-    vmExpo,
-    read("exposurePaas", () => query<{ id: string; name: string; type: string; resourceGroup: string; properties?: Props }>(arm, subs, PUBLIC_Q)),
-    read("findings", () => query<{ rid: string; count: number; names: string[] }>(arm, subs, HIGH_Q)),
-    read("identities", () => query<{ id: string; name: string; type: string; resourceGroup: string; sp?: string; ua?: string[] }>(arm, subs, IDENTITY_Q)),
-    read("identities", () => query<{ id: string; principalId: string }>(arm, subs, UAMI_Q)),
-    read("jewels", () => query<{ id: string; name: string; type: string }>(arm, subs, JEWELS_Q)),
-  ]);
+  // One after another: the diagram already spends part of the caller's Resource Graph quota (15 per 5 s); six more at
+  // once made stg's identity read fail with 429 — and every resource's identity "unknown"
+  const vms = await vmExpo;
+  const paas = await read("exposurePaas", () => query<{ id: string; name: string; type: string; resourceGroup: string; properties?: Props }>(arm, subs, PUBLIC_Q));
+  const highRows = await read("findings", () => query<{ rid: string; count: number; names: string[] }>(arm, subs, HIGH_Q));
+  const idRows = await read("identities", () => query<{ id: string; name: string; type: string; resourceGroup: string; sp?: string; ua?: string[] }>(arm, subs, IDENTITY_Q));
+  const uamis = await read("identities", () => query<{ id: string; principalId: string }>(arm, subs, UAMI_Q));
+  const jewels = await read("jewels", () => query<{ id: string; name: string; type: string }>(arm, subs, JEWELS_Q));
   const uamiPrincipal = new Map((uamis ?? []).map((u) => [lc(u.id), u.principalId]));
   const identities = idRows && uamis ? new Map(idRows.map((r) => [r.id, {
     name: r.name, type: r.type, resourceGroup: r.resourceGroup,
@@ -285,17 +349,33 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
       return out;
     });
   }
-  const high = highRows ? new Map(highRows.flatMap((r) => { const p = fromId(r.rid); return p ? [[r.rid, { count: Number(r.count) || 0, names: r.names ?? [], ...p }] as const] : []; })) : null;
-  const exposure: ExposureIn[] | null = vms === null && paas === null ? null : [
-    ...(vms ?? []),
-    ...(paas ?? []).map((r) => ({ id: r.id, name: r.name, type: r.type, resourceGroup: r.resourceGroup, ...paasExposureFactor(r.type, r.properties ?? {}) })),
-  ];
+  const high = highRows ? rollUpHigh(highRows) : null;
+  const paasFacts = (paas ?? []).map((r) => ({ id: r.id, name: r.name, type: r.type, resourceGroup: r.resourceGroup, ...paasExposureFactor(r.type, r.properties ?? {}) }));
+  // Rules kept in child resources (PostgreSQL / MySQL / SQL firewall rules …): read them for the resources that matter —
+  // those with a High finding or a managed identity (stg: 3 PostgreSQL servers were "can't tell" without this)
+  const childOk = "fetchJson" in arm && typeof (arm as Partial<ArmFetcher>).fetchJson === "function";
+  const needRules = paasFacts.filter((f) => f.reason === "childRules" && CHILD_RULES[f.type] && (high?.has(lc(f.id)) || identities?.has(lc(f.id)))).slice(0, CHILD_READS);
+  if (childOk && needRules.length) {
+    const fetcher = arm as Pick<ArmFetcher, "fetchJson">;
+    for (let i = 0; i < needRules.length; i += 4) {
+      await Promise.all(needRules.slice(i, i + 4).map(async (f) => {
+        try {
+          const raw = (paas ?? []).find((r) => r.id === f.id)?.properties ?? {};
+          const pna = typeof raw.publicNetworkAccess === "string" ? raw.publicNetworkAccess : String(((raw.network ?? {}) as Props).publicNetworkAccess ?? "");
+          const { network } = await readChildRules(fetcher as never, f.id, f.type);
+          const v = rulesExposure(pna || null, network);
+          if (v.state !== "unknown") { delete f.reason; Object.assign(f, v); }
+        } catch { /* stays unknown: childRules */ }
+      }));
+    }
+  }
+  const exposure: ExposureIn[] | null = vms === null && paas === null ? null : [...(vms ?? []), ...paasFacts];
   const input: CombosInput = { exposure, high, identities, roles, exposureUnread: { vm: vms === null, paas: paas === null }, jewels };
   const judged = judgeCombos(input, subscriptionId);
   const paths = attackPaths(input);
   const out: AzureRiskResponse = {
     subscriptionId, generatedAt: new Date().toISOString(),
-    combos: judged.combos, paths, counts: { ...judged.counts, paths: paths.length }, gaps,
+    combos: judged.combos, undetermined: judged.undetermined, paths, counts: { ...judged.counts, paths: paths.length }, gaps,
   };
   if (!gaps.length && !deps) cache.set(key, out);
   return out;
