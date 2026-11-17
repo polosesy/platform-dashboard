@@ -15,7 +15,7 @@ export type NavIcon =
   | "home" | "cloud" | "waypoints" | "helm" | "lock" | "coins"
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
-  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book";
+  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -52,6 +52,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // Each domain holds the Azure and the cluster view side by side.
       item("/security", "securityOverview", "shieldCheck", "nav.section.secPriority"),
       item("/security/risk", "securityRisk", "radar", "nav.section.secPriority"),
+      // Wiz's Security Graph: ask the graph with conditions — before, a tab inside AKS 보안 점검 (security-roadmap 5.3 ①)
+      item("/security/explore", "securityExplore", "graph", "nav.section.secPriority"),
       item("/security/advisories", "securityAdvisories", "megaphone", "nav.section.secVulns"),
       item("/security/findings", "securityFindings", "listChecks", "nav.section.secPosture"),
       item("/policies", "clusterSecurity", "clipboardCheck", "nav.section.secPosture"),
@@ -84,6 +86,7 @@ export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster"
   "/kubernetes": ["cluster"],
   "/observability": ["cluster"],
   "/security/risk": ["subscription"],
+  "/security/explore": ["cluster"],
   "/security/advisories": ["cluster"],
   "/security": ["subscription"],
   "/security/findings": ["subscription"],

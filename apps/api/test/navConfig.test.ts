@@ -35,7 +35,7 @@ test("every page route appears in the menu exactly once (the sign-in page is the
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 21); // + /runbooks (사례·런북, 2026-11-13)
+  assert.equal(routes.length, 22); // + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -67,7 +67,7 @@ test("group order and shape: 7 slots, single-item groups are direct links", () =
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble"]);
   assert.deepEqual(
     NAV_GROUPS.find((g) => g.key === "security")!.items.map((i) => i.href),
-    ["/security", "/security/risk", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"],
+    ["/security", "/security/risk", "/security/explore", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"],
   );
 });
 
@@ -83,8 +83,8 @@ test("sections: only in the security group, contiguous, translated, never repeat
     // 2026-11-17: by the question (what first · vulnerabilities · configuration & exposure · identity & threats · audit),
     // not by data source — the cluster's posture sits next to the cloud's
     assert.deepEqual([...seen], ["nav.section.secPriority", "nav.section.secVulns", "nav.section.secPosture", "nav.section.secAccess", "nav.section.secAudit"]);
-    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.secPriority", null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
-    assert.deepEqual(g.items.map((i) => i.href), ["/security", "/security/risk", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"]);
+    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.secPriority", null, null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
+    assert.deepEqual(g.items.map((i) => i.href), ["/security", "/security/risk", "/security/explore", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"]);
     for (const it of g.items) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[it.section!]!.ko, `${it.href} label differs from its section heading`);
   }
 });

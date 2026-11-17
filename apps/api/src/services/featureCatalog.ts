@@ -69,7 +69,7 @@ export const FEATURES: FeatureDef[] = [
   { id: "defenderPosture", tier: "pro", routes: ["/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance"], requires: ["security"], optional: [] },
   { id: "aksClusters", tier: "pro", routes: ["/kubernetes"], requires: ["aksCredential", "k8sRead"], optional: ["inventory"], preconditions: AKS_PRE },
   { id: "aksMonitoring", tier: "pro", routes: ["/observability"], requires: ["aksCredential", "k8sRead"], optional: ["logs", "prometheus", "k8sPodLogs", "registryPull"], preconditions: [...AKS_PRE!, ...STATE], platformRole: "operator" },
-  { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec", "security", "logs"], preconditions: [...AKS_PRE!, ...STATE] },
+  { id: "aksSecurityCheck", tier: "enterprise", routes: ["/policies", "/security/explore"], requires: ["aksCredential", "k8sRead"], optional: ["inventory", "hubbleExec", "security", "logs"], preconditions: [...AKS_PRE!, ...STATE] },
   { id: "integratedRisk", tier: "enterprise", routes: ["/security/risk"], requires: ["security", "inventory", "aksCredential", "k8sRead"], optional: [], preconditions: STATE },
   // Official feeds and the dashboard's own runtime need no Azure permission; Defender findings and cluster images add targets
   { id: "urgentVulnerabilities", tier: "pro", routes: ["/security/advisories"], requires: [], optional: ["security", "aksCredential", "k8sRead"] },

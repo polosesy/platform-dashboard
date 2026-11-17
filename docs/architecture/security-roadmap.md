@@ -262,7 +262,7 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 
 | Wiz | 핵심 메커니즘 | 여기 | 다음 |
 |---|---|---|---|
-| Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | 클러스터 범위 그래프 탐색(`/policies?tab=explore`) + 통신하는 Azure 리소스 | **보안 메뉴에서 바로 닿게**(지금은 AKS 보안 점검 안 탭) — 메뉴는 경로 1:1이라 별도 화면이 필요 |
+| Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | **✓ 2026-11-17 보안 › 무엇부터 › 그래프 탐색(`/security/explore`)** — `/policies?tab=explore`와 같은 패널·같은 순수 모델(`lib/securityGraph.ts`), 감시 질문 이슈 링크가 이 화면으로, 워크로드·네트워크·위험 조합 링크는 AKS 보안 점검(`?row=`·`?net=`·`?issue=`) | 다음: Azure 리소스 쪽 노드(구독 단위)를 그래프에 |
 | Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) | Azure 리소스 쪽 조합(공용 노출 + 높은 권고 + 특권 ID)을 이슈로 |
 | Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) | Azure 리소스 경로(구성도 노출 선 + Defender 권고 + 역할) |
 | Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 | 리소스 하나의 '보안 카드'(권고·경고·노출·ID 한 곳) |

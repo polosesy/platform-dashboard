@@ -51,7 +51,8 @@ function Policies() {
   // The panel lives in the URL (?tab=rbac) so links from other pages open it directly
   const [tab, setTab] = useQueryParam<Panel>("tab", PANELS, "overview");
   const group = groupOfPanel(tab);
-  const [heatSel, setHeatSel] = useState<HeatSel | null>(null);
+  // ?row= / ?net= (from 보안 › 그래프 탐색): open that workload row or network node
+  const [heatSel, setHeatSel] = useState<HeatSel | null>(() => { const r = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("row"); return r ? { row: r, key: null } : null; });
   const [heatManaged, setHeatManaged] = useState(false);
   // Deep links from 통합 위험 › 이슈 목록: ?cluster=<ARM id>&issue=<risk combination id>
   const linkParams = useSearchParams();
@@ -65,7 +66,7 @@ function Policies() {
     if (c) setClusterId(c.id);
     if (linkParams.get("issue")) requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector("#policy-combos")?.scrollIntoView({ behavior: "smooth", block: "start" })));
   }, [clusters, linkApplied, linkCluster, linkParams, setClusterId]);
-  const [netSel, setNetSel] = useState<string | null>(null);
+  const [netSel, setNetSel] = useState<string | null>(() => new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("net"));
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const [category, setCategory] = useState<PolicyCategory | "all">("all");
   const [showSystem, setShowSystem] = useState(false);

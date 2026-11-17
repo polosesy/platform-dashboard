@@ -536,7 +536,7 @@ test("security graph — subscription reach: Azure resources it talks to (exposu
   const raised = queue.items.filter((i) => i.source === "query");
   assert.deepEqual(raised.map((i) => [i.key, i.sev, i.target]), [[`query:${scope}:weak-paas/obs/agent`, "critical", "obs/agent"]], "web (can't tell) raises nothing");
   assert.ok(raised.every((i) => ISSUE_KEY.test(i.key)));
-  assert.match(raised[0]!.href, /tab=explore&cluster=.*&q=paasDefenderHigh/);
+  assert.match(raised[0]!.href, /^\/security\/explore\?cluster=.*&q=paasDefenderHigh$/, "a watched question opens 보안 › 그래프 탐색 (2026-11-17)");
   assert.equal(raised[0]!.evidence, "cfg");
   assert.equal(queue.notDetected, 1, "the gone match of the watched question — not the unwatched one's state");
 });

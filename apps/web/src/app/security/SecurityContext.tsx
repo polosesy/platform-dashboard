@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 // Shared state for every /security/* page. It lives in the route layout, so the
 // selected subscription and the posture response survive moving between the pages
 // (one request per subscription, not one per page).
@@ -29,7 +31,9 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   const { subscriptions, subscriptionId, setSubscriptionId, loaded } = useSubscriptions();
   // The recommendation texts come in the app's language (Microsoft's own Korean texts — API services/assessmentTexts.ts)
   const { locale } = useI18n();
-  const q = useApiQuery(loaded ? `posture:${subscriptionId}:${locale}` : null, (token) =>
+  // 그래프 탐색 reads the cluster, not the Defender posture — no posture read there
+  const needsPosture = !usePathname().startsWith("/security/explore");
+  const q = useApiQuery(loaded && needsPosture ? `posture:${subscriptionId}:${locale}` : null, (token) =>
     fetchJsonWithBearer<SecurityPostureResponse>(apiUrl("/api/security/posture", { subscriptionId: subscriptionId || undefined, lang: locale }), token),
   );
   return (

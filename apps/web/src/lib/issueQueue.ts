@@ -179,7 +179,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
         raw.push({
           key: `query:${scope}:${q.id}/${ascii(w.id, 300)}`, source: "query", sev: q.sev,
           title: `${q.name} · ${w.name}`, target: `${w.namespace}/${w.name}`, evidence: ev,
-          href: `/policies?tab=explore&cluster=${cluster}&q=${encodeURIComponent(q.q)}`, seenAt: input.insights.generatedAt,
+          href: `/security/explore?cluster=${cluster}&q=${encodeURIComponent(q.q)}`, seenAt: input.insights.generatedAt,
           namespaces: [w.namespace], resourceGroups: uniq([clusterRg]),
         });
       }
