@@ -260,3 +260,17 @@ test("a status incident moves on: re-read refreshes it (open → resolved → po
   assert.deepEqual([gh().itemKind, gh().open, gh().firstSeenAt, gh().rcaSeenAt], ["rca", false, "2026-11-17T08:05:00.000Z", "2026-11-18T10:00:00.000Z"]);
   clearFeedsMemory();
 });
+
+test("a feed whose items share one <link> (AWS Health — 38 collapsed into 1 on stg): each item's own https guid is its address; the collapsed one is dropped", async () => {
+  const rss = (n: number) => `<rss><channel>${Array.from({ length: n }, (_, i) => `<item><title>Service disruption ${i}</title><link>https://status.aws.example.com/</link><guid isPermaLink="false">https://status.aws.example.com/#ec2-r${i}_17000000${i}</guid><pubDate>Tue, 17 Nov 2026 0${i}:00:00 GMT</pubDate><description>text</description></item>`).join("")}</channel></rss>`;
+  assert.deepEqual(parseFeed(rss(3)).map((x) => x.url), ["https://status.aws.example.com/#ec2-r0_170000000", "https://status.aws.example.com/#ec2-r1_170000001", "https://status.aws.example.com/#ec2-r2_170000002"]);
+  assert.equal(parseFeed(RSS)[0]!.url, "https://eng.example.com/p/dns-outage", "a feed with distinct links keeps them (stored ids don't move)");
+  clearFeedsMemory();
+  assert.ok((await setFeeds(env, [{ name: "AWS Health", url: "https://status.aws.example.com/rss/all.rss", kind: "status" }], 0, "op")).ok);
+  // stored the old way: one item at the shared link
+  await checkFeeds(env, async () => `<rss><channel><item><title>Service disruption 0</title><link>https://status.aws.example.com/</link><description>x</description></item></channel></rss>`, undefined, new Date(AT));
+  await checkFeeds(env, async () => rss(3), undefined, new Date(AT));
+  const r = await feedsResponse(env, true);
+  assert.deepEqual(r.items.map((i) => i.url).sort(), ["https://status.aws.example.com/#ec2-r0_170000000", "https://status.aws.example.com/#ec2-r1_170000001", "https://status.aws.example.com/#ec2-r2_170000002"]);
+  clearFeedsMemory();
+});

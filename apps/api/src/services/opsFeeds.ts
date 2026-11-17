@@ -62,11 +62,19 @@ const iso = (s: string | undefined) => { const t = s ? Date.parse(decode(s).trim
 /** RSS 2.0 items or Atom entries → title · link · date · summary (plain text) */
 export function parseFeed(xml: string): Array<{ title: string; url: string; publishedAt: string | null; summary: string }> {
   const out: Array<{ title: string; url: string; publishedAt: string | null; summary: string }> = [];
+  const guids: string[] = [];
   for (const m of xml.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)) {
     const it = m[1]!;
-    const link = plain(tag(it, "link") ?? "") || /<guid[^>]*isPermaLink="true"[^>]*>([^<]+)</i.exec(it)?.[1] || "";
+    const guid = plain(/<guid[^>]*>([\s\S]*?)<\/guid>/i.exec(it)?.[1] ?? "");
+    const link = plain(tag(it, "link") ?? "") || (/^https:\/\//.test(guid) ? guid : "");
+    guids.push(guid);
     out.push({ title: plain(tag(it, "title") ?? ""), url: link.trim(), publishedAt: iso(tag(it, "pubDate") ?? tag(it, "dc:date")), summary: plain(tag(it, "description") ?? tag(it, "content:encoded") ?? "") });
   }
+  // AWS Health gives every item the same <link> (the dashboard) and a unique guid URL — 38 items collapsed into one
+  // (stg 2026-11-17): where a link repeats inside one feed, that item's own https guid is its address
+  const seen = new Map<string, number>();
+  for (const x of out) seen.set(x.url, (seen.get(x.url) ?? 0) + 1);
+  out.forEach((x, i) => { if ((seen.get(x.url) ?? 0) > 1 && /^https:\/\//.test(guids[i] ?? "")) x.url = guids[i]!; });
   if (!out.length) {
     for (const m of xml.matchAll(/<entry(?:\s[^>]*)?>([\s\S]*?)<\/entry>/gi)) {
       const it = m[1]!;
@@ -259,6 +267,10 @@ export async function checkFeeds(env: Env, fetcher: FeedFetch = guardedFetch, on
         const posts = (f.extractor === "awsPes" ? extractAwsPes(await fetcher(f.url, { html: true }))
           : f.extractor === "azurePir" ? extractAzurePir(await fetcher(f.url, { html: true }))
           : parseFeed(await fetcher(f.url))).slice(0, MAX_ITEMS_PER_FEED);
+        // an item stored before a shared link was told apart (its address = the link the guids now extend) is dropped
+        for (const [k, old] of Object.entries(s.items)) {
+          if (old.feedId === f.id && !old.decision && posts.some((p) => p.url !== old.url && p.url.startsWith(`${old.url}#`))) delete s.items[k];
+        }
         for (const p of posts) {
           const id = idOf(`${f.id}|${p.url}`);
           const summary = redactLogText(p.summary.slice(0, 400)).text;
