@@ -88,7 +88,8 @@ export default function SecurityOverviewPage() {
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
               <Stat label={t("sec.coverage")} value={plansGap || !posture.plans.length ? "—" : `${paidPlans} / ${posture.plans.length}`}
-                hint={plansGap ? notCollected : posture.plans.length ? t("sec.coverageHint", { n: posture.plans.length }) : t("sec.plansNotVisible")} />
+                hint={plansGap ? notCollected : posture.plans.length ? t("sec.coverageHint", { n: posture.plans.length })
+                  : posture.resourcePlans?.length ? t("sec.plansResourceOnly", { n: posture.resourcePlans.length }) : t("sec.plansNotVisible")} />
             </Link>
           </div>
 

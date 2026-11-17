@@ -1520,6 +1520,7 @@ const CORE: Translations = {
   "sec.affectedUnread": { ko: "영향 리소스 수를 읽지 못함 — 권고 {n}종 · 발견 {f}건(리소스 수 아님)", en: "Affected resources could not be read — {n} recommendations · {f} findings (not a resource count)" },
   "sec.alertsTruncated": { ko: "최근 {n}건만 — 더 있음", en: "newest {n} only — there are more" },
   "sec.plansNotVisible": { ko: "플랜이 보이지 않음 — 구독 수준이라 구독 Reader 필요", en: "Plans not visible — subscription-level, needs subscription Reader" },
+  "sec.plansResourceOnly": { ko: "구독 플랜이 보이지 않음 — 리소스 하나에 켠 플랜 {n}개만 보임(구독 보호 범위 아님)", en: "Subscription plans not visible — only {n} plan(s) set on single resources (not the subscription's coverage)" },
   "sec.unhealthyResources": { ko: "비정상 리소스 {n}", en: "{n} unhealthy resources" },
   "sec.noAlertsPlansUnknown": { ko: "Defender 플랜이 보이지 않아(구독 수준) 탐지 범위를 알 수 없습니다. 경고가 없다는 것이 안전하다는 뜻은 아닙니다.", en: "Defender plans are not visible (subscription-level), so detection coverage is unknown. No alerts does not mean safe." },
   "risk.noLinkedFindingHint": { ko: "근거로 연결된 권고 없음 — 권고마다 리소스 표본(최대 5개)으로 잇기 때문에 '0건'이 아님", en: "No finding linked — findings are linked through up to 5 sample resources each, so this is not '0 findings'" },

@@ -39,7 +39,7 @@ export type RecommendationRow = {
 };
 export type ControlRow = { dn: string; s?: { current?: number; max?: number } | null; u?: number; h?: number; w?: number };
 export type ComplianceRow = { name: string; st?: string; p?: number; f?: number; k?: number };
-export type PlanRow = { name: string; tier?: string; sub?: string };
+export type PlanRow = { name: string; tier?: string; sub?: string; res?: boolean };
 export type AlertRow = { id: string; dn?: string; sev?: string; st?: string; intent?: string; t?: string; dsc?: string; rids?: unknown;
   rem?: unknown; ce?: string; ent?: unknown; t0?: string; uri?: string };
 
@@ -316,7 +316,9 @@ const Q = {
   compliance:
     "securityresources | where type == 'microsoft.security/regulatorycompliancestandards'" +
     " | project name, st=tostring(properties.state), p=toint(properties.passedControls), f=toint(properties.failedControls), k=toint(properties.skippedControls)",
-  plans: "securityresources | where type == 'microsoft.security/pricings' | project name, tier=tostring(properties.pricingTier), sub=tostring(properties.subPlan)",
+  // A pricing under a resource group is a plan on one resource (e.g. Defender for Containers on one AKS cluster) — not
+  // the subscription's plan (stg 2026-11-17: an identity with resource-group roles saw only that row → coverage "1 / 1")
+  plans: "securityresources | where type == 'microsoft.security/pricings' | project name, tier=tostring(properties.pricingTier), sub=tostring(properties.subPlan), res=id has '/resourceGroups/'",
   alerts:
     "securityresources | where type == 'microsoft.security/locations/alerts' | where tostring(properties.Status) in ('Active','InProgress')" +
     " | project id, dn=tostring(properties.AlertDisplayName), sev=tostring(properties.Severity), st=tostring(properties.Status)," +
@@ -407,7 +409,8 @@ export async function collectPosture(arm: Pick<ArmFetcher, "postJson"> & Partial
       Low: num(affected.find((r) => r.sev === "Low")?.n),
     },
     compliance: mergeCompliance(mapCompliance(compliance)),
-    plans: mergePlans(mapPlans(plans)),
+    plans: mergePlans(mapPlans(plans.filter((r) => !r.res))),
+    ...(plans.some((r) => r.res) ? { resourcePlans: mergePlans(mapPlans(plans.filter((r) => r.res))).map((x) => ({ name: x.name, tier: x.tier })) } : {}),
     alerts: mapAlerts(arm.fetchJson ? await unmaskAlertRows({ fetchJson: arm.fetchJson }, subs, alerts.slice(0, ALERTS_SHOWN)) : alerts.slice(0, ALERTS_SHOWN)),
     ...(alerts.length > ALERTS_SHOWN ? { alertsTruncated: true } : {}),
     gaps,

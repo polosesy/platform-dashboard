@@ -69,3 +69,12 @@ test("menu: by the question a person comes with — each section names a job, th
   assert.ok(nav.indexOf('"/security", "securityOverview"') < nav.indexOf('"/security/risk", "securityRisk"'), "overview first");
   assert.ok(nav.indexOf('"/security/findings", "securityFindings"') < nav.indexOf('"/policies", "clusterSecurity"'), "cloud and cluster configuration together");
 });
+
+test("plans: a pricing on one resource is not the subscription's plan (stg: an RG-scoped identity saw one → coverage '1 / 1')", async () => {
+  const arm = { postJson: async (_u: string, b: { query: string }) => ({ data: /pricings/.test(b.query)
+    ? [{ name: "Containers", tier: "Standard", res: true }, { name: "VirtualMachines", tier: "Free", res: false }] : [] }) };
+  const p = await collectPosture(arm as never, ["00000000-0000-0000-0000-0000000000aa"]);
+  assert.deepEqual(p.plans, [{ name: "VirtualMachines", tier: "Free" }]);
+  assert.deepEqual(p.resourcePlans, [{ name: "Containers", tier: "Standard" }]);
+  assert.match(read("../src/services/securityPosture.ts"), /res=id has '\/resourceGroups\/'/);
+});

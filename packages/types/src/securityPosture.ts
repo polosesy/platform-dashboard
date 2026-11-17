@@ -93,6 +93,11 @@ export type SecurityPostureResponse = {
   compliance: PostureComplianceStandard[];
   plans: PostureDefenderPlan[];
   alerts: PostureAlert[];
+  /**
+   * Plans set on single resources (pricing under a resource group) — not the subscription's coverage; `plans` holds the
+   * subscription-level ones only
+   */
+  resourcePlans?: Array<{ name: string; tier: string }>;
   /** More active alerts than `alerts` carries (the newest ALERTS_SHOWN) — counts on screen are "n+" */
   alertsTruncated?: boolean;
   /** Per-section failures (messages have IDs masked); the rest of the response is still valid. */
