@@ -1,7 +1,7 @@
 // 사례·런북 (/runbooks) — pure view helpers: the forms ↔ the API bodies, filters, the link an alert opens.
 // Design: docs/architecture/ops-knowledge.md. Tested in apps/api/test/opsKnowledge.test.ts.
 
-import type { NotifyAlert, OpsCase, OpsCaseStatus, OpsFollowUp, OpsRecurrenceGroup, OpsRunbook, OpsRunbookStep, OpsSeverity, OpsSignal, OpsTimelineEntry } from "@aud/types";
+import type { NotifyAlert, OpsCase, OpsCaseStatus, OpsChange, OpsFeedItem, OpsFollowUp, OpsKnowledgeResponse, OpsRecurrenceGroup, OpsReference, OpsRunbook, OpsRunbookStep, OpsSeverity, OpsSignal, OpsTimelineEntry } from "@aud/types";
 
 export type CaseForm = {
   title: string; status: OpsCaseStatus; severity: OpsSeverity; occurredAt: string; symptoms: string; cause: string; resolution: string;
@@ -11,6 +11,8 @@ export type CaseForm = {
   recurrenceKey: string;
   timeline: OpsTimelineEntry[];
   followUps: OpsFollowUp[];
+  /** a public write-up this case records (kept as is — set when it starts from a blog post) */
+  reference: OpsReference | null;
 };
 /** `alertRules`: the alert rules it answers (comma list) — a recurrence group of that rule lists the runbook */
 export type RunbookForm = { title: string; when: string; tags: string; keywords: string; alertRules: string; steps: OpsRunbookStep[]; rollback: string; team: string; verifiedAt: string };
@@ -31,7 +33,7 @@ export function emptyCase(now: Date, prefill: Partial<CaseForm> = {}): CaseForm 
   return {
     title: "", status: "open", severity: "sev3", occurredAt: toLocalInput(now.toISOString()), symptoms: "", cause: "", resolution: "", lessons: "",
     tags: "", keywords: "", clusterId: "", clusterName: "", namespace: "", workload: "", resourceType: "", runbookIds: [], team: "", alertRule: "", sourceRef: "",
-    recurrenceKey: "", timeline: [], followUps: [],
+    recurrenceKey: "", timeline: [], followUps: [], reference: null,
     ...prefill,
   };
 }
@@ -44,7 +46,7 @@ export function caseForm(c: OpsCase): CaseForm {
     clusterId: c.scope.clusterId ?? "", clusterName: c.scope.clusterName ?? "", namespace: c.scope.namespace ?? "", workload: c.scope.workload ?? "",
     resourceType: c.scope.resourceType ?? "", runbookIds: c.runbookIds, team: c.team ?? "",
     alertRule: c.signals.find((s) => s.kind === "alertRule")?.value ?? "", sourceRef: c.source?.kind === "alert" ? c.source.ref ?? "" : "",
-    recurrenceKey: c.recurrenceKey ?? "", timeline: c.timeline ?? [], followUps: c.followUps ?? [],
+    recurrenceKey: c.recurrenceKey ?? "", timeline: c.timeline ?? [], followUps: c.followUps ?? [], reference: c.reference ?? null,
   };
 }
 
@@ -69,7 +71,9 @@ export function caseBody(f: CaseForm, baseRev: number | null) {
     title: f.title.trim(), status: f.status, severity: f.severity, occurredAt: fromLocalInput(f.occurredAt) ?? new Date().toISOString(),
     symptoms: f.symptoms, ...(opt(f.cause) ? { cause: f.cause } : {}), ...(opt(f.resolution) ? { resolution: f.resolution } : {}),
     ...(opt(f.lessons) ? { lessons: f.lessons } : {}), tags: listOf(f.tags).slice(0, 12).map((t) => t.slice(0, 40)), signals, scope,
-    runbookIds: f.runbookIds.slice(0, 10), ...(f.sourceRef ? { source: { kind: "alert" as const, ref: f.sourceRef.slice(0, 200) } } : { source: { kind: "manual" as const } }),
+    runbookIds: f.runbookIds.slice(0, 10),
+    ...(f.reference ? { source: { kind: "reference" as const, ref: f.reference.url.slice(0, 200) }, reference: f.reference }
+      : f.sourceRef ? { source: { kind: "alert" as const, ref: f.sourceRef.slice(0, 200) } } : { source: { kind: "manual" as const } }),
     ...(opt(f.team) ? { team: f.team.trim() } : {}),
     ...(f.recurrenceKey ? { recurrenceKey: f.recurrenceKey } : {}),
     ...(f.timeline.length ? { timeline: f.timeline.filter((e) => e.text.trim()).slice(0, 200).map((e) => ({ ...e, text: e.text.trim().slice(0, 1000) })) } : {}),
@@ -204,3 +208,26 @@ export function filterGroups(groups: OpsRecurrenceGroup[], recurringOnly: boolea
   return groups.filter((g) => (!recurringOnly || g.occurrences >= 2)
     && (!n || `${g.rule} ${g.target.name} ${g.target.type ?? ""} ${g.target.namespace ?? ""} ${g.target.resourceGroup ?? ""}`.toLowerCase().includes(n)));
 }
+
+// ── 외부 학습 · 변경 상관 (§10 B · §11) ──
+
+/** The team's cases and the bundled public library together (lib- ids) — for "have we (or anyone) seen this" */
+export function withLibrary(d: OpsKnowledgeResponse): OpsKnowledgeResponse {
+  return { ...d, cases: [...d.cases, ...(d.library ?? [])] };
+}
+export const isLibraryCase = (id: string) => id.startsWith("lib-");
+
+/** A blog post → a case form to review: the post is the reference; the operator writes what the team learns from it */
+export function feedItemPrefill(item: OpsFeedItem, feedName: string): Partial<CaseForm> {
+  const day = (item.publishedAt ?? item.firstSeenAt).slice(0, 10);
+  return {
+    title: item.title.slice(0, 120), status: "resolved", severity: "sev3",
+    occurredAt: toLocalInput(item.publishedAt ?? item.firstSeenAt),
+    symptoms: item.summary || item.title, resolution: "", tags: ["public-case", feedName].join(", "),
+    keywords: item.matched.join(", "),
+    reference: { org: feedName.slice(0, 80), url: item.url, publishedAt: day },
+  };
+}
+
+/** "-18분" before the incident · "+3분" after */
+export const changeOffset = (c: Pick<OpsChange, "minutesBefore">) => (c.minutesBefore >= 0 ? `-${c.minutesBefore}` : `+${-c.minutesBefore}`);

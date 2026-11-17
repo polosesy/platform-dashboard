@@ -34,6 +34,7 @@ last-verified: 2026-11-17
 - **밖으로 나가는 것(긴급 취약점)** — 고정된 공식 주소만, https, 다른 주소로 리디렉션되면 거부:
   - `www.cisa.gov`·`nodejs.org`·`www.php.net`: GET만, 보내는 값 없음
   - `cveawg.mitre.org`(CVE.org)·`services.nvd.nist.gov`: **CVE 번호**만 (선제 감시의 팀 감시 번호 포함)
+  - **기술 블로그 감시**(사례·런북 › 외부 학습, 운영자가 등록한 RSS·Atom만, 기본 1시간): GET만, 보내는 값 없음, 공개 주소로만(사설·내부 주소 거부). 글 목록은 `<AUD_ARRANGEMENT_DIR>/knowledge/feeds.json`
   - **선제 감시**(백그라운드, 15분 — 사전 공지일·공개 전후 2분): `www.oracle.com`(CPU·CSPU 사전 공지·공지·Security Alert 페이지)·`openjdk.org`(취약점 공지)·`www.boho.or.kr`(보안공지 RSS) — GET만, 보내는 값 없음. 감시 목록·처음 본 시각은 `<AUD_ARRANGEMENT_DIR>/advisories/early-watch.json`
   - `api.osv.dev`(OSV): **패키지 이름·버전 목록** — 이 대시보드의 npm·OS 패키지, 클러스터의 Kubernetes 버전, 알려진 오픈소스 이미지(cilium·argo-cd 등)의 Go 모듈·버전(긴급 취약점과 AKS 보안 점검의 이미지 취약성이 같은 조회를 씀). 고객 앱 이미지 이름·테넌트·리소스 이름은 보내지 않습니다. 이것만 끄려면 `AUD_ADVISORY_OSV=false`(이 탭이 비고 공지·KEV는 그대로)
   - 폐쇄망은 `AUD_ADVISORY_FEEDS=false`(차트 `features.advisoryFeeds: false`) — 모두 끄고 Defender 결과와 대시보드 자체 버전만으로 판정

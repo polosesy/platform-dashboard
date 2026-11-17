@@ -164,6 +164,9 @@ const EnvSchema = z.object({
   // advisories, Oracle Security Alerts, OpenJDK advisories, KISA 보호나라, watched CVE IDs on CVE.org) — every 2 min
   // around a pre-release day / release time. 0 = off. Needs AUD_ADVISORY_FEEDS
   AUD_ADVISORY_WATCH_INTERVAL_SEC: z.coerce.number().int().min(0).max(86_400).default(900),
+  // 사례·런북 › 외부 학습: how often the API reads the engineering blogs / status histories the team registered (RSS ·
+  // Atom, guarded fetch — public hosts only). 0 = off. In Kubernetes add the hosts to networkPolicy.extraFqdns
+  AUD_OPS_FEEDS_INTERVAL_SEC: z.coerce.number().int().min(0).max(86_400).default(3600),
 
   // Live diagram: who uses each Private Endpoint (PaaS access logs + VNet flow logs). Signed-in users only;
   // the SP fallback is for local verification (access logs name callers, so anonymous use is off by default).

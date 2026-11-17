@@ -146,7 +146,7 @@ test("web: a case from a recurrence group passes the API schema; follow-ups togg
 
 test("wiring: the 재발 tab, its i18n, operator-only actions", () => {
   const page = read("../../web/src/app/runbooks/page.tsx");
-  assert.match(page, /const TABS = \["find", "recurrence", "cases", "runbooks"\] as const;/);
+  assert.match(page, /const TABS = \["find", "recurrence", "cases", "runbooks", "learn"\] as const;/);
   const view = read("../../web/src/app/runbooks/RecurrenceView.tsx");
   assert.match(view, /\{canWrite \? <Button size="sm" variant="primary" onClick=\{\(\) => startCase\(g\)\}>/);
   const all = read("../../web/src/lib/i18nOps.ts");

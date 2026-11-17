@@ -9,7 +9,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { OpsCase, OpsRunbook, OpsRunbookUsage } from "@aud/types";
+import type { OpsCase, OpsEvidence, OpsRunbook, OpsRunbookUsage } from "@aud/types";
 import { redactLogText } from "./logRedaction.js";
 
 export function opsKnowledgeDir(env: { AUD_ARRANGEMENT_DIR?: string }): string | undefined {
@@ -63,7 +63,12 @@ export const CaseBody = z.object({
   signals: z.array(Signal).max(20),
   scope: Scope,
   runbookIds: z.array(z.string().regex(OPS_ID)).max(10),
-  source: z.object({ kind: z.enum(["alert", "manual"]), ref: z.string().max(200).optional() }).strict().optional(),
+  source: z.object({ kind: z.enum(["alert", "manual", "reference"]), ref: z.string().max(200).optional() }).strict().optional(),
+  // a public write-up this case records (another company's postmortem, an engineering blog) — https only
+  reference: z.object({
+    org: z.string().trim().min(1).max(80), url: z.string().max(500).regex(/^https:\/\/[^\s]+$/),
+    incidentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), publishedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}/).optional(),
+  }).strict().optional(),
   // the recurrence group (services/opsRecurrence.ts recurrenceKey) — hashed, never an id
   recurrenceKey: z.string().regex(/^(az|ac):[0-9a-f]{16}$/).optional(),
   timeline: Timeline.optional(),
@@ -203,6 +208,31 @@ export async function writeOps<T extends OpsCase | OpsRunbook>(
     await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o640 });
     await fs.rename(tmp, fileOf(dir));
     return { ok: true, item };
+  });
+  lock = run;
+  return run;
+}
+
+/**
+ * Attach a read-only evidence snapshot to a case (§10 C): kept apart from the editable fields — no revision bump (an
+ * editor holding the case still saves), at most 5 snapshots (the oldest drops), the caller must be able to use its
+ * connection
+ */
+export const MAX_EVIDENCE = 5;
+export async function attachEvidence(dir: string | undefined, id: string, evidence: OpsEvidence, mayUse: (connection: string) => boolean): Promise<OpsWriteResult<OpsCase>> {
+  if (!OPS_ID.test(id)) return { ok: false, error: "id_invalid" };
+  const run = lock.catch(() => undefined).then(async (): Promise<OpsWriteResult<OpsCase>> => {
+    const doc = await readDoc(dir);
+    const stored = doc.cases[id];
+    if (!stored) return { ok: false, error: "not_found" };
+    if (stored.connection && !mayUse(stored.connection)) return { ok: false, error: "forbidden" };
+    stored.evidence = [...(stored.evidence ?? []), evidence].slice(-MAX_EVIDENCE);
+    if (!dir) { memory = doc; return { ok: true, item: strip(stored) as OpsCase }; }
+    await fs.mkdir(dir, { recursive: true });
+    const tmp = `${fileOf(dir)}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o640 });
+    await fs.rename(tmp, fileOf(dir));
+    return { ok: true, item: strip(stored) as OpsCase };
   });
   lock = run;
   return run;

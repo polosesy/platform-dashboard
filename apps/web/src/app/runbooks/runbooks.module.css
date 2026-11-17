@@ -45,3 +45,9 @@
 .followUps > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .timelineShort > li { grid-template-columns: 150px minmax(0, 1fr); }
 @media (max-width: 640px) { .timeline > li, .timelineShort > li { grid-template-columns: minmax(0, 1fr); } }
+
+/* 증거 스냅샷 (§10 C) — read-only lines as read */
+.evidence { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; }
+.evidence summary { cursor: pointer; font-size: var(--text-small); }
+.evidenceSection { display: grid; gap: 4px; margin-top: 8px; }
+.evidenceLines { margin: 0; padding: 8px; max-height: 220px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-caption); background: var(--panel-sunken); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }

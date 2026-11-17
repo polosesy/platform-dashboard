@@ -45,8 +45,12 @@ export type OpsCase = {
   scope: OpsScope;
   /** Runbooks used for it */
   runbookIds: string[];
-  /** Where it came from: an alert of the notification centre, or written by hand */
-  source?: { kind: "alert" | "manual"; ref?: string };
+  /** Where it came from: an alert of the notification centre, written by hand, or a public write-up (blog · postmortem) */
+  source?: { kind: "alert" | "manual" | "reference"; ref?: string };
+  /** A public incident write-up this case records (another company's postmortem, a vendor's engineering blog) */
+  reference?: OpsReference;
+  /** Read-only evidence fixed when the case started (and later on request) — never edited, kept across edits */
+  evidence?: OpsEvidence[];
   /** The recurrence group it answers (rule × target — OpsRecurrenceGroup.key): every later firing finds this case */
   recurrenceKey?: string;
   timeline?: OpsTimelineEntry[];
@@ -59,6 +63,99 @@ export type OpsCase = {
   updatedBy?: string;
   /** Secrets masked when it was saved (tokens, keys pasted with an error) */
   redactions?: number;
+};
+
+/** Where a public case comes from — the organisation's own page */
+export type OpsReference = { org: string; url: string; incidentDate?: string; publishedAt?: string };
+
+// ── 변경 상관 (change correlation) · 증거 스냅샷 (evidence) — §10 B·C ──
+
+/**
+ * A change near an incident's time, with why it is listed — a fact and its overlap, never a probability:
+ * rollout = a Deployment's new ReplicaSet · nodeMaintenance = an AKS node upgrade / update episode · warningEvent = a
+ * Kubernetes Warning event (AKS keeps them about an hour)
+ */
+export type OpsChange = {
+  kind: "rollout" | "nodeMaintenance" | "warningEvent";
+  at: string;
+  /** null = still going (node maintenance) */
+  end?: string | null;
+  title: string;
+  detail?: string;
+  /** How it touches the incident's scope: the same workload · the same namespace · the cluster (nodes) */
+  match: "workload" | "namespace" | "cluster";
+  /** minutes from the change to the incident (negative = after it) */
+  minutesBefore: number;
+};
+export type OpsChangeSourceState = "ok" | "failed" | "notRead" | "expired";
+export type OpsChangesResponse = {
+  at: string;
+  windowMinutes: number;
+  scope: { namespace?: string; workload?: string };
+  sources: { rollouts: OpsChangeSourceState; nodeMaintenance: OpsChangeSourceState; warningEvents: OpsChangeSourceState };
+  /** nearest scope first, then nearest time */
+  changes: OpsChange[];
+  counts: { rollouts: number; nodeMaintenance: number; warningEvents: number };
+};
+
+/** One section of an evidence snapshot: what was read, its state, and the lines as read (masked) */
+export type OpsEvidenceSection = {
+  kind: "changes" | "pods" | "events" | "logErrors";
+  state: "ok" | "failed" | "notAllowed" | "empty" | "notApplicable";
+  lines: string[];
+  note?: string;
+};
+export type OpsEvidence = {
+  takenAt: string;
+  takenBy?: string;
+  /** The case time it was read around */
+  at: string;
+  scope: { clusterName?: string; namespace?: string; workload?: string };
+  sections: OpsEvidenceSection[];
+};
+
+// ── 알림 → 재발 (the alert centre's detail: "this group's n-th · past cases") ──
+export type OpsAlertRecurrence = {
+  key: string | null;
+  /** which firing of the group this is (1 = the first in the window) and how many in the window */
+  n: number;
+  total: number;
+  days: number;
+  firstAt: string | null;
+  cases: Array<{ id: string; title: string; status: OpsCaseStatus; link: "linked" | "rule"; resolution?: string; occurredAt: string }>;
+  runbooks: Array<{ id: string; title: string }>;
+  /** azure = read from Azure Monitor (partial when a subscription is only partly readable) */
+  state: "ok" | "partial" | "failed" | "notGrouped";
+};
+
+// ── 기술 블로그 감시 (feeds) — official engineering blogs / status histories the team registers ──
+export type OpsFeed = { id: string; name: string; url: string; addedBy?: string; addedAt: string };
+export type OpsFeedItem = {
+  id: string;
+  feedId: string;
+  title: string;
+  url: string;
+  publishedAt: string | null;
+  firstSeenAt: string;
+  /** Plain-text start of the post (masked, ≤ 400 chars) */
+  summary: string;
+  /** Incident words the title / summary carries (outage · postmortem · root cause · 장애 …) — a fact, not a score */
+  matched: string[];
+  decision?: "case" | "ignored";
+  caseId?: string;
+  decidedBy?: string;
+};
+export type OpsFeedsResponse = {
+  enabled: boolean;
+  intervalSec: number;
+  lastCheckAt: string | null;
+  durable: boolean;
+  canWrite: boolean;
+  rev: number;
+  feeds: Array<OpsFeed & { state: "ok" | "failed" | "unchecked"; checkedAt: string | null; detail?: string; items: number }>;
+  items: OpsFeedItem[];
+  /** Official feeds known to work (one click to add) */
+  presets: Array<{ name: string; url: string; note: string }>;
 };
 
 export type OpsRunbookStep = {
@@ -95,6 +192,8 @@ export type OpsRunbookUsage = { cases: number; resolved: number; lastUsedAt: str
 
 export type OpsKnowledgeResponse = {
   cases: OpsCase[];
+  /** Public incident write-ups bundled with the platform (read-only, `lib-` ids) — matched like cases */
+  library?: OpsCase[];
   runbooks: OpsRunbook[];
   usage: Record<string, OpsRunbookUsage>;
   /** Kept on disk (else in memory — lost on restart) */

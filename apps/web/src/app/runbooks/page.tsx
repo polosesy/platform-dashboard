@@ -17,14 +17,14 @@ import {
   Button, Chip, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput, Toggle,
 } from "@/components/ui";
 import {
-  caseBody, caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, followUpStats, runbookForm, toggleFollowUp, type CaseForm, type RunbookForm,
-} from "@/lib/opsKnowledge";
+  caseBody, caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, followUpStats, runbookForm, toggleFollowUp, type CaseForm, type RunbookForm, isLibraryCase, withLibrary } from "@/lib/opsKnowledge";
 import { CaseEditor, RunbookEditor } from "./Editors";
 import { RecurrenceView } from "./RecurrenceView";
+import { ChangesSection, EvidenceSection, LearnView } from "./Learning";
 import { MatchWhy, SevBadge, SignalChips, StatusChip, errText, useOpsCall } from "./shared";
 import s from "./runbooks.module.css";
 
-const TABS = ["find", "recurrence", "cases", "runbooks"] as const;
+const TABS = ["find", "recurrence", "cases", "runbooks", "learn"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function RunbooksPage() {
@@ -44,8 +44,9 @@ function RunbooksInner() {
   const q = useApiQuery("ops-knowledge", (token) => fetchJsonWithBearer<OpsKnowledgeResponse>(apiUrl("/api/ops/knowledge"), token));
   const { clusters } = useAksClusters();
   const [editing, setEditing] = useState<Editing>(null);
-  const [selCase, setSelCase] = useState<string | null>(null);
-  const [selRunbook, setSelRunbook] = useState<string | null>(null);
+  // ?tab=cases&id= / ?tab=runbooks&id= (the alert centre's "past cases" links) open that one
+  const [selCase, setSelCase] = useState<string | null>(params.get("tab") === "cases" ? params.get("id") : null);
+  const [selRunbook, setSelRunbook] = useState<string | null>(params.get("tab") === "runbooks" ? params.get("id") : null);
   const [saved, setSaved] = useState<string | null>(null);
   const d = q.data;
   const canWrite = !!d?.canWrite;
@@ -57,7 +58,15 @@ function RunbooksInner() {
   const newRunbook = (prefill: Partial<RunbookForm> = {}) => { setEditing({ kind: "runbook", id: null, rev: null, form: emptyRunbook(prefill) }); setTab("runbooks"); };
   // 재발 › '비슷한 경험 찾기': the find tab starts over with that text
   const [findSeed, setFindSeed] = useState<string | null>(null);
+  const call = useOpsCall();
+  // a case started from a blog post: that post is marked "recorded as a case" once the case is saved
+  const [fromPost, setFromPost] = useState<string | null>(null);
   const onSaved = (kind: "case" | "runbook", id: string, redactions: number) => {
+    // 증거 스냅샷 (§10 C): a new case with a cluster gets the read-only evidence of its moment right away
+    if (kind === "case" && editing?.kind === "case" && editing.id === null && editing.form.clusterId) {
+      void call("POST", "/api/ops/cases/evidence", { id }).then(() => q.reload(), () => undefined);
+    }
+    if (kind === "case" && fromPost) { void call("PUT", "/api/ops/feeds/item", {}, { id: fromPost, decision: "case", caseId: id }).catch(() => undefined); setFromPost(null); }
     setEditing(null);
     if (kind === "case") setSelCase(id); else setSelRunbook(id);
     setSaved(redactions ? t("ops.kb.savedMasked", { n: redactions }) : t("ops.kb.saved"));
@@ -81,12 +90,13 @@ function RunbooksInner() {
         { id: "recurrence", label: t("ops.kb.tab.recurrence") },
         { id: "cases", label: t("ops.kb.tab.cases"), ...(d ? { count: d.cases.length } : {}) },
         { id: "runbooks", label: t("ops.kb.tab.runbooks"), ...(d ? { count: d.runbooks.length } : {}) },
+        { id: "learn", label: t("ops.kb.tab.learn"), ...(d?.library ? { count: d.library.length } : {}) },
       ]} />
       {!d && q.loading ? <LoadingState /> : null}
       {d && tab === "find" ? (
-        <FindView key={findSeed ?? "url"} data={d} canWrite={canWrite} initialText={findSeed ?? params.get("q") ?? ""}
+        <FindView key={findSeed ?? "url"} data={withLibrary(d)} canWrite={canWrite} initialText={findSeed ?? params.get("q") ?? ""}
           initialScope={{ namespace: params.get("ns") ?? "", workload: params.get("wl") ?? "" }}
-          onOpenCase={openCase} onOpenRunbook={openRunbook}
+          onOpenCase={(id) => (isLibraryCase(id) ? setTab("learn") : openCase(id))} onOpenRunbook={openRunbook}
           onRecord={(text) => newCase({
             title: excerpt(text.split("\n")[0], 120), symptoms: text, alertRule: params.get("rule") ?? "", sourceRef: params.get("alert") ?? "",
             namespace: params.get("ns") ?? "", workload: params.get("wl") ?? "", resourceType: params.get("rt") ?? "",
@@ -104,6 +114,9 @@ function RunbooksInner() {
               onSaved={(c, n) => onSaved("case", c.id, n)} onCancel={() => setEditing(null)} /></div>
           : <CasesView data={d} canWrite={canWrite} selected={selCase} onSelect={setSelCase} onOpenRunbook={openRunbook}
               onEdit={(c) => setEditing({ kind: "case", id: c.id, rev: c.rev, form: caseForm(c) })} onDeleted={() => { setSelCase(null); q.reload(); }} onChanged={() => q.reload()} />
+      ) : null}
+      {d && tab === "learn" ? (
+        <LearnView data={d} canWrite={canWrite} onRecord={(form, itemId) => { setFromPost(itemId); newCase(form); }} />
       ) : null}
       {d && tab === "runbooks" ? (
         editing?.kind === "runbook"
@@ -400,6 +413,9 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onCha
             {fuErr ? <Notice tone="danger">{fuErr}</Notice> : null}
           </div>
         ) : null}
+        {c.reference ? <div className={s.section}><h3>{t("ops.learn.reference")}</h3><a href={c.reference.url} target="_blank" rel="noreferrer noopener">{c.reference.org} ↗</a></div> : null}
+        <ChangesSection c={c} />
+        <EvidenceSection c={c} canWrite={canWrite} onChanged={onChanged} />
         {c.timeline?.length ? (
           <div className={s.section}>
             <h3>{t("ops.kb.tl.title")}</h3>

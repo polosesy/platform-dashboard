@@ -58,3 +58,7 @@
 .chHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .howTo { margin-top: 12px; }
 .howTo summary { cursor: pointer; font-size: var(--text-small); color: var(--accent); }
+
+/* 이 묶음의 n번째 · 지난 사례 (§10 D) */
+.recur { display: grid; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.recurList { margin: 0; padding-left: 18px; display: grid; gap: 2px; font-size: var(--text-small); }

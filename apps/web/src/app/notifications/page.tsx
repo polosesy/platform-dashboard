@@ -16,6 +16,7 @@ import { useQueryParam } from "@/lib/useQueryParam";
 import { Badge, Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, Panel, Segmented, Select, Stat, Tabs, Toggle } from "@/components/ui";
 import { CATEGORIES, DEFAULT_FILTER, MAPPING, SEVERITIES, azureSnippet, filterInbox, grafanaSnippet, pullSnippet, receiverUrls, targetText, teamsOf, type InboxFilter } from "@/lib/notifyView";
 import { alertFindHref } from "@/lib/opsKnowledge";
+import type { OpsAlertRecurrence } from "@aud/types";
 import { DesktopToggle } from "./DesktopToggle";
 import { Channels } from "./Channels";
 import s from "./notifications.module.css";
@@ -128,6 +129,34 @@ function Inbox({ data, reload }: { data: NotificationsResponse; reload: () => vo
   );
 }
 
+/** 알림 → 재발 (사례·런북 §10 D): which firing of its rule × target group this is, and what the team wrote for it */
+function AlertRecurrence({ a }: { a: NotifyAlert }) {
+  const { t } = useI18n();
+  const q = useApiQuery(a.source === "test" ? null : `alert-recurrence:${a.id}:${a.lastReceivedAt}`, (token) =>
+    fetchJsonWithBearer<OpsAlertRecurrence>(apiUrl("/api/ops/recurrence/alert", { id: a.id }), token));
+  const r = q.data;
+  if (!r || r.state === "notGrouped" || q.error) return null;
+  return (
+    <div className={s.recur}>
+      <p className={s.muted}>
+        {r.total ? t("notify.recur.nth", { n: r.n, total: r.total, d: r.days }) : t("notify.recur.none", { d: r.days })}
+        {r.state !== "ok" ? ` · ${t(`notify.recur.state.${r.state}`)}` : ""}
+      </p>
+      {r.cases.length ? (
+        <ul className={s.recurList}>
+          {r.cases.map((c) => (
+            <li key={c.id}>
+              <Link href={`/runbooks?tab=cases&id=${encodeURIComponent(c.id)}`} className={s.link}>{c.title}</Link>
+              <span className={s.muted}> · {t(`ops.kb.status.${c.status}`)} · {t(`notify.recur.link.${c.link}`)}{c.resolution ? ` — ${c.resolution.slice(0, 160)}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      ) : <p className={s.muted}>{t("notify.recur.noCases")}</p>}
+      {r.runbooks.length ? <p className={s.muted}>{t("notify.recur.runbooks")} {r.runbooks.map((x, i) => <span key={x.id}>{i ? ", " : ""}<Link href={`/runbooks?tab=runbooks&id=${encodeURIComponent(x.id)}`} className={s.link}>{x.title}</Link></span>)}</p> : null}
+    </div>
+  );
+}
+
 function Detail({ a, canWrite, reload }: { a: NotifyAlert; canWrite: boolean; reload: () => void }) {
   const { t, locale } = useI18n();
   const getToken = useApiToken();
@@ -157,6 +186,7 @@ function Detail({ a, canWrite, reload }: { a: NotifyAlert; canWrite: boolean; re
               : <a key={l.url} href={l.url} target="_blank" rel="noreferrer noopener" className={s.link} title={l.url}>{linkLabel(l)} ↗</a>)}
           </div>
           {a.links.some((l) => l.kind === "portal") ? <p className={s.muted}>{t("notify.portalNote")}</p> : null}
+          <AlertRecurrence a={a} />
         </div>
         <dl className={s.facts}>
           {target.map(([k, v]) => <div key={k}><dt>{t(`notify.target.${k}`)}</dt><dd className={s.mono}>{String(v)}</dd></div>)}

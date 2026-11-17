@@ -51,6 +51,7 @@ last-verified: 2026-11-12
 ## 문제 해결 — `troubleshooting/`
 
 - [error-catalog.md](troubleshooting/error-catalog.md) — 도메인별 오류 `[도메인]-[번호]` (HUB·OBS·AUTH·K8S·FE·SEC·CONN·NET·HEALTH)
+- [public-incident-cases.md](troubleshooting/public-incident-cases.md) — 공개 장애 사례(다른 회사의 사후 분석, 원문 확인) · 기술 블로그 감시 피드
 
 ## 보관 — `archive/`
 

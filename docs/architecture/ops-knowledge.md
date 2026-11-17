@@ -148,8 +148,8 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 | incident.io Timeline | 사건 중 자동으로 쌓이는 기록 | 사례 **타임라인**(경고·변경·조치·메모·상태) — 재발 묶음에서 시작하면 최근 발생·해소가 자동으로 채워짐 | ✓ |
 | incident.io Follow-ups · PagerDuty postmortem action items | 재발 방지 할 일 | **후속 조치**(담당·기한·완료) — 사례 상세에서 바로 완료 표시(rev 409), 사례 탭 머리에 남음·기한 지남 | ✓ |
 | PagerDuty 서비스·경고의 runbook 링크 | 경고 → 런북 | 런북 **경고 규칙** 칸(alertRule 신호) — 그 규칙의 재발 묶음에 보임. 고친 것: 예전 런북 편집기는 모든 신호를 키워드로 저장해 규칙 연결이 없었음 | ✓ |
-| PagerDuty Change Correlation / Probable Origin | 가까운 변경 3개 + 이유 / 확률 | 롤아웃(ReplicaSet)·노드 유지 보수·Warning 이벤트를 발생 시각 앞 2시간에서 **근거와 함께** — 확률(%)은 만들지 않음 | 다음(B) |
-| Rundeck / PagerDuty Automated Diagnostics | 사건 시작 때 진단 잡 실행 → 타임라인 | 읽기 전용 **증거 스냅샷**(파드 상태·이벤트·로그 ERROR 수·SLO 소진)을 사례에 첨부 — 쓰기·명령 실행은 하지 않음(플랫폼은 읽기 전용) | 다음(C) |
+| PagerDuty Change Correlation / Probable Origin | 가까운 변경 3개 + 이유 / 확률 | 롤아웃(ReplicaSet)·노드 유지 보수·Warning 이벤트를 발생 시각 앞 2시간에서 **근거와 함께** — 확률(%)은 만들지 않음 | ✓ 10.6 |
+| Rundeck / PagerDuty Automated Diagnostics | 사건 시작 때 진단 잡 실행 → 타임라인 | 읽기 전용 **증거 스냅샷**(변경·파드 상태·이벤트·로그 ERROR 수)을 사례에 첨부 — 쓰기·명령 실행은 하지 않음(플랫폼은 읽기 전용). SLO 소진은 아직 | ✓ 10.6 |
 | incident.io 역할·상태 업데이트·Slack 채널 | 지휘관·커뮤니케이션 | 알림 센터 중계(Flow)로 상태 알림 — 역할 지정은 사례 '담당' 칸으로 시작 | 다음(D) |
 | 학습 지표(MTTA·MTTR·재발률) | 운영 건강도 | 재발 묶음 수·사례 없는 재발·런북 없는 재발(구현) → 묶음별 해소 시간 추이·후속 조치 완료율 | 일부 ✓ |
 | AI 요약·초안 | 사건 요약·후속 조치 제안 | 8절 결정 대기(외부 전송) | 대기 |
@@ -184,3 +184,22 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 - **C 증거 스냅샷**: 사례 시작 시 읽기 전용 질의 결과를 타임라인 '증거'로 고정 — 어떤 질의를 기본으로 할지(워크로드 범위가 있는 경고만) 정해야 함.
 - **D 알림 센터 연결**: 알림 상세에 '이 묶음 n번째 · 지난 사례' — 알림 센터 항목에서 같은 키를 계산(Grafana는 바로, Azure는 대상 리소스 ID로).
 - **E Grafana `runbook_url`**: 규칙 104개에 런북 링크(`/runbooks?tab=runbooks&id=`)를 넣는 것은 고객 Grafana 쓰기라 하지 않음 — 넣을 주석을 복사로 제공.
+
+### 10.6 구현 (B·C·D — 2026-11-17)
+
+| | 무엇 | 근거·규칙 |
+|---|---|---|
+| **B 변경 상관** | `GET /api/ops/changes?clusterId&at&namespace&workload` → `services/opsChanges.ts` 순수 `correlateChanges`: 롤아웃(`rollouts.ts`)·노드 유지 보수(`nodeMaintenance.ts`)·Warning 이벤트(`kubeEvents.ts`)를 사건 **120분 전 ~ 10분 후**로 | 순서 = 범위(같은 워크로드 → 같은 네임스페이스 → 클러스터 노드) → 시간 가까움. 확률 없음. 워크로드 소속 `ownedBy` — 이름 자체 · ReplicaSet · 파드 꼬리는 Kubernetes 생성 문자(`bcdfghjklmnpqrstvwxz2456789`)만(`orders-db-0`은 orders가 아님 — 접두사만 보면 틀림). 출처별 상태: 이벤트는 AKS가 약 1시간만 보관 → 그보다 오래된 사건 = `expired`(없음 아님), 7일(롤아웃)·29일(노드) 밖 = `notRead`. 화면: 사례 상세 '변경 상관' |
+| **C 증거 스냅샷** | `POST /api/ops/cases/evidence?id=`(운영자) → `services/opsEvidence.ts`: 변경 · 파드(그 워크로드 — 단계·Ready·재시작·대기/마지막 종료 사유) · Warning 이벤트(메시지 — 운영자) · 로그 ERROR/WARN 수(`aks.podLogNamespaces`가 허용할 때만) | 클러스터에 아무것도 실행·쓰지 않음. 섹션마다 ok·failed·notAllowed·empty·notApplicable, 줄은 가리기(`redactLogText`). 사례와 **따로** 저장(`attachEvidence` — rev 안 올림: 열린 편집기가 그대로 저장, 최대 5개, 사례 PUT이 보존, 본문으로는 못 씀). 새 사례에 클러스터가 있으면 저장 직후 자동으로 찍음 |
+| **D 알림 → 재발** | `GET /api/ops/recurrence/alert?id=` → 알림 센터 알림 상세 '최근 30일 이 규칙 × 대상의 n번째 (모두 m번) · 지난 사례 · 런북' | 재발 탭과 같은 키(`recurrenceKey`): Grafana·Alertmanager = 알림 센터 기록, Azure = Azure Monitor 원본(대상 리소스 ID). 사례 링크 `/runbooks?tab=cases&id=` |
+
+## 11. 외부 학습 — 공개 사례·기술 블로그 (2026-11-17)
+
+**목표**: 우리 사례가 아직 적을 때(stg 0건) "누가 이걸 겪었나"를 검증된 공개 사후 분석으로 답하고, 새 사후 분석을 놓치지 않는다.
+
+| 기능 | 구현 | 원칙 |
+|---|---|---|
+| 공개 사례 라이브러리 | `services/opsLibrary.ts` 12건(OpenAI·Azure Front Door ×2·Datadog·Google Cloud·AWS ×3·Cloudflare·Slack·Anthropic·Uber) → `knowledge` 응답 `library`, '찾기'가 우리 사례와 함께 비교(`lib-` id), 탭 '외부 학습' | **원문 페이지에서 확인한 사실만**(2026-11-17, 원문을 읽는 검증 에이전트 + 대조). 원문 확인 못 한 Reddit Pi-Day는 제외, Uber는 사후 분석이 아니라 `partially-confirmed`. 읽기 전용 — 팀 사례와 섞어 저장하지 않음. 목록·요약 = `docs/troubleshooting/public-incident-cases.md`(테스트가 id·링크 일치 검사) |
+| 기술 블로그 감시 | `services/opsFeeds.ts` — 운영자가 RSS·Atom 등록(최대 30, 확인된 공식 피드 7개는 한 번에 추가), `AUD_OPS_FEEDS_INTERVAL_SEC`(기본 1시간)마다 읽어 새 글 = 처음 본 시각 + 장애 단어(`incidentWords` — 사실, 점수 아님), 사람이 '사례로 기록'(원문이 출처 `source.kind: reference` + `reference`) / '건너뛰기' | 운영자가 넣은 주소라 SSRF 방어: https·호스트 이름·자격 증명 없음, 모든 해석 주소가 공개(사설·루프백·링크 로컬·CGNAT·ULA·메타데이터 거부), 리디렉션은 손으로 3번까지 매번 재확인, 2MB·15초·RSS/Atom만. 쿠버네티스는 `networkPolicy.extraFqdns`가 최종 경계. 글 요약도 가리기 |
+
+전문가 토론: ① "블로그 글을 자동으로 사례로 만들자" — 반론: 남의 사건은 우리 범위·조치가 아님, 자동 등록은 사례 목록을 오염 → **사람이 검토해 기록**(초안 자동 채움). ② "관련도 점수로 정렬" — 반론: 점수 기준이 임의 → 장애 단어가 **있는지**만, 그 단어를 보여 줌. ③ "Anthropic·Uber 블로그도 감시" — 확인 결과 공식 RSS 없음(404·406) → 지원하지 않는다고 화면·문서에 적음(HTML 긁기 금지 — 구조가 바뀌면 조용히 틀림).
