@@ -200,7 +200,7 @@ export function registerOpsRoutes(router: Router, env: Env) {
       if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
       const b = req.body as { feeds?: unknown; baseRev?: unknown };
       if (!Array.isArray(b?.feeds) || typeof b.baseRev !== "number") return res.status(400).json({ error: "ops_feeds_invalid" });
-      const list = b.feeds.map((f) => ({ name: String((f as { name?: unknown })?.name ?? ""), url: String((f as { url?: unknown })?.url ?? "") }));
+      const list = b.feeds.map((f) => ({ name: String((f as { name?: unknown })?.name ?? ""), url: String((f as { url?: unknown })?.url ?? ""), kind: String((f as { kind?: unknown })?.kind ?? "blog") }));
       const r = await setFeeds(env, list, b.baseRev, req.auth.principal.name ?? "operator");
       if (!r.ok) return res.status(r.error === "conflict" ? 409 : 400).json({ error: r.error === "conflict" ? "ops_feeds_conflict" : "ops_feeds_invalid", ...(r.detail ? { detail: r.detail } : {}) });
       for (const id of r.added) void checkFeeds(env, undefined, id).catch(() => undefined);

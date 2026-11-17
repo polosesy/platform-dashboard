@@ -129,7 +129,13 @@ export type OpsAlertRecurrence = {
 };
 
 // ── 기술 블로그 감시 (feeds) — official engineering blogs / status histories the team registers ──
-export type OpsFeed = { id: string; name: string; url: string; addedBy?: string; addedAt: string };
+/**
+ * What a source is: blog = an engineering blog (posts; a candidate by its title) · status = a status page's history
+ * (incidents, scheduled maintenance, published postmortems) · rca = official incident reports only (AWS Post-Event
+ * Summaries, Azure Post Incident Reviews, GitHub availability reports) — HTML pages only through a built-in extractor
+ */
+export type OpsFeedKind = "blog" | "status" | "rca";
+export type OpsFeed = { id: string; name: string; url: string; kind?: OpsFeedKind; extractor?: "awsPes" | "azurePir"; addedBy?: string; addedAt: string };
 export type OpsFeedItem = {
   id: string;
   feedId: string;
@@ -147,7 +153,16 @@ export type OpsFeedItem = {
    * product posts say "disruption", "degraded", "downtime", "root cause" in passing)
    */
   candidate: boolean;
-  candidateBasis?: "title" | "incidentUrl";
+  candidateBasis?: "title" | "incidentUrl" | "rcaSource" | "statusIncident";
+  /**
+   * post = a blog post · incident = a status page incident (no report yet) · maintenance = scheduled work (not a
+   * candidate) · rca = an official incident report / a postmortem published on the incident
+   */
+  itemKind?: "post" | "incident" | "maintenance" | "rca";
+  /** A status page incident whose latest update is not resolved — a vendor incident going on now */
+  open?: boolean;
+  /** When this dashboard first saw a postmortem on the status incident */
+  rcaSeenAt?: string;
   decision?: "case" | "ignored";
   caseId?: string;
   decidedBy?: string;
@@ -162,7 +177,7 @@ export type OpsFeedsResponse = {
   feeds: Array<OpsFeed & { state: "ok" | "failed" | "unchecked"; checkedAt: string | null; detail?: string; items: number }>;
   items: OpsFeedItem[];
   /** Official feeds known to work (one click to add) */
-  presets: Array<{ name: string; url: string; note: string }>;
+  presets: Array<{ name: string; url: string; note: string; kind: OpsFeedKind; extractor?: "awsPes" | "azurePir" }>;
 };
 
 export type OpsRunbookStep = {

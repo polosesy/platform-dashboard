@@ -10,7 +10,7 @@ import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { changeOffset, feedItemPrefill, type CaseForm } from "@/lib/opsKnowledge";
-import { Badge, Button, Chip, ErrorNotice, LinkButton, Notice, Panel, TextInput } from "@/components/ui";
+import { Badge, Button, Chip, ErrorNotice, LinkButton, Notice, Panel, Segmented, TextInput } from "@/components/ui";
 import { StatusChip, errText, useOpsCall } from "./shared";
 import s from "./runbooks.module.css";
 
@@ -97,19 +97,22 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
   const [open, setOpen] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [kind, setKind] = useState<"blog" | "status">("blog");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [onlyIncident, setOnlyIncident] = useState(true);
   const f = q.data;
   const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(dateLocale(locale)) : "—");
   const lib = data.library ?? [];
-  const save = async (feeds: Array<{ name: string; url: string }>) => {
+  const save = async (feeds: Array<{ name: string; url: string; kind?: string }>) => {
     if (!f) return;
     setBusy(true); setErr(null);
     try { await call("PUT", "/api/ops/feeds", {}, { feeds, baseRev: f.rev }); setName(""); setUrl(""); await q.reload(); }
     catch (e) { setErr(errText(t, e)); } finally { setBusy(false); }
   };
-  const current = () => (f?.feeds ?? []).map((x) => ({ name: x.name, url: x.url }));
+  const current = () => (f?.feeds ?? []).map((x) => ({ name: x.name, url: x.url, kind: x.kind ?? "blog" }));
+  // vendor incidents going on now (a status page's latest update is not resolved) — check them first in an incident
+  const openNow = (f?.items ?? []).filter((i) => i.open);
   const decide = async (it: OpsFeedItem, decision: "ignored" | null) => {
     try { await call("PUT", "/api/ops/feeds/item", {}, { id: it.id, decision }); await q.reload(); } catch (e) { setErr(errText(t, e)); }
   };
@@ -156,6 +159,7 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
                   <li key={x.id} className={s.item}>
                     <div className={s.itemHead}>
                       <strong>{x.name}</strong>
+                      <Badge tone={x.kind === "rca" ? "high" : x.kind === "status" ? "info" : "neutral"}>{t(`ops.learn.kind.${x.kind ?? "blog"}`)}</Badge>
                       <Chip level={x.state === "ok" ? "ok" : x.state === "failed" ? "danger" : "unknown"}>{t(`ops.learn.feeds.state.${x.state}`)}</Chip>
                       <span className={s.sub}>{x.url} · {t("ops.learn.feeds.items", { n: x.items })}{x.state === "failed" && x.detail ? ` · ${x.detail}` : ""}</span>
                       {f.canWrite ? <LinkButton tone="muted" onClick={() => void save(current().filter((y) => y.url !== x.url))}>{t("ops.learn.feeds.remove")}</LinkButton> : null}
@@ -169,20 +173,40 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
                 <div className={s.actions}>
                   <TextInput label={t("ops.learn.feeds.name")} value={name} onChange={setName} maxLength={60} width={200} />
                   <TextInput label={t("ops.learn.feeds.url")} value={url} onChange={setUrl} placeholder="https://…/feed.xml" width={360} />
-                  <Button onClick={() => void save([...current(), { name, url }])} disabled={busy || !name.trim() || !url.trim()}>{t("ops.learn.feeds.add")}</Button>
+                  <Segmented label={t("ops.learn.feeds.kind")} value={kind} onChange={setKind} items={[{ id: "blog", label: t("ops.learn.kind.blog") }, { id: "status", label: t("ops.learn.kind.status") }]} />
+                  <Button onClick={() => void save([...current(), { name, url, kind }])} disabled={busy || !name.trim() || !url.trim()}>{t("ops.learn.feeds.add")}</Button>
                 </div>
                 <p className={s.sub}>{t("ops.learn.feeds.presets")}</p>
-                <div className={s.tags}>
-                  {f.presets.filter((p) => !f.feeds.some((x) => x.url === p.url)).map((p) => (
-                    <LinkButton key={p.url} onClick={() => void save([...current(), { name: p.name, url: p.url }])}>+ {p.name}</LinkButton>
-                  ))}
-                </div>
+                {(["rca", "status", "blog"] as const).map((k) => {
+                  const left = f.presets.filter((p) => p.kind === k && !f.feeds.some((x) => x.url === p.url));
+                  return left.length ? (
+                    <div key={k} className={s.tags}>
+                      <span className={s.sub}>{t(`ops.learn.kind.${k}`)}:</span>
+                      {left.map((p) => <LinkButton key={p.url} title={p.note} onClick={() => void save([...current(), { name: p.name, url: p.url, kind: p.kind }])}>+ {p.name}</LinkButton>)}
+                    </div>
+                  ) : null;
+                })}
                 <p className={s.sub}>{t("ops.learn.feeds.guard")}</p>
               </>
             ) : null}
           </>
         ) : null}
       </Panel>
+
+      {openNow.length ? (
+        <Panel title={t("ops.learn.open.title", { n: openNow.length })} sub={t("ops.learn.open.sub")} flush level="warn">
+          <ul className={s.list}>
+            {openNow.map((it) => (
+              <li key={it.id} className={s.item}>
+                <div className={s.itemHead}>
+                  <a href={it.url} target="_blank" rel="noreferrer noopener">{it.title}</a>
+                  <span className={s.sub}>{feedName(it.feedId)} · {when(it.publishedAt)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       {f && f.items.length ? (
         <Panel title={t("ops.learn.items.title", { n: items.length })} sub={t("ops.learn.items.sub")} flush
@@ -193,7 +217,8 @@ export function LearnView({ data, canWrite, onRecord }: { data: OpsKnowledgeResp
                 <div className={s.itemHead}>
                   <a href={it.url} target="_blank" rel="noreferrer noopener">{it.title}</a>
                   <span className={s.sub}>{feedName(it.feedId)} · {when(it.publishedAt)} · {t("ops.learn.items.seen", { at: when(it.firstSeenAt) })}</span>
-                  {it.candidate ? <Badge tone="medium">{t(`ops.learn.items.basis.${it.candidateBasis ?? "title"}`)}</Badge> : null}
+                  {it.itemKind && it.itemKind !== "post" ? <Badge tone={it.itemKind === "rca" ? "high" : it.itemKind === "incident" ? (it.open ? "medium" : "info") : "neutral"}>{t(`ops.learn.itemKind.${it.itemKind}`)}{it.open ? ` · ${t("ops.learn.open.now")}` : ""}</Badge> : null}
+                  {it.candidate && it.candidateBasis !== "rcaSource" && it.candidateBasis !== "statusIncident" ? <Badge tone="medium">{t(`ops.learn.items.basis.${it.candidateBasis ?? "title"}`)}</Badge> : null}
                   {it.matched.length ? <span className={s.sub}>{t("ops.learn.items.words", { w: it.matched.slice(0, 4).join(", ") })}</span> : null}
                   {it.decision ? <Chip level={it.decision === "case" ? "ok" : "neutral"}>{t(`ops.learn.items.decision.${it.decision}`)}</Chip> : null}
                 </div>

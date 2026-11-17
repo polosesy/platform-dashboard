@@ -9,7 +9,7 @@ import { correlateChanges, getChanges, ownedBy } from "../src/services/opsChange
 import { changeLines, podLines, takeEvidence } from "../src/services/opsEvidence.js";
 import { CaseBody, OPS_ID, attachEvidence, clearOpsMemory, readKnowledge, writeOps } from "../src/services/opsKnowledgeStore.js";
 import { LIBRARY } from "../src/services/opsLibrary.js";
-import { FEED_PRESETS, candidateOf, isIncidentUrl, checkFeeds, clearFeedsMemory, decideItem, feedUrlProblem, feedsResponse, incidentWords, isPublicAddress, parseFeed, setFeeds } from "../src/services/opsFeeds.js";
+import { FEED_PRESETS, candidateFor, candidateOf, extractAwsPes, extractAzurePir, isIncidentUrl, statusItem, checkFeeds, clearFeedsMemory, decideItem, feedUrlProblem, feedsResponse, incidentWords, isPublicAddress, parseFeed, setFeeds } from "../src/services/opsFeeds.js";
 import * as okNs from "../../web/src/lib/opsKnowledge.ts";
 
 const OK = ((okNs as unknown as { default?: typeof okNs }).default ?? okNs) as typeof okNs;
@@ -198,4 +198,65 @@ test("wiring: routes (signed in / operator), the find view sees the library, the
   assert.match(page, /<EvidenceSection c=\{c\} canWrite=\{canWrite\}/);
   assert.match(page, /editing\.id === null && editing\.form\.clusterId[\s\S]{0,120}\/api\/ops\/cases\/evidence/, "a new case with a cluster gets its evidence at once");
   assert.match(read("../src/env.ts"), /AUD_OPS_FEEDS_INTERVAL_SEC: z\.coerce\.number\(\)\.int\(\)\.min\(0\)\.max\(86_400\)\.default\(3600\)/);
+});
+
+test("official RCA sources: AWS Post-Event Summaries and Azure PIR pages through their built-in extractors — none found = the page changed (an error)", () => {
+  const pes = `<li><a href="https://aws.amazon.com/message/101925/">Summary of the Amazon DynamoDB Service Disruption in the Northern Virginia (US-EAST-1) Region</a> October 23, 2025<br></li>
+<li><a href=\\"https://aws.amazon.com/message/74876-2/\\">Summary of the Amazon EC2 DNS Resolution Issues in the Asia Pacific (Seoul) Region (AP-NORTHEAST-2)</a> November 22, 2018<br></li>
+<li><a href="/message/101925/">Summary of the Amazon DynamoDB Service Disruption in the Northern Virginia (US-EAST-1) Region</a></li>`;
+  assert.deepEqual(extractAwsPes(pes).map((x) => [x.url, x.publishedAt]), [
+    ["https://aws.amazon.com/message/101925/", "2025-10-23T00:00:00.000Z"], ["https://aws.amazon.com/message/74876-2/", "2018-11-22T00:00:00.000Z"],
+  ], "ids with a suffix; the JSON-escaped copy; one report once, with its date");
+  const pir = `<div class="col-md-8">Post Incident Review (PIR) – Network Connectivity – Gateway service degradation in multiple regions </div> <div class="col-md-3 incident-history-tracking-id"> Tracking ID: 7Q30-010 </div>`;
+  assert.deepEqual(extractAzurePir(pir).map((x) => x.url), ["https://azure.status.microsoft/en-us/status/history/?trackingId=7Q30-010"]);
+  assert.throws(() => extractAwsPes("<html>redesigned</html>"), /page may have changed/);
+  assert.throws(() => extractAzurePir("<html>redesigned</html>"), /page may have changed/);
+});
+
+test("status pages: incident · maintenance · a postmortem that is there (not a promise) · still open — per format (live samples 2026-11-17)", () => {
+  // Statuspage (GitHub, Claude, Datadog, Cloudflare): "<state> - <text>", newest first
+  assert.deepEqual(statusItem("Incident with Pull Requests", "Nov 16 , 17:05 UTC Resolved - This incident has been resolved. A detailed root cause analysis will be shared as soon as it is available. Nov 16 , 16:16 UTC Update - We mitigated"), { itemKind: "incident", open: false },
+    "a promised root cause analysis is not one (9 of GitHub's 25 said so)");
+  assert.deepEqual(statusItem("Delayed Traces in APM", "Nov 17 , 09:12 UTC Postmortem - Read details … Nov 16 , 20:00 UTC Resolved - fixed"), { itemKind: "rca", open: false });
+  assert.deepEqual(statusItem("Some users unable to sign up", "Nov 17 , 09:30 UTC Monitoring - A fix has been implemented Nov 17 , 09:00 UTC Investigating - We are"), { itemKind: "incident", open: true });
+  assert.deepEqual(statusItem("PTY (Panama City) on 2026-11-27", "THIS IS A SCHEDULED EVENT Nov 27 Scheduled - We will be performing scheduled maintenance"), { itemKind: "maintenance", open: false });
+  // incident.io (OpenAI): "Status: <state>"; the title's verb is not the state
+  assert.deepEqual(statusItem("Investigating unexpected usage limit resets", "Status: Resolved All impacted services have now fully recovered."), { itemKind: "incident", open: false });
+  assert.deepEqual(statusItem("Elevated errors on Responses API", "Status: Investigating We are looking into"), { itemKind: "incident", open: true });
+  // Google Cloud: RESOLVED: / UPDATE: titles, the report in the text
+  assert.deepEqual(statusItem("RESOLVED: Multiple services were experiencing issues in the europe-west2 region.", "Incident Report Summary On Monday, 19 Oct 2026 …"), { itemKind: "rca", open: false });
+  assert.deepEqual(statusItem("UPDATE: Elevated latency in us-central1", "We are investigating"), { itemKind: "incident", open: true });
+  // Slack / AWS Health say it in prose: no state = not claimed open
+  assert.deepEqual(statusItem("Incident: Trouble with Slack", "This issue is now resolved for all users."), { itemKind: "incident", open: false });
+  assert.deepEqual(statusItem("Maintenance: Scheduled maintenance for Slack Calls", "…"), { itemKind: "maintenance", open: false });
+  // candidates by the source's kind
+  assert.deepEqual(candidateFor("rca", { title: "GitHub availability report: October 2026", url: "https://github.blog/x" }), { candidate: true, candidateBasis: "rcaSource" });
+  assert.deepEqual(candidateFor("status", { title: "PTY", url: "https://www.cloudflarestatus.com/incidents/x", itemKind: "maintenance" }), { candidate: false });
+  assert.deepEqual(candidateFor("status", { title: "Incident with Pull Requests", url: "https://www.githubstatus.com/incidents/x", itemKind: "incident" }), { candidate: true, candidateBasis: "statusIncident" });
+  assert.deepEqual(candidateFor("blog", { title: "Kubernetes v1.37: Garhwal", url: "https://kubernetes.io/blog/x" }), { candidate: false });
+});
+
+test("presets: official RCA reports, status page histories and blogs — every one passes the URL guard; HTML only for the two extractors", () => {
+  const byKind = (k: string) => FEED_PRESETS.filter((p) => p.kind === k).length;
+  assert.deepEqual([byKind("rca") >= 3, byKind("status") >= 6, byKind("blog") >= 5], [true, true, true]);
+  assert.deepEqual(FEED_PRESETS.filter((p) => p.extractor).map((p) => p.extractor).sort(), ["awsPes", "azurePir"]);
+  assert.ok(FEED_PRESETS.every((p) => feedUrlProblem(p.url) === null));
+});
+
+test("a status incident moves on: re-read refreshes it (open → resolved → postmortem), keeps first-seen; a page registered by URL keeps its extractor", async () => {
+  clearFeedsMemory();
+  const url = "https://www.githubstatus.com/history.rss";
+  assert.ok((await setFeeds(env, [{ name: "GitHub", url, kind: "status" }, { name: "AWS PES", url: "https://aws.amazon.com/premiumsupport/technology/pes/" }], 0, "op")).ok);
+  const rss = (state: string) => `<rss><channel><item><title>Incident with Actions</title><link>https://www.githubstatus.com/incidents/abc</link><pubDate>Tue, 17 Nov 2026 08:00:00 GMT</pubDate><description>&lt;strong&gt;${state}&lt;/strong&gt; - text</description></item></channel></rss>`;
+  const pes = `<a href="https://aws.amazon.com/message/101925/">Summary of the Amazon DynamoDB Service Disruption</a> October 23, 2025`;
+  const fetcher = (state: string) => async (u: string) => (u === url ? rss(state) : pes);
+  await checkFeeds(env, fetcher("Investigating"), undefined, new Date("2026-11-17T08:05:00Z"));
+  let r = await feedsResponse(env, true);
+  const gh = () => r.items.find((i) => i.url.includes("githubstatus"))!;
+  assert.deepEqual([gh().itemKind, gh().open, r.feeds.map((f) => f.kind)], ["incident", true, ["status", "rca"]]);
+  assert.equal(r.items.find((i) => i.url.includes("/message/"))!.candidateBasis, "rcaSource");
+  await checkFeeds(env, fetcher("Postmortem"), undefined, new Date("2026-11-18T10:00:00Z"));
+  r = await feedsResponse(env, true);
+  assert.deepEqual([gh().itemKind, gh().open, gh().firstSeenAt, gh().rcaSeenAt], ["rca", false, "2026-11-17T08:05:00.000Z", "2026-11-18T10:00:00.000Z"]);
+  clearFeedsMemory();
 });

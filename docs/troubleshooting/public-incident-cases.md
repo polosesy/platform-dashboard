@@ -137,6 +137,32 @@ covers: [apps/api/src/services/opsLibrary.ts, apps/api/src/services/opsFeeds.ts]
 - **교훈**: 오류를 소유한 서비스만 재시도 · 재시도 폭주 반경 최대 25→3, 평균 20→2.
 - 원문: https://www.uber.com/us/en/blog/protecting-against-retry-storms/
 
+## 외부 출처 감시 — 공식 RCA · 상태 페이지 · 기술 블로그 (2026-11-17 확인)
+
+사례·런북 › 외부 학습에서 운영자가 등록합니다(아래 목록은 한 번에 추가 — 스스로 추가되지 않음). 종류마다 다르게 읽습니다.
+
+| 종류 | 무엇 | 후보(사람이 검토) |
+|---|---|---|
+| **공식 RCA·사고 보고** | 공급사가 낸 사고 보고서만 | 모든 항목 |
+| **상태 페이지 기록** | 사건 · 예정 점검 · 사건에 붙은 사후 분석 | 사건(점검 제외), 사후 분석이 실제로 붙으면 'RCA'(약속 문장 아님), 마지막 갱신이 해결이 아니면 **진행 중인 공급사 장애**로 따로 |
+| **기술 블로그** | 글 | 제목의 장애 단어 · 상태 페이지 사건 주소 · AWS 'Summary of the … Event' |
+
+| 종류 | 출처 | 주소 | 읽는 법 |
+|---|---|---|---|
+| 공식 RCA | Azure 사후 검토(PIR) | https://azure.status.microsoft/en-us/status/history/ | HTML — 내장 추출기(제목 + Tracking ID → `?trackingId=` 링크) |
+| 공식 RCA | AWS 사건 요약(Post-Event Summaries) | https://aws.amazon.com/premiumsupport/technology/pes/ | HTML — 내장 추출기(`/message/<id>/` + 날짜) |
+| 공식 RCA | GitHub 가용성 보고서 | https://github.blog/tag/github-availability-report/feed/ | RSS |
+| 상태 페이지 | Google Cloud | https://status.cloud.google.com/en/feed.atom | Atom — RESOLVED:/UPDATE: 제목, 본문 'Incident Report Summary' = RCA |
+| 상태 페이지 | AWS Health | https://status.aws.amazon.com/rss/all.rss | RSS — 상태 표시 없음(진행 중 판정 안 함) |
+| 상태 페이지 | GitHub · Cloudflare · Claude · Datadog | `…/history.rss` | Statuspage — "상태 - 내용"(최신 먼저), 'Postmortem' = RCA |
+| 상태 페이지 | OpenAI | https://status.openai.com/history.rss | incident.io — "Status: …" |
+| 상태 페이지 | Slack | https://slack-status.com/feed/rss | 제목 'Incident:'/'Maintenance:' |
+| 기술 블로그 | Cloudflare · Kubernetes · AWS Architecture · Azure · Google Cloud · OpenAI 뉴스 | (화면의 목록) | RSS·Atom |
+
+**원문 대조**(2026-11-17, 원본의 상태 표시를 따로 셈): GitHub 사건 25 = 25(사후 분석 0 — 9건의 'root cause analysis will be shared'는 약속이라 RCA 아님), Cloudflare 예정 점검 25 = 25, Claude 진행 중 1 = 1, Datadog 사건 20 = 20, OpenAI 해결 104 = 104(진행 중 0), AWS 사건 요약 18 = 보고서 id 18(`74876-2`처럼 꼬리가 붙은 id 포함), Azure PIR 2 = Tracking ID 2. HTML 보고서 페이지에서 패턴을 하나도 못 찾으면 '보고서 없음'이 아니라 **읽지 못함(페이지 구조가 바뀜)**.
+
+넣지 않은 것: Anthropic·Uber 블로그(공식 RSS 없음 — Claude 상태 기록은 있음), Azure 상태 피드(진행 중 사건만 — 평소 비어 있음). HTML은 위 두 공식 보고서 페이지만 내장 추출기로 읽고, 다른 HTML은 읽지 않습니다(구조가 바뀌면 조용히 틀림).
+
 ## 기술 블로그 감시 — 확인된 공식 피드 (2026-11-17)
 
 사례·런북 › 외부 학습 › 기술 블로그 감시에서 운영자가 등록합니다(아래는 한 번에 추가할 수 있는 목록 — 스스로 추가되지 않음). 새 글은 처음 본 시각과 장애 단어(outage·postmortem·root cause·장애 …)와 함께 쌓이고, 사람이 '사례로 기록'(원문 링크가 출처) 또는 '건너뛰기'를 고릅니다.
