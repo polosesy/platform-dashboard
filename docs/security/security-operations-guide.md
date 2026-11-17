@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-security
-last-verified: 2026-11-12
-covers: [apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
+last-verified: 2026-11-17
+covers: [apps/api/src/services/earlyWatch.ts, apps/web/src/app/security/advisories/EarlyWatchPanel.tsx, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/aksManagedVulns.ts, apps/web/src/lib/aksManagedView.ts, apps/api/src/services/policyAnalyzer.ts, apps/web/src/lib/netpolSim.ts, apps/api/src/services/netpolModel.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/issueStateStore.ts, apps/api/src/services/imageVulns.ts, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/securityPosture.ts]
 ---
 # 보안 기능 운영 가이드 — 이슈 목록 · 위험 조합 · 워크로드 ID
 
@@ -311,3 +311,27 @@ Azure는 Defender 경고의 제목·설명·조치 단계를 **영어로만** �
 - 표에 있는 유형: kubelet kubeconfig 파일 액세스(`K8S.NODE_KubeConfigAccess`), 중요한 볼륨 탑재 컨테이너(`K8S_SensitiveMount`). 새 유형이 보이면 `services/alertTextsKo.ts`에 문장을 더합니다.
 - 리소스 이름·네임스페이스·Pod 같은 대상 정보는 번역하지 않습니다.
 - 검색은 화면에 보이는 문구(한국어)로 합니다.
+
+## 13. 긴급 취약점 선제 감시 (2026-11-17)
+
+**목표**: 사내 공지보다 먼저 안다. 2026-11-17 사내 메일(Java CVE-2026-114938, '내일 06:00 공개')의 대상 버전(8u511·11.0.33·17.0.21·21.0.13·25.0.5·27.0.1 이하)은 **Oracle Critical Security Patch Update 11월 사전 공지**(2026-11-12 18:40 UTC 게시)와 같았습니다 — 메일보다 약 5일 빠른 공식 출처. CVE 번호는 그때 CVE.org에서 `RESERVED`(내용 없음)였고, Oracle RSS는 10/30 뒤 갱신이 없었습니다.
+
+| 출처 | 언제 나오나 | 대시보드가 읽는 것 |
+|---|---|---|
+| Oracle CPU(1·4·7·10월)·CSPU(그 밖의 달) | **셋째 화요일 13:00 로스앤젤레스**(한국 수요일 05:00/06:00), 사전 공지 = 직전 **목요일** | `security-alerts/{cpu|cspu}<월><연도>.html` — 404면 아직. Java SE 절: 패치 수·원격 무인증·최고 CVSS·라인별 영향 버전, 공개 뒤 CVE |
+| Oracle Security Alert | 수시(정기 밖) | `security-alerts/` 색인의 새 `alert-cve-…` 링크 |
+| OpenJDK 취약점 공지 | 공개 당일 | 영향 버전·CVE·라인(Temurin 등 OpenJDK 빌드의 확정 근거) |
+| KISA 보호나라 보안공지 | 공개 뒤 | RSS 제목에 Java·Oracle·OpenJDK 또는 감시 CVE |
+| CVE.org | 공개 순간 | 팀 감시 번호의 상태 `RESERVED` → `PUBLISHED`(+ CNA 제목·점수) |
+
+**쓰는 법**
+1. 사내·외부에서 번호를 먼저 받으면 **긴급 취약점 › 선제 감시 › 팀 감시 CVE**에 넣습니다(운영자). 공개되는 순간 알림 센터(보안)와 보내는 곳(Flow 등)으로 알림이 갑니다.
+2. Oracle 칸의 '사전 공지 게시됨'과 **우리 Java 워크로드** 표(고른 클러스터 — 버전은 런타임 지표·텔레메트리·이미지 설정, 추정 없음)로 1순위 대상을 미리 정합니다. 외부 노출 여부는 AKS 보안 점검(네트워크 노출)·통합 위험에서.
+3. 공개 시각 −15분부터 3시간은 2분마다 확인합니다. 공개(`released`)·OpenJDK 공지가 잡히면 표의 'OpenJDK' 열이 확정 근거가 됩니다.
+
+**주의**
+- '처음 본 시각' = 이 대시보드가 확인한 시각(공급사 게시 시각은 Oracle 칸에 따로). 상태 저장소(PVC)가 없으면 재시작 때 잊습니다.
+- 상태 파일 없이 처음 확인할 때 이미 나와 있던 공지는 **기록만**(알림 안 보냄) — 재시작마다 다시 보내지 않게.
+- Oracle 목록은 Oracle Java SE 기준. '라인 없음' = 그 라인이 공지에 없음(지원 종료일 수 있음 — 수정판 없음).
+- 사내 메일의 CVSS v4.0 9.2는 Oracle 사전 공지(v3.1 최고 8.1)에 없는 값 — 공개 뒤 CVE 기록(CNA 점수)으로 확인합니다.
+

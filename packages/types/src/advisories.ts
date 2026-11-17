@@ -119,3 +119,105 @@ export type AdvisoriesResponse = {
   components: { platform: number; cluster: number; byKind: Record<ComponentKind, number>; unmappedImages: number };
   findings: DependencyFinding[];
 };
+
+// ── 선제 감시 (early watch — GET /api/security/early-watch, services/earlyWatch.ts) ──
+// The API polls the vendors' own pages on their published schedule — Oracle's Critical Patch Update / Critical Security
+// Patch Update pre-release announcements (the Thursday before the third Tuesday) and advisories, Oracle Security
+// Alerts, OpenJDK Vulnerability Group advisories, KISA 보호나라 보안공지 — and the team's watched CVE IDs on CVE.org
+// (RESERVED → PUBLISHED). Something new = an event, kept with the time this dashboard first saw it, and sent to the
+// alert center (and its outbound channels).
+
+/** Oracle's Java SE part of one advisory page (pre-release or final) — only what the page says */
+export type JavaSummary = {
+  patches: number | null;
+  /** "all" = every one remotely exploitable without authentication; a number = that many; null = not said */
+  remoteUnauth: "all" | number | null;
+  maxScore: number | null;
+  /** "3.1" · "4.0" */
+  scoreVersion: string | null;
+  /** Oracle Java SE versions named affected, e.g. 8u511 · 11.0.33 · 21.0.13 (the newest affected per line) */
+  versions: string[];
+  /** CVE IDs in the Java SE risk matrix (final advisory only — a pre-release names none) */
+  cves: string[];
+};
+
+export type OracleCycle = {
+  /** cpu = quarterly Critical Patch Update · cspu = Critical Security Patch Update (the other months) */
+  kind: "cpu" | "cspu";
+  /** "2026-11" */
+  month: string;
+  /** 13:00 America/Los_Angeles on the third Tuesday (UTC ISO) */
+  releaseAt: string;
+  /** The Thursday before (date only — Oracle gives no time) */
+  preReleaseDate: string;
+  url: string;
+  /** notYet = 404 · preRelease = the pre-release announcement is up · released = the advisory · failed = not read */
+  state: "notYet" | "preRelease" | "released" | "failed" | "unchecked";
+  /** Oracle's own page update time */
+  updatedAt: string | null;
+  /** When this dashboard first saw the current state */
+  firstSeenAt: string | null;
+  java: JavaSummary | null;
+  checkedAt: string | null;
+};
+
+export type OpenJdkAdvisory = {
+  date: string;
+  url: string;
+  /** "The affected versions are …, and earlier" — versions as written (e.g. 21.0.13.0.2 · 8u504) */
+  affected: string[];
+  cves: Array<{ id: string; score: number | null; lines: number[] }>;
+};
+
+export type EarlyWatchSourceId = "oracle" | "oracleAlerts" | "openjdk" | "kisa" | "cveorg";
+export type EarlyWatchEvent = {
+  key: string;
+  source: EarlyWatchSourceId;
+  kind: "preRelease" | "released" | "securityAlert" | "openjdkAdvisory" | "kisaNotice" | "cvePublished" | "cveRejected";
+  title: string;
+  url: string;
+  /** When this dashboard first saw it */
+  firstSeenAt: string;
+  cves: string[];
+  maxScore: number | null;
+  /** Sent to the alert center (false = recorded quietly — the first check after a restart without a state file) */
+  notified: boolean;
+};
+
+export type WatchedCve = {
+  id: string;
+  note?: string;
+  addedBy?: string;
+  addedAt: string;
+  /** CVE.org's own state: RESERVED (number only) · PUBLISHED · REJECTED; unknown = not read yet / failed */
+  state: "RESERVED" | "PUBLISHED" | "REJECTED" | "unknown";
+  checkedAt: string | null;
+  /** When this dashboard first saw it PUBLISHED */
+  publishedSeenAt: string | null;
+  title: string | null;
+  cna: string | null;
+  cvss: { score: number; version: string; severity: string } | null;
+  published: string | null;
+};
+
+export type EarlyWatchResponse = {
+  /** false = AUD_ADVISORY_FEEDS off or AUD_ADVISORY_WATCH_INTERVAL_SEC=0 */
+  enabled: boolean;
+  intervalSec: number;
+  /** Faster around the vendors' release windows */
+  fastIntervalSec: number;
+  lastCheckAt: string | null;
+  nextCheckAt: string | null;
+  /** State kept on disk (AUD_ARRANGEMENT_DIR) — else in memory: a restart forgets first-seen times */
+  durable: boolean;
+  canWrite: boolean;
+  rev: number;
+  sources: Array<{ id: EarlyWatchSourceId; state: "ok" | "failed" | "disabled" | "unchecked"; checkedAt: string | null; url: string; detail?: string }>;
+  oracle: { current: OracleCycle; next: OracleCycle; alerts: Array<{ id: string; url: string; firstSeenAt: string }> };
+  openjdk: OpenJdkAdvisory | null;
+  /** KISA notices whose title names a watched product (Java · Oracle · OpenJDK) or a watched CVE */
+  kisa: Array<{ title: string; url: string; date: string | null; matched: string[] }>;
+  kisaChecked: number;
+  watch: WatchedCve[];
+  events: EarlyWatchEvent[];
+};

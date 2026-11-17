@@ -160,6 +160,10 @@ const EnvSchema = z.object({
   AUD_ADVISORY_OSV: envBool(true),
   // Optional NVD API key (raises the public rate limit of 5 requests / 30 s)
   AUD_NVD_API_KEY: z.string().optional(),
+  // 긴급 취약점 › 선제 감시: how often the API reads the vendors' announcement pages (Oracle CPU/CSPU pre-release and
+  // advisories, Oracle Security Alerts, OpenJDK advisories, KISA 보호나라, watched CVE IDs on CVE.org) — every 2 min
+  // around a pre-release day / release time. 0 = off. Needs AUD_ADVISORY_FEEDS
+  AUD_ADVISORY_WATCH_INTERVAL_SEC: z.coerce.number().int().min(0).max(86_400).default(900),
 
   // Live diagram: who uses each Private Endpoint (PaaS access logs + VNet flow logs). Signed-in users only;
   // the SP fallback is for local verification (access logs name callers, so anonymous use is off by default).

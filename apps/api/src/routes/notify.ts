@@ -24,6 +24,7 @@ import { channelInfo, channelPayload, loadChannels, type Channel } from "../serv
 import { relayChanged, sendToChannel, testResult } from "../services/notifyRelay.js";
 import { MANAGED_GRAFANA_SCOPE, pullConfig, startGrafanaAlertPull, type PullState } from "../services/grafanaAlertPull.js";
 import { credentials } from "../infra/connectionCredentials.js";
+import { startEarlyWatch } from "../services/earlyWatch.js";
 
 const SEV_RANK: Record<NotifySeverity, number> = { sev1: 1, sev2: 2, sev3: 3, sev4: 4 };
 const PER_MINUTE = 600;
@@ -64,6 +65,11 @@ function ownersFor(env: Env, a: ParsedAlert): OwnerRule[] {
 }
 
 /** Records the alerts; relays the new / changed ones — except `quiet` ids (recorded only: the Grafana pull's first look) */
+/** Record alerts in the inbox and relay the new / changed ones — also used by the API's own watchers (선제 감시) */
+export async function deliverAlerts(env: Env, parsed: ParsedAlert[]): Promise<void> {
+  await deliver(env, parsed);
+}
+
 async function deliver(env: Env, parsed: ParsedAlert[], quiet?: Set<string>): Promise<number> {
   const dir = notifyDir(env);
   const recorded = await ingest(dir, parsed, { retentionDays: env.AUD_NOTIFY_RETENTION_DAYS, teamOf: (a) => ownerTeam(a, ownersFor(env, a)) });
@@ -113,6 +119,8 @@ function startPull(env: Env) {
 export function registerNotifyHooks(app: Express, env: Env) {
   channelsOf(env); // fail at startup on an invalid AUD_NOTIFY_CHANNELS
   startPull(env);
+  // 긴급 취약점 선제 감시: vendor announcements polled in the background → this inbox and its channels
+  startEarlyWatch(env, (alerts) => deliverAlerts(env, alerts));
   let windowStart = 0, count = 0;
   app.post("/hooks/alerts/:source", async (req: Request, res: Response) => {
     res.setHeader("cache-control", "no-store");

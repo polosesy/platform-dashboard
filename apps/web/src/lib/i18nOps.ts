@@ -1961,6 +1961,7 @@ export const OPS_T: Translations = {
   "notify.src.grafana": { ko: "Grafana", en: "Grafana" },
   "notify.src.alertmanager": { ko: "Alertmanager", en: "Alertmanager" },
   "notify.src.test": { ko: "시험", en: "Test" },
+  "notify.src.advisory": { ko: "긴급 취약점 선제 감시", en: "Early vulnerability watch" },
   "notify.link.dashboard": { ko: "대시보드", en: "Dashboard" },
   "notify.link.grafana": { ko: "Grafana", en: "Grafana" },
   "notify.link.portal": { ko: "Azure Portal", en: "Azure Portal" },

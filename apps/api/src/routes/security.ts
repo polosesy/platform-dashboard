@@ -10,6 +10,8 @@ import { collectAdvisories } from "../services/advisoriesCollector.js";
 import { getAzureRiskCombos } from "../services/azureRiskCombos.js";
 import { getResourceSecurityCard } from "../services/resourceSecurityCard.js";
 import { getSecurityTeamScope } from "../services/securityTeamScope.js";
+import { checkNow, earlyWatchResponse, setWatch } from "../services/earlyWatch.js";
+import { deliverAlerts } from "./notify.js";
 import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
@@ -42,6 +44,43 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       res.json(await getSecurityTeamScope(env, req.auth.bearerToken, subscriptionId));
     } catch (e: unknown) {
       sendError(res, e, "team_scope_failed", "security");
+    }
+  });
+
+  // 긴급 취약점 › 선제 감시: what the background watcher found (signed in), the team's watched CVE IDs (operator),
+  // a check now (operator, once a minute)
+  router.get("/api/security/early-watch", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      res.json(await earlyWatchResponse(env, roleAtLeast(callerOf(env, req.auth.bearerToken)?.role ?? null, "operator")));
+    } catch (e: unknown) {
+      sendError(res, e, "early_watch_failed", "security");
+    }
+  });
+  router.put("/api/security/early-watch", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const b = req.body as { watch?: unknown; baseRev?: unknown };
+      if (!Array.isArray(b?.watch) || typeof b.baseRev !== "number") return res.status(400).json({ error: "early_watch_invalid" });
+      const list = b.watch.map((x) => ({ id: String((x as { id?: unknown })?.id ?? ""), note: typeof (x as { note?: unknown })?.note === "string" ? (x as { note: string }).note : undefined }));
+      const r = await setWatch(env, list, b.baseRev, req.auth.principal.name ?? "operator");
+      if (!r.ok) return res.status(r.error === "conflict" ? 409 : 400).json({ error: r.error === "conflict" ? "early_watch_conflict" : "early_watch_invalid" });
+      void checkNow(env, (alerts) => deliverAlerts(env, alerts)).catch(() => undefined);
+      res.json({ rev: r.rev });
+    } catch (e: unknown) {
+      sendError(res, e, "early_watch_write_failed", "security");
+    }
+  });
+  let lastCheck = 0;
+  router.post("/api/security/early-watch/check", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      if (Date.now() - lastCheck < 60_000) return res.status(429).json({ error: "early_watch_too_soon" });
+      lastCheck = Date.now();
+      await checkNow(env, (alerts) => deliverAlerts(env, alerts));
+      res.json(await earlyWatchResponse(env, true));
+    } catch (e: unknown) {
+      sendError(res, e, "early_watch_check_failed", "security");
     }
   });
 

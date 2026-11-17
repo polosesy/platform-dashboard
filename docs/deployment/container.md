@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-ops
-last-verified: 2026-11-12
+last-verified: 2026-11-17
 covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts, apps/api/test/runtimeSecurity.test.ts]
 ---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
@@ -243,7 +243,7 @@ Host aud-onprem
 - **왜 우리에게 해당하나**: API의 HTTP 클라이언트(Node `fetch`·쿠버네티스 클라이언트의 node-fetch)는 Brotli를 요청하지 않지만 상대가 `content-encoding: br`로 보내면 그대로 풉니다(2026-10-23 실험) — Azure·쿠버네티스 API는 TLS지만 클러스터 안 Loki(`http://…:3100`)는 평문이라 그 응답 경로가 열려 있습니다. API 파드는 Azure 자격 증명(워크로드 ID)을 가지므로 원격 코드 실행은 곧 Azure 권한 탈취입니다.
 - **해당 없음(설정 기준)**: Permission Model(`--permission`) 미사용, startup snapshot·SEA 미사용, HTTP/2 서버 없음(Next 표준 서버는 HTTP/1.1), Express `trust proxy` 미사용(proxy-addr), API에 `HTTPS_PROXY` 없음(프록시 자격 증명 노출 CVE-2026-48615 — 온프렘에서 프록시를 쓰면 URL에 자격 증명을 넣지 말 것).
 - **새 보안 릴리스가 나오면**: 공지의 24.x 수정 버전으로 Dockerfile `ARG`와 위 테스트 상수를 올리고 → 온프렘 `scripts/onprem.sh deploy`, 클러스터는 고객 DHI 미러 이미지 버전도 함께 올린 뒤 GitOps 재배포. 실행 중인 버전 확인: `kubectl exec … -c api -- node -p process.versions.node` / 서버 `docker run --rm --entrypoint node aud-dashboard:<tag> -v`.
-- **긴급 취약점 화면**(보안 › 긴급 취약점)이 새 공지를 자동으로 보여 줍니다. 온프렘 API는 `www.cisa.gov`·`services.nvd.nist.gov`·`nodejs.org`·`www.php.net`·`cveawg.mitre.org`·`api.osv.dev`(443)에 나갈 수 있어야 하고(프록시면 `HTTPS_PROXY`), 막혀 있으면 화면에 출처별로 '읽지 못함'이 뜹니다. 폐쇄망은 `AUD_ADVISORY_FEEDS=false`.
+- **긴급 취약점 화면**(보안 › 긴급 취약점)이 새 공지를 자동으로 보여 줍니다. 온프렘 API는 `www.cisa.gov`·`services.nvd.nist.gov`·`nodejs.org`·`www.php.net`·`cveawg.mitre.org`·`api.osv.dev` + 선제 감시 `www.oracle.com`·`openjdk.org`·`www.boho.or.kr`(443)에 나갈 수 있어야 하고(프록시면 `HTTPS_PROXY`), 막혀 있으면 화면에 출처별로 '읽지 못함'이 뜹니다. 폐쇄망은 `AUD_ADVISORY_FEEDS=false`.
 - **이미지 안 패키지 취약점**(2026-11-04 Defender for Containers — 시험 배포 이미지 `High`: `minimatch` 10.2.5 → 11.0.1, `brace-expansion` 5.0.9 → 5.0.12): 둘 다 우리 코드가 아니라 Docker Hub Node 이미지에 딸린 **npm**(`/usr/local/lib/node_modules/npm`) 안에 있었음. 실행 중인 이미지의 `package.json` 350개를 OSV에 물어 본 전체 결과:
 
   | 어디 | 패키지 (취약 → 수정) | 조치 |

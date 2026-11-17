@@ -7,7 +7,8 @@
 export type NotifySeverity = "sev1" | "sev2" | "sev3" | "sev4";
 /** What the alert is about: an outage / service health, security, a monitoring signal, a planned change or maintenance */
 export type NotifyCategory = "incident" | "security" | "monitoring" | "change";
-export type NotifySource = "azure-monitor" | "grafana" | "alertmanager" | "test";
+/** advisory = 긴급 취약점 선제 감시 (the API's own watcher of vendor announcements — services/earlyWatch.ts) */
+export type NotifySource = "azure-monitor" | "grafana" | "alertmanager" | "test" | "advisory";
 
 export type NotifyLink = { kind: "dashboard" | "grafana" | "portal" | "runbook" | "silence" | "source"; label: string; url: string };
 

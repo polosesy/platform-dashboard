@@ -1,0 +1,18 @@
+/* 긴급 취약점 › 선제 감시 — one panel: sources, Oracle's cycle, our Java workloads, OpenJDK, KISA, watched CVEs, events */
+.dim { color: var(--muted); font-size: var(--text-caption); }
+.mono { font-family: var(--font-mono); font-size: var(--text-caption); }
+.bad { color: var(--danger); font-weight: 600; font-size: var(--text-small); }
+.h { margin: 14px 0 6px; font-size: var(--text-small); font-weight: 600; }
+.sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.cycle { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); margin-bottom: 8px; }
+.cycle[data-state="preRelease"], .cycle[data-state="released"] { border-color: rgba(var(--warning-rgb), 0.55); }
+.cycleHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cycleHead a { font-size: var(--text-caption); }
+.cycle p { margin: 0; }
+.java { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: var(--text-small); }
+.tableWrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
+.table th, .table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.table thead th { position: sticky; top: 0; background: var(--panel-solid); color: var(--muted); font-weight: 600; }
+.list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--text-small); }
+.form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-top: 8px; }

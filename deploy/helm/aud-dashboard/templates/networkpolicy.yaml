@@ -59,6 +59,9 @@ spec:
         - matchName: api.osv.dev                        # OSV — exact-version match of the package list
         - matchName: cve-api.prod-aks.azure.com         # AKS 관리 부품 — Microsoft's CVE scan per AKS image / release
         - matchName: releases.aks.azure.com             # AKS release tracker (the release each region runs)
+        - matchName: www.oracle.com                     # 선제 감시 — Oracle CPU/CSPU pre-release · advisories · Security Alerts
+        - matchName: openjdk.org                        # OpenJDK Vulnerability Group advisories
+        - matchName: www.boho.or.kr                     # KISA 보호나라 보안공지 RSS
         {{- end }}
         {{- if .Values.features.imageConfig }}
         - matchPattern: "*.azurecr.io"                  # 앱 런타임 — image configs (config blob only; AcrPull)

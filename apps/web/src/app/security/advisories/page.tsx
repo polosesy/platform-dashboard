@@ -14,6 +14,7 @@ import { useAksClusters } from "@/lib/useAksClusters";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { cveOrgUrl, cvssTone, filterFindings, findingCounts, kevHitsUs, maxCvss, mergeWatch, osvChecked, parseWatch, splitItems, targetCounts, type FindingFilter } from "@/lib/advisoryView";
 import s from "./advisories.module.css";
+import { EarlyWatchPanel } from "./EarlyWatchPanel";
 
 const MOCK_SUB = "/subscriptions/00000000-0000-0000-0000-000000000000/";
 const WATCH_KEY = "aud.advisories.watch";
@@ -228,6 +229,8 @@ export default function SecurityAdvisoriesPage() {
         }
       />
       <ErrorNotice error={q.error} />
+      {/* 선제 감시: the vendors' own announcements, watched in the background — before the details and the internal notice */}
+      <EarlyWatchPanel clusterId={realCluster} />
       {!d ? <LoadingState /> : (
         <>
           <ul className={s.sources} aria-label={t("adv.sources")}>
