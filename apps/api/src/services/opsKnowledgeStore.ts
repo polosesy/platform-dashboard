@@ -33,6 +33,22 @@ const Scope = z.object({
 }).strict();
 const Iso = z.string().datetime({ offset: true });
 
+const Timeline = z.array(z.object({
+  at: z.string().datetime({ offset: true }),
+  kind: z.enum(["alert", "change", "action", "note", "status"]),
+  text: z.string().trim().min(1).max(1000),
+  by: z.string().trim().max(120).optional(),
+}).strict()).max(200);
+export const FOLLOW_UP_ID = /^[a-z0-9]{1,16}$/;
+const FollowUps = z.array(z.object({
+  id: z.string().regex(FOLLOW_UP_ID),
+  title: z.string().trim().min(1).max(300),
+  owner: z.string().trim().max(120).optional(),
+  due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status: z.enum(["open", "done"]),
+  doneAt: z.string().datetime({ offset: true }).optional(),
+}).strict()).max(30).refine((l) => new Set(l.map((f) => f.id)).size === l.length, "follow-up ids repeat");
+
 export const CaseBody = z.object({
   title: z.string().trim().min(1).max(120),
   status: z.enum(["open", "mitigated", "resolved"]),
@@ -48,6 +64,10 @@ export const CaseBody = z.object({
   scope: Scope,
   runbookIds: z.array(z.string().regex(OPS_ID)).max(10),
   source: z.object({ kind: z.enum(["alert", "manual"]), ref: z.string().max(200).optional() }).strict().optional(),
+  // the recurrence group (services/opsRecurrence.ts recurrenceKey) — hashed, never an id
+  recurrenceKey: z.string().regex(/^(az|ac):[0-9a-f]{16}$/).optional(),
+  timeline: Timeline.optional(),
+  followUps: FollowUps.optional(),
   team: z.string().trim().max(60).optional(),
   baseRev: z.number().int().min(0).nullable(),
 }).strict()

@@ -3,11 +3,11 @@
 // 사례·런북 — the case and runbook forms (operators). Only the symptoms are required for a case; "resolved" asks
 // for what fixed it. Pasted secrets are masked by the API when saved (it says how many).
 import { useState } from "react";
-import type { OpsCase, OpsRunbook } from "@aud/types";
+import type { OpsCase, OpsFollowUp, OpsRunbook, OpsTimelineEntry, OpsTimelineKind } from "@aud/types";
 import { useI18n } from "@/lib/i18n";
-import { Button, FilterChip, Notice, Panel, Select, TextInput } from "@/components/ui";
+import { Button, FilterChip, LinkButton, Notice, Panel, Select, TextInput, Toggle } from "@/components/ui";
 import {
-  caseBody, caseProblems, emptyStep, runbookBody, runbookProblems, type CaseForm, type RunbookForm,
+  caseBody, caseProblems, emptyStep, newFollowUpId, runbookBody, runbookProblems, toLocalInput, type CaseForm, type RunbookForm,
 } from "@/lib/opsKnowledge";
 import { errText, useOpsCall } from "./shared";
 import s from "./runbooks.module.css";
@@ -67,7 +67,9 @@ export function CaseEditor({ initial, id, rev, runbooks, clusters, onSaved, onCa
           <TextInput label={t("ops.kb.f.keywords")} value={f.keywords} onChange={set("keywords")} hint={t("ops.kb.f.keywordsHint")} />
           <TextInput label={t("ops.kb.f.team")} value={f.team} onChange={set("team")} maxLength={60} />
         </div>
-        {f.alertRule ? <p className={s.muted}>{t("ops.kb.f.fromAlert", { rule: f.alertRule })}</p> : null}
+        {f.alertRule ? <p className={s.muted}>{t("ops.kb.f.fromAlert", { rule: f.alertRule })}{f.recurrenceKey ? ` · ${t("ops.kb.f.fromGroup")}` : ""}</p> : null}
+        <TimelineEditor list={f.timeline} onChange={set("timeline")} />
+        <FollowUpEditor list={f.followUps} onChange={set("followUps")} />
         <div className={s.field}>
           <span className={s.sub}>{t("ops.kb.f.runbooks")}</span>
           <div className={s.tags}>
@@ -120,6 +122,7 @@ export function RunbookEditor({ initial, id, rev, onSaved, onCancel }: {
         <TextInput label={t("ops.kb.f.title")} value={f.title} onChange={set("title")} maxLength={120} placeholder={t("ops.kb.f.rbTitlePh")} />
         <TextInput label={t("ops.kb.f.when")} rows={3} value={f.when} onChange={set("when")} maxLength={2000} placeholder={t("ops.kb.f.whenPh")} />
         <div className={s.row2}>
+          <TextInput label={t("ops.kb.f.alertRules")} value={f.alertRules} onChange={set("alertRules")} hint={t("ops.kb.f.alertRulesHint")} />
           <TextInput label={t("ops.kb.f.keywords")} value={f.keywords} onChange={set("keywords")} hint={t("ops.kb.f.rbKeywordsHint")} />
           <TextInput label={t("ops.kb.f.tags")} value={f.tags} onChange={set("tags")} hint={t("ops.kb.f.listHint")} />
           <TextInput label={t("ops.kb.f.team")} value={f.team} onChange={set("team")} maxLength={60} />
@@ -147,5 +150,82 @@ export function RunbookEditor({ initial, id, rev, onSaved, onCancel }: {
         {err ? <Notice tone="danger">{err}</Notice> : null}
       </div>
     </Panel>
+  );
+}
+
+const TIMELINE_KINDS: OpsTimelineKind[] = ["alert", "change", "action", "note", "status"];
+const fromLocal = (v: string) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
+
+/** The incident's story: lines kept in time order (the API sorts them too) */
+function TimelineEditor({ list, onChange }: { list: OpsTimelineEntry[]; onChange: (l: OpsTimelineEntry[]) => void }) {
+  const { t } = useI18n();
+  const [kind, setKind] = useState<OpsTimelineKind>("action");
+  const [at, setAt] = useState(() => toLocalInput(new Date().toISOString()));
+  const [text, setText] = useState("");
+  const add = () => {
+    const iso = fromLocal(at);
+    if (!iso || !text.trim()) return;
+    onChange([...list, { at: iso, kind, text: text.trim().slice(0, 1000) }].sort((a, z) => (a.at < z.at ? -1 : a.at > z.at ? 1 : 0)).slice(0, 200));
+    setText("");
+  };
+  return (
+    <div className={s.field}>
+      <span className={s.sub}>{t("ops.kb.tl.title")}</span>
+      {list.length ? (
+        <ol className={s.timeline}>
+          {list.map((e, i) => (
+            <li key={`${e.at}:${i}`}>
+              <span className={s.tlWhen}>{new Date(e.at).toLocaleString()}</span>
+              <span className={s.tlKind}>{t(`ops.kb.tl.kind.${e.kind}`)}</span>
+              <span className={s.tlText}>{e.text}</span>
+              <LinkButton tone="muted" onClick={() => onChange(list.filter((_, j) => j !== i))}>{t("ops.kb.remove")}</LinkButton>
+            </li>
+          ))}
+        </ol>
+      ) : <span className={s.muted}>{t("ops.kb.tl.none")}</span>}
+      <div className={s.row2}>
+        <Select label={t("ops.kb.tl.kind")} value={kind} onChange={(v) => setKind(v as OpsTimelineKind)} options={TIMELINE_KINDS.map((k) => ({ value: k, label: t(`ops.kb.tl.kind.${k}`) }))} />
+        <TextInput label={t("ops.kb.tl.at")} type="datetime-local" value={at} onChange={setAt} />
+        <TextInput label={t("ops.kb.tl.text")} value={text} onChange={setText} maxLength={1000} placeholder={t("ops.kb.tl.textPh")} />
+        <Button size="sm" onClick={add} disabled={!text.trim() || !fromLocal(at)}>{t("ops.kb.tl.add")}</Button>
+      </div>
+    </div>
+  );
+}
+
+/** What must change so it does not happen again — owner, due day, done */
+function FollowUpEditor({ list, onChange }: { list: OpsFollowUp[]; onChange: (l: OpsFollowUp[]) => void }) {
+  const { t } = useI18n();
+  const [title, setTitle] = useState("");
+  const [owner, setOwner] = useState("");
+  const [due, setDue] = useState("");
+  const add = () => {
+    if (!title.trim() || list.length >= 30) return;
+    onChange([...list, { id: newFollowUpId(list), title: title.trim().slice(0, 300), status: "open", ...(owner.trim() ? { owner: owner.trim() } : {}), ...(due ? { due } : {}) }]);
+    setTitle(""); setOwner(""); setDue("");
+  };
+  const patch = (id: string, p: Partial<OpsFollowUp>) => onChange(list.map((f) => (f.id === id ? { ...f, ...p } : f)));
+  return (
+    <div className={s.field}>
+      <span className={s.sub}>{t("ops.kb.fu.title")}</span>
+      {list.length ? (
+        <ul className={s.followUps}>
+          {list.map((f) => (
+            <li key={f.id}>
+              <Toggle checked={f.status === "done"}
+                onChange={(on) => patch(f.id, on ? { status: "done", doneAt: new Date().toISOString() } : { status: "open", doneAt: undefined })}>{f.title}</Toggle>
+              <span className={s.sub}>{[f.owner, f.due ? t("ops.kb.fu.dueOn", { d: f.due }) : ""].filter(Boolean).join(" · ")}</span>
+              <LinkButton tone="muted" onClick={() => onChange(list.filter((x) => x.id !== f.id))}>{t("ops.kb.remove")}</LinkButton>
+            </li>
+          ))}
+        </ul>
+      ) : <span className={s.muted}>{t("ops.kb.fu.none")}</span>}
+      <div className={s.row2}>
+        <TextInput label={t("ops.kb.fu.what")} value={title} onChange={setTitle} maxLength={300} placeholder={t("ops.kb.fu.whatPh")} />
+        <TextInput label={t("ops.kb.fu.owner")} value={owner} onChange={setOwner} maxLength={120} />
+        <TextInput label={t("ops.kb.fu.due")} type="datetime-local" value={due ? `${due}T00:00` : ""} onChange={(v) => setDue(v.slice(0, 10))} />
+        <Button size="sm" onClick={add} disabled={!title.trim() || list.length >= 30}>{t("ops.kb.fu.add")}</Button>
+      </div>
+    </div>
   );
 }

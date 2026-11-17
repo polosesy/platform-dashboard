@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-13
-covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMatch.ts, apps/api/src/services/opsAgent.ts, apps/api/src/routes/ops.ts, apps/web/src/app/runbooks]
+last-verified: 2026-11-17
+covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMatch.ts, apps/api/src/services/opsRecurrence.ts, apps/api/src/services/opsAgent.ts, apps/api/src/routes/ops.ts, apps/web/src/app/runbooks]
 ---
 # 사례·런북 — 경험으로 빨리 정상화하기
 
@@ -124,3 +124,62 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 - 런북 단계별 체크(장애 중 진행 기록)
 - 내보내기·가져오기(JSON) — 다른 환경과 경험 나누기
 - 2단계 에이전트(8절)
+
+## 10. 인시던트 대응·학습 고도화 (2026-11-17)
+
+목표: PagerDuty·incident.io·Rundeck의 런북·인시던트 핵심 기능을 이 플랫폼 원칙(사실만 · 읽기 전용 · 연결 범위)에 맞게 옮겨, **장애를 빨리 끝내고, 사례로 배우고, 재발하면 바로 원인과 조치를 찾게** 한다.
+
+### 10.1 원본부터 셈 (stg, 2026-11-17)
+
+| 원본 | 측정 | 뜻 |
+|---|---|---|
+| Azure Monitor 경고 30일(Alerts Management, 구독 4개) | 108건 · 규칙×대상 31묶음 · **2번 이상 15묶음** · 최다 30번 · **지금 울림 57** | 같은 장애가 반복된다. 상위 묶음은 30번 모두 해소된 적이 없다(자동 해소 꺼진 규칙 — 울림이 쌓이기만 함) |
+| 해소까지 시간(구독별 중앙값) | 7분 ~ 150분, p90 최대 18시간 | 같은 종류라도 대응 속도 차이가 크다 — 지난번 조치를 바로 봐야 한다 |
+| Grafana 경고 규칙 | 104개 중 **`runbook_url` 0개** | 경고에서 런북으로 가는 길이 없다 |
+| Grafana 상태 이력 API(`/api/v1/rules/history`) | 500 | 이력 저장소 미설정 — Grafana 쪽 재발은 대시보드가 받은 알림(알림 센터)으로만 셈 |
+| 알림 센터 저장 | 2건(가져오기 시작 직후) | 기간이 쌓이면 Grafana 재발도 같은 묶음으로 보임 |
+| 사례·런북 | 0 · 0 | 학습 기록이 아직 없다 — 첫 사례를 쉽게 시작하게 해야 한다 |
+
+### 10.2 글로벌 기능 → 여기서는
+
+| 제품 기능 | 무엇 | 여기 (근거·원칙) | 상태 |
+|---|---|---|---|
+| PagerDuty Past Incidents · incident.io Related incidents | 같은 서비스·신호의 과거 사건 | **재발 묶음** — 규칙 × 정확한 대상의 모든 발생(추정 없음). 묶음에 연결된 사례(●)·같은 규칙 사례(○)·규칙 런북 | ✓ |
+| incident.io Timeline | 사건 중 자동으로 쌓이는 기록 | 사례 **타임라인**(경고·변경·조치·메모·상태) — 재발 묶음에서 시작하면 최근 발생·해소가 자동으로 채워짐 | ✓ |
+| incident.io Follow-ups · PagerDuty postmortem action items | 재발 방지 할 일 | **후속 조치**(담당·기한·완료) — 사례 상세에서 바로 완료 표시(rev 409), 사례 탭 머리에 남음·기한 지남 | ✓ |
+| PagerDuty 서비스·경고의 runbook 링크 | 경고 → 런북 | 런북 **경고 규칙** 칸(alertRule 신호) — 그 규칙의 재발 묶음에 보임. 고친 것: 예전 런북 편집기는 모든 신호를 키워드로 저장해 규칙 연결이 없었음 | ✓ |
+| PagerDuty Change Correlation / Probable Origin | 가까운 변경 3개 + 이유 / 확률 | 롤아웃(ReplicaSet)·노드 유지 보수·Warning 이벤트를 발생 시각 앞 2시간에서 **근거와 함께** — 확률(%)은 만들지 않음 | 다음(B) |
+| Rundeck / PagerDuty Automated Diagnostics | 사건 시작 때 진단 잡 실행 → 타임라인 | 읽기 전용 **증거 스냅샷**(파드 상태·이벤트·로그 ERROR 수·SLO 소진)을 사례에 첨부 — 쓰기·명령 실행은 하지 않음(플랫폼은 읽기 전용) | 다음(C) |
+| incident.io 역할·상태 업데이트·Slack 채널 | 지휘관·커뮤니케이션 | 알림 센터 중계(Flow)로 상태 알림 — 역할 지정은 사례 '담당' 칸으로 시작 | 다음(D) |
+| 학습 지표(MTTA·MTTR·재발률) | 운영 건강도 | 재발 묶음 수·사례 없는 재발·런북 없는 재발(구현) → 묶음별 해소 시간 추이·후속 조치 완료율 | 일부 ✓ |
+| AI 요약·초안 | 사건 요약·후속 조치 제안 | 8절 결정 대기(외부 전송) | 대기 |
+
+### 10.3 전문가 토론
+
+| 쟁점 | 주장 | 반론 | 결론 |
+|---|---|---|---|
+| 재발을 무엇으로 묶나 | 글 유사도로 넓게 묶으면 더 많이 찾는다 | 경고는 규칙·대상이 정확히 있다. 추정 묶음은 '같은 장애'라고 단정할 근거가 없다 | **규칙 × 정확한 대상**(해시 키). 넓은 비슷함은 '찾기'(opsMatch)가 따로 맡고, 묶음에서 '비슷한 경험 찾기'로 넘긴다 |
+| 같은 Azure 경고를 두 번 세는가 | 알림 센터도 Azure 경고를 받는다 | 액션 그룹 웹후크와 API를 둘 다 세면 두 배 | Azure = Azure Monitor API 원본만, 알림 센터 = Grafana·Alertmanager만 |
+| '지금 울림' | 울림 = 장애 진행 중 | 자동 해소가 꺼진 로그·활동 경고는 조치 뒤에도 Fired로 남는다(상위 묶음 30번 전부) | 사실 그대로 '지금 울림 n · 언제부터'를 보이고, 툴팁에 '자동 해소가 꺼진 규칙이면 남는다' — 장애라고 단정하지 않음 |
+| PagerDuty Probable Origin의 확률 | 원인 후보를 %로 주면 빠르다 | 과거 패턴 기반 모델 — 이 플랫폼은 '임계값 없이 색칠하지 않는다'·'추정 금지' | 확률 대신 시간·범위가 겹치는 **변경 사실**과 겹치는 이유(B) |
+| 진단 자동 실행 | Rundeck처럼 사건 시작 때 잡을 돌린다 | 쓰기·명령 실행은 고객 승인 범위 밖 | 읽기 전용 증거만(C). 런북 명령은 지금처럼 복사만 |
+| 후속 조치를 어디에 | Jira 같은 외부 추적기 | 외부 연동은 자격 증명·전송 결정이 필요 | 사례 안에 담당·기한·완료(외부 동기화는 나중) |
+| 보안 | 타임라인·후속 조치에 로그·토큰이 붙여질 수 있다 | — | 저장 때 같은 가리기(`maskTexts`), 재발 키는 해시(구독·리소스 ID가 응답에 없음), 구독은 호출자 역할이 쓰는 연결만 |
+
+### 10.4 구현 (A단계)
+
+- API `GET /api/ops/recurrence?days=1|7|30`(로그인) → `services/opsRecurrence.ts`
+  - Azure: 구독마다 `alerts?timeRange=<n>d`(Fired·Resolved 둘 다, 250개씩 최대 20쪽, 5분 캐시) → `azureFirings`
+  - 알림 센터: `history`의 firing → 다음 resolved 쌍마다 발생 하나 → `centerFirings`(파드 이름의 해시 꼬리는 대상에서 뺌)
+  - 순수 `recurrenceGroups` — 키 `az|ac:` + sha256(규칙|대상) 16자, 발생·지금 울림(부터)·처음·마지막·해소 분 중앙값/최대·최근 10, 사례(연결/규칙)·런북(규칙), 합계(재발·사례 없는 재발·런북 없는 재발)
+  - 상태 ok · partial(구독 일부·알림 센터 실패 — `gaps`) · failed(아무것도 못 읽음 — 0 아님)
+- 사례: `recurrenceKey`·`timeline[]`(≤200, 1,000자)·`followUps[]`(≤30, id 고유, 기한 날짜) — 저장 때 가리기, 타임라인 시각순 정렬, 완료 시각 자동
+- 화면 `/runbooks` 탭 **재발**: 기간 1·7·30일 · 재발만/전체 · 찾기 · 한 줄 요약('재발 n 중 사례 없음 · 런북 없음') · 묶음 행(규칙·등급·출처·횟수·지금 울림·대상·마지막·해소 시간·사례/런북) → 펼치면 최근 발생 + '이 묶음으로 사례 기록'(타임라인·신호·범위·심각도 자동) · '이 규칙의 런북 쓰기' · '비슷한 경험 찾기'
+- 사례 편집기: 타임라인·후속 조치 편집, 사례 상세: 후속 조치 바로 완료(rev), 타임라인 표시
+
+### 10.5 다음 단계와 이유
+
+- **B 변경 상관**: 데이터는 있음(롤아웃 `services/rollouts.ts` · 노드 유지 보수 · K8s Warning 이벤트). Azure 리소스 경고는 Activity Log 변경이 필요(리소스별 읽기 비용) — 묶음 펼칠 때만 읽는 방식으로.
+- **C 증거 스냅샷**: 사례 시작 시 읽기 전용 질의 결과를 타임라인 '증거'로 고정 — 어떤 질의를 기본으로 할지(워크로드 범위가 있는 경고만) 정해야 함.
+- **D 알림 센터 연결**: 알림 상세에 '이 묶음 n번째 · 지난 사례' — 알림 센터 항목에서 같은 키를 계산(Grafana는 바로, Azure는 대상 리소스 ID로).
+- **E Grafana `runbook_url`**: 규칙 104개에 런북 링크(`/runbooks?tab=runbooks&id=`)를 넣는 것은 고객 Grafana 쓰기라 하지 않음 — 넣을 주석을 복사로 제공.

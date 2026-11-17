@@ -15,6 +15,16 @@ export type OpsSignal = { kind: OpsSignalKind; value: string };
 export type OpsScope = { clusterId?: string; clusterName?: string; namespace?: string; workload?: string; resourceType?: string };
 
 export type OpsCaseStatus = "open" | "mitigated" | "resolved";
+
+/**
+ * One line of an incident's story (incident.io timeline): when it fired, what was seen or changed, what was done.
+ * `alert` lines come from the recurrence group / the alert it started from; the rest are written by responders.
+ */
+export type OpsTimelineKind = "alert" | "change" | "action" | "note" | "status";
+export type OpsTimelineEntry = { at: string; kind: OpsTimelineKind; text: string; by?: string };
+
+/** A follow-up so it does not happen again (incident.io follow-ups · PagerDuty postmortem action items) */
+export type OpsFollowUp = { id: string; title: string; owner?: string; due?: string; status: "open" | "done"; doneAt?: string };
 export type OpsSeverity = "sev1" | "sev2" | "sev3" | "sev4";
 
 export type OpsCase = {
@@ -37,6 +47,10 @@ export type OpsCase = {
   runbookIds: string[];
   /** Where it came from: an alert of the notification centre, or written by hand */
   source?: { kind: "alert" | "manual"; ref?: string };
+  /** The recurrence group it answers (rule × target — OpsRecurrenceGroup.key): every later firing finds this case */
+  recurrenceKey?: string;
+  timeline?: OpsTimelineEntry[];
+  followUps?: OpsFollowUp[];
   team?: string;
   rev: number;
   createdAt: string;
@@ -155,4 +169,52 @@ export type OpsSimilarResponse = {
    * the similar cases that used it. Experience, not a verdict: the operator decides.
    */
   suggested: Array<{ runbookId: string; fromCases: string[]; direct: boolean }>;
+};
+
+// ── 재발 (recurrence) — the same alert rule on the same target, firing again (docs/architecture/ops-knowledge.md §10) ──
+
+/**
+ * One rule × target over the window: every firing of it. Facts only — counts and times as the alert sources gave them;
+ * linked = a case written for this group (recurrenceKey) · rule = cases/runbooks that name the alert rule.
+ */
+export type OpsRecurrenceGroup = {
+  /** `<source>:<rule>|<target>` lower-cased — stable across firings (what a case stores as recurrenceKey) */
+  key: string;
+  source: "azureMonitor" | "alertCenter";
+  rule: string;
+  /** what it fired on: an Azure resource (name · type · resource group) or a Kubernetes workload (namespace/name) */
+  target: { name: string; type?: string; resourceGroup?: string; namespace?: string };
+  severity: OpsSeverity;
+  /** firings in the window (an alert centre item counts its re-firings) */
+  occurrences: number;
+  /** still firing now (not resolved) — and since when */
+  firingNow: number;
+  firingSince?: string;
+  firstAt: string;
+  lastAt: string;
+  /** minutes from firing to resolved, over the firings that resolved — null when none did */
+  resolveMinutes: { p50: number; max: number; n: number } | null;
+  /** the last firings (newest first, ≤ 10) — the timeline a new case starts from */
+  recent: Array<{ at: string; resolvedAt?: string }>;
+  cases: { linked: string[]; rule: string[] };
+  runbooks: string[];
+};
+
+export type OpsRecurrenceResponse = {
+  generatedAt: string;
+  days: number;
+  /** ok = every source answered; partial = some subscription or the alert centre failed (listed in gaps) */
+  state: "ok" | "partial" | "failed";
+  gaps: Array<{ source: "azureMonitor" | "alertCenter"; scope: string; reason: string }>;
+  totals: {
+    alerts: number;
+    groups: number;
+    /** groups that fired 2+ times */
+    recurring: number;
+    firingNow: number;
+    /** recurring groups with no case (linked or by rule) — the team has not written down what it learnt */
+    recurringNoCase: number;
+    recurringNoRunbook: number;
+  };
+  groups: OpsRecurrenceGroup[];
 };

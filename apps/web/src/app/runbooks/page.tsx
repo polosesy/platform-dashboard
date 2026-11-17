@@ -14,16 +14,17 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { useAksClusters } from "@/lib/useAksClusters";
 import {
-  Button, Chip, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput,
+  Button, Chip, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput, Toggle,
 } from "@/components/ui";
 import {
-  caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, runbookForm, type CaseForm, type RunbookForm,
+  caseBody, caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, followUpStats, runbookForm, toggleFollowUp, type CaseForm, type RunbookForm,
 } from "@/lib/opsKnowledge";
 import { CaseEditor, RunbookEditor } from "./Editors";
+import { RecurrenceView } from "./RecurrenceView";
 import { MatchWhy, SevBadge, SignalChips, StatusChip, errText, useOpsCall } from "./shared";
 import s from "./runbooks.module.css";
 
-const TABS = ["find", "cases", "runbooks"] as const;
+const TABS = ["find", "recurrence", "cases", "runbooks"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function RunbooksPage() {
@@ -53,7 +54,9 @@ function RunbooksInner() {
   const openCase = (id: string) => { setSelCase(id); setEditing(null); setTab("cases"); };
   const openRunbook = (id: string) => { setSelRunbook(id); setEditing(null); setTab("runbooks"); };
   const newCase = (prefill: Partial<CaseForm> = {}) => { setEditing({ kind: "case", id: null, rev: null, form: emptyCase(new Date(), prefill) }); setTab("cases"); };
-  const newRunbook = () => { setEditing({ kind: "runbook", id: null, rev: null, form: emptyRunbook() }); setTab("runbooks"); };
+  const newRunbook = (prefill: Partial<RunbookForm> = {}) => { setEditing({ kind: "runbook", id: null, rev: null, form: emptyRunbook(prefill) }); setTab("runbooks"); };
+  // 재발 › '비슷한 경험 찾기': the find tab starts over with that text
+  const [findSeed, setFindSeed] = useState<string | null>(null);
   const onSaved = (kind: "case" | "runbook", id: string, redactions: number) => {
     setEditing(null);
     if (kind === "case") setSelCase(id); else setSelRunbook(id);
@@ -66,7 +69,7 @@ function RunbooksInner() {
       <PageHeader actions={canWrite ? (
         <div className={s.actions}>
           <Button onClick={() => newCase()}>{t("ops.kb.case.new")}</Button>
-          <Button onClick={newRunbook}>{t("ops.kb.rb.new")}</Button>
+          <Button onClick={() => newRunbook()}>{t("ops.kb.rb.new")}</Button>
         </div>
       ) : undefined} />
       {d && !d.signedIn ? <SignInNotice /> : null}
@@ -75,12 +78,13 @@ function RunbooksInner() {
       <ErrorNotice error={q.error} />
       <Tabs label={t("ops.kb.tabs")} value={tab} onChange={setTab} items={[
         { id: "find", label: t("ops.kb.tab.find") },
+        { id: "recurrence", label: t("ops.kb.tab.recurrence") },
         { id: "cases", label: t("ops.kb.tab.cases"), ...(d ? { count: d.cases.length } : {}) },
         { id: "runbooks", label: t("ops.kb.tab.runbooks"), ...(d ? { count: d.runbooks.length } : {}) },
       ]} />
       {!d && q.loading ? <LoadingState /> : null}
       {d && tab === "find" ? (
-        <FindView data={d} canWrite={canWrite} initialText={params.get("q") ?? ""}
+        <FindView key={findSeed ?? "url"} data={d} canWrite={canWrite} initialText={findSeed ?? params.get("q") ?? ""}
           initialScope={{ namespace: params.get("ns") ?? "", workload: params.get("wl") ?? "" }}
           onOpenCase={openCase} onOpenRunbook={openRunbook}
           onRecord={(text) => newCase({
@@ -88,12 +92,18 @@ function RunbooksInner() {
             namespace: params.get("ns") ?? "", workload: params.get("wl") ?? "", resourceType: params.get("rt") ?? "",
           })} />
       ) : null}
+      {d && tab === "recurrence" ? (
+        <RecurrenceView data={d} canWrite={canWrite} onOpenCase={openCase} onOpenRunbook={openRunbook}
+          onNewCase={(form) => newCase(form)}
+          onNewRunbook={(rule, title) => newRunbook({ title, alertRules: rule, when: t("ops.rec.runbookWhen", { rule }) })}
+          onFind={(text) => { setFindSeed(text); setTab("find"); }} />
+      ) : null}
       {d && tab === "cases" ? (
         editing?.kind === "case"
           ? <div className={s.stack}><CaseEditor key={editing.id ?? "new"} initial={editing.form} id={editing.id} rev={editing.rev} runbooks={d.runbooks} clusters={clusterList}
               onSaved={(c, n) => onSaved("case", c.id, n)} onCancel={() => setEditing(null)} /></div>
           : <CasesView data={d} canWrite={canWrite} selected={selCase} onSelect={setSelCase} onOpenRunbook={openRunbook}
-              onEdit={(c) => setEditing({ kind: "case", id: c.id, rev: c.rev, form: caseForm(c) })} onDeleted={() => { setSelCase(null); q.reload(); }} />
+              onEdit={(c) => setEditing({ kind: "case", id: c.id, rev: c.rev, form: caseForm(c) })} onDeleted={() => { setSelCase(null); q.reload(); }} onChanged={() => q.reload()} />
       ) : null}
       {d && tab === "runbooks" ? (
         editing?.kind === "runbook"
@@ -264,9 +274,9 @@ function AgentSlot() {
 
 // ── cases ──
 
-function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, onDeleted }: {
+function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, onDeleted, onChanged }: {
   data: OpsKnowledgeResponse; canWrite: boolean; selected: string | null; onSelect: (id: string | null) => void;
-  onOpenRunbook: (id: string) => void; onEdit: (c: OpsCase) => void; onDeleted: () => void;
+  onOpenRunbook: (id: string) => void; onEdit: (c: OpsCase) => void; onDeleted: () => void; onChanged: () => void;
 }) {
   const { t, locale } = useI18n();
   const [q, setQ] = useState("");
@@ -277,7 +287,7 @@ function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, 
   if (!data.cases.length) return <div className={s.stack}><EmptyState title={t("ops.kb.case.none")}>{t("ops.kb.case.noneHint")}</EmptyState></div>;
   return (
     <div className={`${s.stack} ${s.layout}`}>
-      <Panel title={t("ops.kb.tab.cases")} flush actions={
+      <Panel title={t("ops.kb.tab.cases")} sub={(() => { const f = followUpStats(data.cases, new Date().toLocaleDateString("en-CA")); return f.open || f.done ? t("ops.kb.fu.stats", { o: f.open, x: f.overdue, d: f.done }) : undefined; })()} flush actions={
         <div className={s.toolbar}>
           <SearchInput label={t("ops.kb.search")} value={q} onChange={setQ} />
           <Segmented label={t("ops.kb.f.status")} value={status} onChange={setStatus}
@@ -296,6 +306,7 @@ function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, 
                 <span className={s.sub}>
                   {when(c.occurredAt)}{c.scope.clusterName ? ` · ${c.scope.clusterName}` : ""}{c.scope.workload ? ` · ${c.scope.namespace ? `${c.scope.namespace}/` : ""}${c.scope.workload}` : ""}
                   {c.runbookIds.length ? ` · ${t("ops.kb.case.runbooksN", { n: c.runbookIds.length })}` : ""}
+                  {c.followUps?.some((f) => f.status === "open") ? ` · ${t("ops.kb.fu.openN", { n: c.followUps.filter((f) => f.status === "open").length })}` : ""}
                 </span>
                 <p className={s.muted}>{excerpt(c.symptoms)}</p>
               </li>
@@ -303,7 +314,7 @@ function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, 
           </ul>
         ) : <EmptyState title={t("ops.kb.noMatch")} />}
       </Panel>
-      {sel ? <CaseDetail c={sel} data={data} canWrite={canWrite} onOpenRunbook={onOpenRunbook} onEdit={onEdit} onDeleted={onDeleted} /> : (
+      {sel ? <CaseDetail key={`${sel.id}:${sel.rev}`} c={sel} data={data} canWrite={canWrite} onOpenRunbook={onOpenRunbook} onEdit={onEdit} onDeleted={onDeleted} onChanged={onChanged} /> : (
         <Panel><p className={s.muted}>{t("ops.kb.pick")}</p></Panel>
       )}
     </div>
@@ -327,11 +338,24 @@ function useDelete(path: string, id: string, rev: number, onDeleted: () => void)
   return { armed, err, run };
 }
 
-function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted }: {
-  c: OpsCase; data: OpsKnowledgeResponse; canWrite: boolean; onOpenRunbook: (id: string) => void; onEdit: (c: OpsCase) => void; onDeleted: () => void;
+function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onChanged }: {
+  c: OpsCase; data: OpsKnowledgeResponse; canWrite: boolean; onOpenRunbook: (id: string) => void; onEdit: (c: OpsCase) => void; onDeleted: () => void; onChanged: () => void;
 }) {
   const { t, locale } = useI18n();
   const del = useDelete("/api/ops/cases", c.id, c.rev, onDeleted);
+  const call = useOpsCall();
+  const [fuErr, setFuErr] = useState<string | null>(null);
+  const [fuBusy, setFuBusy] = useState(false);
+  // A follow-up done / reopened right here — the case's revision guards it (409 when someone else saved meanwhile)
+  const flip = async (id: string) => {
+    setFuBusy(true);
+    try {
+      const form = caseForm(c);
+      await call("PUT", "/api/ops/cases", { id: c.id }, caseBody({ ...form, followUps: toggleFollowUp(form.followUps, id, new Date()) }, c.rev));
+      setFuErr(null);
+      onChanged();
+    } catch (e) { setFuErr(errText(t, e)); } finally { setFuBusy(false); }
+  };
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(dateLocale(locale)) : "—");
   const rbs = c.runbookIds.map((id) => data.runbooks.find((r) => r.id === id)).filter((r): r is OpsRunbook => !!r);
   return (
@@ -359,6 +383,36 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted }: {
         {c.signals.length ? <div className={s.section}><h3>{t("ops.kb.f.signals")}</h3><div className={s.tags}><SignalChips t={t} signals={c.signals} /></div></div> : null}
         {rbs.length ? (
           <div className={s.section}><h3>{t("ops.kb.f.runbooks")}</h3><div className={s.tags}>{rbs.map((r) => <LinkButton key={r.id} onClick={() => onOpenRunbook(r.id)}>{r.title}</LinkButton>)}</div></div>
+        ) : null}
+        {c.followUps?.length ? (
+          <div className={s.section}>
+            <h3>{t("ops.kb.fu.title")}</h3>
+            <ul className={s.followUps}>
+              {c.followUps.map((f) => (
+                <li key={f.id}>
+                  {canWrite
+                    ? <Toggle checked={f.status === "done"} disabled={fuBusy} onChange={() => void flip(f.id)}>{f.title}</Toggle>
+                    : <span>{f.status === "done" ? "✓ " : "○ "}{f.title}</span>}
+                  <span className={s.sub}>{[f.owner, f.due ? t("ops.kb.fu.dueOn", { d: f.due }) : "", f.doneAt ? t("ops.kb.fu.doneAt", { at: when(f.doneAt) }) : ""].filter(Boolean).join(" · ")}</span>
+                </li>
+              ))}
+            </ul>
+            {fuErr ? <Notice tone="danger">{fuErr}</Notice> : null}
+          </div>
+        ) : null}
+        {c.timeline?.length ? (
+          <div className={s.section}>
+            <h3>{t("ops.kb.tl.title")}</h3>
+            <ol className={s.timeline}>
+              {c.timeline.map((e, i) => (
+                <li key={`${e.at}:${i}`}>
+                  <span className={s.tlWhen}>{when(e.at)}</span>
+                  <span className={s.tlKind}>{t(`ops.kb.tl.kind.${e.kind}`)}</span>
+                  <span className={s.tlText}>{e.text}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
         ) : null}
         {del.err ? <Notice tone="danger">{del.err}</Notice> : null}
       </Panel>

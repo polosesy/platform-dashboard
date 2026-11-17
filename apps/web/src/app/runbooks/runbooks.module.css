@@ -33,3 +33,15 @@
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+
+/* 재발 · 인시던트 기록 — the summary line, a firing / case timeline, the follow-up list */
+.recSummary { margin: 0; padding: 12px 16px; font-size: var(--text-body); border-bottom: 1px solid var(--border); }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.timeline > li { display: grid; grid-template-columns: 150px 72px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: var(--text-small); }
+.tlWhen { color: var(--subtle); font-variant-numeric: tabular-nums; }
+.tlKind { color: var(--muted); }
+.tlText { overflow-wrap: anywhere; min-width: 0; }
+.followUps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.followUps > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.timelineShort > li { grid-template-columns: 150px minmax(0, 1fr); }
+@media (max-width: 640px) { .timeline > li, .timelineShort > li { grid-template-columns: minmax(0, 1fr); } }

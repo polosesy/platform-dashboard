@@ -11,6 +11,10 @@ import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { sendError } from "../infra/requestParams.js";
 import { CaseBody, RunbookBody, maskTexts, opsKnowledgeDir, readKnowledge, runbookUsage, writeOps, type OpsWriteResult } from "../services/opsKnowledgeStore.js";
 import { findSimilar } from "../services/opsMatch.js";
+import { RECURRENCE_DAYS, azureRecurrenceFirings, centerFirings, recurrenceGroups, type RecurrenceDays } from "../services/opsRecurrence.js";
+import { listAlerts, notifyDir } from "../services/notifyStore.js";
+import { visibleTo } from "./notify.js";
+import type { OpsRecurrenceResponse } from "@aud/types";
 
 const SimilarBody = z.object({
   text: z.string().max(20_000).optional(),
@@ -63,6 +67,33 @@ export function registerOpsRoutes(router: Router, env: Env) {
   // Agent (stage 2 — skeleton): its status, and the draft call that answers 501 until a provider is configured.
   // The context it would be given is built either way (the same code a provider will receive), so the answer can say
   // how much would have been sent — never the text itself.
+  // 재발: every firing of the same alert rule on the same target (Azure Monitor + the alert centre), with the cases and
+  // runbooks written for it — signed in; the caller's subscriptions and connections only (§10)
+  router.get("/api/ops/recurrence", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const days = (RECURRENCE_DAYS as readonly number[]).includes(Number(req.query.days)) ? (Number(req.query.days) as RecurrenceDays) : 30;
+      const role = callerOf(env, req.auth.bearerToken)?.role ?? null;
+      const subs = role === "admin" ? "all" as const : new Set(accessibleConnections(env, role).flatMap((c) => c.subscriptions.map((x) => x.toLowerCase())));
+      const [azure, center, kb] = await Promise.all([
+        azureRecurrenceFirings(env, req.auth.bearerToken, days),
+        listAlerts(notifyDir(env)).then((l) => ({ firings: centerFirings(visibleTo(l, subs)), error: null as string | null }), (e: unknown) => ({ firings: [], error: e instanceof Error ? e.message : String(e) })),
+        readKnowledge(dir, usable(req)),
+      ]);
+      const gaps = [...azure.gaps, ...(center.error ? [{ source: "alertCenter" as const, scope: "inbox", reason: center.error.slice(0, 200) }] : [])];
+      const { groups, totals } = recurrenceGroups([...azure.firings, ...center.firings], kb.cases, kb.runbooks, new Date(), days);
+      res.setHeader("cache-control", "no-store");
+      res.json({
+        generatedAt: new Date().toISOString(), days,
+        // nothing read at all = failed (never "no recurrence"); some sources = partial, said per gap
+        state: !gaps.length ? "ok" : azure.read === 0 && center.error ? "failed" : "partial",
+        gaps, totals, groups,
+      } satisfies OpsRecurrenceResponse);
+    } catch (e: unknown) {
+      sendError(res, e, "ops_recurrence_failed");
+    }
+  });
+
   router.get("/api/ops/agent", (req: Request, res: Response) => {
     if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
     res.json(agentStatus(env) satisfies OpsAgentStatus);
@@ -116,7 +147,12 @@ export function registerOpsRoutes(router: Router, env: Env) {
         if (!parsed.success) return res.status(400).json({ error: "ops_case_invalid", fields: parsed.error.issues.map((i) => i.path.join(".")).slice(0, 10) });
         const connection = connectionOfCluster(env, parsed.data.scope.clusterId);
         if (connection === undefined) return res.status(400).json({ error: "ops_cluster_unknown" });
-        const { body: b, n } = maskTexts(parsed.data, ["symptoms", "cause", "resolution", "lessons", "title"]);
+        const masked = maskTexts(parsed.data, ["symptoms", "cause", "resolution", "lessons", "title"]);
+        let n = masked.n;
+        // timeline lines and follow-ups are free text too (a pasted log line, a token in a note)
+        const timeline = masked.body.timeline?.map((e) => { const m = maskTexts(e, ["text"]); n += m.n; return m.body; });
+        const followUps = masked.body.followUps?.map((f) => { const m = maskTexts(f, ["title"]); n += m.n; return { ...m.body, ...(m.body.status === "done" ? { doneAt: m.body.doneAt ?? now.toISOString() } : { doneAt: undefined }) }; });
+        const b = { ...masked.body, ...(timeline ? { timeline: timeline.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0)) } : {}), ...(followUps ? { followUps } : {}) };
         const { baseRev, ...rest } = b;
         const r = await writeOps<OpsCase>(dir, "cases", id, (prev, nid) => ({
           ...rest, id: nid, rev: (prev?.rev ?? 0) + 1,

@@ -1,14 +1,19 @@
 // 사례·런북 (/runbooks) — pure view helpers: the forms ↔ the API bodies, filters, the link an alert opens.
 // Design: docs/architecture/ops-knowledge.md. Tested in apps/api/test/opsKnowledge.test.ts.
 
-import type { NotifyAlert, OpsCase, OpsCaseStatus, OpsRunbook, OpsRunbookStep, OpsSeverity, OpsSignal } from "@aud/types";
+import type { NotifyAlert, OpsCase, OpsCaseStatus, OpsFollowUp, OpsRecurrenceGroup, OpsRunbook, OpsRunbookStep, OpsSeverity, OpsSignal, OpsTimelineEntry } from "@aud/types";
 
 export type CaseForm = {
   title: string; status: OpsCaseStatus; severity: OpsSeverity; occurredAt: string; symptoms: string; cause: string; resolution: string;
   lessons: string; tags: string; keywords: string; clusterId: string; clusterName: string; namespace: string; workload: string; resourceType: string;
   runbookIds: string[]; team: string; alertRule: string; sourceRef: string;
+  /** the recurrence group it answers (kept as is — the editor never shows the hash) */
+  recurrenceKey: string;
+  timeline: OpsTimelineEntry[];
+  followUps: OpsFollowUp[];
 };
-export type RunbookForm = { title: string; when: string; tags: string; keywords: string; steps: OpsRunbookStep[]; rollback: string; team: string; verifiedAt: string };
+/** `alertRules`: the alert rules it answers (comma list) — a recurrence group of that rule lists the runbook */
+export type RunbookForm = { title: string; when: string; tags: string; keywords: string; alertRules: string; steps: OpsRunbookStep[]; rollback: string; team: string; verifiedAt: string };
 
 /** datetime-local value (local time, minutes) ↔ ISO */
 export const toLocalInput = (iso: string) => {
@@ -26,6 +31,7 @@ export function emptyCase(now: Date, prefill: Partial<CaseForm> = {}): CaseForm 
   return {
     title: "", status: "open", severity: "sev3", occurredAt: toLocalInput(now.toISOString()), symptoms: "", cause: "", resolution: "", lessons: "",
     tags: "", keywords: "", clusterId: "", clusterName: "", namespace: "", workload: "", resourceType: "", runbookIds: [], team: "", alertRule: "", sourceRef: "",
+    recurrenceKey: "", timeline: [], followUps: [],
     ...prefill,
   };
 }
@@ -38,6 +44,7 @@ export function caseForm(c: OpsCase): CaseForm {
     clusterId: c.scope.clusterId ?? "", clusterName: c.scope.clusterName ?? "", namespace: c.scope.namespace ?? "", workload: c.scope.workload ?? "",
     resourceType: c.scope.resourceType ?? "", runbookIds: c.runbookIds, team: c.team ?? "",
     alertRule: c.signals.find((s) => s.kind === "alertRule")?.value ?? "", sourceRef: c.source?.kind === "alert" ? c.source.ref ?? "" : "",
+    recurrenceKey: c.recurrenceKey ?? "", timeline: c.timeline ?? [], followUps: c.followUps ?? [],
   };
 }
 
@@ -63,17 +70,26 @@ export function caseBody(f: CaseForm, baseRev: number | null) {
     symptoms: f.symptoms, ...(opt(f.cause) ? { cause: f.cause } : {}), ...(opt(f.resolution) ? { resolution: f.resolution } : {}),
     ...(opt(f.lessons) ? { lessons: f.lessons } : {}), tags: listOf(f.tags).slice(0, 12).map((t) => t.slice(0, 40)), signals, scope,
     runbookIds: f.runbookIds.slice(0, 10), ...(f.sourceRef ? { source: { kind: "alert" as const, ref: f.sourceRef.slice(0, 200) } } : { source: { kind: "manual" as const } }),
-    ...(opt(f.team) ? { team: f.team.trim() } : {}), baseRev,
+    ...(opt(f.team) ? { team: f.team.trim() } : {}),
+    ...(f.recurrenceKey ? { recurrenceKey: f.recurrenceKey } : {}),
+    ...(f.timeline.length ? { timeline: f.timeline.filter((e) => e.text.trim()).slice(0, 200).map((e) => ({ ...e, text: e.text.trim().slice(0, 1000) })) } : {}),
+    ...(f.followUps.length ? { followUps: f.followUps.filter((x) => x.title.trim()).slice(0, 30).map((x) => ({
+      id: x.id, title: x.title.trim().slice(0, 300), status: x.status, ...(x.owner?.trim() ? { owner: x.owner.trim() } : {}), ...(x.due ? { due: x.due } : {}),
+      ...(x.doneAt ? { doneAt: x.doneAt } : {}),
+    })) } : {}),
+    baseRev,
   };
 }
 
 export const emptyStep = (): OpsRunbookStep => ({ title: "", detail: "", command: "", check: "" });
 export function emptyRunbook(prefill: Partial<RunbookForm> = {}): RunbookForm {
-  return { title: "", when: "", tags: "", keywords: "", steps: [emptyStep()], rollback: "", team: "", verifiedAt: "", ...prefill };
+  return { title: "", when: "", tags: "", keywords: "", alertRules: "", steps: [emptyStep()], rollback: "", team: "", verifiedAt: "", ...prefill };
 }
 export function runbookForm(r: OpsRunbook): RunbookForm {
   return {
-    title: r.title, when: r.when, tags: r.tags.join(", "), keywords: r.signals.map((s) => s.value).join(", "),
+    // alert rules apart (they link recurrence groups); other kinds stay with the keywords as before
+    title: r.title, when: r.when, tags: r.tags.join(", "), keywords: r.signals.filter((s) => s.kind !== "alertRule").map((s) => s.value).join(", "),
+    alertRules: r.signals.filter((s) => s.kind === "alertRule").map((s) => s.value).join(", "),
     steps: r.steps.map((s) => ({ title: s.title, detail: s.detail ?? "", command: s.command ?? "", check: s.check ?? "" })),
     rollback: r.rollback ?? "", team: r.team ?? "", verifiedAt: r.verifiedAt ? toLocalInput(r.verifiedAt) : "",
   };
@@ -88,7 +104,10 @@ export function runbookProblems(f: RunbookForm): string[] {
 export function runbookBody(f: RunbookForm, baseRev: number | null) {
   const verified = f.verifiedAt ? fromLocalInput(f.verifiedAt) : null;
   return {
-    title: f.title.trim(), when: f.when, signals: listOf(f.keywords).slice(0, 20).map((v) => ({ kind: "keyword" as const, value: v.slice(0, 120) })),
+    title: f.title.trim(), when: f.when, signals: [
+      ...listOf(f.alertRules).slice(0, 10).map((v) => ({ kind: "alertRule" as const, value: v.slice(0, 120) })),
+      ...listOf(f.keywords).map((v) => ({ kind: "keyword" as const, value: v.slice(0, 120) })),
+    ].slice(0, 20),
     tags: listOf(f.tags).slice(0, 12).map((t) => t.slice(0, 40)),
     steps: f.steps.filter((s) => s.title.trim()).slice(0, 30).map((s) => ({
       title: s.title.trim(), ...(opt(s.detail ?? "") ? { detail: s.detail } : {}), ...(opt(s.command ?? "") ? { command: s.command } : {}), ...(opt(s.check ?? "") ? { check: s.check } : {}),
@@ -131,4 +150,57 @@ export function alertSearch(a: Pick<NotifyAlert, "id" | "rule" | "title" | "summ
 export function alertFindHref(a: Parameters<typeof alertSearch>[0]): string {
   const { text, prefill } = alertSearch(a);
   return `/runbooks?${new URLSearchParams({ tab: "find", q: text, ...prefill }).toString()}`;
+}
+
+// ── 인시던트 기록: timeline · follow-ups · recurrence ──
+
+/** Pure: a short id not in the list (a-z0-9, ≤ 16 — the API's rule) */
+export function newFollowUpId(existing: Array<{ id: string }>, seed = Date.now()): string {
+  const taken = new Set(existing.map((x) => x.id));
+  for (let i = 0; ; i++) {
+    const id = (seed + i).toString(36).slice(-10);
+    if (!taken.has(id)) return id;
+  }
+}
+
+/** Pure: a follow-up done / reopened (doneAt set or cleared) */
+export function toggleFollowUp(list: OpsFollowUp[], id: string, now: Date): OpsFollowUp[] {
+  return list.map((f) => (f.id !== id ? f : f.status === "open"
+    ? { ...f, status: "done" as const, doneAt: now.toISOString() }
+    : (({ doneAt: _d, ...rest }) => ({ ...rest, status: "open" as const }))(f)));
+}
+
+/** Pure: open follow-ups over the cases, overdue ones apart (a `due` day before today, local) */
+export function followUpStats(cases: OpsCase[], today: string): { open: number; overdue: number; done: number } {
+  let open = 0, overdue = 0, done = 0;
+  for (const c of cases) for (const f of c.followUps ?? []) {
+    if (f.status === "done") done++;
+    else { open++; if (f.due && f.due < today) overdue++; }
+  }
+  return { open, overdue, done };
+}
+
+/** Pure: the timeline lines of a group's last firings (fired · resolved), oldest first — the start of a case */
+export function groupTimeline(g: OpsRecurrenceGroup, words: { fired: string; resolved: string }): OpsTimelineEntry[] {
+  return g.recent.flatMap((r) => [
+    { at: r.at, kind: "alert" as const, text: `${words.fired} — ${g.rule}` },
+    ...(r.resolvedAt ? [{ at: r.resolvedAt, kind: "alert" as const, text: `${words.resolved} — ${g.rule}` }] : []),
+  ]).sort((a, z) => (a.at < z.at ? -1 : a.at > z.at ? 1 : 0));
+}
+
+/** Pure: a new case's form from a recurrence group — rule, target, severity, the group key and its firings */
+export function caseFromGroup(g: OpsRecurrenceGroup, now: Date, text: { title: string; symptoms: string; fired: string; resolved: string }): CaseForm {
+  return emptyCase(now, {
+    title: text.title.slice(0, 120), symptoms: text.symptoms, severity: g.severity, occurredAt: toLocalInput(g.lastAt),
+    alertRule: g.rule.slice(0, 120), recurrenceKey: g.key, namespace: g.target.namespace ?? "",
+    workload: g.source === "alertCenter" ? g.target.name : "", resourceType: g.target.type ?? "",
+    timeline: groupTimeline(g, text),
+  });
+}
+
+/** Pure: groups to show — recurring ones (2+) or all; then a free-text filter on rule / target */
+export function filterGroups(groups: OpsRecurrenceGroup[], recurringOnly: boolean, q: string): OpsRecurrenceGroup[] {
+  const n = q.trim().toLowerCase();
+  return groups.filter((g) => (!recurringOnly || g.occurrences >= 2)
+    && (!n || `${g.rule} ${g.target.name} ${g.target.type ?? ""} ${g.target.namespace ?? ""} ${g.target.resourceGroup ?? ""}`.toLowerCase().includes(n)));
 }
