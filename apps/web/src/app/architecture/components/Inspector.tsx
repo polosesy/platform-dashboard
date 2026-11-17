@@ -1,7 +1,8 @@
 "use client";
 
+import { ResourceSecurityCard } from "@/components/ResourceSecurityCard";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ArchitectureNode } from "@aud/types";
 import { FLOW_UNREACHED, flowPath, internetId, internetOutId, locationPath, type ArchDrawEdge, type ArchEdge, type ArchModel, type ArchPlaced } from "@/lib/archModel";
 import { formatBytes } from "@/lib/format";
@@ -29,6 +30,8 @@ type Props = {
   undrawn?: Array<{ type: string; count: number }>;
   /** Traffic-entry order is on: show why a tile / subnet sits in its column */
   flow?: boolean;
+  /** Live data (not the sample): the selected resource's security card can be opened */
+  securityCard?: boolean;
 };
 
 function Row({ k, children }: { k: string; children: ReactNode }) {
@@ -42,8 +45,9 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 
 const portalUrl = (azureId?: string) => (azureId ? `https://portal.azure.com/#@/resource${azureId}` : null);
 
-export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [], undrawn = [], flow = false }: Props) {
+export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, filteredOut = [], undrawn = [], flow = false, securityCard = false }: Props) {
   const { t } = useI18n();
+  const [cardFor, setCardFor] = useState<string | null>(null);
   const kind = (k: string) => {
     const v = t(`arch.kind.${k}`);
     return v === `arch.kind.${k}` ? k : v;
@@ -305,11 +309,19 @@ export function Inspector({ model, target, drawn, offscreen, onSelect, shownAt, 
   if (!node) return null;
   const path = locationPath(model, id);
   const portal = portalUrl(node.azureId);
+  // resources only (a VNet / subnet has no Defender findings or identity of its own worth a card)
+  const canCard = securityCard && !!node.azureId && !vnet && !subnet && /\/providers\//i.test(node.azureId);
 
   return (
     <aside className={s.inspector}>
       <h2 className={s.iTitle}>{node.name}</h2>
       <p className={s.iKind}>{kind(node.kind)}</p>
+      {canCard ? (
+        <>
+          <LinkButton ariaExpanded={cardFor === node.azureId} onClick={() => setCardFor(cardFor === node.azureId ? null : node.azureId!)}>{cardFor === node.azureId ? t("rsc.close") : t("rsc.open")}</LinkButton>
+          {cardFor === node.azureId ? <ResourceSecurityCard resourceId={node.azureId!} /> : null}
+        </>
+      ) : null}
       <dl className={s.iRows}>
         {node.resourceGroup ? <Row k={t("arch.i.rg")}>{node.resourceGroup}</Row> : null}
         {path ? <Row k={t("arch.i.region")}>{regionName(path.region, t)}</Row> : null}

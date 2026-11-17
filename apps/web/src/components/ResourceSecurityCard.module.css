@@ -1,0 +1,8 @@
+/* 리소스 보안 카드 — one resource's security facts, embedded in 통합 위험 and the infrastructure diagram */
+.card { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); min-width: 0; font-size: var(--text-small); }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; min-width: 0; overflow-wrap: anywhere; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px; }
+.h { margin: 8px 0 0; font-size: var(--text-small); font-weight: 600; }
+.list { margin: 0; padding-left: 16px; display: grid; gap: 3px; overflow-wrap: anywhere; }
+.dim { color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.foot { margin: 6px 0 0; color: var(--subtle); font-size: var(--text-caption); }

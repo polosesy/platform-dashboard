@@ -213,6 +213,7 @@ export function judgeCombos(input: CombosInput, subscriptionId: string): { combo
       key: azureRiskKey(res.resourceGroup, res.type, res.name), name: res.name, type: res.type, resourceGroup: res.resourceGroup,
       kind, sev: exposure.state === "yes" && exposure.limited ? LOWER[SEV[kind]] : SEV[kind], exposure, high: hi, identity,
       portalUrl: `https://portal.azure.com/#@/resource/subscriptions/${subscriptionId}/resourceGroups/${encodeURIComponent(res.resourceGroup)}/providers/${res.type}/${encodeURIComponent(res.name)}`,
+      resourceId: id,
     });
   }
   const rank = { critical: 0, high: 1, medium: 2 } as const;
@@ -264,7 +265,7 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
     if (e.limited) sev = sev === "critical" ? "high" : "medium";
     out.push({
       key: azureRiskKey(e.resourceGroup, e.type, e.name).replace(/^azure:/, "path:"),
-      entry: { name: e.name, type: e.type, resourceGroup: e.resourceGroup, ...(e.detail ? { detail: e.detail } : {}), ...(e.limited ? { limited: true } : {}) },
+      entry: { name: e.name, type: e.type, resourceGroup: e.resourceGroup, ...(e.detail ? { detail: e.detail } : {}), ...(e.limited ? { limited: true } : {}), resourceId: id },
       vuln: h ? { count: h.count, names: h.names } : null,
       roles, ends, sev, ...(identityUnknown ? { identityUnknown: true } : {}), identity: { principals: principals.length, otherRoles },
     });

@@ -265,7 +265,7 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 | Security Graph | 리소스·ID·네트워크·취약점을 한 그래프로 질의 | **✓ 2026-11-17 보안 › 무엇부터 › 그래프 탐색(`/security/explore`)** — `/policies?tab=explore`와 같은 패널·같은 순수 모델(`lib/securityGraph.ts`), 감시 질문 이슈 링크가 이 화면으로, 워크로드·네트워크·위험 조합 링크는 AKS 보안 점검(`?row=`·`?net=`·`?issue=`) | 다음: Azure 리소스 쪽 노드(구독 단위)를 그래프에 |
 | Issues (toxic combinations) | 위험 요인이 겹친 것만 이슈로, 증거·고칠 곳 | 이슈 목록(조합·WI·취약점·감시 질문·경고) + **✓ 2026-11-17 Azure 위험 조합**(5.4) | 다음: 공격 경로(③) |
 | Attack path | 인터넷 → 노출 → 취약점 → 권한 → 데이터 | 클러스터 공격 경로(관측·권한 근거) + **✓ 2026-11-17 Azure 공격 경로**(5.5) | 다음: 리소스 보안 카드(④) |
-| Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 | 리소스 하나의 '보안 카드'(권고·경고·노출·ID 한 곳) |
+| Inventory | 모든 리소스 + 위험 칩 | 클러스터 KBOM, 구성도 + **✓ 2026-11-17 리소스 보안 카드**(5.6) | 다음: 팀 범위(⑤) |
 | Project/Owner | 팀별 범위·담당 | 이슈 팀(연결 파일 `owners`) | 보안 개요를 팀 범위로 거르기 |
 | 데이터 신선도 | 스캔 시각 | 출처 칩·피드 시각(이번에 사실로) | 화면마다 '읽은 시각'과 원본 시각 분리 |
 
@@ -322,3 +322,29 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 - 첫 구독 경로 5개 — 모두 **진입점에서 끝남**(지정 출발지만 열린 VM + 높음 권고, 관리 ID의 역할은 Reader 하나씩). 데이터까지 닿는 경로는 stg에 없어, 도달 규칙은 단위 테스트로 고정(`azureRiskCombos.test.ts` — 범위 경계·서비스 한정·키 역할·모름).
 - VM 관리 ID들이 실제로 가진 역할을 이름으로 확인: Storage Blob Data Reader/Contributor · Key Vault Secrets User · Crypto User/Officer · **Storage Account Key Operator Service Role**(데이터 역할 표에 없지만 listKeys = 데이터 → `KEY_ROLES` 추가) · Reader.
 - 다른 구독의 데이터는 세지 않음(구독 하나씩 읽음) — 화면 꼬리에 명시.
+
+### 5.6 리소스 보안 카드 (2026-11-17, ④)
+
+`GET /api/security/resource-card?resourceId=` → `services/resourceSecurityCard.ts` → 공용 컴포넌트 `components/ResourceSecurityCard.tsx`. 여는 곳: 통합 위험의 **위험 조합·공격 경로 항목**('보안 카드 ▸'), **인프라 구성도 리소스 상세**(실데이터일 때).
+
+| 섹션 | 원본 (리소스 ID로 직접, 순차·429 재시도) | 판정 |
+|---|---|---|
+| Defender 권고 | 평가 — 그 리소스 + 하위 엔터티(`…/securityentitydata/…`) | 비정상·정상·해당 없음, 높음/중간/낮음, 권고별 대상 수(하위 포함 여부) |
+| 활성 경고 | 경고의 `ResourceIdentifiers`가 그 리소스(또는 하위)를 가리킴 | Active·InProgress, 경고 하나 = 한 줄 |
+| 인터넷 노출 | VM: 구성도 NSG 판정 · PaaS/AKS: 본문 + 하위 방화벽 규칙(`rulesExposure`) | 위험 조합과 같은 판정, 공용 엔드포인트 설정이 없는 유형 = 해당 없음 |
+| 이 리소스가 할 수 있는 것 | 관리 ID(시스템·사용자 할당) principal의 역할 할당 + 역할 정의 이름(ARM, 하루 캐시) | 특권 · 데이터 · 키·정책 · 기타 |
+| 누가 다룰 수 있나 | 범위가 이 리소스를 포함하는 역할 할당(관리 그룹·구독·RG·리소스 — 형제 접두사 제외) | 특권·데이터·키 역할만, 분류별 할당·주체 수 + 주체 유형·ID 끝 4자리(이름은 Graph 권한 필요) |
+| 위험 조합 · 공격 경로 | 같은 키로 조인 | 칩 |
+
+섹션마다 상태 ok · failed · na — 못 읽은 섹션은 '읽지 못함 — 없음이 아님'.
+
+**검증** (stg, 대시보드 전체 경로 vs 같은 리소스에 대한 독립 KQL):
+
+| 리소스 | 비정상 권고 | 활성 경고 | 관리 ID 역할 | 특권 접근 할당 |
+|---|---|---|---|---|
+| VM (노출+권고) | 5 = 5 | 0 = 0 | 1 = 1 | 8 = 8 |
+| 컨테이너 레지스트리 (허용 목록 + 취약 이미지) | 8,889 = 8,889 | 0 = 0 | 0 = 0 | 8 = 8 |
+| AKS 클러스터 (권고 + 특권 ID) | 579 = 579 | **1 = 1** | 4 = 4 | 8 = 8 |
+| PostgreSQL | 2 = 2 | 0 = 0 | 0 = 0 | 8 = 8 |
+
+검증에서 발견: 경고 조회식이 `summarize take_any(properties) by id`(잘못된 Resource Graph 쿼리), 고친 뒤에도 `distinct …, title, …`(열 이름 `title`이 파싱 실패) — 모든 카드의 경고가 '읽지 못함'이었음 → 열 이름 `dn`. 회귀 테스트로 고정.

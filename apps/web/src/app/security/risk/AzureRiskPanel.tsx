@@ -5,9 +5,10 @@
 // with a privileged role. Each factor with its evidence; "could not tell" is shown as such (never as "no"), and the
 // resources that could be a combination but a factor is unknown are counted. Each combination is also an issue above.
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
+import { ResourceSecurityCard } from "@/components/ResourceSecurityCard";
 import type { AzureAttackPath, AzureRiskCombo, AzureRiskFactor, AzureRiskResponse } from "@aud/types";
-import { Badge, Button, Chip, EmptyState, ErrorNotice, LoadingState, Notice, Panel } from "@/components/ui";
+import { Badge, Button, Chip, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel } from "@/components/ui";
 import type { ChipLevel } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import s from "./risk.module.css";
@@ -35,6 +36,7 @@ export const gapIsThrottle = (message: string) => /429|RateLimiting|throttl/i.
 
 export function AzureRiskPanel({ data, error, loading, onReload }: { data: AzureRiskResponse | undefined; error: string | null | undefined; loading: boolean; onReload?: () => void }) {
   const { t } = useI18n();
+  const [card, setCard] = useState<string | null>(null);
   // a known reason in words, else its code (never hidden)
   const reasonText = (r: string) => { const k = `azr.reason.${r}`; const v = t(k); return v === k ? r : v; };
   const factor = (name: "exposure" | "high" | "identity", f: AzureRiskFactor & { count?: number; children?: number; roles?: AzureRiskCombo["identity"]["roles"] }) => {
@@ -86,6 +88,7 @@ export function AzureRiskPanel({ data, error, loading, onReload }: { data: Azure
                       <Badge tone={SEV_TONE[c.sev]}>{t(`iq.sev.${c.sev}`)}</Badge>
                       <strong>{t(`azr.kind.${c.kind}`, { name: c.name })}</strong>
                       <a href={c.portalUrl} target="_blank" rel="noreferrer noopener">{t("azr.portal")}</a>
+                      <LinkButton ariaExpanded={card === c.key} onClick={() => setCard(card === c.key ? null : c.key)}>{card === c.key ? t("rsc.close") : t("rsc.open")}</LinkButton>
                     </div>
                     <span className={s.dim}>{c.type} · {c.resourceGroup}{c.exposure.limited ? ` · ${t("azr.sevLowered")}` : ""}</span>
                     <div className={s.azFactors}>
@@ -93,6 +96,7 @@ export function AzureRiskPanel({ data, error, loading, onReload }: { data: Azure
                       {factor("high", c.high)}
                       {factor("identity", c.identity)}
                     </div>
+                    {card === c.key ? <ResourceSecurityCard resourceId={c.resourceId} /> : null}
                   </li>
                 ))}
               </ul>

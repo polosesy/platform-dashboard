@@ -815,7 +815,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
             </div>
             <Legend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} showContext={view.active} flow={flowOrder} />
           </div>
-          <Inspector model={model} flow={flowOrder} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} filteredOut={scope.cut} undrawn={graph.undrawnTypes} />
+          <Inspector model={model} flow={flowOrder} target={target} drawn={layout.edges} offscreen={layout.offscreen} onSelect={setSelectedId} shownAt={layout.shownAt} filteredOut={scope.cut} undrawn={graph.undrawnTypes} securityCard={graph.source !== "mock"} />
         </div>
       )}
     </>

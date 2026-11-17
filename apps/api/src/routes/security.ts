@@ -8,6 +8,7 @@ import { queryArmResourceId, querySubscriptionId, respondWithFallback, sendError
 import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
 import { getAzureRiskCombos } from "../services/azureRiskCombos.js";
+import { getResourceSecurityCard } from "../services/resourceSecurityCard.js";
 import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
@@ -28,6 +29,18 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       res.json(await getAzureRiskCombos(env, req.auth.bearerToken, subscriptionId));
     } catch (e: unknown) {
       sendError(res, e, "azure_risk_failed", "security");
+    }
+  });
+
+  // Resource security card (Wiz's resource page): every security fact about one resource — signed in; the resource's
+  // subscription is checked against the caller's connections by the authorize middleware (any /subscriptions/ in the query)
+  router.get("/api/security/resource-card", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const resourceId = queryArmResourceId(req, env, "resourceId");
+      res.json(await getResourceSecurityCard(env, req.auth.bearerToken, resourceId));
+    } catch (e: unknown) {
+      sendError(res, e, "resource_card_failed", "security");
     }
   });
 

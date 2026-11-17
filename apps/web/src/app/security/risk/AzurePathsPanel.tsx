@@ -4,8 +4,10 @@
 // Internet through an exposed entry, its High findings, its managed identity's privileged and data roles, to the data
 // stores inside each role's scope — only links with evidence, and where the chain stops is said (no inferred hops).
 
+import { useState } from "react";
 import type { AzureAttackPath, AzureRiskResponse } from "@aud/types";
-import { Badge, Chip, EmptyState, Panel } from "@/components/ui";
+import { ResourceSecurityCard } from "@/components/ResourceSecurityCard";
+import { Badge, Chip, EmptyState, LinkButton, Panel } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { comboAnchor } from "./AzureRiskPanel";
 import s from "./risk.module.css";
@@ -14,6 +16,7 @@ const SEV_TONE = { critical: "high", high: "high", medium: "medium" } as const;
 
 export function AzurePathsPanel({ data }: { data: AzureRiskResponse | undefined }) {
   const { t } = useI18n();
+  const [card, setCard] = useState<string | null>(null);
   if (!data) return null;
   const roleText = (r: AzureAttackPath["roles"][number]) =>
     `${r.kind === "privileged" ? t(`azr.role.${r.role}`) : t(`azp.data.${r.role}`, { rw: r.write ? t("azp.write") : t("azp.read") })}${r.viaKeys ? ` (${t("azp.viaKeys")})` : ""} @ ${t(`azr.scope.${r.scope}`)}${r.scopeName ? ` ${r.scopeName}` : ""}`;
@@ -26,7 +29,9 @@ export function AzurePathsPanel({ data }: { data: AzureRiskResponse | undefined 
               <div className={s.azHead}>
                 <Badge tone={SEV_TONE[p.sev]}>{t(`iq.sev.${p.sev}`)}</Badge>
                 <strong>{t(`azp.ends.${p.ends}`, { name: p.entry.name })}</strong>
+                <LinkButton ariaExpanded={card === p.key} onClick={() => setCard(card === p.key ? null : p.key)}>{card === p.key ? t("rsc.close") : t("rsc.open")}</LinkButton>
               </div>
+              {card === p.key ? <ResourceSecurityCard resourceId={p.entry.resourceId} /> : null}
               <ol className={s.azChain} aria-label={t("azp.chain")}>
                 <li><Chip level="neutral" glyph={false}>{t("azp.internet")}</Chip></li>
                 <li>

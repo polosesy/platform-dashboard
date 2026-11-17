@@ -32,6 +32,8 @@ export type AzureRiskCombo = {
   high: AzureRiskFactor & { count?: number; children?: number };
   identity: AzureRiskFactor & { roles?: Array<{ role: "owner" | "contributor" | "uaa" | "rbacAdmin"; scope: "managementGroup" | "subscription" | "resourceGroup" | "resource" }> };
   portalUrl: string;
+  /** lower-case ARM id — opens the resource security card */
+  resourceId: string;
 };
 
 /** A data store a role can reach (a crown jewel) */
@@ -63,7 +65,7 @@ export type AzurePathRole = {
  */
 export type AzureAttackPath = {
   key: string;
-  entry: { name: string; type: string; resourceGroup: string; detail?: string; limited?: boolean };
+  entry: { name: string; type: string; resourceGroup: string; detail?: string; limited?: boolean; resourceId: string };
   vuln: { count: number; names: string[] } | null;
   roles: AzurePathRole[];
   /** data = reaches a data store · control = a privileged role with no data store found in scope · entry = stops at the entry (vulnerable, no identity reach) */
@@ -87,4 +89,42 @@ export type AzureRiskResponse = {
   counts: { exposed: number; high: number; privileged: number; combos: number; undetermined: number; paths: number };
   /** Sections that failed (their factor is "unknown" everywhere) */
   gaps: Array<{ section: "exposureVm" | "exposurePaas" | "findings" | "identities" | "roles" | "jewels"; message: string }>;
+};
+
+// ── 리소스 보안 카드 (security-roadmap 5.3 ④) — every security fact about one Azure resource, in one answer ──
+
+/** ok · failed (that section could not be read — never shown as "none") · na (does not apply to this resource) */
+export type CardSectionState = "ok" | "failed" | "na";
+
+export type ResourceSecurityCard = {
+  resourceId: string;
+  generatedAt: string;
+  /** found = the caller's identity can read the resource */
+  resource: { found: boolean; name: string; type: string; resourceGroup: string; location?: string; portalUrl: string };
+  recommendations: {
+    state: CardSectionState;
+    /** unhealthy / healthy / not applicable assessments on the resource and its child entities (images, containers) */
+    counts: { unhealthy: number; healthy: number; notApplicable: number; high: number; medium: number; low: number };
+    /** unhealthy, one row per recommendation, High first (≤ 100) */
+    items: Array<{ name: string; severity: "High" | "Medium" | "Low"; entities: number; onSelf: boolean }>;
+  };
+  alerts: { state: CardSectionState; items: Array<{ title: string; severity: string; status: string; at: string }> };
+  /** section = whether it could be read; factor = the exposure verdict (the combinations' judge) */
+  exposure: { section: CardSectionState; factor: AzureRiskFactor | null };
+  /** what this resource can do: its managed identities' role assignments */
+  identity: {
+    state: CardSectionState;
+    principals: number;
+    roles: Array<{ roleName: string; class: "privileged" | "data" | "keys" | "other"; scope: "managementGroup" | "subscription" | "resourceGroup" | "resource"; scopeName?: string }>;
+  };
+  /** who can act on this resource: role assignments whose scope covers it, privileged / data / key roles only */
+  access: {
+    state: CardSectionState;
+    /** per role class: assignments and distinct principals */
+    byClass: Array<{ class: "privileged" | "data" | "keys"; assignments: number; principals: number }>;
+    items: Array<{ roleName: string; class: "privileged" | "data" | "keys"; principalType: string; principalTail: string; scope: "managementGroup" | "subscription" | "resourceGroup" | "resource" }>;
+  };
+  /** the combination and attack path it belongs to (same keys as the issue list) */
+  combo: AzureRiskCombo | null;
+  path: AzureAttackPath | null;
 };
