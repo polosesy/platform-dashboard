@@ -38,7 +38,7 @@ test("alerts past the cap are said ('200+'), not shown as all of them", async ()
 test("overview: 'affected resources' never falls back to the findings sum; invisible plans are '—', not '0 / 0'; alerts '+'", () => {
   const page = read("../../web/src/app/security/page.tsx");
   assert.doesNotMatch(page, /n \?\? findings\(sev\)/, "the inflated findings sum under the 'affected resources' label");
-  assert.match(page, /value=\{recGap \|\| n === null \? "—" : n\.toLocaleString\(\)\}/);
+  assert.match(page, /value=\{\(b \? teamGap \|\| !b\.rgRules : recGap\) \|\| n === null \? "—" : n\.toLocaleString\(\)\}/);
   assert.match(page, /plansGap \|\| !posture\.plans\.length \? "—"/);
   assert.match(page, /posture\.alertsTruncated \? "\+" : ""/);
   assert.match(page, /sec\.unhealthyResources/, "a control's count is unhealthy resources, not 'issues'");

@@ -152,7 +152,7 @@ function fakeArm(fail: string[] = [], calls = { n: 0 }) {
     postJson: async <T>(_url: string, body: unknown): Promise<T> => {
       calls.n++;
       const q = (body as { query: string }).query;
-      const section = q.includes("dcount(rid)") ? "affected" : q.includes("securescorecontrols") ? "controls" : q.includes("securescores") ? "score" : q.includes("regulatorycompliance") ? "compliance" : q.includes("pricings") ? "plans" : q.includes("alerts") ? "alerts" : "recommendations";
+      const section = q.includes("summarize by rid, sev") ? "affected" : q.includes("securescorecontrols") ? "controls" : q.includes("securescores") ? "score" : q.includes("regulatorycompliance") ? "compliance" : q.includes("pricings") ? "plans" : q.includes("alerts") ? "alerts" : "recommendations";
       if (fail.includes(section)) throw new Error(`ARM 403: no access to scope '/subscriptions/${SUB}/resourceGroups/rg' for ${SUB}`);
       const data: Record<string, unknown[]> = {
         recommendations: [{ key: "k1", title: "Rec", sev: "High", unhealthy: 2, healthy: 1, md: { categories: ["Networking"] }, samples: [{ id: VM }] }],

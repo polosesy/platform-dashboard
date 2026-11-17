@@ -1,18 +1,24 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import type { PostureDomain } from "@aud/types";
 import { EmptyState, LoadingState, Panel, Stat } from "@/components/ui";
 import { useI18n } from "@/lib/i18n";
 import { useSecurity } from "./SecurityContext";
 import { DOMAINS, PostureNotices, SecurityHeader, SeverityBadge, useGap, useLabel } from "./components";
+import { ScopePicker, TeamSummaryPanel, bucketName, useTeamScope } from "./TeamScope";
 import s from "./security.module.css";
 
-/** 보안 개요 — Wiz-style posture overview: score, open findings by severity, areas, threats, coverage. */
+/**
+ * 보안 개요 — Wiz-style posture overview: score, open findings by severity, areas, threats, coverage. With a team chosen
+ * (security-roadmap 5.7 ⑤) the numbers that split by resource group are that team's (owner rules — the issue list's
+ * `teamOf`); the score, controls, compliance and plans are subscription-level and say so.
+ */
 export default function SecurityOverviewPage() {
   const { t } = useI18n();
   const label = useLabel();
-  const { posture } = useSecurity();
+  const { posture, subscriptionId } = useSecurity();
   const recGap = useGap("recommendations");
   const complianceGap = useGap("compliance");
   const plansGap = useGap("plans");
@@ -20,7 +26,10 @@ export default function SecurityOverviewPage() {
   const scoreGap = useGap("score");
   const controlsGap = useGap("controls");
 
-  const recs = posture?.recommendations ?? [];
+  const recs = useMemo(() => posture?.recommendations ?? [], [posture]);
+  const team = useTeamScope(subscriptionId, !!posture && posture.source !== "mock", recs);
+  const b = team.bucket; // null = the whole subscription
+  const teamNote = b ? t("sec.team.subscriptionWide") : null;
   // Findings = sum of unhealthy over recommendations (a resource once per recommendation); resources = distinct ids
   const findings = (sev: string) => recs.filter((r) => r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
   const resources = (sev: "High" | "Medium" | "Low") => posture?.affected?.[sev] ?? null;
@@ -29,14 +38,16 @@ export default function SecurityOverviewPage() {
   const paidPlans = (posture?.plans ?? []).filter((p) => p.tier === "Standard").length;
   const notCollected = t("sec.collectFailed");
 
-  const byDomain = DOMAINS.map((d) => {
+  const byDomainAll = DOMAINS.map((d) => {
     const rs = recs.filter((r) => r.domain === d);
     const sum = (sev?: string) => rs.filter((r) => !sev || r.severity === sev).reduce((n, r) => n + r.unhealthy, 0);
     return { d, kinds: rs.length, total: sum(), high: sum("High"), medium: sum("Medium"), low: sum("Low") };
   }).filter((x) => x.kinds > 0);
+  const byDomain = b ? DOMAINS.map((d) => b.byDomain.find((x) => x.d === d)).filter((x): x is NonNullable<typeof x> => !!x && x.kinds > 0) : byDomainAll;
   const href = (d: PostureDomain) => (d === "identity" ? "/security/identity" : `/security/findings?domain=${d}`);
 
-  const top = recs.slice(0, 6);
+  const top = b ? b.top.slice(0, 6).map((x) => ({ key: x.key, title: x.title, severity: x.severity, text: t("sec.team.findingsN", { n: x.n.toLocaleString() }) }))
+    : recs.slice(0, 6).map((r) => ({ key: r.key, title: r.title, severity: r.severity, text: t("sec.unhealthyOf", { u: r.unhealthy, t: r.unhealthy + r.healthy }) }));
   // Secure score, its controls and compliance standards are subscription-level resources: a connection that reads
   // only some resource groups sees none of them (no rows — not an error, not zero)
   const controls = (posture?.controls ?? []).filter((c) => c.maxScore > 0);
@@ -45,6 +56,12 @@ export default function SecurityOverviewPage() {
     <div className={s.page}>
       <SecurityHeader />
       <PostureNotices />
+      {posture && posture.source !== "mock" ? (
+        <div className={s.scopeBar}>
+          <ScopePicker view={team.view} scope={team.scope} pick={team.pick} />
+          {b ? <span className={s.dim}>{t("sec.team.scopeHint", { name: bucketName(t, b.id), g: b.groups.length })}</span> : null}
+        </div>
+      ) : null}
 
       {!posture ? (
         <LoadingState />
@@ -56,18 +73,20 @@ export default function SecurityOverviewPage() {
               <Stat
                 label={t("sec.score")}
                 value={posture.score && !scoreGap ? `${posture.score.percentage}%` : "—"}
-                hint={scoreGap ? notCollected : posture.score ? `${posture.score.current} / ${posture.score.max}` : t("sec.scoreNotVisible")}
+                hint={teamNote ?? (scoreGap ? notCollected : posture.score ? `${posture.score.current} / ${posture.score.max}` : t("sec.scoreNotVisible"))}
                 tone={posture.score && !scoreGap ? (posture.score.percentage < 40 ? "high" : posture.score.percentage < 70 ? "medium" : "success") : undefined}
               />
             </div>
             {(["High", "Medium", "Low"] as const).map((sev) => {
-              const n = resources(sev);
+              const n = b ? b.affected?.[sev] ?? null : resources(sev);
+              const teamGap = !!b && (!b.affected || !b.findings);
               return (
                 <Link key={sev} href="/security/findings" className={s.statLink}>
                   <Stat
                     label={t(`sec.affected${sev}`)}
-                    value={recGap || n === null ? "—" : n.toLocaleString()}
-                    hint={recGap ? notCollected : n === null
+                    value={(b ? teamGap || !b.rgRules : recGap) || n === null ? "—" : n.toLocaleString()}
+                    hint={b ? (teamGap ? notCollected : !b.rgRules ? t("sec.team.nsOnly") : t("sec.team.affectedHint", { f: (b.findings?.[sev] ?? 0).toLocaleString() }))
+                      : recGap ? notCollected : n === null
                       ? t("sec.affectedUnread", { n: kinds(sev), f: findings(sev).toLocaleString() })
                       : t("sec.affectedHint", { n: kinds(sev), f: findings(sev).toLocaleString() })}
                     tone={sev === "High" ? "high" : sev === "Medium" ? "medium" : undefined}
@@ -76,25 +95,30 @@ export default function SecurityOverviewPage() {
               );
             })}
             <Link href="/security/threats" className={s.statLink}>
-              <Stat label={t("sec.activeThreats")} value={alertsGap ? "—" : `${posture.alerts.length}${posture.alertsTruncated ? "+" : ""}`}
-                hint={alertsGap ? notCollected : posture.alertsTruncated ? t("sec.alertsTruncated", { n: posture.alerts.length }) : t("sec.alertsHint")} />
+              {b ? (
+                <Stat label={t("sec.activeThreats")} value={!b.alerts || !b.rgRules ? "—" : b.alerts.total}
+                  hint={!b.alerts ? notCollected : !b.rgRules ? t("sec.team.nsOnly") : t("sec.team.alertsHint")} />
+              ) : (
+                <Stat label={t("sec.activeThreats")} value={alertsGap ? "—" : `${posture.alerts.length}${posture.alertsTruncated ? "+" : ""}`}
+                  hint={alertsGap ? notCollected : posture.alertsTruncated ? t("sec.alertsTruncated", { n: posture.alerts.length }) : t("sec.alertsHint")} />
+              )}
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
               <Stat
                 label={t("sec.failedControls")}
                 value={complianceGap || !posture.compliance.length ? "—" : failedControls}
-                hint={complianceGap ? notCollected : posture.compliance.length ? t("sec.standards", { n: posture.compliance.length }) : t("sec.noStandardsVisible")}
+                hint={teamNote ?? (complianceGap ? notCollected : posture.compliance.length ? t("sec.standards", { n: posture.compliance.length }) : t("sec.noStandardsVisible"))}
               />
             </Link>
             <Link href="/security/compliance" className={s.statLink}>
               <Stat label={t("sec.coverage")} value={plansGap || !posture.plans.length ? "—" : `${paidPlans} / ${posture.plans.length}`}
-                hint={plansGap ? notCollected : posture.plans.length ? t("sec.coverageHint", { n: posture.plans.length })
-                  : posture.resourcePlans?.length ? t("sec.plansResourceOnly", { n: posture.resourcePlans.length }) : t("sec.plansNotVisible")} />
+                hint={teamNote ?? (plansGap ? notCollected : posture.plans.length ? t("sec.coverageHint", { n: posture.plans.length })
+                  : posture.resourcePlans?.length ? t("sec.plansResourceOnly", { n: posture.resourcePlans.length }) : t("sec.plansNotVisible"))} />
             </Link>
           </div>
 
-          <Panel title={t("sec.byDomain")} sub={t("sec.byDomainHint")}>
-            {recGap ? (
+          <Panel title={t("sec.byDomain")} sub={b ? t("sec.team.panelSub", { name: bucketName(t, b.id) }) : t("sec.byDomainHint")}>
+            {(b ? !b.findings : recGap) ? (
               <div className={s.dim}>{notCollected}</div>
             ) : (
               <div className={s.domains}>
@@ -120,18 +144,18 @@ export default function SecurityOverviewPage() {
           </Panel>
 
           <div className={s.split}>
-            <Panel title={t("sec.topActions")} actions={<Link href="/security/findings" className={s.linkMore}>{t("sec.viewAll")}</Link>}>
+            <Panel title={t("sec.topActions")} sub={b ? t("sec.team.panelSub", { name: bucketName(t, b.id) }) : undefined} actions={<Link href="/security/findings" className={s.linkMore}>{t("sec.viewAll")}</Link>}>
               <ul className={s.list}>
                 {top.map((r) => (
                   <li key={r.key} className={s.listItem}>
                     <SeverityBadge severity={r.severity} />
                     <span className={s.listTitle} title={r.title}>{r.title}</span>
-                    <span className={s.num}>{t("sec.unhealthyOf", { u: r.unhealthy, t: r.unhealthy + r.healthy })}</span>
+                    <span className={s.num}>{r.text}</span>
                   </li>
                 ))}
               </ul>
             </Panel>
-            <Panel title={t("sec.controls")} sub={t("sec.controlsHint")}>
+            <Panel title={t("sec.controls")} sub={teamNote ?? t("sec.controlsHint")}>
               {controlsGap
                 ? <EmptyState title={notCollected}>{t("sec.controlsFailedHint")}</EmptyState>
                 : controls.length === 0 && <EmptyState title={t("sec.controlsEmpty")}>{t("sec.controlsEmptyHint")}</EmptyState>}
@@ -146,6 +170,8 @@ export default function SecurityOverviewPage() {
               ))}
             </Panel>
           </div>
+
+          {posture.source !== "mock" ? <TeamSummaryPanel q={team.q} view={team.view} data={team.data} scope={team.scope} pick={team.pick} /> : null}
 
           <Panel title={t("sec.clusterCardTitle")}>
             <div className={s.cluster}>

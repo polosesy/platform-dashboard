@@ -319,10 +319,11 @@ const Q = {
     " samples=make_list_if(pack('id', rid, 'n', tostring(properties.resourceDetails.ResourceName), 't', tostring(properties.resourceDetails.ResourceType))," +
     " st=='Unhealthy' and isnotempty(rid), 5)" +
     " by key=name, title=tostring(properties.displayName), sev=tostring(properties.metadata.severity)",
-  // One resource once per severity — the recommendations' unhealthy counts repeat it per recommendation
+  // One resource once per severity — the recommendations' unhealthy counts repeat it per recommendation. Exact
+  // (`summarize by` then count): dcount() is an estimate, and the team view's per-group sums must add up to this
   affected:
     `${A} | extend st=tostring(properties.status.code), rid=tolower(tostring(properties.resourceDetails.Id)), sev=tostring(properties.metadata.severity)` +
-    " | where st == 'Unhealthy' and isnotempty(rid) | summarize n=dcount(rid) by sev",
+    " | where st == 'Unhealthy' and isnotempty(rid) | summarize by rid, sev | summarize n=count() by sev",
   score: "securityresources | where type == 'microsoft.security/securescores' and name == 'ascScore' | project s=properties.score",
   controls:
     "securityresources | where type == 'microsoft.security/securescores/securescorecontrols'" +

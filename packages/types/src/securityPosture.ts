@@ -1,4 +1,5 @@
 import type { SecureScoreControl } from "./security.js";
+import type { OwnerRule } from "./issues.js";
 
 /** Defender recommendation severity. */
 export type PostureSeverity = "High" | "Medium" | "Low";
@@ -110,4 +111,23 @@ export type SecurityPostureResponse = {
    */
   textLanguage?: "ko" | "en";
   textLocalized?: number;
+};
+
+/**
+ * 보안 개요 팀 범위 (GET /api/security/team-scope): raw counts per resource group (lower-case; "" = no group — the
+ * subscription itself, alerts naming no Azure resource). The web partitions them by `owners` with the issue list's
+ * `teamOf` (resource-group rules — namespace rules don't apply to Azure resources). Exact counts, no estimates.
+ */
+export type SecurityTeamScopeResponse = {
+  subscriptionId: string;
+  generatedAt: string;
+  owners: OwnerRule[];
+  /** every group seen: its resource count (null = inventory not read) and its distinct unhealthy resources per severity */
+  groups: Array<{ rg: string; resources: number | null; affected: { High: number; Medium: number; Low: number } }>;
+  /** unhealthy findings per (group, recommendation key) — a resource once per recommendation */
+  findings: Array<{ rg: string; key: string; severity: PostureSeverity; n: number }>;
+  /** active alerts (Active · InProgress): severity and the groups of the resources each names — no alert ids */
+  alerts: Array<{ severity: string; rgs: string[] }>;
+  /** a section not read (or cut at the row cap): its numbers are not facts */
+  gaps: Array<{ section: "inventory" | "affected" | "findings" | "alerts"; message: string }>;
 };

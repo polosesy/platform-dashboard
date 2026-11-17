@@ -9,6 +9,7 @@ import { queryLang } from "../infra/lang.js";
 import { collectAdvisories } from "../services/advisoriesCollector.js";
 import { getAzureRiskCombos } from "../services/azureRiskCombos.js";
 import { getResourceSecurityCard } from "../services/resourceSecurityCard.js";
+import { getSecurityTeamScope } from "../services/securityTeamScope.js";
 import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
@@ -29,6 +30,18 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       res.json(await getAzureRiskCombos(env, req.auth.bearerToken, subscriptionId));
     } catch (e: unknown) {
       sendError(res, e, "azure_risk_failed", "security");
+    }
+  });
+
+  // 보안 개요 팀 범위: raw counts per resource group — the web splits them by the owner rules (signed in)
+  router.get("/api/security/team-scope", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env) ?? defaultSubscriptions(env, req.auth.bearerToken)[0];
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      res.json(await getSecurityTeamScope(env, req.auth.bearerToken, subscriptionId));
+    } catch (e: unknown) {
+      sendError(res, e, "team_scope_failed", "security");
     }
   });
 

@@ -544,3 +544,49 @@
   .alertHead { grid-template-columns: auto minmax(0, 1fr); }
   .alertWhen { grid-column: 2; }
 }
+
+/* ── 팀 범위 (security-roadmap 5.7) ── */
+.scopeBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.teamTableWrap {
+  overflow-x: auto;
+}
+
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+.teamTable th,
+.teamTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.teamTable th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+
+.teamTable thead th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.teamTable tfoot th,
+.teamTable tfoot td {
+  font-weight: 700;
+  border-bottom: 0;
+}
+
+.teamRowOn {
+  background: rgba(var(--accent-rgb), 0.08);
+}
