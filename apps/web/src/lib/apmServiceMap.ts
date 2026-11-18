@@ -69,8 +69,12 @@ export type ApmMap = {
 };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-/** APM cards are one row taller than the Pod traffic map's: the signal row (lib/apmSignals.ts) */
-export const APM_CARD_H = NET.CARD_H + 20;
+/** An APM card (2026-11-18, Datadog service discovery): the bordered body (name · kind · numbers · the signal band,
+ *  lib/apmSignals.ts bandsOf) and, under it outside the border, one footnote line (shared dependency · fan-out, notesOf)
+ *  — always reserved, so a card's place does not depend on whether it has a footnote */
+export const APM_CARD_BODY = 96;
+export const APM_NOTE_H = 20;
+export const APM_CARD_H = APM_CARD_BODY + APM_NOTE_H;
 /** A workload seen on the network only: name + one line (flows · drops) — one step quieter than a traced service */
 export const DISC_CARD_H = 46;
 const DISC_HEAD = 24;

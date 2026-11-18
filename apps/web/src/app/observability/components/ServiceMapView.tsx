@@ -6,7 +6,7 @@
 // failed, dotted = messaging; width = rate. Hover or select a card: its lines stay, the rest dims, the panel lists each
 // caller / callee with rate · failures · p95 (server side). Failures are facts (▲) — no target, no red.
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position, ReactFlowProvider, useNodesInitialized, useReactFlow, type Edge, type Node, type NodeProps } from "reactflow";
 import "reactflow/dist/style.css";
@@ -22,7 +22,10 @@ import { useRangeRefresh } from "@/lib/useTimeRange";
 import { RED_WINDOWS, countText, errorRateText, quantileText, rateText } from "@/lib/redView";
 import { NET_GLYPH, apmLinksOf, buildApmMap, type ApmBox, type ApmLink, type ApmMap, type ApmPlacedCard } from "@/lib/apmServiceMap";
 import { depsOf, durationText } from "@/lib/depsView";
-import { SIGNAL_MIN_REQUESTS, VOLUME_FACTOR, instrumentationCoverage, serviceSignals, signalCounts, withSignal, type Coverage, type ServiceSignals, type SignalKind } from "@/lib/apmSignals";
+import {
+  CRITICAL_ERROR_RATE, FANOUT_MIN, SHARED_DEP_MIN, SIGNAL_MIN_REQUESTS, VOLUME_FACTOR, bandsOf, instrumentationCoverage, notesOf, serviceRows, serviceSignals, signalCounts, windowText, withSignal,
+  type Band, type Coverage, type ServiceSignals, type SignalKind,
+} from "@/lib/apmSignals";
 import obs from "../styles.module.css";
 import { useDependencies } from "./DependenciesView";
 import styles from "../../hubble/styles.module.css";
@@ -65,37 +68,84 @@ const CardNode = memo(function CardNode({ data }: NodeProps<CardData>) {
       </div>
     );
   }
+  // A service (Datadog service discovery's card): the body — name, kind, numbers, the worst signal's band — and under it,
+  // outside the border, the dependency footnote. Words come from stated rules (lib/apmSignals bandsOf · notesOf).
+  const entry = c.kind === "entry";
+  const bands = entry ? [] : bandsOf(data.sig);
+  const top = bands[0] ?? null;
+  const notes = entry ? { shared: null, fanout: null } : notesOf(data.sig);
   return (
-    <div className={styles.nmCard} data-status={c.status} data-dim={data.dim || undefined} data-selected={data.selected || undefined}
-      data-kind={c.kind === "entry" ? "internetIn" : "workload"}>
+    <div className={styles.nmApm} data-dim={data.dim || undefined} data-selected={data.selected || undefined}>
       <HiddenHandles />
-      <div className={styles.nmCardTop}>
-        <span className={styles.nmGlyph} aria-hidden="true">{NET_GLYPH[c.status]}</span>
-        <span className={styles.nmCardName} title={c.name}>{c.kind === "entry" ? t("ob.apm.entry") : c.name}</span>
+      <div className={styles.nmApmCard} data-level={top?.level} data-kind={entry ? "entry" : "service"} data-status={c.status}>
+        <div className={styles.nmApmHead}>
+          <span className={styles.nmApmIcon} aria-hidden="true">{entry ? "⇥" : top ? LEVEL_GLYPH[top.level] : NET_GLYPH.ok}</span>
+          <span className={styles.nmCardName} title={c.name}>{entry ? t("ob.apm.entry") : c.name}</span>
+        </div>
+        <div className={styles.nmApmMeta} title={entry ? c.name : undefined}>
+          {entry ? c.name : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}
+        </div>
+        <div className={styles.nmApmNums}>
+          {entry
+            ? <span>{t("ob.apm.out")} <b>{countText(c.outRequests, locale)}</b></span>
+            : <>
+                <span>{t("ob.apm.in")} <b>{c.inRequests > 0 ? rate(c.inRate) : "—"}</b></span>
+                <span data-hot={c.inFailed > 0 || undefined}>{t("ob.apm.failed")} <b>{countText(c.inFailed, locale)}</b></span>
+              </>}
+        </div>
+        {entry ? null : <SignalBand bands={bands} sig={data.sig} buckets={data.buckets} />}
       </div>
-      <div className={styles.nmCardKind}>
-        <span>{c.kind === "entry" ? c.name : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}</span>
-      </div>
-      <div className={styles.nmCells}>
-        {c.kind === "entry"
-          ? <span><small>{t("ob.apm.out")}</small>{countText(c.outRequests, locale)}</span>
-          : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
-        <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
-      </div>
-      {data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
+      {notes.shared !== null || notes.fanout !== null ? (
+        <div className={styles.nmApmNote}>
+          <span aria-hidden="true">ⓘ</span>
+          {notes.shared !== null ? <span title={t("ob.apm.note.sharedRule", { m: SHARED_DEP_MIN })}>{t("ob.apm.note.shared", { n: notes.shared })}</span> : null}
+          {notes.fanout !== null ? <span title={t("ob.apm.note.fanoutRule", { m: FANOUT_MIN })}>{t("ob.apm.note.fanout", { n: notes.fanout })}</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 });
 
-/** A card's signal line: errors · p95 slower than a week ago · volume ×n · callers / callees (facts — rules in lib/apmSignals) */
-function SignalRow({ sig, buckets, fan = true }: { sig: ServiceSignals; buckets: number[]; fan?: boolean }) {
+const BAND_GLYPH: Record<SignalKind, string> = { error: "✱", latency: "◷", volume: "⇅" };
+/** The card's square follows its worst band — the platform's state grammar (■ danger · ▲ warning · ● fine), ◆ = a change */
+const LEVEL_GLYPH: Record<Band["level"], string> = { critical: "■", high: "▲", info: "◆" };
+
+/** A band's words and its rule (the tooltip) — the same text in the card, the list and the panel */
+function useBandText() {
   const { t, locale } = useI18n();
+  const ratio = (x: number) => (x < 1 ? x.toFixed(2) : x.toFixed(1));
+  const text = (b: Band, s: ServiceSignals, buckets: number[]) => {
+    switch (b.label) {
+      case "errorCritical": return t("ob.apm.band.errorCritical", { r: errorRateText(s.error!.rate) });
+      case "errors": return s.error!.rate !== null
+        ? t("ob.apm.band.errorsRate", { n: countText(s.error!.count, locale), r: errorRateText(s.error!.rate) })
+        : t("ob.apm.band.errors", { n: countText(s.error!.count, locale) });
+      case "latency": return t("ob.apm.band.latency", { a: quantileText(s.latency!.weekAgo, buckets), b: quantileText(s.latency!.now, buckets) });
+      case "volumeNew": return t("ob.apm.band.volumeNew");
+      default: return t(`ob.apm.band.${b.label}`, { x: ratio(s.volume!.ratio!) });
+    }
+  };
+  const rule = (b: Band, s: ServiceSignals) => {
+    const crit = { r: errorRateText(CRITICAL_ERROR_RATE), n: SIGNAL_MIN_REQUESTS };
+    if (b.kind === "error") return `${t(b.level === "critical" ? "ob.apm.band.criticalRule" : "ob.apm.band.errorsRule", crit)} · ${t("ob.apm.sig.errorHint")} (${s.error!.basis === "spans" ? "RED" : "service graph"})`;
+    if (b.kind === "latency") return t("ob.apm.sig.latencyRule", { n: SIGNAL_MIN_REQUESTS });
+    return `${t("ob.apm.sig.volumeHint", { a: countText(s.volume!.weekAgo, locale), b: countText(s.volume!.now, locale) })} · ${t("ob.apm.band.volumeRule")}`;
+  };
+  return { text, rule };
+}
+
+/** The card's band: the worst signal in words (+n more — all of them in the tooltip); no signal = a quiet line */
+function SignalBand({ bands, sig, buckets }: { bands: Band[]; sig: ServiceSignals | null; buckets: number[] }) {
+  const { t } = useI18n();
+  const { text, rule } = useBandText();
+  const top = bands[0];
+  if (!top || !sig) return <div className={styles.nmApmBand}><span aria-hidden="true">●</span><span>{t("ob.apm.band.none")}</span></div>;
+  const all = bands.map((b) => `${BAND_GLYPH[b.kind]} ${text(b, sig, buckets)} — ${rule(b, sig)}`).join("\n");
   return (
-    <div className={styles.nmSignals}>
-      {sig.error ? <span data-hot title={t("ob.apm.sig.errorHint")}>▲ {t("ob.apm.sig.errorN", { n: countText(sig.error.count, locale) })}</span> : null}
-      {sig.latency ? <span data-warm title={t("ob.apm.sig.latencyHint", { a: quantileText(sig.latency.weekAgo, buckets), b: quantileText(sig.latency.now, buckets) })}>◷ p95 ↑</span> : null}
-      {sig.volume ? <span data-warm title={t("ob.apm.sig.volumeHint", { a: countText(sig.volume.weekAgo, locale), b: countText(sig.volume.now, locale) })}>⇅ {sig.volume.ratio === null ? t("ob.apm.sig.new") : "×" + (sig.volume.ratio < 1 ? sig.volume.ratio.toFixed(2) : sig.volume.ratio.toFixed(1))}</span> : null}
-      {fan ? <span className={styles.nmSigFan} title={t("ob.apm.sig.fanHint", { i: sig.callers, o: sig.callees })}>← {sig.callers} · → {sig.callees}</span> : null}
+    <div className={styles.nmApmBand} data-level={top.level} title={all}>
+      <span aria-hidden="true">{BAND_GLYPH[top.kind]}</span>
+      <span className={styles.nmApmBandText}>{text(top, sig, buckets)}</span>
+      {bands.length > 1 ? <span className={styles.nmApmMore}>+{bands.length - 1}</span> : null}
     </div>
   );
 }
@@ -254,7 +304,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
       : `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`) : null;
     const quietNet = l.tone === "net" && !on && !pointed;
     return {
-      id: l.id, source: l.source, target: l.target, type: "smoothstep", interactionWidth: 14,
+      id: l.id, source: l.source, target: l.target, type: "default", interactionWidth: 14,
       style: { stroke: tone.color, strokeWidth: on || pointed ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: (focus && !on) || (!focus && marked && !marked.has(l.source) && !marked.has(l.target)) ? 0.06 : on || pointed ? 1 : l.tone === "fail" ? 0.95 : quietNet ? 0.35 : 0.5 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
       ...(label ? { label, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
@@ -270,15 +320,56 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
   }, [selected]);
 
   const sel = map.cards.find((c) => c.id === selected) ?? null;
+  const win = windowText(d.windowMinutes);
+  // "Instrument services": the coverage panel below (the workloads that send no traces, and how to add them)
+  const covRef = useRef<HTMLElement>(null);
+  const [covOpen, setCovOpen] = useState(false);
+  const toCoverage = () => { setCovOpen(true); covRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); covRef.current?.focus({ preventScroll: true }); };
   return (
     <div className={styles.nm}>
-      <div className={styles.nmBar}>
-        <Segmented label={t("ob.apm.show")} value={failing ? "failing" : "all"} onChange={(v) => setFailing(v === "failing")}
-          items={[{ id: "all", label: t("ob.apm.all") }, { id: "failing", label: t("ob.apm.failingOnly") }]} />
-        <SearchInput label={t("ob.apm.search")} value={search} onChange={setSearch} placeholder={t("ob.apm.search")} />
-        <Segmented label={t("ob.apm.mode")} value={mode} onChange={setMode} items={[{ id: "map", label: t("ob.apm.mode.map") }, { id: "list", label: t("ob.apm.mode.list") }]} />
+      <div className={styles.nmTop}>
+        <div className={styles.nmSummary}>
+          <span>{t("ob.apm.summary", { s: map.totals.services, l: map.totals.links, r: countText(map.totals.requests, locale), m: d.windowMinutes })}</span>
+          {map.totals.failingLinks > 0 && <span data-status="warn">{NET_GLYPH.warn} {t("ob.apm.failingLinks", { n: map.totals.failingLinks, f: countText(map.totals.failed, locale) })}</span>}
+          {windowChip && <Chip>{windowChip}</Chip>}
+          {d.resets != null && d.resets > 0 && <Chip level="warn" title={t("ob.apm.resetsHint")}>{t("ob.apm.resets", { n: d.resets })}</Chip>}
+          {d.gaps?.length ? <Chip level="warn">{t("ob.apm.gaps", { q: d.gaps.map((g) => g.query).join(", ") })}</Chip> : null}
+        </div>
+        <Button variant="primary" disabled={!coverage} onClick={toCoverage}
+          title={coverage ? t("ob.apm.instrumentHint", { n: coverage.untraced.length }) : t("ob.apm.instrumentWait")}>
+          {t("ob.apm.instrument")} →
+        </Button>
       </div>
-      <div className={styles.nmBar} role="group" aria-label={t("ob.apm.disc.title")}>
+
+      <section className={styles.nmFrame} aria-label={t("ob.apm.mode.map")}>
+        <div className={styles.nmFrameHead}>
+          <span className={styles.nmFrameRange} title={t("ob.apm.frame.rangeHint")}>
+            <span className={styles.nmRangeCode}>{win.short}</span>
+            {win.unit === "hour" ? (win.n === 1 ? t("ob.apm.frame.past.hour1") : t("ob.apm.frame.past.hour", { n: win.n })) : t("ob.apm.frame.past.min", { n: win.n })}
+          </span>
+          <Segmented label={t("ob.apm.mode")} value={mode} onChange={setMode} items={[
+            { id: "map", label: <><span aria-hidden="true">⊶ </span>{t("ob.apm.mode.map")}</> },
+            { id: "list", label: <><span aria-hidden="true">☰ </span>{t("ob.apm.mode.list")}</> },
+          ]} />
+        </div>
+        <div className={styles.nmSigRow} role="group" aria-label={t("ob.apm.sig.filter")}>
+          <span className={styles.nmSigLead}>{t("ob.apm.sig.filter")}:</span>
+          {(["latency", "error", "volume"] as const).map((k) => (
+            <FilterChip key={k} pressed={signal === k} disabled={(k !== "error" && redState !== "ok") || counts[k] === 0} title={t(`ob.apm.sig.${k}Rule`, { n: SIGNAL_MIN_REQUESTS, f: VOLUME_FACTOR })}
+              onClick={() => setSignal(signal === k ? null : k)}>
+              <span className={styles.nmSigIcon} aria-hidden="true">{BAND_GLYPH[k]}</span>
+              {t(`ob.apm.sig.${k}`)}
+              <span className={styles.nmSigNum} data-zero={counts[k] === 0 || undefined}>{counts[k]}</span>
+            </FilterChip>
+          ))}
+          {redState === "none" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.noRed")}</span> : redState === "loading" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.loadingRed")}</span> : null}
+          <span className={styles.nmSigTools}>
+            <Segmented label={t("ob.apm.show")} value={failing ? "failing" : "all"} onChange={(v) => setFailing(v === "failing")}
+              items={[{ id: "all", label: t("ob.apm.all") }, { id: "failing", label: t("ob.apm.failingOnly") }]} />
+            <SearchInput label={t("ob.apm.search")} value={search} onChange={setSearch} placeholder={t("ob.apm.search")} />
+          </span>
+        </div>
+      <div className={styles.nmFrameSub} role="group" aria-label={t("ob.apm.disc.title")}>
         <FilterChip pressed={discover} title={t("ob.apm.disc.hint")} onClick={() => { setDiscover(!discover); setOpenNs(new Set()); }}>{t("ob.apm.disc.toggle")}</FilterChip>
         {discover ? (
           <>
@@ -293,33 +384,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
           </>
         ) : null}
       </div>
-      <div className={styles.nmBar} role="group" aria-label={t("ob.apm.sig.filter")}>
-        <span className={styles.nmSigLabel}>{t("ob.apm.sig.filter")}</span>
-        {(["latency", "error", "volume"] as const).map((k) => (
-          <FilterChip key={k} pressed={signal === k} disabled={(k !== "error" && redState !== "ok") || counts[k] === 0} title={t(`ob.apm.sig.${k}Rule`, { n: SIGNAL_MIN_REQUESTS, f: VOLUME_FACTOR })}
-            onClick={() => setSignal(signal === k ? null : k)}>{t(`ob.apm.sig.${k}`)} {counts[k]}</FilterChip>
-        ))}
-        {redState === "none" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.noRed")}</span> : redState === "loading" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.loadingRed")}</span> : null}
-      </div>
-
-      <div className={styles.nmSummary}>
-        <span>{t("ob.apm.summary", { s: map.totals.services, l: map.totals.links, r: countText(map.totals.requests, locale), m: d.windowMinutes })}</span>
-        {map.totals.failingLinks > 0 && <span data-status="warn">{NET_GLYPH.warn} {t("ob.apm.failingLinks", { n: map.totals.failingLinks, f: countText(map.totals.failed, locale) })}</span>}
-        {windowChip && <Chip>{windowChip}</Chip>}
-        {d.resets != null && d.resets > 0 && <Chip level="warn" title={t("ob.apm.resetsHint")}>{t("ob.apm.resets", { n: d.resets })}</Chip>}
-        {d.gaps?.length ? <Chip level="warn">{t("ob.apm.gaps", { q: d.gaps.map((g) => g.query).join(", ") })}</Chip> : null}
-        <ul className={styles.nmLegend} aria-label={t("ob.hm.legend")}>
-          <li data-status="ok"><span aria-hidden="true">{NET_GLYPH.ok}</span>{t("ob.apm.status.ok")}</li>
-          <li data-status="warn"><span aria-hidden="true">{NET_GLYPH.warn}</span>{t("ob.apm.status.warn")}</li>
-          <li><span className={styles.nmLine} data-tone="forward" />{t("ob.apm.line.forward")}</li>
-          <li><span className={styles.nmLine} data-tone="dropOther" />{t("ob.apm.line.fail")}</li>
-          <li><span className={styles.nmLine} data-tone="dropIpv6" />{t("ob.apm.line.async")}</li>
-          {net ? <li><span className={styles.nmLine} data-tone="net" />{t("ob.apm.line.net")}</li> : null}
-          {net ? <li><span className={styles.nmQuietKey} aria-hidden="true" />{t("ob.apm.disc.legendCard")}</li> : null}
-        </ul>
-      </div>
-
-      {mode === "list" ? <ServiceList map={map} signals={signals} marked={marked} buckets={d.buckets} red={red} onPick={(id) => { setSelected(id); setMode("map"); }} /> : null}
+      {mode === "list" ? <div className={styles.nmFrameList}><ServiceList map={map} signals={signals} marked={marked} buckets={d.buckets} red={red} onPick={(id) => { setSelected(id); setMode("map"); }} /></div> : null}
       <div className={styles.nmLayout} data-open={!!sel || undefined} hidden={mode === "list"}>
         <div className={styles.nmCanvas}>
           {map.cards.length === 0 ? (
@@ -350,8 +415,20 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
         </div>
         {sel && <CardPanel card={sel} map={map} d={d} deps={depsOf(deps, sel.id)} onPick={setSelected} onClose={() => setSelected(null)} nameOf={nameOf} />}
       </div>
+        <ul className={styles.nmLegend} aria-label={t("ob.hm.legend")}>
+          <li><span className={styles.nmApmKey} data-level="critical" aria-hidden="true">{BAND_GLYPH.error}</span>{t("ob.apm.legend.critical")}</li>
+          <li><span className={styles.nmApmKey} data-level="high" aria-hidden="true">{BAND_GLYPH.latency}</span>{t("ob.apm.legend.high")}</li>
+          <li><span className={styles.nmApmKey} data-level="info" aria-hidden="true">{BAND_GLYPH.volume}</span>{t("ob.apm.legend.info")}</li>
+          <li><span aria-hidden="true">ⓘ</span>{t("ob.apm.legend.note")}</li>
+          <li><span className={styles.nmLine} data-tone="forward" />{t("ob.apm.line.forward")}</li>
+          <li><span className={styles.nmLine} data-tone="dropOther" />{t("ob.apm.line.fail")}</li>
+          <li><span className={styles.nmLine} data-tone="dropIpv6" />{t("ob.apm.line.async")}</li>
+          {net ? <li><span className={styles.nmLine} data-tone="net" />{t("ob.apm.line.net")}</li> : null}
+          {net ? <li><span className={styles.nmQuietKey} aria-hidden="true" />{t("ob.apm.disc.legendCard")}</li> : null}
+        </ul>
+      </section>
 
-      {coverage ? <CoveragePanel c={coverage} /> : null}
+      {coverage ? <CoveragePanel c={coverage} open={covOpen} setOpen={setCovOpen} anchor={covRef} /> : null}
       <details className={styles.nmAt}>
         <summary>{t("ob.apm.howMeasured")}</summary>
         <p>{t("ob.apm.howMeasuredHint")}</p>
@@ -452,9 +529,7 @@ function ServiceList({ map, signals, marked, buckets, red, onPick }: {
   const { t, locale } = useI18n();
   const rate = useRate();
   const redOf = new Map((red ?? []).map((r) => [r.service, r]));
-  const weight = (s: ServiceSignals | undefined) => (s ? (s.error ? 4 : 0) + (s.latency ? 2 : 0) + (s.volume ? 1 : 0) : 0);
-  const rows = map.cards.filter((c) => c.kind === "service" && (!marked || marked.has(c.id)))
-    .sort((a, b) => weight(signals.get(b.id)) - weight(signals.get(a.id)) || b.inRequests - a.inRequests || (a.name < b.name ? -1 : 1));
+  const rows = serviceRows(map.cards, signals, marked);
   if (!rows.length) return <EmptyState title={t("ob.apm.noData")} />;
   return (
     <div className={obs.sloTableWrap}>
@@ -479,7 +554,7 @@ function ServiceList({ map, signals, marked, buckets, red, onPick }: {
                   <span className={obs.sloCellMain}>{r?.p95 ? quantileText(r.p95, buckets) : "—"}</span>
                   {r?.weekAgo?.p95 ? <span className={obs.sloCellSub}>{t("ob.apm.col.weekAgo", { v: quantileText(r.weekAgo.p95, buckets) })}</span> : null}
                 </td>
-                <td>{s ? <SignalRow sig={s} buckets={buckets} fan={false} /> : "—"}</td>
+                <td><BandCells sig={s ?? null} buckets={buckets} /></td>
                 <td className={obs.redNum}>← {s?.callers ?? 0} · → {s?.callees ?? 0}</td>
               </tr>
             );
@@ -490,14 +565,28 @@ function ServiceList({ map, signals, marked, buckets, red, onPick }: {
   );
 }
 
+/** The list's signal cell: every band (worst first) in its words — the same as the card, all of them */
+function BandCells({ sig, buckets }: { sig: ServiceSignals | null; buckets: number[] }) {
+  const { text, rule } = useBandText();
+  const bands = bandsOf(sig);
+  if (!sig || !bands.length) return <>—</>;
+  return (
+    <span className={styles.nmBandCells}>
+      {bands.map((b) => (
+        <span key={b.label} className={styles.nmApmBand} data-level={b.level} title={rule(b, sig)}>
+          <span aria-hidden="true">{BAND_GLYPH[b.kind]}</span><span className={styles.nmApmBandText}>{text(b, sig, buckets)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Instrumentation coverage — the running workloads of the traced namespaces that send no traces */
-function CoveragePanel({ c }: { c: Coverage }) {
+function CoveragePanel({ c, open, setOpen, anchor }: { c: Coverage; open: boolean; setOpen: (v: boolean) => void; anchor: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  if (!c.total) return null;
   const shown = open ? c.untraced : c.untraced.slice(0, 12);
   return (
-    <section className={styles.nmCoverage} aria-label={t("ob.apm.cov.title")}>
+    <section ref={anchor} tabIndex={-1} className={styles.nmCoverage} aria-label={t("ob.apm.cov.title")}>
       <h4>{t("ob.apm.cov.title")}</h4>
       <p>{t("ob.apm.cov.summary", { ns: c.namespaces.length, t: c.traced, n: c.total, u: c.untraced.length })}</p>
       {c.untraced.length ? (

@@ -1029,6 +1029,8 @@
 .nmLine[data-tone="net"] { border-top: 2px dotted rgba(var(--integration-rgb), 0.7); }
 .nmLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr) 340px; }
+/* [hidden] loses to the class's display: grid — the list view showed the map under it (2026-11-18) */
+.nmLayout[hidden] { display: none; }
 .nmCanvas { height: calc(100vh - 300px); min-height: 460px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-md); background: rgba(var(--ink-rgb), 0.015); overflow: hidden; }
 @media (max-width: 1100px) { .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr); } }
 
@@ -1088,11 +1090,76 @@
 .nmCells small { display: block; font-size: var(--canvas-text-xs); font-weight: 500; color: var(--subtle); }
 .nmCells [data-hot] { color: var(--status); }
 /* APM signal line (lib/apmSignals.ts): facts only — errors in the warning text colour, "slower · volume" as text + glyph */
-.nmSignals { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; min-width: 0; overflow: hidden; font-size: var(--text-caption); font-weight: 600; color: var(--muted); white-space: nowrap; }
-.nmSignals [data-hot] { color: var(--warning-strong); }
-.nmSignals [data-warm] { color: var(--ink); }
-.nmSigFan { margin-left: auto; font-weight: 500; color: var(--subtle); font-variant-numeric: tabular-nums; }
 .nmSigLabel { font-size: var(--text-small); color: var(--muted); }
+
+/* APM service map (2026-11-18, Datadog service discovery): a summary line + "Instrument services" over one framed panel —
+   head (the window "1h · Past hour" | Map · List), the signal filter row (icon · words · count), the canvas flush with
+   the frame, the legend as its foot. Cards: a body (name · kind · numbers · the worst signal's band, tinted by its level)
+   and, under the border, the dependency footnote. Levels (lib/apmSignals bandsOf): critical = the stated error-rate rule,
+   high = errors / higher latency, info = a volume change (a change, not a fault — accent, not a warning colour). */
+.nmTop { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.nmFrame { display: grid; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; }
+.nmFrameHead { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel-sunken); }
+.nmFrameRange { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-body); font-weight: 500; color: var(--ink); }
+.nmRangeCode { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: var(--radius-sm); background: rgba(var(--ink-rgb), 0.07); color: var(--muted); font-family: var(--font-mono); font-size: var(--text-small); }
+.nmSigRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px 8px; }
+.nmSigLead { font-size: var(--text-small); font-weight: 600; color: var(--ink); margin-right: 4px; }
+.nmSigIcon { color: var(--muted); margin-right: 2px; }
+.nmSigNum { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; margin-left: 4px; padding: 0 6px; border-radius: var(--radius-pill); background: rgba(var(--ink-rgb), 0.08); color: var(--ink); font-size: var(--text-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+.nmSigNum[data-zero] { background: transparent; color: var(--subtle); font-weight: 500; }
+.nmSigTools { margin-left: auto; display: inline-flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.nmFrameSub { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 0 16px 12px; }
+.nmFrame > .nmLayout { padding: 0; gap: 0; border-top: 1px solid var(--border); }
+.nmFrame .nmCanvas { border: 0; border-radius: 0; }
+.nmFrame .nmPanel { border-width: 0 0 0 1px; border-radius: 0; }
+.nmFrame > .nmLegend { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); }
+.nmFrameList { padding: 0 0 4px; border-top: 1px solid var(--border); min-width: 0; }
+@media (max-width: 1100px) { .nmFrame .nmPanel { border-width: 1px 0 0; } }
+
+.nmApm { position: relative; width: 100%; height: 100%; display: grid; grid-template-rows: 96px 20px; cursor: pointer; transition: opacity 0.15s; }
+.nmApm[data-dim] { opacity: 0.25; }
+.nmApmCard {
+  --level: rgba(var(--ink-rgb), 0.14); --level-rgb: var(--ink-rgb);
+  display: grid; grid-template-rows: 20px 16px 18px 1fr; gap: 2px; min-width: 0; box-sizing: border-box; padding: 8px 0 0; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--level); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); line-height: 1.25;
+  transition: box-shadow 0.15s;
+}
+.nmApmCard[data-level="critical"] { --level: rgba(var(--danger-rgb), 0.55); --level-rgb: var(--danger-rgb); }
+.nmApmCard[data-level="high"] { --level: rgba(var(--warning-rgb), 0.6); --level-rgb: var(--warning-rgb); }
+.nmApm[data-selected] .nmApmCard { box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.6), var(--shadow-sm); }
+.nmApmCard[data-kind="entry"] { background: rgba(var(--violet-rgb), 0.04); border-style: dashed; }
+.nmApmHead { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 10px; }
+/* The service square: the status glyph on the status colour (white glyph — the one direct colour, on a filled square) */
+.nmApmIcon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); background: var(--status); color: #fff; font-size: var(--text-caption); font-weight: 700; }
+.nmApmCard:not([data-level]) .nmApmIcon { background: var(--ok); }
+.nmApmCard[data-level="critical"] .nmApmIcon { background: var(--danger); }
+.nmApmCard[data-level="high"] .nmApmIcon { background: var(--warning); }
+.nmApmCard[data-level="info"] .nmApmIcon { background: var(--accent); }
+.nmApmCard[data-kind="entry"] .nmApmIcon { background: rgba(var(--violet-rgb), 0.85); }
+.nmApmHead .nmCardName { font-size: var(--text-small); color: var(--ink); }
+.nmApmMeta { padding: 0 10px 0 38px; font-size: var(--text-caption); color: var(--subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nmApmNums { display: flex; gap: 12px; padding: 0 10px 0 38px; font-size: var(--text-caption); color: var(--muted); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
+.nmApmNums b { font-weight: 600; color: var(--ink); }
+.nmApmNums [data-hot] b { color: var(--warning-strong); }
+.nmApmBand {
+  display: flex; align-items: center; gap: 6px; min-width: 0; align-self: end; height: 26px; padding: 0 10px;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08); font-size: var(--text-caption); font-weight: 500; color: var(--subtle); white-space: nowrap;
+}
+.nmApmBand[data-level="critical"] { background: var(--danger-soft); border-top-color: rgba(var(--danger-rgb), 0.25); color: var(--danger-strong); font-weight: 600; }
+.nmApmBand[data-level="high"] { background: var(--warning-soft); border-top-color: rgba(var(--warning-rgb), 0.3); color: var(--warning-strong); font-weight: 600; }
+.nmApmBand[data-level="info"] { background: var(--accent-soft); border-top-color: rgba(var(--accent-rgb), 0.25); color: var(--accent-strong); font-weight: 600; }
+.nmApmBandText { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nmApmMore { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
+.nmApmNote { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 2px 0; font-size: var(--text-caption); color: var(--subtle); white-space: nowrap; overflow: hidden; }
+.nmApmNote > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nmApmNote > span:not(:first-child) + span::before { content: "· "; }
+.nmApmKey { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 16px; border-radius: var(--radius-sm); font-size: var(--text-caption); }
+.nmApmKey[data-level="critical"] { background: var(--danger-soft); color: var(--danger-strong); }
+.nmApmKey[data-level="high"] { background: var(--warning-soft); color: var(--warning-strong); }
+.nmApmKey[data-level="info"] { background: var(--accent-soft); color: var(--accent-strong); }
+/* the list's signal cell: the same bands, stacked */
+.nmBandCells { display: grid; gap: 4px; justify-items: start; }
+.nmBandCells .nmApmBand { height: 24px; border: 0; border-radius: var(--radius-sm); }
 /* instrumentation coverage under the APM map */
 .nmCoverage { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); min-width: 0; }
 .nmCoverage h4 { margin: 0; font-size: var(--text-body); font-weight: 600; }

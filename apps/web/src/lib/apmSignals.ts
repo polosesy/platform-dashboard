@@ -14,7 +14,7 @@ export const VOLUME_FACTOR = 2;
 
 export type SignalKind = "error" | "latency" | "volume";
 export type ServiceSignals = {
-  error?: { count: number; rate: number | null; basis: "spans" | "graph" };
+  error?: { count: number; rate: number | null; requests: number; basis: "spans" | "graph" };
   latency?: { now: RedQuantile; weekAgo: RedQuantile };
   volume?: { now: number; weekAgo: number; ratio: number | null };
   /** distinct services calling it / it calls (service graph, self calls excluded) */
@@ -39,8 +39,8 @@ export function serviceSignals(graph: Pick<ServiceGraphResponse, "nodes" | "edge
     if (n.entry) continue;
     const s: ServiceSignals = { callers: callers.get(n.service)?.size ?? 0, callees: callees.get(n.service)?.size ?? 0 };
     const r = redOf.get(n.service);
-    if (r && r.errors > 0) s.error = { count: r.errors, rate: r.errorRate, basis: "spans" };
-    else if (n.inbound.failed > 0) s.error = { count: n.inbound.failed, rate: n.inbound.errorRate, basis: "graph" };
+    if (r && r.errors > 0) s.error = { count: r.errors, rate: r.errorRate, requests: r.requests, basis: "spans" };
+    else if (n.inbound.failed > 0) s.error = { count: n.inbound.failed, rate: n.inbound.errorRate, requests: n.inbound.requests, basis: "graph" };
     const w = r?.weekAgo;
     if (r && w) {
       const enough = Math.max(r.requests, w.requests) >= SIGNAL_MIN_REQUESTS;
@@ -117,4 +117,66 @@ export function instrumentationCoverage(
 export function withSignal(signals: Map<string, ServiceSignals>, kind: SignalKind | null): Set<string> | null {
   if (!kind) return null;
   return new Set([...signals].filter(([, s]) => !!s[kind]).map(([k]) => k));
+}
+
+// ── the card's band and footnote (2026-11-18 — Datadog service discovery: "Critical error rate", "High latency",
+// "Critical dependency", "High fan-out") — each word is a stated rule, nothing is a model ──
+
+/** = apps/api workloadSlo.ts SLO_DEFAULTS.availability and the SRE Workbook page factor (burn ×14.4 over 1 h) — tested */
+export const DEFAULT_AVAILABILITY = 0.999;
+export const FAST_BURN = 14.4;
+/** The error rate that burns a 99.9 % budget at the paging speed (2 % of a 30-day budget in an hour) = 1.44 % */
+export const CRITICAL_ERROR_RATE = Math.round(FAST_BURN * (1 - DEFAULT_AVAILABILITY) * 1e6) / 1e6;
+/** A shared dependency: called by at least this many services (a failure there reaches more than one caller) */
+export const SHARED_DEP_MIN = 2;
+/** High fan-out: calls at least this many services (one request waits on all of them — any slow one slows it) */
+export const FANOUT_MIN = 3;
+
+export type BandLevel = "critical" | "high" | "info";
+export type BandLabel = "errorCritical" | "errors" | "latency" | "volumeUp" | "volumeDown" | "volumeNew";
+export type Band = { kind: SignalKind; level: BandLevel; label: BandLabel };
+
+/**
+ * Pure: a service's bands, worst first —
+ *   errorCritical (critical) = error rate ≥ CRITICAL_ERROR_RATE on at least SIGNAL_MIN_REQUESTS requests
+ *   errors (high)            = any other error
+ *   latency (high)           = the latency signal (p95 bucket above a week ago)
+ *   volume (info)            = ×2 up, ½ down, or new — a change, not a fault: no warning colour
+ */
+export function bandsOf(s: ServiceSignals | null | undefined): Band[] {
+  if (!s) return [];
+  const out: Band[] = [];
+  if (s.error) {
+    const critical = s.error.rate !== null && s.error.requests >= SIGNAL_MIN_REQUESTS && s.error.rate >= CRITICAL_ERROR_RATE;
+    out.push({ kind: "error", level: critical ? "critical" : "high", label: critical ? "errorCritical" : "errors" });
+  }
+  if (s.latency) out.push({ kind: "latency", level: "high", label: "latency" });
+  if (s.volume) out.push({ kind: "volume", level: "info", label: s.volume.ratio === null ? "volumeNew" : s.volume.ratio >= 1 ? "volumeUp" : "volumeDown" });
+  return out;
+}
+
+/** Pure: the footnote under a card — shared dependency (callers) and high fan-out (callees), null = not one */
+export function notesOf(s: ServiceSignals | null | undefined): { shared: number | null; fanout: number | null } {
+  return {
+    shared: s && s.callers >= SHARED_DEP_MIN ? s.callers : null,
+    fanout: s && s.callees >= FANOUT_MIN ? s.callees : null,
+  };
+}
+
+/** Pure: the window's short code and words ("15m" · 15 min, "1h" · 1 hour) — the frame head's "15m Past 15 minutes" */
+export function windowText(minutes: number): { short: string; n: number; unit: "min" | "hour" } {
+  if (minutes >= 60 && minutes % 60 === 0) return { short: `${minutes / 60}h`, n: minutes / 60, unit: "hour" };
+  return { short: `${minutes}m`, n: minutes, unit: "min" };
+}
+
+/** Pure: the list's rows — the services on the map that carry the chosen signal (all of them with none), worst bands
+ *  first (critical error 8 · error 4 · latency 2 · volume 1, summed), then most requests, then name. The same set the
+ *  map highlights. */
+export function serviceRows<C extends { id: string; kind: string; name: string; inRequests: number }>(
+  cards: C[], signals: Map<string, ServiceSignals>, marked: Set<string> | null,
+): C[] {
+  const W: Record<BandLabel, number> = { errorCritical: 8, errors: 4, latency: 2, volumeUp: 1, volumeDown: 1, volumeNew: 1 };
+  const weight = (s: ServiceSignals | undefined) => bandsOf(s).reduce((n, b) => n + W[b.label], 0);
+  return cards.filter((c) => c.kind === "service" && (!marked || marked.has(c.id)))
+    .sort((a, b) => weight(signals.get(b.id)) - weight(signals.get(a.id)) || b.inRequests - a.inRequests || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
