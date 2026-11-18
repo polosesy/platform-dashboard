@@ -169,3 +169,61 @@ test("Helm notify values: channels → AUD_NOTIFY_CHANNELS, each URL / auth vari
   assert.notEqual(bad.status, 0, "a channel cannot pull another variable from the Secret");
   assert.match(bad.stderr, /urlEnv must match/);
 });
+
+// ── flowWebhook: Flow's own incoming webhook (replaces the flowLabs relay where the Flow server offers it) ──
+
+const sampleAlert = () => {
+  const r = parseAlertPayload(samplePayload("grafana"), new Date("2026-11-18T00:00:00Z"));
+  assert.ok(r.kind !== "unsupported");
+  return Object.values(applyDelivery({}, [r.alerts[0]!], new Date("2026-11-18T00:00:00Z"), () => "platform").next)[0]!;
+};
+
+test("flowWebhook: body {title, text} — Flow posts text (the whole message, title first); no Azure schema, no secrets", async () => {
+  const c = channel({ format: "flowWebhook", tokenEnv: "AUD_NOTIFY_AUTH_FLOW_TEST", prefix: "[STG-TEST] " });
+  const a = sampleAlert();
+  const body = (await import("../src/services/notifyChannels.js")).channelPayload(c, a, "https://aud.example.com") as Record<string, unknown>;
+  assert.deepEqual(Object.keys(body).sort(), ["text", "title"]);
+  assert.match(String(body.title), /^\[STG-TEST\] /);
+  assert.ok(String(body.text).startsWith(String(body.title)), "text alone reads complete — Flow shows only text");
+  assert.ok(String(body.text).length <= 4000);
+  assert.match(String(body.text), /📋 /, "the summary line");
+});
+
+test("flowWebhook: the endpoint token goes in x-flow-webhook-token (never Authorization, never the body)", async () => {
+  const c = channel({ format: "flowWebhook", tokenEnv: "AUD_NOTIFY_AUTH_FLOW_TEST" });
+  let seen: { headers: Record<string, string>; body: string } | null = null;
+  const fetchImpl = (async (_u: URL, init: RequestInit) => { seen = { headers: init.headers as Record<string, string>, body: String(init.body) }; return new Response("", { status: 200 }); }) as unknown as typeof fetch;
+  const vars = { AUD_NOTIFY_URL_FLOW_TEST: "https://flow.example.com/webhook/hook1/default", AUD_NOTIFY_AUTH_FLOW_TEST: "tok-123" };
+  const r = await sendToChannel(c, sampleAlert(), null, vars, { fetchImpl });
+  assert.equal(r.ok, true);
+  assert.equal(seen!.headers["x-flow-webhook-token"], "tok-123");
+  assert.equal(seen!.headers.authorization, undefined);
+  assert.doesNotMatch(seen!.body, /tok-123/);
+  const noToken = await sendToChannel(c, sampleAlert(), null, { AUD_NOTIFY_URL_FLOW_TEST: vars.AUD_NOTIFY_URL_FLOW_TEST }, { fetchImpl });
+  assert.equal(noToken.ok, true);
+  assert.equal(seen!.headers["x-flow-webhook-token"], undefined, "unset token → no header (Flow's token is optional)");
+});
+
+test("flowWebhook: tokenEnv only on that format, only AUD_NOTIFY_AUTH_*; the screen gets the name and whether it is set", () => {
+  assert.throws(() => channel({ tokenEnv: "AUD_NOTIFY_AUTH_X" }), /tokenEnv is for format flowWebhook/);
+  assert.throws(() => channel({ format: "flowWebhook", tokenEnv: "AZURE_CLIENT_SECRET" }));
+  const c = channel({ format: "flowWebhook", tokenEnv: "AUD_NOTIFY_AUTH_FLOW_TEST" });
+  const off = channelInfo(c, { AUD_NOTIFY_URL_FLOW_TEST: "https://flow.example.com/webhook/h/default" });
+  assert.deepEqual([off.tokenEnv, off.tokenSet], ["AUD_NOTIFY_AUTH_FLOW_TEST", false]);
+  const on = channelInfo(c, { AUD_NOTIFY_URL_FLOW_TEST: "https://flow.example.com/webhook/h/default", AUD_NOTIFY_AUTH_FLOW_TEST: "tok-123" });
+  assert.equal(on.tokenSet, true);
+  assert.doesNotMatch(JSON.stringify(on), /tok-123|webhook\/h/, "neither the token nor the hook id leaves the API");
+});
+
+test("Helm: a flowWebhook channel's tokenEnv also comes from the Secret; another name fails the render", (t) => {
+  const helm = spawnSync("helm", ["version", "--short"], { encoding: "utf8" });
+  if (helm.status !== 0) return t.skip("helm not installed");
+  const tpl = (...set: string[]) => spawnSync("helm", ["template", "aud-dashboard", "deploy/helm/aud-dashboard", ...set.flatMap((s) => ["--set", s])], { cwd: ROOT, encoding: "utf8" });
+  const base = ["notify.urlSecret=aud-notify-urls", "notify.channels[0].key=flow-test", "notify.channels[0].name=Flow", "notify.channels[0].format=flowWebhook", "notify.channels[0].urlEnv=AUD_NOTIFY_URL_FLOW_TEST"];
+  const ok = tpl(...base, "notify.channels[0].tokenEnv=AUD_NOTIFY_AUTH_FLOW_TEST");
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /- name: AUD_NOTIFY_AUTH_FLOW_TEST\n\s+valueFrom: \{ secretKeyRef: \{ name: "aud-notify-urls", key: AUD_NOTIFY_AUTH_FLOW_TEST, optional: true \} \}/);
+  const bad = tpl(...base, "notify.channels[0].tokenEnv=AZURE_CLIENT_SECRET");
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /tokenEnv must match/);
+});

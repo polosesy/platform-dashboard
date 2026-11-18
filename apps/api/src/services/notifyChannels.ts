@@ -1,8 +1,12 @@
 // 알림 센터 — outbound channels (pure). The dashboard is the relay: alerts it received (Azure common alert schema,
 // Grafana, Alertmanager) go out to chat tools in the shape each one reads:
-//   flow        Madras Check Flow (flowLabs BOT webhook) — a template receiver ({{json.path}}): the Azure common schema
-//               fields (data.essentials.*, data.alertContext.*) AND finished `title` / `message`, so both an existing
-//               Azure template and a {{title}}/{{message}} template render — the reason Grafana alerts came out blank
+//   flow        Madras Check Flow through flowLabs (an on-prem relay of our own, not a Flow product) — a template
+//               receiver ({{json.path}}): the Azure common schema fields (data.essentials.*, data.alertContext.*) AND
+//               finished `title` / `message`, so both an existing Azure template and a {{title}}/{{message}} template
+//               render — the reason Grafana alerts came out blank
+//   flowWebhook Flow's own incoming webhook (OPEN API 센터 › 웹훅 관리, beta — api.flow.team/docs/webhook): a bot posts
+//               into one chat room; body {title, text} (Flow posts only `text` when present), the endpoint's token in
+//               the x-flow-webhook-token header (tokenEnv) — replaces flowLabs where the Flow server offers it
 //   azureCommon Azure Monitor common alert schema (any receiver built for action groups)
 //   grafana     Grafana webhook shape (receivers built for Grafana contact points)
 //   slack       Slack incoming webhook (text + Block Kit)
@@ -14,7 +18,7 @@
 import { z } from "zod";
 import type { NotifyAlert, NotifyCategory, NotifyChannelInfo, NotifySeverity } from "@aud/types";
 
-export const FORMATS = ["flow", "azureCommon", "grafana", "slack", "googleChat", "teams", "json"] as const;
+export const FORMATS = ["flow", "flowWebhook", "azureCommon", "grafana", "slack", "googleChat", "teams", "json"] as const;
 export type ChannelFormat = (typeof FORMATS)[number];
 
 const SEVS = ["sev1", "sev2", "sev3", "sev4"] as const;
@@ -29,6 +33,8 @@ export const ChannelSchema = z.object({
   urlEnv: z.string().regex(/^AUD_NOTIFY_URL_[A-Z0-9_]{1,40}$/),
   /** Optional environment variable whose value is sent as the Authorization header (e.g. "Bearer …") */
   authHeaderEnv: z.string().regex(/^AUD_NOTIFY_AUTH_[A-Z0-9_]{1,40}$/).optional(),
+  /** flowWebhook only: environment variable holding the endpoint token, sent as x-flow-webhook-token */
+  tokenEnv: z.string().regex(/^AUD_NOTIFY_AUTH_[A-Z0-9_]{1,40}$/).optional(),
   minSeverity: z.enum(SEVS).default("sev3"),
   /** Only these categories (empty = all) */
   categories: z.array(z.enum(CATS)).default([]),
@@ -42,7 +48,7 @@ export const ChannelSchema = z.object({
   /** Plain http is refused unless set (an internal server without TLS) */
   allowHttp: z.boolean().default(false),
   enabled: z.boolean().default(true),
-}).strict();
+}).strict().refine((c) => !c.tokenEnv || c.format === "flowWebhook", { message: "tokenEnv is for format flowWebhook (x-flow-webhook-token)", path: ["tokenEnv"] });
 export type Channel = z.infer<typeof ChannelSchema>;
 
 /**
@@ -83,6 +89,7 @@ export function channelInfo(c: Channel, vars: Record<string, string | undefined>
   const u = channelUrl(c, vars);
   return {
     key: c.key, name: c.name, format: c.format, host: u ? u.host : null, configured: !!u, urlEnv: c.urlEnv, enabled: c.enabled,
+    ...(c.tokenEnv ? { tokenEnv: c.tokenEnv, tokenSet: !!vars[c.tokenEnv]?.trim() } : {}),
     minSeverity: c.minSeverity, categories: c.categories as NotifyCategory[], teams: c.teams, statuses: c.statuses, lang: c.lang, prefix: c.prefix,
   };
 }
@@ -237,6 +244,11 @@ export function googleChatShape(m: Message): Record<string, unknown> {
   return { text: [`*${m.title}*`, ...m.lines, ...m.links.map((l) => `<${l.url}|${l.label}>`)].join("\n").slice(0, 4000) };
 }
 
+/** Flow's own incoming webhook: Flow posts `text` (as the endpoint's bot) when the body has it — title kept for its card */
+export function flowWebhookShape(m: Message): Record<string, unknown> {
+  return { title: m.title.slice(0, 200), text: plainText(m).slice(0, 4000) };
+}
+
 export function teamsShape(a: NotifyAlert, m: Message): Record<string, unknown> {
   return {
     type: "message",
@@ -261,6 +273,7 @@ export function channelPayload(c: Pick<Channel, "format" | "lang" | "prefix">, a
   const m = messageOf(a, c, base);
   switch (c.format) {
     case "flow": return { ...azureCommon(a, m), title: m.title, message: plainText(m), status: a.status, severity: a.severity, category: a.category, team: a.team ?? null };
+    case "flowWebhook": return flowWebhookShape(m);
     case "azureCommon": return azureCommon(a, m);
     case "grafana": return grafanaShape(a, m, base);
     case "slack": return slackShape(m);

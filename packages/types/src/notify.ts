@@ -107,12 +107,15 @@ export type NotifyChannelCheck = {
 export type NotifyChannelInfo = {
   key: string;
   name: string;
-  format: "flow" | "azureCommon" | "grafana" | "slack" | "googleChat" | "teams" | "json";
+  format: "flow" | "flowWebhook" | "azureCommon" | "grafana" | "slack" | "googleChat" | "teams" | "json";
   host: string | null;
   /** The URL variable is set (and https, or http allowed) */
   configured: boolean;
   /** The variable that holds the URL — its name, never its value (what to set when `configured` is false) */
   urlEnv: string;
+  /** flowWebhook: the variable holding the endpoint token (name only) and whether it is set */
+  tokenEnv?: string;
+  tokenSet?: boolean;
   enabled: boolean;
   minSeverity: NotifySeverity;
   categories: NotifyCategory[];

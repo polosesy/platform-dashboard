@@ -131,6 +131,9 @@ export function registerNotifyHooks(app: Express, env: Env) {
   for (const c of missing) {
     console.warn(`[notify] channel "${c.key}" has no usable URL — set ${c.urlEnv} (https${c.allowHttp ? " or http" : ""}); its alerts are recorded but not sent`);
   }
+  for (const c of channelsOf(env).filter((x) => x.enabled && x.tokenEnv && !vars()[x.tokenEnv]?.trim())) {
+    console.warn(`[notify] channel "${c.key}" names ${c.tokenEnv} for its Flow webhook token but it is not set — sends go without x-flow-webhook-token`);
+  }
   startPull(env);
   // 긴급 취약점 선제 감시: vendor announcements polled in the background → this inbox and its channels
   startEarlyWatch(env, (alerts) => deliverAlerts(env, alerts));

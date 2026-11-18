@@ -127,7 +127,8 @@ spec:
             {{- /* only AUD_NOTIFY_URL_* / AUD_NOTIFY_AUTH_* — a channel must not pull any other variable (AZURE_CLIENT_ID …) from the Secret */}}
             {{- if not (regexMatch "^AUD_NOTIFY_URL_[A-Z0-9_]{1,40}$" (.urlEnv | default "")) }}{{ fail (printf "notify.channels %s: urlEnv must match AUD_NOTIFY_URL_[A-Z0-9_]+" (.key | default "?")) }}{{ end }}
             {{- if and .authHeaderEnv (not (regexMatch "^AUD_NOTIFY_AUTH_[A-Z0-9_]{1,40}$" .authHeaderEnv)) }}{{ fail (printf "notify.channels %s: authHeaderEnv must match AUD_NOTIFY_AUTH_[A-Z0-9_]+" (.key | default "?")) }}{{ end }}
-            {{- range (compact (list .urlEnv .authHeaderEnv)) }}
+            {{- if and .tokenEnv (not (regexMatch "^AUD_NOTIFY_AUTH_[A-Z0-9_]{1,40}$" .tokenEnv)) }}{{ fail (printf "notify.channels %s: tokenEnv must match AUD_NOTIFY_AUTH_[A-Z0-9_]+" (.key | default "?")) }}{{ end }}
+            {{- range (compact (list .urlEnv .authHeaderEnv .tokenEnv)) }}
             - name: {{ . }}
               valueFrom: { secretKeyRef: { name: {{ $.Values.notify.urlSecret | quote }}, key: {{ . }}, optional: true } }   # missing → logged at start, shown on the setup screen
             {{- end }}

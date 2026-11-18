@@ -99,7 +99,9 @@ AUD_NOTIFY_CHANNELS='[
 ]'
 AUD_NOTIFY_URL_FLOW_OPS=<Flow BOT webhook URL — secret>
 AUD_NOTIFY_URL_SLACK_SEC=<Slack incoming webhook URL — secret>
-# formats: flow · azureCommon · grafana · slack · googleChat · teams · json
+# Flow's own incoming webhook instead of flowLabs (Flow admin › OPEN API › webhooks — https://<flow>/webhook/<hookId>/default):
+#   {"key":"flow-test","name":"Flow test room","format":"flowWebhook","urlEnv":"AUD_NOTIFY_URL_FLOW_TEST","tokenEnv":"AUD_NOTIFY_AUTH_FLOW_TEST"}
+# formats: flow (flowLabs) · flowWebhook (Flow official) · azureCommon · grafana · slack · googleChat · teams · json
 # optional: "teams":["platform"] (connection file owners) · "authHeaderEnv":"AUD_NOTIFY_AUTH_X" · "allowHttp":true (internal http only)`;
 }
 

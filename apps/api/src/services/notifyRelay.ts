@@ -19,6 +19,7 @@ export async function sendToChannel(
   const url = channelUrl(c, vars);
   if (!url) return { ok: false, attempts: 0, error: "notConfigured", ms: 0 };
   const auth = c.authHeaderEnv ? vars[c.authHeaderEnv] : undefined;
+  const hookToken = c.tokenEnv ? vars[c.tokenEnv]?.trim() : undefined;
   const body = JSON.stringify(channelPayload(c, a, base));
   const f = opts.fetchImpl ?? fetch;
   let last: SendResult = { ok: false, attempts: 0, ms: 0 };
@@ -26,7 +27,7 @@ export async function sendToChannel(
     try {
       const res = await f(url, {
         method: "POST", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { "content-type": "application/json; charset=utf-8", ...(auth ? { authorization: auth } : {}) },
+        headers: { "content-type": "application/json; charset=utf-8", ...(auth ? { authorization: auth } : {}), ...(hookToken ? { "x-flow-webhook-token": hookToken } : {}) },
         body,
       });
       const ok = res.status >= 200 && res.status < 300;

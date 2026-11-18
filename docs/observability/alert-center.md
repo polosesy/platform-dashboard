@@ -77,7 +77,8 @@ resource "grafana_contact_point" "aud_dashboard" {
 
 | 형식 `format` | 받는 곳 | 보내는 모양 |
 |---|---|---|
-| `flow` | **Flow(마드라스체크) BOT 웹훅**(flowLabs, 템플릿형 수신기 `{{json.path}}`) | Azure 일반 경고 스키마 경로(`data.essentials.*`·`data.alertContext.*`) **+** 완성된 `title`·`message` — 기존 Azure 템플릿과 `{{title}}`/`{{message}}` 템플릿이 둘 다 그대로 동작 |
+| `flow` | **flowLabs BOT 웹훅** — 사내에 직접 구축한 중계 서버(Flow 공식 제품 아님), 템플릿형 수신기 `{{json.path}}` | Azure 일반 경고 스키마 경로(`data.essentials.*`·`data.alertContext.*`) **+** 완성된 `title`·`message` — 기존 Azure 템플릿과 `{{title}}`/`{{message}}` 템플릿이 둘 다 그대로 동작 |
+| `flowWebhook` | **Flow 공식 수신 웹훅**(OPEN API 센터 › 웹훅 관리, 베타) — flowLabs 없이 Flow 서버로 직접 | `{title, text}` — Flow는 `text`만 **봇 이름으로** 방에 올림(제목이 첫 줄). 토큰은 `tokenEnv`(`AUD_NOTIFY_AUTH_*`) → 헤더 `x-flow-webhook-token` |
 | `azureCommon` | 액션 그룹용으로 만든 수신기 | Azure 일반 경고 스키마 |
 | `grafana` | Grafana 연락처용으로 만든 수신기 | Grafana 웹훅 모양(`alerts[]`·`title`·`message`) |
 | `slack` | Slack incoming webhook | `text` + Block Kit(머리·본문·링크 버튼) |
@@ -134,6 +135,16 @@ kubectl -n aud-dashboard create secret generic aud-notify-urls   --from-literal=
 - `urlEnv`는 `AUD_NOTIFY_URL_*`, `authHeaderEnv`는 `AUD_NOTIFY_AUTH_*`만 — 다른 이름이면 렌더 실패(Secret에서 `AZURE_CLIENT_ID` 같은 다른 설정을 덮어쓰지 못하게)
 - 예전처럼 `api.extraEnv`에 `AUD_NOTIFY_CHANNELS`를 넣었다면 `notify.channels`로 옮기기(둘 다 두면 뒤의 `extraEnv`가 이김)
 
+#### flowLabs 대신 Flow 공식 웹훅으로 (`flowWebhook`, 2026-11-18)
+
+flowLabs는 Flow가 공식 지원하지 않아 사내에 직접 구축한 중계 서버입니다(공개 주소·주소 안 토큰뿐인 인증·Flow 업그레이드 때 깨질 위험). 대시보드는 이미 메시지를 완성해 보내므로, Flow 서버에 **공식 수신 웹훅**이 있으면 중계 서버 없이 바로 보낼 수 있습니다.
+
+- 근거: Flow OPEN API 문서(https://api.flow.team/docs/webhook — 클라우드판 기준, **베타**: 사양 변경 가능, 엔드포인트는 만든 뒤 수정 불가, 연동 코드 복사는 고객센터 문의). 주소 `https://<Flow 서버>/webhook/{hookId}/{service}`(알 수 없는 서비스 = `default`), 토큰은 헤더 `x-flow-webhook-token`, 본문에 `text`가 있으면 그 값만 올림
+- **온프렘(서버설치형)에도 있는지는 공개 자료로 확인되지 않음** — 사내 Flow 서버는 `/webhook…` 경로에만 다르게 답함(2026-11-18 GET 확인: 그 경로 200, 같은 모양의 다른 경로는 오류 페이지)이라 정황은 있음. Flow 관리자 화면에 'OPEN API · 봇 관리 · 웹훅 관리'가 있는지가 결정
+- 절차: ① Flow 관리자 › OPEN API › **봇 관리** — 봇 만들기(방에 글을 쓰는 이름) ② **웹훅 관리** — 이름·봇·Action **채팅**·Target = 시험방 **연동 코드**(ID 아님) → 'Copy URL', 토큰 ③ Secret 키 둘: `AUD_NOTIFY_URL_FLOW_TEST`(주소)·`AUD_NOTIFY_AUTH_FLOW_TEST`(토큰) ④ 채널 `{"key":"flow-test","name":"Flow 시험방","format":"flowWebhook","urlEnv":"AUD_NOTIFY_URL_FLOW_TEST","tokenEnv":"AUD_NOTIFY_AUTH_FLOW_TEST","minSeverity":"sev4","prefix":"[STG-TEST] "}` ⑤ 연결 확인 → 시험 전송 → 방에 봇 이름으로 글
+- 확인 화면: 토큰 변수가 비면 '토큰 없음 — <변수>' 배지·시작 로그 경고(헤더 없이 보냄 — Flow 토큰은 선택이라 받을 수도, 거절할 수도)
+- 같은 Flow 서버로 보내는 Azure 액션 그룹(flowLabs 직결)은 이 채널과 별개 — 대시보드 수신(§3.1)으로 옮기면 한 경로가 됨
+
 #### Flow 방(모바일·PC)까지 — 끝까지 닿는 조건
 
 전달은 한 줄로 이어진 사슬입니다. 어느 한 칸이 비면 방에 아무것도 오지 않고, 대부분 **조용히** 비어 있습니다. 칸마다 객관적으로 확인하는 방법이 있습니다.
@@ -145,7 +156,7 @@ kubectl -n aud-dashboard create secret generic aud-notify-urls   --from-literal=
 | 3 | 주소가 파드에 있음 | `AUD_NOTIFY_URL_*` — Helm `notify.urlSecret`의 키 | 플랫폼 관리자 | '주소 없음' 배지 없음 · 시작 로그에 `[notify] … no usable URL` 없음 |
 | 4 | API 파드 → 웹훅 호스트 길 | 송신(NAT·방화벽 FQDN/IP 규칙) · CNP 강제면 `networkPolicy.extraFqdns`에 호스트 · 받는 쪽이 출발지 IP를 제한하면 **송신 공용 IP**(NAT 게이트웨이) 허용 · Flow 서버가 **사내망(사설 주소)** 이면 클러스터 → 사내망 경로(VPN·ExpressRoute)와 사내 이름 DNS 전달, 온프렘 Docker는 같은 망이면 그대로·프록시면 `NO_PROXY` | 고객 네트워크 | **연결 확인 = 연결됨** |
 | 5 | 인증서 | 공인 인증서(예: Let's Encrypt — 90일마다 받는 쪽이 갱신) 또는 사내 CA = API에 `NODE_EXTRA_CA_CERTS` · 사내 http만 있으면 채널 `allowHttp: true` | Flow 운영 · 플랫폼 관리자 | 연결 확인의 인증서 줄(남은 날) |
-| 6 | 받는 쪽이 받아 그림 | **방마다 BOT 웹훅 하나**(웹훅 1개 = 템플릿 1개), 템플릿 `{{title}}`/`{{message}}`(또는 기존 Azure 템플릿) | Flow 방 관리자 | **시험 전송 = 응답 2xx** + 방에 `[STG-TEST] …` 글 |
+| 6 | 받는 쪽이 받아 그림 | `flow`(flowLabs): **방마다 BOT 웹훅 하나**(웹훅 1개 = 템플릿 1개), 템플릿 `{{title}}`/`{{message}}`(또는 기존 Azure 템플릿) / `flowWebhook`(Flow 공식): 봇 + 웹훅 엔드포인트(Action 채팅, Target = 방의 **연동 코드**), 토큰 | Flow 방 관리자 · Flow 관리자 | **시험 전송 = 응답 2xx** + 방에 `[STG-TEST] …` 글(공식 웹훅이면 봇 이름) |
 | 7 | 방 → 구성원의 모바일·PC | 시험방 구성원 · 방 알림 켜짐(BOT 글 포함)·방해 금지 아님 · 모바일 앱 알림 권한 · Flow 서버의 푸시 발송(Flow 운영 쪽) | Flow 운영 · 구성원 | 구성원 휴대폰·PC에 도착 — **대시보드가 알 수 없는 칸**(사람이 확인) |
 | 8 | 실제 알림으로 끝까지 | 1~7 | — | Grafana 규칙이 울릴 때(E2E: 시험 파드 로그 주입) 같은 알림이 Google Chat·Flow 둘 다, 해소도 · '보낸 곳' 정상 |
 

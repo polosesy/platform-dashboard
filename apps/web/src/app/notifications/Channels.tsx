@@ -73,6 +73,7 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
                 <b>{c.name}</b>
                 <Badge tone="info">{t(`notify.ch.format.${c.format}`)}</Badge>
                 {c.configured ? <span className={s.mono}>{c.host}</span> : <Badge tone="medium">{t("notify.ch.noUrlVar", { name: c.urlEnv })}</Badge>}
+                {c.tokenEnv && !c.tokenSet ? <Badge tone="medium">{t("notify.ch.noToken", { name: c.tokenEnv })}</Badge> : null}
                 {!c.enabled ? <Badge tone="neutral">{t("notify.ch.disabled")}</Badge> : null}
               </div>
               <div className={s.muted}>
@@ -101,6 +102,7 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
         <summary>{t("notify.ch.howTo")}</summary>
         <pre className={s.code}>{channelsSnippet()}</pre>
         <p className={s.muted}>{t("notify.ch.flowHint")}</p>
+        <p className={s.muted}>{t("notify.ch.flowWebhookHint")}</p>
         <pre className={s.code}>{flowTemplateHint()}</pre>
       </details>
     </Panel>
