@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OpsCase, OpsRunbook } from "@aud/types";
-import { extractSignals, findSimilar, scopeOverlap, tokenize } from "../src/services/opsMatch.js";
+import { extractSignals, findSimilar, scopeOverlap, signalInText, tokenize } from "../src/services/opsMatch.js";
 import { CaseBody, RunbookBody, clearOpsMemory, maskTexts, readKnowledge, runbookUsage, visible, writeOps } from "../src/services/opsKnowledgeStore.js";
 import * as webNs from "../../web/src/lib/opsKnowledge.ts";
 
@@ -165,4 +165,40 @@ test("agent seam (skeleton): the context is the text + the closest experience, m
   assert.deepEqual(ctx.runbooks[0]?.steps, ["이전 컨테이너 종료 이유 확인", "메모리 사용량 vs limit 비교"], "step titles only — commands are not sent");
   assert.equal(agentProvider({ AUD_OPS_AGENT: "off" }), null);
   assert.deepEqual(agentStatus({}).state, "notConfigured");
+});
+
+// 찾기 '결과 없음' 줄이기 (2026-11-18 — 실데이터 평가: 문서 오류 줄 중 저장 데이터에 없는 것 36개, 결과 없음 7 → 3, 1순위 28 → 32)
+const mk = (id: string, title: string, signals: OpsCase["signals"], symptoms = "증상"): OpsCase => ({
+  id, title, status: "resolved", severity: "sev3", occurredAt: "2026-11-01T00:00:00Z", symptoms, resolution: "고침", tags: [], signals, scope: {}, runbookIds: [],
+  rev: 1, createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z",
+});
+
+test("a stored signal found verbatim in the pasted text is shared — keywords and event reasons the extractor doesn't know", () => {
+  const acr = mk("acr-push-timeout", "ACR 푸시 실패 — VPN DPD", [{ kind: "keyword", value: "TLS handshake timeout" }, { kind: "keyword", value: "i/o timeout" }]);
+  const zombie = mk("zombie-pid1", "좀비 프로세스 누적", [{ kind: "keyword", value: "ZombieProcessAccumulation" }]);
+  const secret = mk("pull-secret", "이미지 풀 시크릿", [{ kind: "k8sReason", value: "FailedToRetrieveImagePullSecret" }]);
+  const other = mk("other", "관계없는 사례", [{ kind: "k8sReason", value: "OOMKilled" }]);
+  const all = [acr, zombie, secret, other];
+  const first = (text: string) => findSimilar({ text }, all, []).cases[0]?.id;
+  // a noisy log line (hosts, IPs, digests) that names the fact
+  assert.equal(first(`failed to do request: Post "https://reg.example.io/v2/app/blobs/uploads/": net/http: TLS handshake timeout\ndial tcp 10.0.3.11:443: i/o timeout`), "acr-push-timeout");
+  assert.equal(first("kubectl get events -A --field-selector reason=ZombieProcessAccumulation --sort-by=.lastTimestamp"), "zombie-pid1");
+  assert.equal(first("ns  Pod/app-79f56fc67b-nnpvw  [FailedToRetrieveImagePullSecret]  x32"), "pull-secret");
+  const m = findSimilar({ text: "[FailedToRetrieveImagePullSecret] x32" }, all, []).cases[0]!;
+  assert.deepEqual(m.why.signals, [{ kind: "k8sReason", value: "FailedToRetrieveImagePullSecret" }], "the reason is said");
+});
+
+test("…but not a generic word, a short value, or a value inside a longer word", () => {
+  assert.equal(signalInText("timeout", "request timeout after 30s"), false, "generic");
+  assert.equal(signalInText("oom", "oom killed"), false, "shorter than 6");
+  assert.equal(signalInText("ZombieProcess", "xzombieprocessaccumulation"), false, "inside a longer word");
+  assert.equal(signalInText("ZombieProcessAccumulation", "reason=zombieprocessaccumulation --sort"), true);
+  assert.equal(signalInText("i/o timeout", "dial tcp 10.0.0.1:443: i/o timeout"), true);
+});
+
+test("tokenize: volatile parts (IPs, hashes, generated suffixes, long numbers) dropped; a name also by its parts", () => {
+  const t = tokenize("dial tcp 10.0.3.11:443 pod shop-sftp-app-79f56fc67b-nnpvw sha256:9f12fada4c1e hubble-relay");
+  assert.ok(!t.some((x) => /10.0.3|9f12fada|79f56fc67b|nnpvw/.test(x)), JSON.stringify(t));
+  assert.ok(t.includes("hubble-relay") && t.includes("hubble") && t.includes("relay"));
+  assert.ok(t.includes("shop-sftp-app") && t.includes("sftp"), "the workload name without its generated suffix");
 });

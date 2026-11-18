@@ -25,6 +25,19 @@ const DROP_REASONS = new Set([
 ]);
 
 const norm = (s: string) => s.trim().toLowerCase();
+
+/** Too common to say two incidents are alike when they appear in a text */
+const GENERIC = new Set(["error", "errors", "failed", "failure", "timeout", "warning", "unknown", "exception", "denied", "forbidden", "unhealthy", "restart", "restarts", "keyword"]);
+/** Pure: a stored signal's value in a pasted text (≥ 6 chars, not generic, on word edges) — the case already knows this fact */
+export function signalInText(value: string, textLower: string): boolean {
+  const v = value.trim().toLowerCase();
+  if (v.length < 6 || GENERIC.has(v)) return false;
+  for (let i = textLower.indexOf(v); i >= 0; i = textLower.indexOf(v, i + 1)) {
+    const before = i === 0 ? " " : textLower[i - 1]!, after = textLower[i + v.length] ?? " ";
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+  }
+  return false;
+}
 export const signalKey = (s: OpsSignal) => `${s.kind}:${norm(s.value)}`;
 
 /** Pure: the facts in a free text (an error, a log line, an alert) — deduplicated, in order of appearance */
@@ -72,7 +85,17 @@ export function tokenize(text: string): string[] {
       if (w.length === 1) continue;
       if (STOP.has(w)) continue;
       for (let i = 0; i + 1 < w.length; i++) out.push(w.slice(i, i + 2));
-    } else if (w.length >= 2 && !STOP.has(w)) out.push(w);
+    } else {
+      // Volatile parts never match another incident — IPs, hashes, generated pod / ReplicaSet suffixes, long numbers —
+      // and only lower the similarity; a name is also matched by its parts (hubble-relay → hubble, relay)
+      if (/^\d+(\.\d+){3}$/.test(w) || /^[0-9a-f]{7,}$/.test(w)) continue;
+      // a generated suffix (Kubernetes' "bcdfghjklmnpqrstvwxz2456789", 5–10) is never the first part of a name
+      const parts = w.split(/[-_.]/).filter((x, i) => x.length >= 2 && !STOP.has(x) && !/^\d+$/.test(x) && !/^[0-9a-f]{7,}$/.test(x)
+        && !(i > 0 && /^[bcdfghjklmnpqrstvwxz2456789]{5,10}$/.test(x)));
+      const kept = parts.join("-");
+      if (kept.length >= 2 && !STOP.has(kept)) out.push(kept);
+      if (parts.length > 1) for (const x of parts) out.push(x);
+    }
   }
   return out;
 }
@@ -131,12 +154,19 @@ export function rankSimilar(query: { text: string; signals: OpsSignal[]; scope?:
   const vecs = vectors([qWords, ...items.map((i) => tokenize(i.text))]);
   const qv = vecs[0]!;
   const qKeys = new Map(query.signals.map((s) => [signalKey(s), s]));
+  const qLower = query.text.toLowerCase();
   const out: OpsMatch[] = [];
   items.forEach((it, i) => {
     const text = qWords.length ? cosine(qv, vecs[i + 1]!) : { score: 0, terms: [] };
     const own = new Set([...it.signals, ...extractSignals(it.text)].map(signalKey));
-    const shared = [...qKeys].filter(([k]) => own.has(k)).map(([, s]) => s);
-    const sig = qKeys.size ? shared.length / qKeys.size : 0;
+    const sharedQ = [...qKeys].filter(([k]) => own.has(k)).map(([, s]) => s);
+    // The item's own facts found verbatim in the pasted text — a keyword, an event reason the extractor doesn't know
+    // (stg 2026-11-18: TLS handshake timeout · ZombieProcessAccumulation · FailedToRetrieveImagePullSecret were pasted
+    // and stored, but only signals extracted from both sides met — keywords never do)
+    const inText = it.signals.filter((s) => !qKeys.has(signalKey(s)) && signalInText(s.value, qLower));
+    const shared = [...sharedQ, ...inText];
+    const asked = qKeys.size + inText.length;
+    const sig = asked ? shared.length / asked : 0;
     const sc = scopeOverlap(query.scope, it.scope);
     if (!shared.length && !sc.on.length && text.score < 0.15) return;
     const score = Math.round((0.5 * text.score + 0.35 * sig + 0.15 * sc.score + (it.resolvedWithFix ? 0.05 : 0)) * 1000) / 1000;
