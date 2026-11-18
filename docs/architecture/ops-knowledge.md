@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-17
+last-verified: 2026-11-18
 covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMatch.ts, apps/api/src/services/opsRecurrence.ts, apps/api/src/services/opsAgent.ts, apps/api/src/routes/ops.ts, apps/web/src/app/runbooks]
 ---
 # 사례·런북 — 경험으로 빨리 정상화하기
@@ -88,6 +88,9 @@ covers: [apps/api/src/services/opsKnowledgeStore.ts, apps/api/src/services/opsMa
 - **사례**: 찾기·상태 필터·목록 → 상세(증상·원인·조치·교훈·신호·쓴 런북) → 고치기(운영자)
 - **런북**: 목록(쓰인 사례 n·마지막 사용) → 단계(명령은 복사 블록) → 고치기
 - **입구**: 알림 센터 › 알림 상세 › '비슷한 경험 찾기'(규칙·제목·요약·대상)
+- **목록 | 상세 배치**(2026-11-18): 넓은 화면(1101px 이상)은 두 칸이 각자 스크롤합니다. 칸마다 높이는 화면에서 위 막대를 뺀 만큼이고, 패널 머리·꼬리는 그대로 둔 채 본문만 스크롤합니다(키트 `Panel scroll`). 고른 행은 목록 상자 안에서만 보이게 옮기고(페이지는 움직이지 않음), 다른 항목을 고르면 상세는 맨 위부터 보입니다. 한 열(1100px 이하)이면 페이지가 평소대로 스크롤하고, 고르면 상세로 내려갑니다.
+- **상세의 구분**(같은 날): 절 = 위 1px 선 + 제목 14/600(글자색) + 옅은 개수 → 제목과 내용 8px, 다음 절까지 32px. 런북의 '언제 쓰나'는 읽는 사람이 먼저 내리는 판단이라 맨 위 옅은 상자(색 없음 — 상태 뜻이 없음). 신호는 종류마다 한 행(종류는 라벨 칸 한 번, 값은 줄바꿈되는 코드). 단계 = 번호 원 + 할 일(600) → 설명 → '명령' 라벨 붙은 상자 → '확인 방법'. 사례 제목은 폼 라벨('증상 (필수)')이 아니라 '증상'·'조치'.
+- **넘침 결함**(같은 날 실측): 1열 grid의 암묵 `auto` 열은 가장 긴 끊을 수 없는 줄만큼 넓어져, 줄바꿈 없는 명령(`white-space: pre`)이 단계·제목·설명을 패널 밖으로 밀었음 — 시험 배포 런북 31개 중 28개, 최대 1,814px. 모든 grid에 `minmax(0, 1fr)` → 31/31·사례 57/57 넘침 0(1440·1280·900px, 실제 화면 + 시험 배포 원본 데이터, DevTools 프로토콜로 요소별 오른쪽 경계 측정). 테스트 `opsLearning.test.ts`가 열 정의 없는 grid를 막음
 
 ## 7. 운영 방법
 

@@ -4,7 +4,7 @@
 // PageHeader takes its title and description from the menu (navConfig), so a page
 // title always equals its menu label.
 
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { usePathname } from "next/navigation";
 import { activeNavItem } from "@/lib/navConfig";
 import { dateLocale, useI18n } from "@/lib/i18n";
@@ -40,18 +40,22 @@ export function PageHeader({ actions, meta, title, desc }: { actions?: ReactNode
    right) · body · optional foot 44 (counts, source, a link). Panels in one row of a Grid share a height — the foot
    sits at the bottom and the spare room stays under the body. */
 export function Panel({
-  title, sub, actions, children, footer, flush, className, id, labelledBy, as = "section", level,
+  title, sub, actions, children, footer, flush, className, id, labelledBy, as = "section", level, scroll, bodyRef,
 }: {
   title?: ReactNode; sub?: ReactNode; actions?: ReactNode; children: ReactNode; footer?: ReactNode; flush?: boolean; className?: string; id?: string;
   labelledBy?: string; as?: "section" | "article" | "aside";
   /** A status the panel stands for — only a quiet top line (the chip in `actions` says it in words) */
   level?: ChipLevel;
+  /** The body scrolls by itself when the page caps the panel's height (`className` sets max-height) — head and foot stay */
+  scroll?: boolean;
+  /** The body element (with `scroll`: the box that scrolls) */
+  bodyRef?: Ref<HTMLDivElement>;
 }) {
   const autoId = useId();
   const headId = title ? `${autoId}-h` : undefined;
   const Tag = as;
   return (
-    <Tag className={cx(s.panel, className)} id={id} aria-labelledby={labelledBy ?? headId} data-level={level}>
+    <Tag className={cx(s.panel, scroll && s.panelScroll, className)} id={id} aria-labelledby={labelledBy ?? headId} data-level={level}>
       {title || actions ? (
         <div className={s.panelHead}>
           {title ? (
@@ -63,7 +67,8 @@ export function Panel({
           {actions ? <div className={s.panelActions}>{actions}</div> : null}
         </div>
       ) : null}
-      <div className={flush ? s.panelFlush : s.panelBody}>{children}</div>
+      {/* a scrolling body takes the keyboard (Tab, then ↑/↓/PgUp/PgDn) */}
+      <div className={flush ? s.panelFlush : s.panelBody} ref={bodyRef} tabIndex={scroll ? 0 : undefined}>{children}</div>
       {footer ? <div className={s.panelFoot}>{footer}</div> : null}
     </Tag>
   );

@@ -274,3 +274,18 @@ test("a feed whose items share one <link> (AWS Health — 38 collapsed into 1 on
   assert.deepEqual(r.items.map((i) => i.url).sort(), ["https://status.aws.example.com/#ec2-r0_170000000", "https://status.aws.example.com/#ec2-r1_170000001", "https://status.aws.example.com/#ec2-r2_170000002"]);
   clearFeedsMemory();
 });
+
+// 2026-11-18: an implicit `auto` grid column is as wide as its widest unbreakable line — a long command (white-space:
+// pre) widened the runbook step, its title and text past the detail panel (28 of 31 real runbooks, up to 1,814px).
+test("runbooks screen: every grid declares its columns (minmax(0, 1fr)) — a long command scrolls in its box, never widens the panel", () => {
+  const css = readFileSync(new URL("../../web/src/app/runbooks/runbooks.module.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const loose = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, , body]) => /display:\s*grid/.test(body!) && !/grid-template-columns/.test(body!) && !/(^|;)\s*width:\s*\d+px/.test(body!))
+    .map(([, sel]) => sel!.trim());
+  assert.deepEqual(loose, [], "grid rules without a column template (fixed-width boxes excepted)");
+  // list | detail: each pane scrolls by itself on wide screens; the detail starts at its top for another item
+  const page = readFileSync(new URL("../../web/src/app/runbooks/page.tsx", import.meta.url), "utf8");
+  assert.equal((page.match(/className=\{s\.pane\} scroll/g) ?? []).length, 4, "both lists and both details are scrolling panes");
+  assert.match(page, /<RunbookDetail key=\{`\$\{sel\.id\}:\$\{sel\.rev\}`\}/);
+  assert.match(css, /@media \(min-width: 1101px\) \{ \.pane \{ max-height: calc\(100dvh - var\(--sticky-top\) - 16px\); \} \}/);
+});

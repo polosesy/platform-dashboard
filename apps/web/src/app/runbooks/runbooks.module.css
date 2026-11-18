@@ -1,10 +1,13 @@
-/* 사례·런북 — docs/architecture/ops-knowledge.md */
-.stack { display: grid; gap: 14px; margin-top: 14px; }
+/* 사례·런북 — docs/architecture/ops-knowledge.md
+   Every one-column grid says `minmax(0, 1fr)`: an implicit `auto` column is as wide as its widest unbreakable line, so a
+   long command (white-space: pre) widened the step, its title and its text past the panel (2026-11-18: 28 of 31 runbooks,
+   up to 1,814px). With minmax(0, 1fr) the code box scrolls inside itself and the text wraps. */
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
 .row2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .list { list-style: none; margin: 0; padding: 0; }
-.item { display: grid; gap: 4px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 12px 14px; border-top: 1px solid var(--line); }
 .item:first-child { border-top: none; }
 .item[data-selected] { background: var(--accent-soft); }
 .itemHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
@@ -13,22 +16,52 @@
 .muted { font-size: var(--text-small); color: var(--muted); margin: 0; }
 .fix { font-size: var(--text-small); margin: 0; }
 .fix b { font-weight: 600; }
+/* List | detail: two panes. Wide screens — each pane is at most the viewport below the top bar and scrolls by itself
+   (Panel `scroll`: head and foot stay, the body scrolls), so the list keeps its place while a long detail is read.
+   One column (≤1100px) — the page scrolls as usual. */
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
-.side { position: sticky; top: var(--sticky-top); }
-.field { display: grid; gap: 4px; }
-.section { display: grid; gap: 6px; margin-top: 12px; }
+@media (min-width: 1101px) { .pane { max-height: calc(100dvh - var(--sticky-top) - 16px); } }
+.field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 12px; }
 .section h3 { margin: 0; font-size: var(--text-small); font-weight: 600; color: var(--muted); }
 .prose { margin: 0; white-space: pre-wrap; font-size: var(--text-body); overflow-wrap: anywhere; }
-.steps { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
-.steps li { padding-left: 4px; }
-.stepTitle { font-weight: 600; }
-.stepEdit { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-sunken); }
+
+/* Detail (case / runbook) — what each block is, at a glance: a block = a rule above + a 14px/600 heading in ink
+   (+ a count in subtle), 8px from its own content and 32px from the next block (proximity groups, the rule separates).
+   The runbook's "when to use" — the decision a reader makes first — is the lead: a sunken box at the top, no colour
+   (no state is meant). Signals are rows by kind (kind in the label column, values as code). Steps are numbered
+   markers on a rail; inside a step: what to do (600) → details → the command box labelled "Command" → "How to check". */
+.detail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.detail > .section { gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.detail .section h3 { font-size: var(--text-body); color: var(--ink); }
+.sectionHead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.sectionMeta { font-size: var(--text-caption); color: var(--subtle); }
+.lead { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 12px 14px; background: var(--panel-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.lead h3 { margin: 0; font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
+.detail > .facts { margin-top: 12px; }
+.detail > :first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.detailPane { min-width: 0; scroll-margin-top: calc(var(--sticky-top) + 8px); }
+.signalRows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0; }
+.signalRows > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.signalRows dt { font-size: var(--text-small); color: var(--muted); }
+.signalRows dd { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sigValue { font-family: var(--font-mono); font-size: var(--text-caption); line-height: var(--leading-body); padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-sunken); overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 640px) { .signalRows > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.steps > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
+.stepNo { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--border-strong); border-radius: 50%; font-size: var(--text-caption); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stepBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; padding-top: 2px; }
+.stepTitle { font-weight: 600; overflow-wrap: anywhere; }
+.check { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; font-size: var(--text-small); color: var(--muted); }
+.check > span:first-child { font-weight: 600; color: var(--ink); }
+.check > span:last-child { overflow-wrap: anywhere; }
+.stepEdit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-sunken); }
 .stepHead { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: var(--text-small); font-weight: 600; }
 .problems { margin: 0; padding-left: 18px; font-size: var(--text-small); color: var(--danger-strong); }
-.helper { display: grid; gap: 12px; }
-.helperCard { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.facts { display: grid; gap: 6px; margin: 0; font-size: var(--text-small); }
+.helper { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.helperCard { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 0; font-size: var(--text-small); }
 .facts div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
@@ -36,12 +69,12 @@
 
 /* 재발 · 인시던트 기록 — the summary line, a firing / case timeline, the follow-up list */
 .recSummary { margin: 0; padding: 12px 16px; font-size: var(--text-body); border-bottom: 1px solid var(--border); }
-.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .timeline > li { display: grid; grid-template-columns: 150px 72px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: var(--text-small); }
 .tlWhen { color: var(--subtle); font-variant-numeric: tabular-nums; }
 .tlKind { color: var(--muted); }
 .tlText { overflow-wrap: anywhere; min-width: 0; }
-.followUps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.followUps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .followUps > li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .timelineShort > li { grid-template-columns: 150px minmax(0, 1fr); }
 @media (max-width: 640px) { .timeline > li, .timelineShort > li { grid-template-columns: minmax(0, 1fr); } }
@@ -49,5 +82,5 @@
 /* 증거 스냅샷 (§10 C) — read-only lines as read */
 .evidence { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 10px; }
 .evidence summary { cursor: pointer; font-size: var(--text-small); }
-.evidenceSection { display: grid; gap: 4px; margin-top: 8px; }
+.evidenceSection { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 8px; }
 .evidenceLines { margin: 0; padding: 8px; max-height: 220px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-caption); background: var(--panel-sunken); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }

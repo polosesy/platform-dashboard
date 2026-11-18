@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-web
-last-verified: 2026-11-13
+last-verified: 2026-11-18
 covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, scripts/gen-icons.mjs, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
 ---
 # 디자인 시스템 — 원칙 v1과 토큰
@@ -157,7 +157,7 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 
 | 부품 | 규칙 |
 |------|------|
-| `Panel` | 머리 56(제목 16/600 + 메타 13 · 오른쪽 컨트롤 ≤ 32) · 본문 · 선택 꼬리 `footer` 44. 불투명·그림자 없음. `level` = 위쪽 2px 상태 선(조용하게 — 상태는 머리의 칩이 글로 말함) |
+| `Panel` | 머리 56(제목 16/600 + 메타 13 · 오른쪽 컨트롤 ≤ 32) · 본문 · 선택 꼬리 `footer` 44. 불투명·그림자 없음. `level` = 위쪽 2px 상태 선(조용하게 — 상태는 머리의 칩이 글로 말함). `scroll` = 화면이 높이를 제한하면(`className`의 max-height) 머리·꼬리는 그대로, 본문만 스크롤(키보드 포커스 가능) — 목록 \| 상세 두 칸(사례·런북) |
 | `Grid` · `Cell span` | 12칸, 간격 16. 3·4·6·8·9·12칸만. 1100px 아래 3·4 → 6, 6·8·9 → 12 · 640px 아래 모두 12. 같은 줄 칸은 높이가 같음 |
 | `Chip` | 24px 알약, 테두리 1px 항상, 색 + 기호(● ▲ ■ ○ ?). `plain` = 판정 없는 사실(값·태그·안 울린 경보) |
 | `Badge` | 기호 없는 태그 — Chip과 같은 24px |
@@ -166,6 +166,8 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 | `Notice` | 화면당 하나. 1px 테두리 + 옅은 바탕 + 기호, 굵은 왼쪽 띠 없음. `action` = 오른쪽 버튼 |
 | `CodeBlock` · `CopyButton` | 설정 조각·명령 — 복사 버튼과 함께 |
 | `Toolbar` | 탭 맨 위 한 줄 — 왼쪽 보기 전환·필터, 오른쪽 기준 시각·기간 칩. 알림 상자가 아님(그래서 '알림 하나' 규칙을 지킴) |
+
+**1열 grid 규칙**(2026-11-18): `display: grid`이면 열을 적습니다 — `grid-template-columns: minmax(0, 1fr)`. 적지 않으면 암묵 `auto` 열이 가장 긴 끊을 수 없는 줄(코드 상자·URL)만큼 넓어져 형제 글자까지 패널 밖으로 밀립니다(사례·런북 화면에서 발견, `opsLearning.test.ts`가 그 화면을 검사).
 
 **같은 줄 규칙**: 아래 줄의 경계는 위 카드의 경계 위에 놓입니다. 숫자 카드 4개 = 3칸씩이면 아래는 6+6 또는 9+3, 숫자 카드 3개면 4+8. 한쪽에 꼬리가 있으면 다른 쪽에도 둡니다.
 

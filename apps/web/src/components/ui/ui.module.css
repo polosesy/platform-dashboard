@@ -120,6 +120,11 @@
   padding: 0;
 }
 
+/* `scroll`: when the page caps the panel's height, the head and the foot stay and only the body scrolls */
+.panelScroll { overflow: hidden; }
+.panelScroll > .panelBody,
+.panelScroll > .panelFlush { min-height: 0; overflow-y: auto; }
+
 .panelFoot {
   display: flex;
   align-items: center;

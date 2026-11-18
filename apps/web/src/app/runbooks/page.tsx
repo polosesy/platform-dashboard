@@ -14,14 +14,14 @@ import { useApiQuery } from "@/lib/useApiQuery";
 import { useQueryParam } from "@/lib/useQueryParam";
 import { useAksClusters } from "@/lib/useAksClusters";
 import {
-  Button, Chip, CodeBlock, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput, Toggle,
+  Button, Chip, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, PageHeader, Panel, SearchInput, Segmented, SignInNotice, Tabs, TextInput, Toggle,
 } from "@/components/ui";
 import {
   caseBody, caseForm, emptyCase, emptyRunbook, excerpt, filterCases, filterRunbooks, followUpStats, runbookForm, toggleFollowUp, type CaseForm, type RunbookForm, isLibraryCase, withLibrary } from "@/lib/opsKnowledge";
 import { CaseEditor, RunbookEditor } from "./Editors";
 import { RecurrenceView } from "./RecurrenceView";
 import { ChangesSection, EvidenceSection, LearnView } from "./Learning";
-import { MatchWhy, SevBadge, SignalChips, StatusChip, errText, useOpsCall } from "./shared";
+import { DetailSection, MatchWhy, SevBadge, SignalChips, SignalRows, StatusChip, StepList, errText, useOpsCall } from "./shared";
 import s from "./runbooks.module.css";
 
 const TABS = ["find", "recurrence", "cases", "runbooks", "learn"] as const;
@@ -203,14 +203,7 @@ function FindView({ data, canWrite, initialText, initialScope, onOpenCase, onOpe
                         </span>
                       </div>
                       <p className={s.muted}>{excerpt(rb.when, 200)}</p>
-                      <ol className={s.steps}>
-                        {rb.steps.slice(0, 3).map((st, i) => (
-                          <li key={i}>
-                            <span className={s.stepTitle}>{st.title}</span>
-                            {st.command ? <CodeBlock code={st.command} copyLabel={t("ops.kb.copy")} copiedLabel={t("ops.kb.copied")} maxHeight={160} /> : null}
-                          </li>
-                        ))}
-                      </ol>
+                      <StepList t={t} steps={rb.steps.slice(0, 3)} brief maxHeight={160} />
                       {rb.steps.length > 3 ? <span className={s.sub}>{t("ops.kb.helper.more", { n: rb.steps.length - 3 })}</span> : null}
                     </div>
                   );
@@ -297,10 +290,11 @@ function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, 
   const list = filterCases(data.cases, q, status);
   const sel = data.cases.find((c) => c.id === selected) ?? null;
   const when = (iso: string) => new Date(iso).toLocaleString(dateLocale(locale));
+  const panes = usePanes(selected);
   if (!data.cases.length) return <div className={s.stack}><EmptyState title={t("ops.kb.case.none")}>{t("ops.kb.case.noneHint")}</EmptyState></div>;
   return (
     <div className={`${s.stack} ${s.layout}`}>
-      <Panel title={t("ops.kb.tab.cases")} sub={(() => { const f = followUpStats(data.cases, new Date().toLocaleDateString("en-CA")); return f.open || f.done ? t("ops.kb.fu.stats", { o: f.open, x: f.overdue, d: f.done }) : undefined; })()} flush actions={
+      <Panel className={s.pane} scroll bodyRef={panes.listRef} title={t("ops.kb.tab.cases")} sub={(() => { const f = followUpStats(data.cases, new Date().toLocaleDateString("en-CA")); return f.open || f.done ? t("ops.kb.fu.stats", { o: f.open, x: f.overdue, d: f.done }) : undefined; })()} flush actions={
         <div className={s.toolbar}>
           <SearchInput label={t("ops.kb.search")} value={q} onChange={setQ} />
           <Segmented label={t("ops.kb.f.status")} value={status} onChange={setStatus}
@@ -327,16 +321,40 @@ function CasesView({ data, canWrite, selected, onSelect, onOpenRunbook, onEdit, 
           </ul>
         ) : <EmptyState title={t("ops.kb.noMatch")} />}
       </Panel>
-      {sel ? <CaseDetail key={`${sel.id}:${sel.rev}`} c={sel} data={data} canWrite={canWrite} onOpenRunbook={onOpenRunbook} onEdit={onEdit} onDeleted={onDeleted} onChanged={onChanged} /> : (
-        <Panel><p className={s.muted}>{t("ops.kb.pick")}</p></Panel>
-      )}
+      <div ref={panes.detailRef} className={s.detailPane}>
+        {sel ? <CaseDetail key={`${sel.id}:${sel.rev}`} c={sel} data={data} canWrite={canWrite} onOpenRunbook={onOpenRunbook} onEdit={onEdit} onDeleted={onDeleted} onChanged={onChanged} /> : (
+          <Panel><p className={s.muted}>{t("ops.kb.pick")}</p></Panel>
+        )}
+      </div>
     </div>
   );
 }
 
+/**
+ * List | detail panes: the picked row stays in view inside its list (also when it was opened from elsewhere — ?id=,
+ * the find tab, the alert centre); on one column (≤1100px) the detail comes into view, since it sits under the list.
+ */
+function usePanes(selected: string | null) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) return;
+    // only the list box moves (scrollIntoView would also move the page and hide the tabs)
+    const box = listRef.current, row = box?.querySelector("[data-selected]");
+    if (box && row && box.scrollHeight > box.clientHeight) {
+      const b = box.getBoundingClientRect(), r = row.getBoundingClientRect();
+      if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - 8;
+    }
+    if (window.matchMedia("(max-width: 1100px)").matches) {
+      detailRef.current?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
+  }, [selected]);
+  return { listRef, detailRef };
+}
+
 function Prose({ title, text }: { title: string; text?: string }) {
   if (!text?.trim()) return null;
-  return <div className={s.section}><h3>{title}</h3><p className={s.prose}>{text}</p></div>;
+  return <DetailSection title={title}><p className={s.prose}>{text}</p></DetailSection>;
 }
 
 function useDelete(path: string, id: string, rev: number, onDeleted: () => void) {
@@ -372,15 +390,15 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onCha
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(dateLocale(locale)) : "—");
   const rbs = c.runbookIds.map((id) => data.runbooks.find((r) => r.id === id)).filter((r): r is OpsRunbook => !!r);
   return (
-    <div className={s.side}>
-      <Panel title={c.title} actions={canWrite ? (
+    <Panel className={s.pane} scroll title={c.title} actions={canWrite ? (
         <div className={s.actions}>
           <Button size="sm" onClick={() => onEdit(c)}>{t("ops.kb.edit")}</Button>
           <Button size="sm" variant="ghost" onClick={() => void del.run()}>{del.armed ? t("ops.kb.deleteConfirm") : t("ops.kb.delete")}</Button>
         </div>
       ) : undefined} footer={<span className={s.sub}>{t("ops.kb.byline", { by: c.updatedBy ?? "—", at: when(c.updatedAt), rev: c.rev })}{c.redactions ? ` · ${t("ops.kb.masked", { n: c.redactions })}` : ""}</span>}>
+      <div className={s.detail}>
         <div className={s.tags}><StatusChip t={t} status={c.status} /><SevBadge t={t} sev={c.severity} />{c.tags.map((x) => <span key={x} className={s.sub}>#{x}</span>)}</div>
-        <dl className={`${s.facts} ${s.section}`}>
+        <dl className={s.facts}>
           <div><dt>{t("ops.kb.f.occurredAt")}</dt><dd>{when(c.occurredAt)}</dd></div>
           {c.resolvedAt ? <div><dt>{t("ops.kb.f.resolvedAt")}</dt><dd>{when(c.resolvedAt)}</dd></div> : null}
           {c.scope.clusterName ? <div><dt>{t("ops.kb.f.cluster")}</dt><dd>{c.scope.clusterName}</dd></div> : null}
@@ -389,17 +407,16 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onCha
           {c.team ? <div><dt>{t("ops.kb.f.team")}</dt><dd>{c.team}</dd></div> : null}
           {c.source?.kind === "alert" ? <div><dt>{t("ops.kb.f.source")}</dt><dd>{t("ops.kb.f.sourceAlert")}</dd></div> : null}
         </dl>
-        <Prose title={t("ops.kb.f.symptoms")} text={c.symptoms} />
+        <Prose title={t("ops.kb.h.symptoms")} text={c.symptoms} />
         <Prose title={t("ops.kb.f.cause")} text={c.cause} />
-        <Prose title={t("ops.kb.f.resolution")} text={c.resolution} />
+        <Prose title={t("ops.kb.h.resolution")} text={c.resolution} />
         <Prose title={t("ops.kb.f.lessons")} text={c.lessons} />
-        {c.signals.length ? <div className={s.section}><h3>{t("ops.kb.f.signals")}</h3><div className={s.tags}><SignalChips t={t} signals={c.signals} /></div></div> : null}
+        {c.signals.length ? <DetailSection title={t("ops.kb.f.signals")} meta={c.signals.length}><SignalRows t={t} signals={c.signals} /></DetailSection> : null}
         {rbs.length ? (
-          <div className={s.section}><h3>{t("ops.kb.f.runbooks")}</h3><div className={s.tags}>{rbs.map((r) => <LinkButton key={r.id} onClick={() => onOpenRunbook(r.id)}>{r.title}</LinkButton>)}</div></div>
+          <DetailSection title={t("ops.kb.f.runbooks")} meta={rbs.length}><div className={s.tags}>{rbs.map((r) => <LinkButton key={r.id} onClick={() => onOpenRunbook(r.id)}>{r.title}</LinkButton>)}</div></DetailSection>
         ) : null}
         {c.followUps?.length ? (
-          <div className={s.section}>
-            <h3>{t("ops.kb.fu.title")}</h3>
+          <DetailSection title={t("ops.kb.fu.title")} meta={c.followUps.length}>
             <ul className={s.followUps}>
               {c.followUps.map((f) => (
                 <li key={f.id}>
@@ -411,14 +428,13 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onCha
               ))}
             </ul>
             {fuErr ? <Notice tone="danger">{fuErr}</Notice> : null}
-          </div>
+          </DetailSection>
         ) : null}
-        {c.reference ? <div className={s.section}><h3>{t("ops.learn.reference")}</h3><a href={c.reference.url} target="_blank" rel="noreferrer noopener">{c.reference.org} ↗</a></div> : null}
+        {c.reference ? <DetailSection title={t("ops.learn.reference")}><a href={c.reference.url} target="_blank" rel="noreferrer noopener">{c.reference.org} ↗</a></DetailSection> : null}
         <ChangesSection c={c} />
         <EvidenceSection c={c} canWrite={canWrite} onChanged={onChanged} />
         {c.timeline?.length ? (
-          <div className={s.section}>
-            <h3>{t("ops.kb.tl.title")}</h3>
+          <DetailSection title={t("ops.kb.tl.title")} meta={c.timeline.length}>
             <ol className={s.timeline}>
               {c.timeline.map((e, i) => (
                 <li key={`${e.at}:${i}`}>
@@ -428,11 +444,11 @@ function CaseDetail({ c, data, canWrite, onOpenRunbook, onEdit, onDeleted, onCha
                 </li>
               ))}
             </ol>
-          </div>
+          </DetailSection>
         ) : null}
-        {del.err ? <Notice tone="danger">{del.err}</Notice> : null}
-      </Panel>
-    </div>
+      </div>
+      {del.err ? <Notice tone="danger">{del.err}</Notice> : null}
+    </Panel>
   );
 }
 
@@ -447,10 +463,11 @@ function RunbooksView({ data, canWrite, selected, onSelect, onOpenCase, onEdit, 
   const list = filterRunbooks(data.runbooks, q);
   const sel = data.runbooks.find((r) => r.id === selected) ?? null;
   const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(dateLocale(locale)) : null);
+  const panes = usePanes(selected);
   if (!data.runbooks.length) return <div className={s.stack}><EmptyState title={t("ops.kb.rb.none")}>{t("ops.kb.rb.noneHint")}</EmptyState></div>;
   return (
     <div className={`${s.stack} ${s.layout}`}>
-      <Panel title={t("ops.kb.tab.runbooks")} flush actions={<SearchInput label={t("ops.kb.search")} value={q} onChange={setQ} />}>
+      <Panel className={s.pane} scroll bodyRef={panes.listRef} title={t("ops.kb.tab.runbooks")} flush actions={<SearchInput label={t("ops.kb.search")} value={q} onChange={setQ} />}>
         {list.length ? (
           <ul className={s.list}>
             {list.map((r) => {
@@ -470,9 +487,12 @@ function RunbooksView({ data, canWrite, selected, onSelect, onOpenCase, onEdit, 
           </ul>
         ) : <EmptyState title={t("ops.kb.noMatch")} />}
       </Panel>
-      {sel ? <RunbookDetail r={sel} data={data} canWrite={canWrite} onOpenCase={onOpenCase} onEdit={onEdit} onDeleted={onDeleted} /> : (
-        <Panel><p className={s.muted}>{t("ops.kb.pick")}</p></Panel>
-      )}
+      <div ref={panes.detailRef} className={s.detailPane}>
+        {/* keyed: another runbook starts at its top, not at the last one's scroll position */}
+        {sel ? <RunbookDetail key={`${sel.id}:${sel.rev}`} r={sel} data={data} canWrite={canWrite} onOpenCase={onOpenCase} onEdit={onEdit} onDeleted={onDeleted} /> : (
+          <Panel><p className={s.muted}>{t("ops.kb.pick")}</p></Panel>
+        )}
+      </div>
     </div>
   );
 }
@@ -485,41 +505,31 @@ function RunbookDetail({ r, data, canWrite, onOpenCase, onEdit, onDeleted }: {
   const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(dateLocale(locale)) : "—");
   const used = data.cases.filter((c) => c.runbookIds.includes(r.id));
   return (
-    <div className={s.side}>
-      <Panel title={r.title} actions={canWrite ? (
+    <Panel className={s.pane} scroll title={r.title} actions={canWrite ? (
         <div className={s.actions}>
           <Button size="sm" onClick={() => onEdit(r)}>{t("ops.kb.edit")}</Button>
           <Button size="sm" variant="ghost" onClick={() => void del.run()}>{del.armed ? t("ops.kb.deleteConfirm") : t("ops.kb.delete")}</Button>
         </div>
       ) : undefined} footer={<span className={s.sub}>{t("ops.kb.byline", { by: r.updatedBy ?? "—", at: when(r.updatedAt), rev: r.rev })}{r.redactions ? ` · ${t("ops.kb.masked", { n: r.redactions })}` : ""}</span>}>
-        <Prose title={t("ops.kb.f.when")} text={r.when} />
-        {r.signals.length ? <div className={s.section}><h3>{t("ops.kb.f.keywords")}</h3><div className={s.tags}><SignalChips t={t} signals={r.signals} /></div></div> : null}
-        <div className={s.section}>
-          <h3>{t("ops.kb.f.steps")}</h3>
-          <ol className={s.steps}>
-            {r.steps.map((st, i) => (
-              <li key={i}>
-                <span className={s.stepTitle}>{st.title}</span>
-                {st.detail ? <p className={s.prose}>{st.detail}</p> : null}
-                {st.command ? <CodeBlock code={st.command} copyLabel={t("ops.kb.copy")} copiedLabel={t("ops.kb.copied")} maxHeight={220} /> : null}
-                {st.check ? <p className={s.muted}>{t("ops.kb.f.checkLine", { c: st.check })}</p> : null}
-              </li>
-            ))}
-          </ol>
-          <p className={s.muted}>{t("ops.kb.commandNote")}</p>
-        </div>
-        <Prose title={t("ops.kb.f.rollback")} text={r.rollback} />
-        <dl className={`${s.facts} ${s.section}`}>
+      <div className={s.detail}>
+        {/* the decision a reader makes first: is this the runbook for what I see? */}
+        {r.when.trim() ? <DetailSection lead title={t("ops.kb.f.when")}><p className={s.prose}>{r.when}</p></DetailSection> : null}
+        <dl className={s.facts}>
           {r.team ? <div><dt>{t("ops.kb.f.team")}</dt><dd>{r.team}</dd></div> : null}
           <div><dt>{t("ops.kb.f.verifiedAt")}</dt><dd>{r.verifiedAt ? when(r.verifiedAt) : t("ops.kb.rb.neverVerified")}</dd></div>
         </dl>
-        <div className={s.section}>
-          <h3>{t("ops.kb.rb.usedBy", { n: used.length })}</h3>
+        {r.signals.length ? <DetailSection title={t("ops.kb.f.keywords")} meta={r.signals.length}><SignalRows t={t} signals={r.signals} /></DetailSection> : null}
+        <DetailSection title={t("ops.kb.f.steps")} meta={r.steps.length}>
+          <StepList t={t} steps={r.steps} maxHeight={220} />
+          <p className={s.muted}>{t("ops.kb.commandNote")}</p>
+        </DetailSection>
+        <Prose title={t("ops.kb.f.rollback")} text={r.rollback} />
+        <DetailSection title={t("ops.kb.rb.usedTitle")} meta={used.length}>
           {used.length ? <div className={s.tags}>{used.slice(0, 20).map((c) => <LinkButton key={c.id} onClick={() => onOpenCase(c.id)}>{c.title}</LinkButton>)}</div>
             : <p className={s.muted}>{t("ops.kb.rb.usedNone")}</p>}
-        </div>
-        {del.err ? <Notice tone="danger">{del.err}</Notice> : null}
-      </Panel>
-    </div>
+        </DetailSection>
+      </div>
+      {del.err ? <Notice tone="danger">{del.err}</Notice> : null}
+    </Panel>
   );
 }
