@@ -522,7 +522,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
           // A level filter Loki answered with no lines is an answer (none in the window) — not a reason to tail kubelet's
           // newest lines and filter those instead
           if (r.lines.length || (level && !r.truncated)) picked = { source: "loki", logs: r.lines, redactions: r.redactions };
-        } else attempts.push({ source: "loki", state: r.state, ...(r.message ? { message: r.message } : {}) });
+        } else attempts.push({ source: "loki", state: r.state, ...(r.message ? { message: r.message } : {}), ...(r.cause ? { cause: r.cause } : {}) });
       }
       // 2. kubelet — needs a pods/log Role in that namespace (k8sReadSurface: never cluster-wide)
       if (!picked && workload) {

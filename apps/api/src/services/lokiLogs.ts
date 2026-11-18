@@ -11,7 +11,8 @@
 // Never sample lines.
 
 import type { Env } from "../env.js";
-import type { HubbleFlow, LogContextResponse, LogInsightsResponse, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
+import type { ConnectCause, HubbleFlow, LogContextResponse, LogInsightsResponse, LogLine, LokiDropsResponse, LokiState, PodLogEntry, WorkloadLogsResponse } from "@aud/types";
+import { connectCauseOf } from "../infra/connectCause.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { HttpError, safeMessage } from "../infra/requestParams.js";
@@ -108,13 +109,16 @@ const SLOW = /TimeoutError|aborted|timeout|other side closed|UND_ERR_SOCKET|ECON
  * Pure: a Loki read's error → state. `answers` = whether /ready answered right after (null = not asked): a slow /
  * cut read on a Loki that answers is busy, on one that does not is unreachable
  */
-export function lokiStateOf(e: unknown, answers: boolean | null = null): { state: LokiState; message: string } {
+export function lokiStateOf(e: unknown, answers: boolean | null = null): { state: LokiState; message: string; cause?: ConnectCause } {
   const message = safeMessage(e);
   const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
   const text = `${(e as { name?: string })?.name ?? ""} ${message} ${cause?.code ?? ""} ${cause?.message ?? ""}`;
-  if (CONNECT.test(text)) return { state: "unreachable", message };
+  // why no connection: DNS · refused (no ready Loki pod) · connect timeout (policy or no such port) — the page says which
+  const why = connectCauseOf(e);
+  const unreachable = { state: "unreachable" as const, message, ...(why ? { cause: why } : {}) };
+  if (CONNECT.test(text)) return unreachable;
   if (BUSY_STATUS.test(message)) return { state: "busy", message };
-  if (SLOW.test(text)) return { state: answers === true ? "busy" : "unreachable", message };
+  if (SLOW.test(text)) return answers === true ? { state: "busy", message } : unreachable;
   return { state: "failed", message };
 }
 /** Whether this read's error needs the /ready question to be told apart */
@@ -139,7 +143,7 @@ async function lokiAnswers(cfg: { url: string; tenant?: string }): Promise<boole
 export const BUSY_BACKOFF_MS = 60_000;
 const busyUntil = new Map<string, { until: number; message: string }>();
 /** A read's failure → state, asking /ready when needed; "busy" starts the backoff for that Loki */
-async function classify(cfg: { url: string; tenant?: string }, e: unknown): Promise<{ state: LokiState; message: string; retryAt?: string }> {
+async function classify(cfg: { url: string; tenant?: string }, e: unknown): Promise<{ state: LokiState; message: string; retryAt?: string; cause?: ConnectCause }> {
   const s = lokiStateOf(e, needsProbe(e) ? await lokiAnswers(cfg) : null);
   if (s.state !== "busy") return s;
   const until = Date.now() + BUSY_BACKOFF_MS;
@@ -456,7 +460,7 @@ export async function getLogContext(
   }
 }
 
-type PodLogRead = { state: LokiState; message?: string; lines: PodLogEntry[]; redactions: number; truncated: boolean; counts: { error: number | null; warn: number | null } | null; minutes: number };
+type PodLogRead = { state: LokiState; message?: string; cause?: ConnectCause; lines: PodLogEntry[]; redactions: number; truncated: boolean; counts: { error: number | null; warn: number | null } | null; minutes: number };
 const podLogCache = new CacheManager<PodLogRead>(50, 10_000);
 
 /**
@@ -532,7 +536,7 @@ export function summarizeLokiDrops(lines: string[]): { drops: LokiDropsResponse[
   return { drops: [...map.values()].sort((a, b) => b.count - a.count).slice(0, 50), flowLines: flowLines.length };
 }
 
-type DropFlows = { state: LokiState | "notConfigured"; flows: HubbleFlow[]; truncated: boolean; message?: string };
+type DropFlows = { state: LokiState | "notConfigured"; flows: HubbleFlow[]; truncated: boolean; message?: string; cause?: ConnectCause };
 const dropFlowCache = new CacheManager<DropFlows>(20, 30_000);
 
 /**

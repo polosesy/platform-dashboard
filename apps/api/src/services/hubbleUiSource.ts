@@ -14,7 +14,8 @@
 // relay (FlowFilter reply=false) — the backlog is then requests, not their echoes (ephemeral-port links vanished).
 
 import type { Env } from "../env.js";
-import type { HubbleCoverage, HubbleFlow, HubbleFlowSet } from "@aud/types";
+import type { ConnectCause, HubbleCoverage, HubbleFlow, HubbleFlowSet } from "@aud/types";
+import { connectCauseOf } from "../infra/connectCause.js";
 import { CacheManager } from "../infra/cacheManager.js";
 import { assertSignedInForCluster, clusterConnection } from "../infra/azureClientFactory.js";
 import { safeMessage } from "../infra/requestParams.js";
@@ -202,7 +203,7 @@ export function eventsRequest(opts: { verdict?: string; type?: string } = {}): U
 
 type Envelope = { meta?: { channel_id?: string; is_terminated?: boolean; is_error?: boolean; is_empty?: boolean; next_datum_id?: string; poll_delay_ms?: number; errors?: Array<{ message?: string }> }; body?: { content?: string } };
 
-class HubbleUiError extends Error { constructor(readonly state: HubbleUiState, message: string) { super(message); } }
+class HubbleUiError extends Error { constructor(readonly state: HubbleUiState, message: string, readonly connectCause?: ConnectCause) { super(message); } }
 
 /**
  * Pure: what a 200 answer whose body is not a JSON envelope means. An empty body or a cut-off JSON object is an
@@ -231,7 +232,8 @@ function poster(url: string): PostFn {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
-      throw new HubbleUiError("unreachable", safeMessage(e));
+      // why no connection (DNS · refused = no ready hubble-ui pod · connect timeout = policy or port) — absent for our own read time-out
+      throw new HubbleUiError("unreachable", safeMessage(e), connectCauseOf(e) ?? undefined);
     }
     if (res.status === 404 || res.status === 405) throw new HubbleUiError("unsupported", `Hubble UI ${res.status}: no service-map-stream route (hubble-ui < 0.13?)`);
     if (!res.ok) throw new HubbleUiError("failed", `Hubble UI ${res.status}`);
@@ -391,18 +393,18 @@ export async function getFlowsFromHubbleUi(
  * Is the Hubble UI source usable for this cluster? (/api/hubble/sources, cached 60 s). It reads the same stream the
  * views read next — a separate "tiny" probe still made the backend replay 10,000 flows, one more channel at once.
  */
-export async function hubbleUiAvailability(env: Env, bearerToken: string | undefined, clusterId: string): Promise<{ state: HubbleUiState; message?: string }> {
+export async function hubbleUiAvailability(env: Env, bearerToken: string | undefined, clusterId: string): Promise<{ state: HubbleUiState; message?: string; cause?: ConnectCause }> {
   const cfg = hubbleUiConfig(env, clusterId);
   if (!cfg) return { state: "notConfigured" };
   const k = clusterId.toLowerCase();
   const hit = stateCache.get(k);
   if (hit) return hit;
-  let out: { state: HubbleUiState; message?: string };
+  let out: { state: HubbleUiState; message?: string; cause?: ConnectCause };
   try {
     await getFlowsFromHubbleUi(env, bearerToken, clusterId, { limit: HUBBLE_UI_SAMPLE });
     out = { state: "ok" };
   } catch (e) {
-    out = e instanceof HubbleUiError ? { state: e.state, message: e.message } : { state: "failed", message: safeMessage(e) };
+    out = e instanceof HubbleUiError ? { state: e.state, message: e.message, ...(e.connectCause ? { cause: e.connectCause } : {}) } : { state: "failed", message: safeMessage(e) };
   }
   stateCache.set(k, out);
   return out;

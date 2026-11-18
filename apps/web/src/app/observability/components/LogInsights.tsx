@@ -16,6 +16,7 @@ import { WORKLOAD_LOG_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { peakBucket, shareOf, timelineBars } from "@/lib/logInsightsView";
 import styles from "../styles.module.css";
+import { causeView } from "@/lib/connectCause";
 
 export function LogInsights({ clusterId, namespace, range, nonce, onPickWorkload }: {
   clusterId: string; namespace: string; range: TimeRange; nonce: number;
@@ -37,10 +38,11 @@ export function LogInsights({ clusterId, namespace, range, nonce, onPickWorkload
   if (q.error) return <Panel title={title} sub={sub}><ErrorNotice error={q.error} /></Panel>;
   if (!d) return <Panel title={title} sub={sub}><LoadingState label={t("ob.li.loading")} /></Panel>;
   if (d.state !== "ok") {
+    const cv = causeView(d.state, d.cause);
     return (
       <Panel title={title} sub={sub}>
-        <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={t(`ob.li.state.${d.state}`)}>
-          {t(`ob.li.stateHint.${d.state}`)}{d.message ? ` (${d.message})` : ""}
+        <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={cv ? t(cv.title, { target: "Loki" }) : t(`ob.li.state.${d.state}`)}>
+          {cv ? t(cv.hint, { target: "Loki" }) : t(`ob.li.stateHint.${d.state}`)}{d.message ? ` (${d.message})` : ""}
         </Notice>
       </Panel>
     );

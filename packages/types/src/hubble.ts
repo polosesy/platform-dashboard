@@ -1,3 +1,5 @@
+import type { ConnectCause } from "./common.js";
+
 // ─────────────────────────────────────────────────────────────
 // Cilium Hubble Types
 // Covers: Service Dependency Map, Network Monitoring,
@@ -268,6 +270,7 @@ export type HubbleServiceMapResponse = {
    */
   windowDrops?: {
     state: "ok" | "notConfigured" | "unreachable" | "busy" | "failed";
+    cause?: ConnectCause;
     /** Drop flows added from Loki (between `from` and the sample's oldest flow) */
     added: number;
     from: string;
@@ -401,7 +404,7 @@ export type HubbleSourcesResponse = {
   /** ContainerNetworkLogs rows for this cluster in the last hour (resource-centric query) */
   flowLogs: { state: HubbleLogsState; rows1h: number | null; newest: string | null };
   /** The cluster's Hubble UI backend (connections file `aks.observability.hubbleUi`) */
-  hubbleUi: { state: HubbleUiState; message?: string };
+  hubbleUi: { state: HubbleUiState; message?: string; cause?: ConnectCause };
   metrics: { state: HubbleMetricsState; message?: string };
 };
 

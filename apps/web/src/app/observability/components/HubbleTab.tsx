@@ -13,6 +13,7 @@ import { Button, ErrorNotice, LoadingState, Notice, Segmented, Toggle, Toolbar }
 import { EnableFlowLogsPanel, LokiDrops, METRICS_WINDOWS, MetricsView, SourceBadge, useHubbleSource } from "../../hubble/components/MetricsViews";
 import { useI18n } from "@/lib/i18n";
 import { LOKI_DROP_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
+import { causeView } from "@/lib/connectCause";
 
 /**
  * `control` = the AKS 모니터링 page's time picker: its 새로 고침 / auto refresh take a new sample (the views' own
@@ -81,7 +82,7 @@ export function HubbleTab({ clusterId, control }: Props) {
       {src.selected === "none" ? (
         <>
           <Notice tone="warning" title={t("hb.src.noneTitle")}>
-            {t(`hb.src.execOff.${src.exec.reason ?? "deployment"}`)} {t(`hb.src.logs.${src.flowLogs.state}`)} {t(`hb.src.ui.${src.hubbleUi.state}`)}{src.hubbleUi.message ? ` (${src.hubbleUi.message})` : ""} {t(`hb.m.state.${src.metrics.state}`)}
+            {t(`hb.src.execOff.${src.exec.reason ?? "deployment"}`)} {t(`hb.src.logs.${src.flowLogs.state}`)} {(() => { const cv = causeView(src.hubbleUi.state, src.hubbleUi.cause); return cv ? `${t(cv.title, { target: "Hubble UI" })}.` : t(`hb.src.ui.${src.hubbleUi.state}`); })()}{src.hubbleUi.message ? ` (${src.hubbleUi.message})` : ""} {t(`hb.m.state.${src.metrics.state}`)}
           </Notice>
           <EnableFlowLogsPanel />
         </>

@@ -1,3 +1,5 @@
+import type { ConnectCause } from "./common.js";
+
 // ─────────────────────────────────────────────────────────────
 // Observability / APM Types
 // Covers: Kubernetes workloads, container resources, JVM, Nginx/Tomcat, Browser RUM
@@ -181,6 +183,7 @@ export type LogContextResponse = {
   clusterId: string;
   generatedAt: string;
   state: LokiState;
+  cause?: ConnectCause;
   message?: string;
   retryAt?: string;
   before: PodLogEntry[];
@@ -194,7 +197,7 @@ export type PodLogSource = "loki" | "kubelet" | "containerInsights";
 /** lokiOnly = a whole workload's lines are read from Loki only (kubelet and Container Insights answer per pod) */
 export type PodLogAttemptState = "ok" | "empty" | "notConfigured" | "denied" | "forbidden" | "unreachable" | "busy" | "failed" | "pastRange" | "lokiOnly";
 /** One source the API tried for these logs — the page says which answered and why the others did not */
-export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string };
+export type PodLogAttempt = { source: PodLogSource; state: PodLogAttemptState; message?: string; cause?: ConnectCause };
 
 export type ObservabilityLogsResponse = {
   clusterId: string;
@@ -574,6 +577,8 @@ export type LogLine = {
 export type WorkloadLogsResponse = {
   /** busy: the next read waits until then (the dashboard does not add load to an overloaded Loki) */
   retryAt?: string;
+  /** unreachable: why the connection was not made (absent = the error did not say) */
+  cause?: ConnectCause;
   clusterId: string;
   generatedAt: string;
   /** The window's end when it is not now (the time picker moved back) */
@@ -593,6 +598,8 @@ export type WorkloadLogsResponse = {
 export type LokiDropsResponse = {
   clusterId: string;
   generatedAt: string;
+  /** unreachable: why the connection was not made */
+  cause?: ConnectCause;
   /** The window's end when it is a past range (the drops of that span — Loki keeps days, the agents minutes) */
   at?: string;
   state: LokiState;
@@ -878,6 +885,8 @@ export type SloSettingsResponse = {
 export type LogInsightsResponse = {
   clusterId: string;
   generatedAt: string;
+  /** unreachable: why the connection was not made */
+  cause?: ConnectCause;
   /** The window's end when it is a past range */
   at?: string;
   state: LokiState;

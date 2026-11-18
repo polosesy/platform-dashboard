@@ -14,6 +14,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Badge, Button, ErrorNotice, LoadingState, Notice, Segmented, Select, Stat } from "@/components/ui";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
+import { causeView } from "@/lib/connectCause";
 
 export const METRICS_WINDOWS = [5, 15, 60, 360] as const;
 const WINDOWS = METRICS_WINDOWS;
@@ -228,15 +229,17 @@ export function LokiDrops({ clusterId, fmt, control }: { clusterId: string; fmt:
   );
   useRangeRefresh("loki-drops", control?.nonce ?? 0, q.loading, q.reload, control?.report);
   const d = q.data?.windowMinutes === win && answersAt(q.data.at, at) ? q.data : null;
+  // unreachable: DNS · refused (no ready Loki pod) · connect timeout (policy or port) — only the last gets the policy rule
+  const cv = d ? causeView(d.state, d.cause) : null;
   return (
     <section aria-labelledby="hb-loki-drops">
       <h3 id="hb-loki-drops" className={styles.sectionTitle}>{t("hb.ld.title")}</h3>
       {control ? null : <Segmented label={t("hb.m.window")} value={own} onChange={setWin} items={[60, 360, 1440].map((w) => ({ id: w, label: t(`ob.hm.window.${w}`) }))} />}
       {q.error ? <Notice tone="warning">{q.error}</Notice> : !d ? <LoadingState /> : d.state !== "ok" ? (
-        <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${d.state}`)}>
-          {t(`ob.hm.lokiHint.${d.state}`)}
+        <Notice tone={d.state === "notConfigured" ? "info" : "warning"} title={cv ? t(cv.title, { target: "Loki" }) : t(`ob.hm.loki.${d.state}`)}>
+          {cv ? t(cv.hint, { target: "Loki" }) : t(`ob.hm.lokiHint.${d.state}`)}
           {d.retryAt ? ` ${t("ob.hm.lokiRetry", { at: new Date(d.retryAt).toLocaleTimeString(dateLocale(locale)) })}` : ""}
-          {d.state === "unreachable" ? <pre className={styles.flowMono}>{LOKI_RULE}</pre> : null}
+          {cv?.showRule ? <pre className={styles.flowMono}>{LOKI_RULE}</pre> : null}
           {d.message ? <div className={styles.flowMono}>{t("ob.hm.lokiCause", { msg: d.message })}</div> : null}
         </Notice>
       ) : (

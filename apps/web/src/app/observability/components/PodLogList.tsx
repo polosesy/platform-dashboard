@@ -14,6 +14,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Button, Chip, CopyButton, EmptyState, Notice } from "@/components/ui";
 import { LEVEL_GLYPH, firstLine, hasContext, labelRows, levelOf, lineKey, lineText, podTail } from "@/lib/podLogView";
 import styles from "../styles.module.css";
+import { causeView } from "@/lib/connectCause";
 
 const CONTEXT_LINES = 20;
 const CONTEXT_MORE = 50;
@@ -118,7 +119,10 @@ export function PodLogList({ clusterId, namespace, logs, empty, showPod }: {
                 </div>
 
                 {cx?.error ? <Notice tone="warning">{t("ob.pl.contextFailed", { code: cx.error })}</Notice> : null}
-                {cx?.data && cx.data.state !== "ok" ? <Notice tone="warning" title={t(`ob.li.state.${cx.data.state}`)}>{cx.data.message ?? t(`ob.li.stateHint.${cx.data.state}`)}</Notice> : null}
+                {cx?.data && cx.data.state !== "ok" ? (() => {
+                  const cv = causeView(cx.data.state, cx.data.cause);
+                  return <Notice tone="warning" title={cv ? t(cv.title, { target: "Loki" }) : t(`ob.li.state.${cx.data.state}`)}>{cv ? `${t(cv.hint, { target: "Loki" })}${cx.data.message ? ` (${cx.data.message})` : ""}` : cx.data.message ?? t(`ob.li.stateHint.${cx.data.state}`)}</Notice>;
+                })() : null}
                 {cx?.data && cx.data.state === "ok" ? (
                   <section className={styles.plContext} aria-label={t("ob.pl.contextTitle")}>
                     <h4 className={styles.plGroupTitle}>

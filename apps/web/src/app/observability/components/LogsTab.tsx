@@ -13,6 +13,7 @@ import { PodLogList } from "./PodLogList";
 import { coverageOf, levelNumbers, type LevelFilter } from "@/lib/podLogView";
 import { atParam, podLogMinutesFor, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
+import { causeView } from "@/lib/connectCause";
 
 // One pod's logs over the page's time range (lib/timeRange podLogMinutesFor — up to a day, ending now or at the
 // range's end): Loki and Container Insights read a past range, kubelet only tails now (skipped, said). Refreshed by
@@ -284,8 +285,8 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
             ) : null}
             {attempts.map((a) => (
               <Chip key={a.source} level={a.state === "ok" ? "ok" : a.state === "empty" || a.state === "notConfigured" || a.state === "pastRange" ? "neutral" : "warn"}
-                title={a.message ?? t(`ob.logs.state.${a.state}`)}>
-                {t(`ob.logs.src.${a.source}`)} · {t(`ob.logs.state.${a.state}`)}
+                title={[causeView(a.state, a.cause) ? t(causeView(a.state, a.cause)!.title, { target: t(`ob.logs.src.${a.source}`) }) : null, a.message ?? t(`ob.logs.state.${a.state}`)].filter(Boolean).join(" — ")}>
+                {t(`ob.logs.src.${a.source}`)} · {a.state === "unreachable" && a.cause ? t(`net.cause.${a.cause}.short`) : t(`ob.logs.state.${a.state}`)}
               </Chip>
             ))}
           </span>

@@ -254,7 +254,7 @@ function NetworkMap({ clusterId, live = false, nonce = 0 }: Props) {
         <p className={styles.nmWindowNote}>
           {last.windowDrops.state === "ok"
             ? t(last.windowDrops.truncated ? "hb.nm.windowDropsCut" : "hb.nm.windowDrops", { w: last.timeWindowMinutes, n: last.windowDrops.added, from: new Date(last.windowDrops.from).toLocaleTimeString(dateLocale(locale)), to: new Date(last.windowDrops.to).toLocaleTimeString(dateLocale(locale)) })
-            : t("hb.nm.windowDropsFail", { state: last.windowDrops.state })}
+            : t("hb.nm.windowDropsFail", { state: last.windowDrops.state === "unreachable" && last.windowDrops.cause ? t(`net.cause.${last.windowDrops.cause}.short`) : last.windowDrops.state })}
         </p>
       )}
       <ErrorNotice error={error} />

@@ -20,6 +20,7 @@ import { WorkloadVpaSection } from "./WorkloadVpaSection";
 import { WORKLOAD_LOG_WINDOWS, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import styles from "../styles.module.css";
+import { causeView } from "@/lib/connectCause";
 
 const LOKI_RULE = `# monitor namespace — allow the dashboard to read Loki (applied by the cluster owner through GitOps)
 - fromEndpoints:
@@ -62,6 +63,8 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
       clusterId, namespace: w.namespace, workload: w.workload, pods, errorsOnly: String(errorsOnly), minutes: String(logWin.value), at,
     }), token),
   );
+  // unreachable: DNS · refused (no ready Loki pod) · connect timeout (policy or port) — only the last gets the policy rule
+  const logCause = logs.data ? causeView(logs.data.state, logs.data.cause) : null;
   useRangeRefresh("panelEvents", nonce, false, events.reload);
   useRangeRefresh("panelLogs", nonce, false, logs.reload);
   const lokiUid = grafana?.datasources.loki;
@@ -195,10 +198,10 @@ export function WorkloadHeatPanel({ clusterId, w, grafana, windowMinutes, range,
             {logWin.differs === "max" ? ` · ${t("ob.hm.logsMax")}` : logWin.differs === "round" ? ` · ${t("ob.hm.logsRound")}` : ""}
           </p>
           {logs.error ? <Notice tone="warning">{logs.error}</Notice> : !logs.data ? <LoadingState /> : logs.data.state !== "ok" ? (
-            <Notice tone={logs.data.state === "notConfigured" ? "info" : "warning"} title={t(`ob.hm.loki.${logs.data.state}`)}>
-              {t(`ob.hm.lokiHint.${logs.data.state}`)}
+            <Notice tone={logs.data.state === "notConfigured" ? "info" : "warning"} title={logCause ? t(logCause.title, { target: "Loki" }) : t(`ob.hm.loki.${logs.data.state}`)}>
+              {logCause ? t(logCause.hint, { target: "Loki" }) : t(`ob.hm.lokiHint.${logs.data.state}`)}
               {logs.data.retryAt ? ` ${t("ob.hm.lokiRetry", { at: new Date(logs.data.retryAt).toLocaleTimeString(dateLocale(locale)) })}` : ""}
-              {logs.data.state === "unreachable" ? <pre className={styles.hmPre}>{LOKI_RULE}</pre> : null}
+              {logCause?.showRule ? <pre className={styles.hmPre}>{LOKI_RULE}</pre> : null}
               {logs.data.message ? <span className={styles.hmMsg}>{t("ob.hm.lokiCause", { msg: logs.data.message })}</span> : null}
             </Notice>
           ) : (

@@ -102,7 +102,7 @@ export async function collectServiceMap(
   const loki = await getLokiDropFlows(env, bearerToken, clusterId, from, oldest).catch(() => null);
   const lokiFlows = (loki?.flows ?? []).filter((f) => !nsFilter || f.source.namespace === nsFilter || f.destination.namespace === nsFilter);
   const windowDrops: HubbleServiceMapResponse["windowDrops"] = loki && loki.state !== "notConfigured"
-    ? { state: loki.state, added: lokiFlows.length, from: new Date(from).toISOString(), to: oldest > from ? new Date(oldest).toISOString() : null, ...(loki.truncated ? { truncated: true } : {}) }
+    ? { state: loki.state, ...(loki.cause ? { cause: loki.cause } : {}), added: lokiFlows.length, from: new Date(from).toISOString(), to: oldest > from ? new Date(oldest).toISOString() : null, ...(loki.truncated ? { truncated: true } : {}) }
     : undefined;
   const flows = lokiFlows.length ? [...sampled, ...lokiFlows] : sampled;
 
