@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-auth
-last-verified: 2026-10-30
+last-verified: 2026-11-18
 covers: [apps/api/src/services/aksAccess.ts, apps/api/src/services/k8sReadSurface.ts, apps/api/src/services/workloadIdentity.ts, apps/api/src/services/workloadIdentityCollector.ts]
 ---
 # AKS 클러스터 연동 (프라이빗 클러스터 포함)

@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-13
+last-verified: 2026-11-18
 covers: [apps/api/src/services/workloadRed.ts, apps/web/src/lib/redView.ts, apps/api/src/services/appRuntimes.ts, apps/web/src/lib/workloadBlocks.ts, apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
@@ -313,14 +313,14 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 ```json
 "aks": { "observability": {
   "grafana": { "endpoint": "https://<grafana>.<region>.grafana.azure.com", "datasources": { "prometheus": "<uid>", "loki": "<uid>", "tempo": "<uid>" } },
-  "loki": { "url": "http://<loki-svc>.<namespace>:3100" },
+  "loki": { "url": "http://<loki-svc>.<namespace>.svc.cluster.local:3100" },
   "hubbleUi": { "url": "http://hubble-ui.kube-system.svc.cluster.local:80" },
   "logErrors": { "metric": "<collector log-error counter>", "podLabel": "exported_pod" },
   "slo": { "windowDays": 30, "availability": 0.999, "latency": { "thresholdMs": 1000, "target": 0.99 },
     "services": { "<namespace>/<application>": { "excludeUris": ["/public/*/webhooks/**"] } } } } }
 ```
 
-`loki.url`·`hubbleUi.url`은 클러스터 안 주소(`<svc>.<ns>[.svc]`)나 사설 IP만, `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다. `slo` 목표는 0.5–0.99999, `windowDays`는 7·14·28·30, 서비스 키는 `<namespace>/<application>`(Micrometer `application` 태그), `exclude: true`면 그 서비스를 뺍니다.
+`loki.url`·`hubbleUi.url`은 클러스터 안 주소(`<svc>.<ns>[.svc[.cluster.local]]`)나 사설 IP만 받습니다 — **끝까지 쓴 이름(`.svc.cluster.local`)을 권장**: 대시보드 파드는 `ndots:1`이라 `<svc>.<ns>`(점 1개)를 먼저 절대 이름으로 바깥(허브) DNS에 묻고 NXDOMAIN 뒤에야 클러스터 이름으로 풉니다(바깥 DNS가 늦거나 실패하면 그대로 `fetch failed` — 2026-11-18 인프라 세션 실측). `grafana.endpoint`는 `https://*.grafana.azure.com`만 받습니다. `slo` 목표는 0.5–0.99999, `windowDays`는 7·14·28·30, 서비스 키는 `<namespace>/<application>`(Micrometer `application` 태그), `exclude: true`면 그 서비스를 뺍니다.
 
 ## 5. 다음
 
