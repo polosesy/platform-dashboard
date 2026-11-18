@@ -82,7 +82,7 @@ export function channelUrl(c: Channel, vars: Record<string, string | undefined>)
 export function channelInfo(c: Channel, vars: Record<string, string | undefined>): NotifyChannelInfo {
   const u = channelUrl(c, vars);
   return {
-    key: c.key, name: c.name, format: c.format, host: u ? u.host : null, configured: !!u, enabled: c.enabled,
+    key: c.key, name: c.name, format: c.format, host: u ? u.host : null, configured: !!u, urlEnv: c.urlEnv, enabled: c.enabled,
     minSeverity: c.minSeverity, categories: c.categories as NotifyCategory[], teams: c.teams, statuses: c.statuses, lang: c.lang, prefix: c.prefix,
   };
 }

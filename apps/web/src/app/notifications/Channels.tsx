@@ -2,15 +2,16 @@
 
 // 알림 센터 › 연동 설정 › 보내는 곳: the outbound chat channels (Flow · Slack · Google Chat · Teams · Azure / Grafana
 // shapes). Admin only — the webhook URL is never shown, only its host. Per channel: the body it would get for a sample
-// alert (preview) and a real test send with the receiver's answer (status · time · attempts).
+// alert (preview), a connection check (name → TCP → TLS, nothing sent — the network question) and a real test send with
+// the receiver's answer (status · time · attempts · why no connection).
 
 import { useState } from "react";
-import type { NotifyChannelInfo, NotifyChannelTest } from "@aud/types";
+import type { NotifyChannelCheck, NotifyChannelInfo, NotifyChannelTest } from "@aud/types";
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useApiToken } from "@/lib/useApiToken";
 import { Badge, Button, EmptyState, Panel, Segmented } from "@/components/ui";
-import { channelsSnippet, flowTemplateHint } from "@/lib/notifyView";
+import { channelsSnippet, checkLine, flowTemplateHint } from "@/lib/notifyView";
 import s from "./notifications.module.css";
 
 export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
@@ -19,6 +20,7 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
   const [kind, setKind] = useState<"grafana" | "azure">("grafana");
   const [preview, setPreview] = useState<{ key: string; body: string } | null>(null);
   const [results, setResults] = useState<Record<string, NotifyChannelTest | string>>({});
+  const [checks, setChecks] = useState<Record<string, NotifyChannelCheck | string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const call = async <T,>(path: string, method: "GET" | "POST"): Promise<T> => {
@@ -39,12 +41,25 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
     } catch (e) { setResults({ ...results, [key]: e instanceof ApiError && e.code ? e.code : String(e) }); }
     setBusy(null);
   };
+  const doCheck = async (key: string) => {
+    setBusy(`check:${key}`);
+    try {
+      setChecks({ ...checks, [key]: await call<NotifyChannelCheck>(`/api/notifications/channels/${encodeURIComponent(key)}/check`, "POST") });
+    } catch (e) { setChecks({ ...checks, [key]: e instanceof ApiError && e.code ? e.code : String(e) }); }
+    setBusy(null);
+  };
+  const checkText = (r: NotifyChannelCheck | string | undefined) => {
+    if (!r) return null;
+    if (typeof r === "string") return <span className={s.err}>{r}</span>;
+    const line = checkLine(r);
+    return <span className={line.tone === "ok" ? s.ack : line.tone === "warn" ? s.muted : s.err}>{line.parts.map((p) => t(p.key, p.vars)).join(" · ")}</span>;
+  };
   const resultText = (r: NotifyChannelTest | string | undefined) => {
     if (!r) return null;
     if (typeof r === "string") return <span className={s.err}>{r}</span>;
     return r.ok
       ? <span className={s.ack}>{t("notify.ch.sent", { status: r.status ?? "", ms: r.ms })}</span>
-      : <span className={s.err}>{t(`notify.ch.fail.${r.error ?? "http"}`, { status: r.status ?? "—", n: r.attempts })}</span>;
+      : <span className={s.err}>{t(`notify.ch.fail.${r.error ?? "http"}`, { status: r.status ?? "—", n: r.attempts })}{r.cause ? ` — ${t(`notify.cause.${r.cause}`)}` : ""}</span>;
   };
 
   return (
@@ -57,7 +72,7 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
               <div className={s.chHead}>
                 <b>{c.name}</b>
                 <Badge tone="info">{t(`notify.ch.format.${c.format}`)}</Badge>
-                {c.configured ? <span className={s.mono}>{c.host}</span> : <Badge tone="medium">{t("notify.ch.noUrl")}</Badge>}
+                {c.configured ? <span className={s.mono}>{c.host}</span> : <Badge tone="medium">{t("notify.ch.noUrlVar", { name: c.urlEnv })}</Badge>}
                 {!c.enabled ? <Badge tone="neutral">{t("notify.ch.disabled")}</Badge> : null}
               </div>
               <div className={s.muted}>
@@ -70,9 +85,11 @@ export function Channels({ channels }: { channels: NotifyChannelInfo[] }) {
               </div>
               <div className={s.ackRow}>
                 <Button size="sm" onClick={() => void doPreview(c.key)}>{preview?.key === c.key ? t("notify.ch.hide") : t("notify.ch.preview")}</Button>
+                <Button size="sm" onClick={() => void doCheck(c.key)} disabled={!c.configured || busy === `check:${c.key}`}>{busy === `check:${c.key}` ? t("notify.chk.running") : t("notify.chk.run")}</Button>
                 <Button size="sm" variant="primary" onClick={() => void doTest(c.key)} disabled={!c.configured || busy === c.key}>{busy === c.key ? t("notify.ch.sending") : t("notify.ch.test")}</Button>
                 {resultText(results[c.key])}
               </div>
+              {checks[c.key] ? <div className={s.ackRow}>{checkText(checks[c.key])}</div> : null}
               {preview?.key === c.key ? <pre className={s.code}>{preview.body}</pre> : null}
             </li>
           ))}

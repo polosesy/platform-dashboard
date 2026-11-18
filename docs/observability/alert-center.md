@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-02
-covers: [apps/api/src/services/grafanaAlertPull.ts, apps/api/src/services/notifyChannels.ts, apps/web/src/app/notifications/Channels.tsx, apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
+last-verified: 2026-11-18
+covers: [apps/api/src/services/grafanaAlertPull.ts, apps/api/src/services/notifyChannels.ts, apps/api/src/services/notifyCheck.ts, deploy/helm/aud-dashboard/templates/deployment.yaml, apps/web/src/app/notifications/Channels.tsx, apps/api/src/services/alertPayloads.ts, apps/api/src/services/notifyStore.ts, apps/api/src/services/notifyRelay.ts, apps/api/src/routes/notify.ts, apps/web/src/lib/notifyView.ts, apps/web/src/app/notifications/page.tsx, apps/web/src/components/NotificationBell.tsx]
 ---
 # 알림 센터 — Azure Monitor · Grafana 알림을 대시보드가 직접 받기
 
@@ -110,9 +110,46 @@ AUD_NOTIFY_URL_SLACK_SEC=<Slack 웹훅 주소 — 비밀>
 
 **규칙**: 새 알림과 발생 ↔ 해소 변화만 채널마다 한 번(같은 알림 반복은 안 보냄). 5초·5xx/429/네트워크 오류 1번 재시도·**리디렉션 따라가지 않음**. 결과는 알림 상세 '보낸 곳'에 채널별로 남음. 정의가 틀리면 API가 시작하지 않음(조용히 알림을 버리지 않게). 화면에는 주소의 **호스트만** — 경로의 토큰은 나가지 않음.
 
-**확인**: 알림 센터 › 연동 설정 › '보내는 곳' — 채널마다 **보낼 내용 미리 보기**(Grafana·Azure 시험 알림으로)와 **시험 전송**(응답 코드·시간·시도 수). 실패 문구: 응답 n = 받는 쪽 거부(주소·템플릿) · 5초 안에 응답 없음 · 연결 안 됨(주소·방화벽·사내 인증서 — `NODE_EXTRA_CA_CERTS`).
+**확인**: 알림 센터 › 연동 설정 › '보내는 곳' — 채널마다 세 단계:
+1. **보낼 내용 미리 보기**(Grafana·Azure 시험 알림으로) — 받는 쪽 템플릿이 읽을 경로가 있는지
+2. **연결 확인**(2026-11-18) — 이름 → TCP → TLS 핸드셰이크까지만 하고 끊음. **HTTP 요청을 보내지 않으므로 방에 아무것도 가지 않음**(`services/notifyCheck.ts`, 테스트가 받는 쪽에 요청 줄·경로·토큰이 한 바이트도 안 가는지 실제 소켓으로 확인). 결과: 연결됨 + 인증서 발급자·남은 날(14일 미만이면 경고) · 사설 주소 여부 · 실패 원인 `dns`(이름 없음) · `refused`(거부) · `timeout`(응답 없음 — 방화벽·NSG·정책 또는 **받는 쪽 출발지 IP 허용 목록**) · `noRoute` · `tls`(인증서 거부 + 코드, 예: `CERT_HAS_EXPIRED`). API가 프록시로 나가면(`NODE_USE_ENV_PROXY=1` + `HTTPS_PROXY`, `NO_PROXY` 밖) 직접 확인은 다른 길이라 '시험 전송으로 확인'
+3. **시험 전송** — 실제로 방에 글이 올라감(응답 코드·시간·시도 수, 연결 실패면 위 원인)
 
-**Flow(온프렘)**: Flow 관리 화면에서 BOT 웹훅을 만들고 템플릿을 `{{title}}`/`{{message}}`로 두거나 기존 Azure 템플릿(`{{data.essentials.alertRule}}` …)을 그대로 씁니다. 대시보드(API 파드)에서 Flow 서버 주소로 나가는 길이 있어야 합니다 — 쿠버네티스는 차트 `networkPolicy.extraFqdns`에 Flow 호스트(443), 온프렘 Docker는 같은 사내망이면 그대로·프록시를 쓰면 `NO_PROXY`.
+전송 결과(알림 상세 '보낸 곳')에도 실패 원인이 남습니다(`deliveries[].cause`). 주소 변수가 없는 채널은 **API 시작 로그**에 `[notify] channel "<키>" has no usable URL — set <변수>`가 찍히고 화면은 '주소 없음 — <변수>'.
+
+#### 쿠버네티스(Helm) — 채널과 주소 넣기
+
+주소는 비밀이라 값 파일에 쓰지 않습니다. 차트 `notify`(2026-11-18):
+
+```yaml
+notify:
+  channels:                     # → AUD_NOTIFY_CHANNELS (위 JSON과 같은 항목)
+    - { key: flow-test, name: "Flow 시험방", format: flow, urlEnv: AUD_NOTIFY_URL_FLOW_TEST, minSeverity: sev4, prefix: "[STG-TEST] ", lang: ko }
+  urlSecret: aud-notify-urls    # 키 = 각 채널의 urlEnv(·authHeaderEnv) 이름
+```
+```bash
+kubectl -n aud-dashboard create secret generic aud-notify-urls   --from-literal=AUD_NOTIFY_URL_FLOW_TEST='<Flow BOT 웹훅 주소>'      # GitOps면 External Secrets·Key Vault CSI로 같은 이름·키
+```
+- 차트는 채널마다 `secretKeyRef`(optional)로 넣음 — 키가 없어도 파드는 뜨고, 시작 로그·화면이 알려 줌(대시보드 전체를 멈추지 않음)
+- `urlEnv`는 `AUD_NOTIFY_URL_*`, `authHeaderEnv`는 `AUD_NOTIFY_AUTH_*`만 — 다른 이름이면 렌더 실패(Secret에서 `AZURE_CLIENT_ID` 같은 다른 설정을 덮어쓰지 못하게)
+- 예전처럼 `api.extraEnv`에 `AUD_NOTIFY_CHANNELS`를 넣었다면 `notify.channels`로 옮기기(둘 다 두면 뒤의 `extraEnv`가 이김)
+
+#### Flow 방(모바일·PC)까지 — 끝까지 닿는 조건
+
+전달은 한 줄로 이어진 사슬입니다. 어느 한 칸이 비면 방에 아무것도 오지 않고, 대부분 **조용히** 비어 있습니다. 칸마다 객관적으로 확인하는 방법이 있습니다.
+
+| # | 칸 | 필요한 것 | 누가 | 확인(통과 기준) |
+|---|---|---|---|---|
+| 1 | 알림이 대시보드에 들어옴 | 사설 클러스터: Grafana 가져오기(§3.5) — `AUD_NOTIFY_PULL_*` + 연결 신원에 **Grafana Viewer** / 공개 주소: 웹훅 수신 | 플랫폼 관리자 · 고객(역할) | 연동 설정 '상태' = 정상·마지막 읽은 시각 1분 안 · 받은 알림에 그 Grafana 알림(`gf:` ID) |
+| 2 | 채널 규칙이 그 알림을 원함 | `minSeverity`·`categories`·`teams`·`statuses` | 플랫폼 관리자 | 알림 상세 '보낸 곳'에 채널 키가 있음(없으면 규칙이 거른 것) |
+| 3 | 주소가 파드에 있음 | `AUD_NOTIFY_URL_*` — Helm `notify.urlSecret`의 키 | 플랫폼 관리자 | '주소 없음' 배지 없음 · 시작 로그에 `[notify] … no usable URL` 없음 |
+| 4 | API 파드 → 웹훅 호스트 길 | 송신(NAT·방화벽 FQDN/IP 규칙) · CNP 강제면 `networkPolicy.extraFqdns`에 호스트 · 받는 쪽이 출발지 IP를 제한하면 **송신 공용 IP**(NAT 게이트웨이) 허용 · Flow 서버가 **사내망(사설 주소)** 이면 클러스터 → 사내망 경로(VPN·ExpressRoute)와 사내 이름 DNS 전달, 온프렘 Docker는 같은 망이면 그대로·프록시면 `NO_PROXY` | 고객 네트워크 | **연결 확인 = 연결됨** |
+| 5 | 인증서 | 공인 인증서(예: Let's Encrypt — 90일마다 받는 쪽이 갱신) 또는 사내 CA = API에 `NODE_EXTRA_CA_CERTS` · 사내 http만 있으면 채널 `allowHttp: true` | Flow 운영 · 플랫폼 관리자 | 연결 확인의 인증서 줄(남은 날) |
+| 6 | 받는 쪽이 받아 그림 | **방마다 BOT 웹훅 하나**(웹훅 1개 = 템플릿 1개), 템플릿 `{{title}}`/`{{message}}`(또는 기존 Azure 템플릿) | Flow 방 관리자 | **시험 전송 = 응답 2xx** + 방에 `[STG-TEST] …` 글 |
+| 7 | 방 → 구성원의 모바일·PC | 시험방 구성원 · 방 알림 켜짐(BOT 글 포함)·방해 금지 아님 · 모바일 앱 알림 권한 · Flow 서버의 푸시 발송(Flow 운영 쪽) | Flow 운영 · 구성원 | 구성원 휴대폰·PC에 도착 — **대시보드가 알 수 없는 칸**(사람이 확인) |
+| 8 | 실제 알림으로 끝까지 | 1~7 | — | Grafana 규칙이 울릴 때(E2E: 시험 파드 로그 주입) 같은 알림이 Google Chat·Flow 둘 다, 해소도 · '보낸 곳' 정상 |
+
+**stg 시험 배포 현황**(2026-11-18 확인 — 읽기만): 1 Grafana Viewer 할당·가져오기 설정 있음 · 2 채널 'Flow 시험방'(sev4 이상 전부) · **3 비어 있음**(채널 정의만 있고 `AUD_NOTIFY_URL_FLOW_TEST`도 Secret도 없음 → 들어온 알림은 기록만, 전송 `notConfigured`) · 4 송신 = NAT 게이트웨이, CNP 관찰 모드, 받는 쪽은 공개 주소 · 5 공인 인증서(Let's Encrypt, 2027-01까지) · 6·7 시험방 BOT 웹훅을 만들어야 함. 남은 순서: 시험방 BOT 웹훅 → Secret → 값 파일 `notify.*` → 배포 → 연결 확인 → 시험 전송 → 실제 알림.
 
 ### 3.4 네트워크
 - Azure 액션 그룹·Azure Managed Grafana는 **공용 인터넷**에서 보냄 → 공개 주소(Front Door·AGC)에 `/hooks/alerts/*` 경로만 열기. 가능하면 WAF·방화벽에서 출발지를 서비스 태그 `ActionGroup`·Grafana 송신 IP로 제한

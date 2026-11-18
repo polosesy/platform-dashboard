@@ -7,12 +7,13 @@
 //   POST /api/notifications/test — a sample Azure / Grafana delivery through the same parser (operator)
 //   GET  /api/notifications/channels/:key/preview — the body a channel would get for a sample alert (admin)
 //   POST /api/notifications/channels/:key/test    — send that sample to the channel now (admin)
+//   POST /api/notifications/channels/:key/check   — name → TCP → TLS to the channel host, nothing sent (admin)
 // Grafana pull (AUD_NOTIFY_PULL_GRAFANA_URL) — the same inbox + channels fed by reading Grafana's active alerts
 // (services/grafanaAlertPull.ts), for a private cluster that Grafana's webhooks can't reach
 // Outbound channels (Flow · Slack · Google Chat · Teams · Azure / Grafana shapes) — services/notifyChannels.ts
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response, Router } from "express";
-import type { NotificationsResponse, NotifyAlert, NotifyCategory, NotifyChannelTest, NotifyReceiverInfo, NotifySeverity, OwnerRule } from "@aud/types";
+import type { NotificationsResponse, NotifyAlert, NotifyCategory, NotifyChannelCheck, NotifyChannelTest, NotifyReceiverInfo, NotifySeverity, OwnerRule } from "@aud/types";
 import type { Env } from "../env.js";
 import { accessibleConnections, callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription, credentialGroup, getConnections, homeConnection } from "../infra/connectionRegistry.js";
@@ -20,7 +21,8 @@ import { sendError } from "../infra/requestParams.js";
 import { debug } from "../infra/logger.js";
 import { parseAlertPayload, samplePayload, type ParsedAlert } from "../services/alertPayloads.js";
 import { applyDelivery, ingest, listAlerts, notifyDir, ownerTeam, setAck, setDeliveries } from "../services/notifyStore.js";
-import { channelInfo, channelPayload, loadChannels, type Channel } from "../services/notifyChannels.js";
+import { channelInfo, channelPayload, channelUrl, loadChannels, type Channel } from "../services/notifyChannels.js";
+import { checkChannel } from "../services/notifyCheck.js";
 import { relayChanged, sendToChannel, testResult } from "../services/notifyRelay.js";
 import { MANAGED_GRAFANA_SCOPE, pullConfig, startGrafanaAlertPull, type PullState } from "../services/grafanaAlertPull.js";
 import { credentials } from "../infra/connectionCredentials.js";
@@ -116,8 +118,19 @@ function startPull(env: Env) {
   if (conn) pull.state.connection = conn.key;
 }
 
+/**
+ * Enabled channels whose URL variable is missing (or not https) — said at startup, not only on the setup screen:
+ * on stg (2026-11-18) the Flow test room was defined for days without its URL Secret and nothing said so
+ */
+export function unconfiguredChannels(channels: Channel[], v: Record<string, string | undefined>): Channel[] {
+  return channels.filter((c) => c.enabled && !channelUrl(c, v));
+}
+
 export function registerNotifyHooks(app: Express, env: Env) {
-  channelsOf(env); // fail at startup on an invalid AUD_NOTIFY_CHANNELS
+  const missing = unconfiguredChannels(channelsOf(env), vars()); // channelsOf fails at startup on an invalid AUD_NOTIFY_CHANNELS
+  for (const c of missing) {
+    console.warn(`[notify] channel "${c.key}" has no usable URL — set ${c.urlEnv} (https${c.allowHttp ? " or http" : ""}); its alerts are recorded but not sent`);
+  }
   startPull(env);
   // 긴급 취약점 선제 감시: vendor announcements polled in the background → this inbox and its channels
   startEarlyWatch(env, (alerts) => deliverAlerts(env, alerts));
@@ -248,6 +261,22 @@ export function registerNotifyRoutes(router: Router, env: Env) {
       res.json(testResult(r) satisfies NotifyChannelTest);
     } catch (e: unknown) {
       sendError(res, e, "channel_test_failed");
+    }
+  });
+
+  // The network path only — no HTTP request, so the room gets nothing (the test send above is the step that posts)
+  router.post("/api/notifications/channels/:key/check", requireRole(env, "admin"), async (req: Request, res: Response) => {
+    if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+    const c = channelFor(req);
+    if (!c) return res.status(404).json({ error: "channel_not_found" });
+    const url = channelUrl(c, vars());
+    if (!url) return res.status(409).json({ error: "channel_not_configured" });
+    try {
+      const r = await checkChannel(url);
+      debug(`[notify] channel check ${c.key}: ${r.ok ? "ok" : r.cause ?? "failed"} stage=${r.stage} ${r.ms}ms`);
+      res.json(r satisfies NotifyChannelCheck);
+    } catch (e: unknown) {
+      sendError(res, e, "channel_check_failed");
     }
   });
 

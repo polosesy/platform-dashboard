@@ -2,7 +2,7 @@
 status: current
 owner: platform
 last-verified: 2026-11-12
-covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts]
+covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts, apps/api/src/services/notifyCheck.ts]
 ---
 # 에러 카탈로그
 
@@ -356,6 +356,11 @@ covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts,
 ### NOTIFY-005: 채널 시험 전송 실패 / API가 시작하지 않음 (`AUD_NOTIFY_CHANNELS: …`)
 - **원인**: 시작 실패 = 채널 정의 JSON 오류·`urlEnv`가 `AUD_NOTIFY_URL_*`가 아님·키 중복·모르는 항목(엄격) · 시험 전송 '주소 변수가 없거나 https가 아님' = 변수 없음 또는 http(`allowHttp` 없음) · '응답 4xx' = 받는 쪽이 거부(웹훅 주소·Flow 템플릿·Teams Workflows가 아닌 옛 커넥터) · '연결 안 됨' = 주소·방화벽(차트 `networkPolicy.extraFqdns`)·사내 인증서(`NODE_EXTRA_CA_CERTS`) · 3xx = 리디렉션은 따라가지 않음(웹훅 주소를 최종 주소로)
 - **해결**: 알림 센터 › 연동 설정 › 보내는 곳에서 '보낼 내용 미리 보기'로 모양 확인 → 시험 전송. Flow는 BOT 템플릿 `{{title}}`/`{{message}}` 또는 기존 Azure 템플릿
+
+### NOTIFY-006: 채널이 있는데 Flow 방에 아무것도 오지 않음 (주소 없음 · 연결 확인 실패)
+- **증상(2026-11-18 stg)**: Grafana 알림이 받은 알림에는 들어오는데 'Flow 시험방'은 조용함. 알림 상세 '보낸 곳' = `notConfigured`
+- **원인**: 채널 정의(`AUD_NOTIFY_CHANNELS`)만 넣고 주소 변수(`AUD_NOTIFY_URL_*`, 비밀)를 넣을 자리가 차트에 없어 빠짐 — 화면 배지 말고는 아무도 알려 주지 않았음
+- **해결**: Helm `notify.channels` + `notify.urlSecret`(키 = urlEnv 이름) — [alert-center.md](../observability/alert-center.md) §3.3. 시작 로그 `[notify] channel "…" has no usable URL`이 사라졌는지 → 연동 설정 '연결 확인'(메시지 없이 이름·TCP·TLS) → '시험 전송'. 연결 확인 원인: `dns` 호스트·사내 DNS 전달 · `refused` 포트·방화벽 거부 · `timeout` 방화벽·NSG·CNP(강제면 `networkPolicy.extraFqdns`) 또는 받는 쪽 출발지 IP 허용 목록(송신 NAT 공용 IP) · `noRoute` 사설 주소면 VPN·UDR · `tls` 사내 CA = `NODE_EXTRA_CA_CERTS`, 만료·이름 불일치 = 받는 쪽 인증서. 방에는 오는데 휴대폰에 안 오면 대시보드 밖(Flow 방 알림·앱 권한·Flow 서버 푸시)
 
 ---
 

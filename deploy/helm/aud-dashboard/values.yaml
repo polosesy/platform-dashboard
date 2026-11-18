@@ -80,6 +80,17 @@ state:
   size: 1Gi
   accessMode: ReadWriteMany        # ReadWriteOnce for a Managed Disk
   mountPath: /var/lib/aud
+# 알림 센터 › 보내는 곳 (Flow · Slack · Google Chat · Teams …) — docs/observability/alert-center.md §3.3
+# channels → AUD_NOTIFY_CHANNELS (no secrets: each entry names its URL variable, urlEnv AUD_NOTIFY_URL_*);
+# urlSecret = a Secret made outside the chart whose keys ARE those urlEnv names (and authHeaderEnv names), e.g.
+#   kubectl -n aud-dashboard create secret generic aud-notify-urls --from-literal=AUD_NOTIFY_URL_FLOW_TEST='<webhook url>'
+# A key missing from the Secret does not stop the pod: the API logs "[notify] channel … has no usable URL" at start and
+# the setup screen shows "주소 없음 — <변수>" (the alert is recorded, not sent). Egress: add the webhook host to
+# networkPolicy.extraFqdns once the policy enforces.
+notify:
+  channels: []
+  #  - { key: flow-test, name: "Flow 시험방", format: flow, urlEnv: AUD_NOTIFY_URL_FLOW_TEST, minSeverity: sev4, prefix: "[STG-TEST] ", lang: ko }
+  urlSecret: ""
 podDisruptionBudget:
   enabled: true                    # maxUnavailable 1 — never blocks node drains with one replica
 podAnnotations: {}

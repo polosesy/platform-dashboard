@@ -195,7 +195,7 @@ function Detail({ a, canWrite, reload }: { a: NotifyAlert; canWrite: boolean; re
           <div><dt>{t("notify.fact.category")}</dt><dd>{t(`notify.cat.${a.category}`)} <span className={s.muted}>({t(`notify.basis.${a.categoryBasis}`)})</span></dd></div>
           <div><dt>{t("notify.fact.since")}</dt><dd>{when(a.startsAt, locale)}{a.endsAt ? ` → ${when(a.endsAt, locale)}` : ""}</dd></div>
           <div><dt>{t("notify.fact.received")}</dt><dd>{t("notify.fact.receivedText", { n: a.received, r: a.refired, at: when(a.lastReceivedAt, locale) })}</dd></div>
-          {a.deliveries?.length ? <div><dt>{t("notify.fact.relay")}</dt><dd>{a.deliveries.map((d) => <div key={d.channel}>{d.channel}: {d.ok ? t("notify.relay.ok") : t("notify.relay.failed", { s: d.status ?? d.error ?? "—" })} <span className={s.muted}>{when(d.at, locale)}</span></div>)}</dd></div> : null}
+          {a.deliveries?.length ? <div><dt>{t("notify.fact.relay")}</dt><dd>{a.deliveries.map((d) => <div key={d.channel}>{d.channel}: {d.ok ? t("notify.relay.ok") : t("notify.relay.failed", { s: d.status ?? d.error ?? "—" })}{!d.ok && d.cause ? ` · ${t(`notify.cause.${d.cause}`)}` : ""} <span className={s.muted}>{when(d.at, locale)}</span></div>)}</dd></div> : null}
         </dl>
       </div>
       {Object.keys(a.labels).length ? <div className={s.kv}>{Object.entries(a.labels).map(([k, v]) => <span key={k} className={s.label}>{k}={v}</span>)}</div> : null}

@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-17
+last-verified: 2026-11-18
 covers: [deploy/helm/aud-dashboard, deploy/kubernetes, docs/integrations/azure/templates/aks]
 ---
 # Kubernetes(AKS) 배포 — 클러스터 안 네임스페이스
@@ -61,6 +61,7 @@ api ─▶ ARM listClusterUserCredential ─▶ privateFQDN(클러스터 DNS) �
 | `gateway.*`·`healthCheckPolicy` | HTTPRoute(선택 `frontDoorId` — `X-Azure-FDID` 헤더가 맞을 때만 통과)·AGC 헬스 프로브 |
 | `networkPolicy.*` | CiliumNetworkPolicy — 처음엔 `enforce: false`(이름 `-audit`, 기본 거부 없음) |
 | `state.*` | 팀 기록 저장소(PVC) — 아래 '상태 저장' |
+| `notify.channels`·`notify.urlSecret` | 알림 센터 보내는 곳(Flow·Slack·Teams …) — 채널 정의는 값, 웹훅 주소는 Secret(키 = 채널의 `urlEnv`). 웹훅 호스트는 CNP 강제 시 `networkPolicy.extraFqdns`에. 방까지 닿는 조건·확인은 [alert-center.md §3.3](../observability/alert-center.md#33-보내는-곳--flow마드라스체크slackgoogle-chatteams-대시보드--중계-서버) |
 
 ### 상태 저장 (PVC) — 고객 환경 안내
 

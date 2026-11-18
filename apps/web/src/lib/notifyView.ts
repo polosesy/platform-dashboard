@@ -1,7 +1,7 @@
 // 알림 센터 view model (pure) — inbox filters, the feature × alert source mapping, and the sender setup snippets.
 // Unit-tested from apps/api/test/notify.test.ts.
 
-import type { NotifyAlert, NotifyCategory, NotifySeverity } from "@aud/types";
+import type { NotifyAlert, NotifyCategory, NotifyChannelCheck, NotifySeverity } from "@aud/types";
 
 export const CATEGORIES: NotifyCategory[] = ["incident", "security", "monitoring", "change"];
 export const SEVERITIES: NotifySeverity[] = ["sev1", "sev2", "sev3", "sev4"];
@@ -87,7 +87,10 @@ webhook_receiver {
 
 /** The admin's channel definition (no secrets — each webhook URL is its own variable) */
 export function channelsSnippet(): string {
-  return `# API environment (api.env · Helm api.extraEnv · Key Vault/Secret for the URLs)
+  return `# Kubernetes (Helm values): notify.channels = this list, notify.urlSecret = a Secret whose keys are the urlEnv names
+#   kubectl -n aud-dashboard create secret generic aud-notify-urls --from-literal=AUD_NOTIFY_URL_FLOW_OPS='<url>'
+# On-prem Docker / other: the same two variables in api.env
+AUD_NOTIFY_CHANNELS='[
 AUD_NOTIFY_CHANNELS='[
   {"key":"flow-ops","name":"Flow ops room","format":"flow","urlEnv":"AUD_NOTIFY_URL_FLOW_OPS",
    "minSeverity":"sev3","categories":["incident","security","monitoring"],"prefix":"[STG] ","lang":"ko"},
@@ -98,6 +101,29 @@ AUD_NOTIFY_URL_FLOW_OPS=<Flow BOT webhook URL — secret>
 AUD_NOTIFY_URL_SLACK_SEC=<Slack incoming webhook URL — secret>
 # formats: flow · azureCommon · grafana · slack · googleChat · teams · json
 # optional: "teams":["platform"] (connection file owners) · "authHeaderEnv":"AUD_NOTIFY_AUTH_X" · "allowHttp":true (internal http only)`;
+}
+
+/** Below this many days the certificate is worth a warning (Let's Encrypt renews at 30 days left) */
+export const CERT_WARN_DAYS = 14;
+
+export type CheckLine = { tone: "ok" | "warn" | "fail"; parts: Array<{ key: string; vars?: Record<string, string | number> }> };
+
+/** '연결 확인' result → the sentence parts (i18n keys) — pure */
+export function checkLine(r: NotifyChannelCheck): CheckLine {
+  if (r.viaProxy) return { tone: "warn", parts: [{ key: "notify.chk.proxy" }] };
+  const where = r.privateAddress ? [{ key: "notify.chk.private" }] : [];
+  if (!r.ok) {
+    const cause = r.cause ?? "unknown";
+    return { tone: "fail", parts: [{ key: `notify.chk.fail.${cause}`, vars: { code: r.tlsCode ?? "" } }, ...where, { key: "notify.chk.ms", vars: { ms: r.ms } }] };
+  }
+  const cert = r.cert;
+  const certPart = cert
+    ? [{ key: cert.daysLeft < CERT_WARN_DAYS ? "notify.chk.certSoon" : "notify.chk.cert", vars: { issuer: cert.issuer ?? "—", days: cert.daysLeft } }]
+    : [];
+  return {
+    tone: cert && cert.daysLeft < CERT_WARN_DAYS ? "warn" : "ok",
+    parts: [{ key: r.stage === "tls" ? "notify.chk.okTls" : "notify.chk.okTcp" }, ...certPart, ...where, { key: "notify.chk.ms", vars: { ms: r.ms } }, { key: "notify.chk.nothingSent" }],
+  };
 }
 
 /** Flow (Madras Check) BOT webhook template — the body carries both the Azure paths and finished text */

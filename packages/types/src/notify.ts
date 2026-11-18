@@ -2,6 +2,7 @@
 // (webhook contact point), received by the dashboard itself and shown to the people who may see them. Messenger
 // webhooks are not required to see them (the inbox is a channel), and the dashboard relays them on to chat tools
 // (Flow · Slack · Google Chat · Teams) in each tool's own payload shape — see apps/api/src/services/notifyChannels.ts.
+import type { ConnectCause } from "./common.js";
 
 /** sev1 critical (outage, data loss) · sev2 major · sev3 warning · sev4 info — the Grafana standard of the platform */
 export type NotifySeverity = "sev1" | "sev2" | "sev3" | "sev4";
@@ -66,7 +67,41 @@ export type NotifyAlert = {
   deliveries?: NotifyDelivery[];
 };
 
-export type NotifyDelivery = { channel: string; at: string; ok: boolean; status?: number; attempts: number; error?: "timeout" | "network" | "http" | "notConfigured" };
+/**
+ * Why a send made no connection — from the socket / TLS error code only (never its text):
+ * dns name does not resolve · refused nothing listens (or a firewall rejects) · timeout no answer (firewall drop, wrong
+ * port) · noRoute no route to the address · tls the certificate was refused (expired, wrong name, unknown CA — an
+ * internal CA needs NODE_EXTRA_CA_CERTS)
+ */
+export type NotifyFailCause = ConnectCause | "tls";
+
+export type NotifyDelivery = {
+  channel: string; at: string; ok: boolean; status?: number; attempts: number;
+  error?: "timeout" | "network" | "http" | "notConfigured";
+  /** Set on network / timeout errors when the code says why */
+  cause?: NotifyFailCause;
+};
+
+/**
+ * '연결 확인' — the path to a channel's host without sending anything: name → TCP → TLS handshake (no HTTP request,
+ * so no message reaches the room). Answers the network question; whether the receiver accepts the body is the test send.
+ */
+export type NotifyChannelCheck = {
+  ok: boolean;
+  /** The last stage reached: dns (name resolved) · connect (TCP open) · tls (certificate accepted) */
+  stage: "none" | "dns" | "connect" | "tls";
+  cause?: NotifyFailCause;
+  /** The TLS error code when the certificate was refused (e.g. CERT_HAS_EXPIRED) */
+  tlsCode?: string;
+  /** How many addresses the name resolved to, and whether any is private (internal network) — never the addresses */
+  addresses?: number;
+  privateAddress?: boolean;
+  /** The certificate the host presented (issuer organisation, expiry) */
+  cert?: { issuer: string | null; validTo: string; daysLeft: number };
+  /** The API sends through an HTTP proxy for this host — a direct check would not test that path; use the test send */
+  viaProxy?: boolean;
+  ms: number;
+};
 
 /** An outbound channel as the admin sees it — the webhook URL (a secret) is never returned, only its host */
 export type NotifyChannelInfo = {
@@ -76,6 +111,8 @@ export type NotifyChannelInfo = {
   host: string | null;
   /** The URL variable is set (and https, or http allowed) */
   configured: boolean;
+  /** The variable that holds the URL — its name, never its value (what to set when `configured` is false) */
+  urlEnv: string;
   enabled: boolean;
   minSeverity: NotifySeverity;
   categories: NotifyCategory[];
@@ -85,7 +122,7 @@ export type NotifyChannelInfo = {
   prefix: string;
 };
 
-export type NotifyChannelTest = { ok: boolean; status?: number; ms: number; attempts: number; error?: NotifyDelivery["error"] };
+export type NotifyChannelTest = { ok: boolean; status?: number; ms: number; attempts: number; error?: NotifyDelivery["error"]; cause?: NotifyFailCause };
 
 export type NotificationsResponse = {
   items: NotifyAlert[];
