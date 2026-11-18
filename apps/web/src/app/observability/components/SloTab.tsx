@@ -14,7 +14,7 @@
 //                     targets (on-prem file / Helm values) with a draft filled from the measured tiers · the fields ·
 //                     workloads without HTTP metrics
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SloService, SloSettingsResponse, SloSli, WorkloadSloResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -70,15 +70,25 @@ export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clust
   const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
   // Two rows: the APM views, and — when SLO is chosen — its own three (one row of nine did not fit)
   const sloView = view === "services" || view === "settings" || view === "guide";
+  // Narrow screens (2026-11-18): eight views do not fit 390 px — the row scrolls in its own box (the page column stays
+  // the screen's width; before, this row's 514 px widened the column and cut the map's frame), and the chosen view is
+  // scrolled into sight
+  const switchRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    for (const el of switchRef.current?.querySelectorAll<HTMLElement>('button[aria-pressed="true"]') ?? []) {
+      const box = el.closest<HTMLElement>("[data-view-scroll]");
+      if (box && box.scrollWidth > box.clientWidth) box.scrollLeft = Math.max(0, el.offsetLeft - box.clientWidth / 2 + el.offsetWidth / 2);
+    }
+  }, [view]);
   const switcher = (
-    <>
-      <Segmented label={t("ob.slo.view")} value={sloView ? "slo" : view} onChange={(v) => setView(v === "slo" ? "services" : v)}
-        items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "red", label: t("ob.slo.view.red") }, { id: "endpoints", label: t("ob.slo.view.endpoints") }, { id: "traces", label: t("ob.slo.view.traces") }, { id: "deps", label: t("ob.slo.view.deps") }, { id: "errors", label: t("ob.slo.view.errors") }, { id: "rollouts", label: t("ob.slo.view.rollouts") }, { id: "slo", label: t("ob.slo.view.slo") }]} />
+    <div ref={switchRef} className={styles.viewSwitch}>
+      <div className={styles.viewScroll} data-view-scroll><Segmented label={t("ob.slo.view")} value={sloView ? "slo" : view} onChange={(v) => setView(v === "slo" ? "services" : v)}
+        items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "red", label: t("ob.slo.view.red") }, { id: "endpoints", label: t("ob.slo.view.endpoints") }, { id: "traces", label: t("ob.slo.view.traces") }, { id: "deps", label: t("ob.slo.view.deps") }, { id: "errors", label: t("ob.slo.view.errors") }, { id: "rollouts", label: t("ob.slo.view.rollouts") }, { id: "slo", label: t("ob.slo.view.slo") }]} /></div>
       {sloView ? (
-        <Segmented label={t("ob.slo.view.sloSub")} value={view} onChange={setView}
-          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} />
+        <div className={styles.viewScroll} data-view-scroll><Segmented label={t("ob.slo.view.sloSub")} value={view} onChange={setView}
+          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} /></div>
       ) : null}
-    </>
+    </div>
   );
   // The service map reads the service graph, RED spanmetrics — not Micrometer: both open whatever the SLO data's state
   if (view === "map") {

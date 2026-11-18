@@ -265,6 +265,14 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           {canRead(namespace)
             ? t("ob.logs.noneHint")
             : t("ob.logs.deniedHint", { list: (logNamespaces ?? []).join(", ") || "—" })}
+          {/* the sources' own words (only in a chip's tooltip before — "Loki · failed" said nothing about why) */}
+          {attempts.some((a) => a.message && a.state !== "ok" && a.state !== "empty") ? (
+            <ul className={styles.plWhy}>
+              {attempts.filter((a) => a.message && a.state !== "ok" && a.state !== "empty").map((a) => (
+                <li key={a.source}><b>{t(`ob.logs.src.${a.source}`)}</b> — {a.message}</li>
+              ))}
+            </ul>
+          ) : null}
         </Notice>
       )}
 

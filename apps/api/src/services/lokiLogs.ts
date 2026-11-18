@@ -177,6 +177,73 @@ const range = (minutes: number, at?: number) => {
   return { start: String(end - BigInt(minutes) * 60_000_000_000n), end: String(end) };
 };
 
+/**
+ * Log lines are cut on Loki's side to one character over what we show (the parser then marks the cut with "…") and
+ * read in pages. 2026-11-18 stg: a workload's ERROR lines are Java stack traces up to 12,000 characters — 424 of them
+ * (≈ 5 MB) got NO answer: Loki held the request ~60 s and dropped the connection, so the viewer said "Loki · failed"
+ * while the counts (a few hundred bytes) said ERROR 424; 200 lines (2.5 MB) came in 0.8 s but over our MAX_BODY were
+ * thrown away as "nothing". Cut to 4,097 a page of PAGE_LINES is ≤ ~0.4 MB.
+ */
+export const lineCut = (query: string) => `${query} | line_format "{{ __line__ | trunc ${MAX_LINE_BYTES + 1} }}"`;
+export const PAGE_LINES = 100;
+type LokiStream = NonNullable<NonNullable<LokiStreams["data"]>["result"]>[number];
+
+/**
+ * Pure: merge one backward page into what was read — drops the lines already held (a page's end is the previous page's
+ * oldest line + 1 ns, so the boundary line comes again) and says where the next page ends and whether to stop:
+ * a short page (the window holds no more), a page with nothing new (lines sharing one timestamp), or the limit.
+ */
+export function mergePage(
+  held: { seen: Set<string>; result: LokiStream[]; got: number }, page: LokiStreams, asked: number, limit: number,
+): { nextEnd: bigint | null } {
+  let returned = 0, added = 0;
+  let oldest: bigint | null = null;
+  for (const st of page.data?.result ?? []) {
+    const keep: LokiStream["values"] = [];
+    for (const v of st.values ?? []) {
+      returned++;
+      const ts = BigInt(v[0]);
+      if (oldest === null || ts < oldest) oldest = ts;
+      const k = `${JSON.stringify(st.stream ?? {})}|${v[0]}|${v[1]}`;
+      if (held.seen.has(k)) continue;
+      held.seen.add(k);
+      keep!.push(v);
+    }
+    if (keep!.length) { held.result.push({ ...st, values: keep }); added += keep!.length; }
+  }
+  held.got += added;
+  const stop = returned < asked || added === 0 || oldest === null || held.got >= limit;
+  return { nextEnd: stop ? null : oldest! + 1n };
+}
+
+/** Pure: only the newest `limit` lines (a page asked one more than needed) */
+export function newest(result: LokiStream[], limit: number): LokiStream[] {
+  const all = result.flatMap((st) => (st.values ?? []).map((v) => ({ st, v })));
+  if (all.length <= limit) return result;
+  const cut = new Set(all.sort((a, b) => (BigInt(b.v[0]) > BigInt(a.v[0]) ? 1 : BigInt(b.v[0]) < BigInt(a.v[0]) ? -1 : 0)).slice(limit).map((x) => x.v));
+  return result.map((st) => ({ ...st, values: (st.values ?? []).filter((v) => !cut.has(v)) })).filter((st) => st.values!.length);
+}
+
+/** The newest `limit` lines of a log query in the window, cut and paged (see lineCut) — one LokiStreams like a single read */
+export async function readLines(
+  cfg: { url: string; tenant?: string }, query: string, win: { start: string; end: string }, limit: number, headers: Record<string, string> = {},
+): Promise<{ body: LokiStreams; truncated: boolean; pages: number }> {
+  const held = { seen: new Set<string>(), result: [] as LokiStream[], got: 0 };
+  const start = BigInt(win.start);
+  let end: bigint | null = BigInt(win.end);
+  let truncated = false, pages = 0;
+  while (end !== null && end > start && held.got < limit) {
+    // after the first page one more: the boundary line comes again and takes a place
+    const asked = Math.min(PAGE_LINES, limit - held.got + (pages ? 1 : 0));
+    const page: { body: LokiStreams; truncated: boolean } = await lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: lineCut(query), start: String(start), end: String(end), limit: String(asked), direction: "backward" }, READ_TIMEOUT_MS, headers);
+    pages++;
+    // over MAX_BODY even cut (should not happen): say so, keep what the earlier pages gave
+    if (page.truncated) { truncated = true; break; }
+    end = mergePage(held, page.body, asked, limit).nextEnd;
+  }
+  return { body: { data: { resultType: "streams", result: newest(held.result, limit) } }, truncated, pages };
+}
+
 const logCache = new CacheManager<WorkloadLogsResponse>(50, 15_000);
 
 export async function getWorkloadLogs(
@@ -200,7 +267,7 @@ export async function getWorkloadLogs(
   const evalAt = opts.at === undefined ? nowNs() : BigInt(opts.at) * 1_000_000_000n;
   try {
     const [lines, exc] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: q.lines, ...range(opts.minutes, opts.at), limit: String(MAX_LINES), direction: "backward" }),
+      readLines(cfg, q.lines, range(opts.minutes, opts.at), MAX_LINES),
       lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: q.exceptions, time: String(evalAt) }, 15_000).catch(() => null),
     ]);
     let redactions = 0;
@@ -450,8 +517,8 @@ export async function getLogContext(
   try {
     const [b, a] = await Promise.all([
       // Loki's range is [start, end): end = ts leaves the line itself out; start = ts + 1 does the same going forward
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, start: String(ts - CONTEXT_SPAN_NS), end: String(ts), limit: n, direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE),
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: selector, start: String(ts + 1n), end: String(ts + CONTEXT_SPAN_NS), limit: n, direction: "forward" }, READ_TIMEOUT_MS, CATEGORIZE),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: lineCut(selector), start: String(ts - CONTEXT_SPAN_NS), end: String(ts), limit: n, direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: lineCut(selector), start: String(ts + 1n), end: String(ts + CONTEXT_SPAN_NS), limit: n, direction: "forward" }, READ_TIMEOUT_MS, CATEGORIZE),
     ]);
     const before = podEntries(b.body, opts.pod), after = podEntries(a.body, opts.pod);
     return { ...base, before: before.lines.slice(-Number(n)), after: after.lines.slice(0, Number(n)), redactions: before.redactions + after.redactions };
@@ -501,7 +568,7 @@ export async function getPodLogsFromLoki(
       .then((r) => Math.round(Number(r.body.data?.result?.[0]?.value?.[1] ?? 0)) || 0).catch(() => null);
   try {
     const [res, error, warn] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: `${selector}${filter}`, ...range(minutes, opts.at), limit: String(limit), direction: "backward" }, READ_TIMEOUT_MS, CATEGORIZE),
+      readLines(cfg, `${selector}${filter}`, range(minutes, opts.at), limit, CATEGORIZE),
       count(ERROR_FILTER), count(WARN_FILTER),
     ]);
     const { lines, redactions } = podEntries(res.body, opts.pod ?? "");

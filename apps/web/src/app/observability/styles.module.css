@@ -887,7 +887,10 @@
 .hmRowNs, .hmRowKind { color: var(--muted); }
 
 /* ── SLO (SloTab) — platform state grammar: left strip + glyph, ● ok · ▲ warn · ■ danger · ○ not judged · ? failed ── */
-.slo { display: grid; gap: 16px; min-width: 0; }
+.slo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+/* The APM view rows: each scrolls in its own box when it does not fit (padding keeps the focus ring inside) */
+.viewSwitch { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+.viewScroll { max-width: calc(100% + 6px); min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; padding: 3px; margin: -3px; }
 /* View switch + basis on one line */
 .sloTop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .sloMeta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--text-small); color: var(--muted); }
@@ -1045,6 +1048,8 @@
 .plPick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
 .plPickEnd { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
 .plSources { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.plWhy { margin: 6px 0 0; padding-left: 18px; font-size: var(--text-small); }
+.plWhy b { font-weight: 600; }
 .plFilters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-bottom: 10px; }
 .plScroll { max-height: 640px; overflow: auto; min-width: 0; }
 .plGroups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px 20px; margin-top: 4px; }

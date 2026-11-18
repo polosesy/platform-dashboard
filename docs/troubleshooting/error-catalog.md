@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts, apps/api/src/services/notifyCheck.ts]
 ---
 # 에러 카탈로그
@@ -78,6 +78,11 @@ covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts,
 - **원인**: 속도 제한이 **아닙니다**. Azure Monitor 작업 영역은 **질의 하나의 비용**이 15,000을 넘으면 거절합니다. 비용 = 시계열 수 × (기간 ÷ 수집 간격) ÷ 5000이고, 기간 안에 한 번이라도 있었던 시계열을 모두 셉니다. 2026-11-09 stg 실측: 지금 시계열은 501개였지만 30일 동안 파드가 바뀌며 생긴 시계열은 6,898개였습니다 → `increase(…[30d])` 비용 ≈ 27,900, 매번 429입니다(오류 본문 `Query cost=27939 exceeds max limit=15000 … # of Ts:6898`). 가끔 통과하는 것은 Azure가 수집 간격을 '무작위로 고른 시계열 하나'로 추정하기 때문입니다
 - **해결**: SLO 기간을 **3일 조각**(`[3d] offset 3d·i`, 첫 조각 = 3일 소진 창 재사용)으로 묻고 서버에서 라벨 집합별로 더합니다(`workloadSlo.ts` `sloWindowParts`·`mergeSloParts`, 조각 하나라도 실패 = 그 값은 실패 — 부분 합을 기간 값처럼 보이지 않음). 조각 합 = 한 번에 묻기와 0.005% 차이(6일 실측). stg 질의 40개 12.9초, 실패 0. 비용 초과 429는 `tooCostly`(재시도 안 함 — 같은 답) · 일반 429는 `throttled`(3초 뒤 1회 재시도 — Azure는 신원별 30초 창으로 셈). 모든 사용자·탭이 같은 연결 신원으로 읽으므로 작업 영역별 동시 질의는 프로세스 전체 8개(`PROM_MAX_IN_FLIGHT`)
 - **새 질의를 만들 때**: 긴 기간(≥ 1일)·여러 서비스 합산 질의는 `count(last_over_time(<선택자>[기간]))`로 그 기간의 시계열 수를 먼저 재고, 시계열 × 시간 × (3600 ÷ 수집 간격초) ÷ 5000 < 15,000(여유 절반)인지 확인합니다
+
+### OBS-005: 로그 탭 '워크로드 전체'·ERROR에서 'Loki · 실패'·0줄인데 로그 지표는 ERROR 수백 건
+- **에러**: 범위 '워크로드 전체', 레벨 ERROR(또는 WARN 이상), 1시간·3시간 — 칩 'Loki · 실패', '어느 출처에서도 이 Pod의 로그를 찾지 못했습니다'. 같은 화면의 로그 지표는 ERROR 382, '이 파드'로 바꾸면 줄이 보임
+- **원인**: 줄 **크기**입니다(질의·권한·정규식이 아님). Java 서비스의 ERROR 줄은 스택 트레이스를 담아 한 줄이 최대 12,000자입니다. 2026-11-18 stg 실측(같은 LogQL을 클러스터 안 Loki에 직접): ERROR 424줄 한 번에(≈ 5 MB) = **61초 동안 답이 없다가 연결 끊김**(대시보드는 25초에 포기 → 실패), 200줄(2.5 MB) = 0.8초에 왔지만 대시보드의 본문 상한(2 MB)을 넘어 버려짐('읽기 한도보다 큼'), 50줄 = 0.3초. 같은 범위의 개수 세기(`count_over_time`)는 1.2초 — 숫자만 오가서 지표는 늘 됐음. 파드 하나(134줄, 1.67 MB)는 상한 바로 아래라 우연히 보였음. 정규식 모양(`pod=~"…-.*"`, `|= "ERROR"`)은 무관
+- **해결**: 줄을 **Loki 쪽에서 잘라**(`| line_format "{{ __line__ | trunc 4097 }}"` — 화면 상한 4,096자 + 1, 파서가 '…' 표시; 시각·구조화 메타데이터 그대로) **100줄씩 나눠** 읽음(`lokiLogs.ts` `lineCut`·`readLines`·`mergePage` — 다음 쪽 끝 = 앞 쪽 가장 오래된 줄 + 1 ns, 경계 줄 중복 제거, 쪽마다 1줄 더). 로그 뷰어·워크로드 로그 스트림·맥락 보기에 적용(Hubble 드롭 줄은 JSON 전체가 필요해 자르지 않음). stg 대조: 상한 500 → 6쪽·2~4.5초에 정확히 500줄, 상한을 넘게 잡으면 받은 줄 = Loki `count_over_time`(ERROR 526 = 526, WARN 이상 1,240 = 1,240; 3시간 WARN 이상은 1,322 / 1,323 — 한 줄 차이, 원인 미확정). 출처가 실패하면 그 이유(출처가 말한 문장)를 안내 상자에 보임(예전엔 칩 툴팁에만)
 
 ---
 
