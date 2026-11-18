@@ -28,7 +28,7 @@ import { useDependencies } from "./DependenciesView";
 import styles from "../../hubble/styles.module.css";
 
 type CardData = { card: ApmPlacedCard; dim: boolean; selected: boolean; sig: ServiceSignals | null; buckets: number[] };
-type BoxData = { box: ApmBox };
+type BoxData = { box: ApmBox; onClose?: () => void };
 
 const HiddenHandles = () => (
   <>
@@ -46,6 +46,25 @@ const CardNode = memo(function CardNode({ data }: NodeProps<CardData>) {
   const { t, locale } = useI18n();
   const rate = useRate();
   const c = data.card;
+  // Seen on the network only — one step quieter: name + flows · drops (a closed namespace: its workloads, summed)
+  if (c.kind === "discovered" || c.kind === "nsGroup") {
+    const group = c.kind === "nsGroup";
+    return (
+      <div className={styles.nmQuiet} data-kind={c.kind} data-dim={data.dim || undefined} data-selected={data.selected || undefined}
+        title={group ? t("ob.apm.disc.groupHint", { ns: c.name, n: c.members ?? 0 }) : t("ob.apm.disc.cardHint", { ns: c.namespace, p: c.net?.pods ?? 0 })}>
+        <HiddenHandles />
+        <span className={styles.nmQuietName}>
+          <span aria-hidden="true">{group ? "▸" : "○"}</span>
+          <span>{group ? t("ob.apm.disc.groupName", { ns: c.name, n: c.members ?? 0 }) : c.name}</span>
+        </span>
+        <span className={styles.nmQuietLine}>
+          {t("ob.apm.disc.flowsN", { n: countText(c.net?.flows ?? 0, locale) })}
+          {c.net?.dropped ? <b> · {t("ob.apm.disc.dropsN", { n: countText(c.net.dropped, locale) })}</b> : null}
+          {group ? <span className={styles.nmQuietOpen}>{t("ob.apm.disc.open")}</span> : null}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className={styles.nmCard} data-status={c.status} data-dim={data.dim || undefined} data-selected={data.selected || undefined}
       data-kind={c.kind === "entry" ? "internetIn" : "workload"}>
@@ -55,23 +74,15 @@ const CardNode = memo(function CardNode({ data }: NodeProps<CardData>) {
         <span className={styles.nmCardName} title={c.name}>{c.kind === "entry" ? t("ob.apm.entry") : c.name}</span>
       </div>
       <div className={styles.nmCardKind}>
-        <span>{c.kind === "entry" ? c.name : c.kind === "discovered" ? t("ob.apm.disc.kind", { ns: c.namespace }) : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}</span>
+        <span>{c.kind === "entry" ? c.name : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}</span>
       </div>
-      {c.kind === "discovered" && c.net ? (
-        // seen on the network only: Cilium's flows and drops in the sample — no requests, no latency (no spans)
-        <div className={styles.nmCells}>
-          <span><small>{t("ob.apm.disc.flows")}</small>{countText(c.net.flows, locale)}</span>
-          <span data-hot={c.net.dropped > 0 || undefined}><small>{t("ob.apm.disc.drops")}</small>{countText(c.net.dropped, locale)}</span>
-        </div>
-      ) : (
-        <div className={styles.nmCells}>
-          {c.kind === "entry"
-            ? <span><small>{t("ob.apm.out")}</small>{countText(c.outRequests, locale)}</span>
-            : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
-          <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
-        </div>
-      )}
-      {c.kind === "discovered" ? <div className={styles.nmSignals}><span>○ {t("ob.apm.disc.noTraces")}</span></div> : data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
+      <div className={styles.nmCells}>
+        {c.kind === "entry"
+          ? <span><small>{t("ob.apm.out")}</small>{countText(c.outRequests, locale)}</span>
+          : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
+        <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
+      </div>
+      {data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
     </div>
   );
 });
@@ -92,13 +103,20 @@ function SignalRow({ sig, buckets, fan = true }: { sig: ServiceSignals; buckets:
 const BoxNode = memo(function BoxNode({ data }: NodeProps<BoxData>) {
   const { t } = useI18n();
   const b = data.box;
-  const title = b.kind === "laneIn" ? t("ob.apm.laneIn") : b.title || t("ob.apm.noNamespace");
+  const title = b.kind === "laneIn" ? t("ob.apm.laneIn")
+    : b.kind === "disc" ? t("ob.apm.disc.boxTitle", { n: b.members })
+    : b.kind === "untraced" ? t("ob.apm.disc.laneTitle", { n: b.members })
+    : b.title || t("ob.apm.noNamespace");
   return (
-    <div className={styles.nmBox} data-kind={b.kind === "laneIn" ? "laneIn" : "namespace"}>
+    <div className={styles.nmBox} data-kind={b.kind}>
       <div className={styles.nmBoxHead}>
-        {b.kind === "namespace" && <span className={styles.nmBoxTag}>NS</span>}
-        <span className={styles.nmBoxTitle} title={title}>{title}</span>
-        <span className={styles.nmBoxCounts}>{b.counts.warn ? <span data-status="warn">{NET_GLYPH.warn}{b.counts.warn}</span> : null}</span>
+        {(b.kind === "namespace" || b.kind === "nsOpen") && <span className={styles.nmBoxTag}>NS</span>}
+        <span className={styles.nmBoxTitle} title={b.kind === "nsOpen" ? `${title} · ${t("ob.apm.disc.openNote", { n: b.members })}` : title}>{title}</span>
+        <span className={styles.nmBoxCounts}>
+          {b.counts.warn ? <span data-status="warn">{NET_GLYPH.warn}{b.counts.warn}</span> : null}
+          {/* the box itself lets clicks through (pointer-events none); this button takes them */}
+          {b.kind === "nsOpen" && data.onClose ? <span className={styles.nmBoxBtn}><Button size="sm" variant="ghost" onClick={data.onClose}>{t("ob.apm.disc.close")}</Button></span> : null}
+        </span>
       </div>
     </div>
   );
@@ -109,8 +127,9 @@ const TONE: Record<ApmLink["tone"], { color: string; dash?: string; legend: stri
   forward: { color: rgba("ink", 0.38), legend: "forward" },
   fail: { color: rgba("warning", 0.95), dash: "6 4", legend: "dropOther" },
   async: { color: rgba("ink", 0.38), dash: "2 4", legend: "dropIpv6" },
-  // seen on the network only (Hubble) — no trace edge: a fine dotted line, no rate
-  net: { color: rgba("integration", 0.7), dash: "1 4", legend: "net" },
+  // seen on the network only (Hubble) — no trace edge: a fine dotted line in the discovery colour, no rate, no label
+  // until pointed at (54 labels at once hid the map)
+  net: { color: rgba("integration", 0.75), dash: "2 4", legend: "net" },
 };
 
 function FitOnKey({ fitKey }: { fitKey: string }) {
@@ -173,6 +192,12 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
   // Hubble UI channel (the backend replays its buffer), so not on every map view
   const [discover, setDiscover] = useState(false);
   const [discScope, setDiscScope] = useState<"traced" | "all">("traced");
+  // namespaces without traces the user opened (the rest stay one card each)
+  const [openNs, setOpenNs] = useState<ReadonlySet<string>>(new Set());
+  // a line's label: while pointed at, or pinned by a click (touch screens have no hover). React Flow only sends edge
+  // events when an edge click handler exists (elementsSelectable is off) — hence onEdgeClick below
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  const [pinEdge, setPinEdge] = useState<string | null>(null);
   const { locale: lang } = useI18n();
   const hq = useApiQuery(discover && clusterId ? `apm-disc:${clusterId}:${lang}` : null, (token) =>
     fetchJsonWithBearer<HubbleServiceMapResponse>(apiUrl("/api/hubble/service-map", { clusterId, timeWindow: "5", lang }), token),
@@ -189,7 +214,9 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
-  const map: ApmMap = useMemo(() => buildApmMap(d, { failing, search }, net), [d, failing, search, net]);
+  const map: ApmMap = useMemo(() => buildApmMap(d, { failing, search, open: openNs }, net), [d, failing, search, net, openNs]);
+  const nameOf = (id: string) => map.cards.find((c) => c.id === id)?.name ?? id;
+  const closeNs = (ns: string) => setOpenNs((p) => { const n = new Set(p); n.delete(ns); return n; });
   const rate = useRate();
 
   const focus = selected ?? hover;
@@ -203,7 +230,9 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
   const nodes: Node[] = useMemo(() => {
     const out: Node[] = map.boxes.map((b) => ({
       id: b.id, type: "aBox", position: { x: b.x, y: b.y }, width: b.w, height: b.h, style: { width: b.w, height: b.h, pointerEvents: "none" },
-      data: { box: b } satisfies BoxData, draggable: false, selectable: false, zIndex: 0,
+      data: { box: b, ...(b.kind === "nsOpen" ? { onClose: () => closeNs(b.title) } : {}) } satisfies BoxData, draggable: false, selectable: false,
+      // a "not instrumented" box sits inside its namespace box
+      zIndex: b.kind === "disc" ? 1 : 0,
     }));
     for (const c of map.cards) {
       out.push({
@@ -212,21 +241,26 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
       });
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, near, selected, marked, signals, d.buckets]);
 
   const edges: Edge[] = useMemo(() => map.links.map((l) => {
     const tone = TONE[l.tone];
     const on = !!focus && (l.source === focus || l.target === focus);
+    const pointed = hoverEdge === l.id || pinEdge === l.id;
+    // labels: a trace line when its card is in focus; a network-only line only when pointed at (the panel lists them all)
+    const label = pointed || (on && !l.net) ? (l.net
+      ? t("ob.apm.disc.linkLabel", { f: countText(l.net.flows, locale), d: countText(l.net.dropped, locale), p: `${l.net.port}/${l.net.protocol}` }) + (l.net.merged > 1 ? ` · ${t("ob.apm.disc.mergedN", { n: l.net.merged })}` : "")
+      : `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`) : null;
+    const quietNet = l.tone === "net" && !on && !pointed;
     return {
-      id: l.id, source: l.source, target: l.target, type: "smoothstep",
-      style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: (focus && !on) || (!focus && marked && !marked.has(l.source) && !marked.has(l.target)) ? 0.06 : on ? 1 : l.tone === "fail" ? 0.95 : 0.5 },
+      id: l.id, source: l.source, target: l.target, type: "smoothstep", interactionWidth: 14,
+      style: { stroke: tone.color, strokeWidth: on || pointed ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: (focus && !on) || (!focus && marked && !marked.has(l.source) && !marked.has(l.target)) ? 0.06 : on || pointed ? 1 : l.tone === "fail" ? 0.95 : quietNet ? 0.35 : 0.5 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
-      ...(on ? { label: l.net
-        ? t("ob.apm.disc.linkLabel", { f: countText(l.net.flows, locale), d: countText(l.net.dropped, locale), p: `${l.net.port}/${l.net.protocol}` })
-        : `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
-      zIndex: on ? 20 : 5,
+      ...(label ? { label, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
+      zIndex: on || pointed ? 20 : 5,
     } satisfies Edge;
-  }), [map.links, focus, t, locale, rate, d.buckets, marked]);
+  }), [map.links, focus, hoverEdge, pinEdge, t, locale, rate, d.buckets, marked]);
 
   useEffect(() => {
     if (!selected) return;
@@ -245,16 +279,17 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
         <Segmented label={t("ob.apm.mode")} value={mode} onChange={setMode} items={[{ id: "map", label: t("ob.apm.mode.map") }, { id: "list", label: t("ob.apm.mode.list") }]} />
       </div>
       <div className={styles.nmBar} role="group" aria-label={t("ob.apm.disc.title")}>
-        <FilterChip pressed={discover} title={t("ob.apm.disc.hint")} onClick={() => setDiscover(!discover)}>{t("ob.apm.disc.toggle")}</FilterChip>
+        <FilterChip pressed={discover} title={t("ob.apm.disc.hint")} onClick={() => { setDiscover(!discover); setOpenNs(new Set()); }}>{t("ob.apm.disc.toggle")}</FilterChip>
         {discover ? (
           <>
-            <Segmented label={t("ob.apm.disc.scope")} value={discScope} onChange={setDiscScope}
+            <Segmented label={t("ob.apm.disc.scope")} value={discScope} onChange={(v) => { setDiscScope(v); setOpenNs(new Set()); }}
               items={[{ id: "traced", label: t("ob.apm.disc.scope.traced") }, { id: "all", label: t("ob.apm.disc.scope.all") }]} />
             <span className={styles.nmSigLabel}>
               {hq.error ? t("ob.apm.disc.failed", { e: hq.error })
                 : !net ? t("ob.apm.disc.loading")
                 : t("ob.apm.disc.summary", { c: net.cards.length, l: net.links.length, m: net.matched, f: countText(net.sample.flows, locale), w: net.sample.windowMinutes })}
             </span>
+            {openNs.size ? <LinkButton onClick={() => setOpenNs(new Set())}>{t("ob.apm.disc.closeAll", { n: openNs.size })}</LinkButton> : null}
           </>
         ) : null}
       </div>
@@ -280,6 +315,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
           <li><span className={styles.nmLine} data-tone="dropOther" />{t("ob.apm.line.fail")}</li>
           <li><span className={styles.nmLine} data-tone="dropIpv6" />{t("ob.apm.line.async")}</li>
           {net ? <li><span className={styles.nmLine} data-tone="net" />{t("ob.apm.line.net")}</li> : null}
+          {net ? <li><span className={styles.nmQuietKey} aria-hidden="true" />{t("ob.apm.disc.legendCard")}</li> : null}
         </ul>
       </div>
 
@@ -292,19 +328,27 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
             <ReactFlow
               nodes={nodes} edges={edges} nodeTypes={NODE_TYPES}
               nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} elevateNodesOnSelect={false}
-              onNodeClick={(_, n) => { if (n.type === "aCard") setSelected((p) => (p === n.id ? null : n.id)); }}
+              onNodeClick={(_, n) => {
+                if (n.type !== "aCard") return;
+                // a closed namespace opens (its workloads as small cards); anything else selects
+                if (n.id.startsWith("nsg:")) { const ns = n.id.slice(4); setOpenNs((p) => new Set([...p, ns])); setHover(null); return; }
+                setSelected((p) => (p === n.id ? null : n.id));
+              }}
               onNodeMouseEnter={(_, n) => { if (n.type === "aCard") setHover(n.id); }}
               onNodeMouseLeave={() => setHover(null)}
-              onPaneClick={() => setSelected(null)}
+              onEdgeMouseEnter={(_, e) => setHoverEdge(e.id)}
+              onEdgeMouseLeave={() => setHoverEdge(null)}
+              onEdgeClick={(_, e) => setPinEdge((p) => (p === e.id ? null : e.id))}
+              onPaneClick={() => { setSelected(null); setPinEdge(null); }}
               minZoom={0.05} maxZoom={2} proOptions={{ hideAttribution: true }}
             >
-              <FitOnKey fitKey={`${fitKey}|${failing}|${search}`} />
+              <FitOnKey fitKey={`${fitKey}|${failing}|${search}|${net ? `${discScope}:${map.totals.discovered}` : "-"}|${[...openNs].sort().join(",")}`} />
               <Background gap={24} size={1} color={rgba("ink", 0.05)} />
               <Controls showInteractive={false} />
             </ReactFlow>
           )}
         </div>
-        {sel && <CardPanel card={sel} map={map} d={d} deps={depsOf(deps, sel.id)} onPick={setSelected} onClose={() => setSelected(null)} />}
+        {sel && <CardPanel card={sel} map={map} d={d} deps={depsOf(deps, sel.id)} onPick={setSelected} onClose={() => setSelected(null)} nameOf={nameOf} />}
       </div>
 
       {coverage ? <CoveragePanel c={coverage} /> : null}
@@ -317,7 +361,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clu
   );
 }
 
-function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlacedCard; map: ApmMap; d: ServiceGraphResponse; deps: AppDependencies | null; onPick: (id: string) => void; onClose: () => void }) {
+function CardPanel({ card: c, map, d, deps, onPick, onClose, nameOf }: { card: ApmPlacedCard; map: ApmMap; d: ServiceGraphResponse; deps: AppDependencies | null; onPick: (id: string) => void; onClose: () => void; nameOf: (id: string) => string }) {
   const { t, locale } = useI18n();
   const rate = useRate();
   const { inbound, outbound } = apmLinksOf(map, c.id);
@@ -325,8 +369,8 @@ function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlaced
     <li key={l.id}>
       <button type="button" className={styles.nmLinkRow} data-tone={l.tone === "fail" ? "dropOther" : "forward"} onClick={() => onPick(peer)}>
         <span className={styles.nmLinkDir}>{dir === "in" ? "←" : "→"}</span>
-        <span className={styles.nmLinkPeer} title={peer}>{peer}</span>
-        <span className={styles.nmLinkPort}>{t(`ob.apm.kind.${l.edge.kind}`)}</span>
+        <span className={styles.nmLinkPeer} title={nameOf(peer)}>{peer.startsWith("nsg:") ? t("ob.apm.disc.groupName", { ns: nameOf(peer), n: map.cards.find((x) => x.id === peer)?.members ?? 0 }) : nameOf(peer)}</span>
+        <span className={styles.nmLinkPort}>{l.net ? t("ob.apm.disc.netKind") : t(`ob.apm.kind.${l.edge.kind}`)}</span>
         <span className={styles.nmLinkFlows}>
           {l.net ? t("ob.apm.disc.linkLabel", { f: countText(l.net.flows, locale), d: countText(l.net.dropped, locale), p: `${l.net.port}/${l.net.protocol}` }) : <>
             {rate(l.edge.rate)} · p95 {quantileText(l.edge.p95, d.buckets)}
@@ -343,16 +387,23 @@ function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlaced
         <span className={styles.nmGlyph} aria-hidden="true">{NET_GLYPH[c.status]}</span>
         <div>
           <strong title={c.name}>{c.kind === "entry" ? t("ob.apm.entry") : c.name}</strong>
-          <small>{c.kind === "entry" ? c.name : c.workload ? `${c.workload.kind} · ${c.workload.namespace}/${c.workload.name}` : t("ob.apm.noWorkload")}</small>
+          <small>{c.kind === "entry" ? c.name : c.kind === "discovered" ? t("ob.apm.disc.kind", { ns: c.namespace }) : c.workload ? `${c.workload.kind} · ${c.workload.namespace}/${c.workload.name}` : t("ob.apm.noWorkload")}</small>
         </div>
         <Button size="sm" variant="ghost" ariaLabel={t("hb.nm.close")} onClick={onClose}>✕</Button>
       </header>
       <p className={styles.nmWhy}>{c.kind === "discovered" ? t("ob.apm.disc.why", { p: c.net?.pods ?? 0 }) : c.kind === "entry" ? t("ob.apm.entryHint") : c.inFailed > 0 ? t("ob.apm.why.warn", { f: countText(c.inFailed, locale), m: d.windowMinutes }) : t("ob.apm.why.ok", { m: d.windowMinutes })}</p>
-      <dl className={styles.nmKv}>
-        {c.kind !== "entry" && <><dt>{t("ob.apm.in")}</dt><dd>{countText(c.inRequests, locale)}{c.inRequests > 0 ? ` (${rate(c.inRate)})` : ""}</dd></>}
-        {c.kind !== "entry" && <><dt>{t("ob.apm.failed")}</dt><dd>{countText(c.inFailed, locale)}</dd></>}
-        <dt>{t("ob.apm.out")}</dt><dd>{countText(c.outRequests, locale)}</dd>
-      </dl>
+      {c.kind === "discovered" ? (
+        <dl className={styles.nmKv}>
+          <dt>{t("ob.apm.disc.flows")}</dt><dd>{countText(c.net?.flows ?? 0, locale)}</dd>
+          <dt>{t("ob.apm.disc.drops")}</dt><dd>{countText(c.net?.dropped ?? 0, locale)}</dd>
+        </dl>
+      ) : (
+        <dl className={styles.nmKv}>
+          {c.kind !== "entry" && <><dt>{t("ob.apm.in")}</dt><dd>{countText(c.inRequests, locale)}{c.inRequests > 0 ? ` (${rate(c.inRate)})` : ""}</dd></>}
+          {c.kind !== "entry" && <><dt>{t("ob.apm.failed")}</dt><dd>{countText(c.inFailed, locale)}</dd></>}
+          <dt>{t("ob.apm.out")}</dt><dd>{countText(c.outRequests, locale)}</dd>
+        </dl>
+      )}
       {c.workload && (
         <p><Link href={`/observability?wl=${encodeURIComponent(`${c.workload.namespace}/${c.workload.name}`)}`}>{t("ob.apm.toWorkload")}</Link></p>
       )}

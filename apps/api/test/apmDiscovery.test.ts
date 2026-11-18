@@ -47,7 +47,10 @@ test("the map: discovered cards in their namespace box, network links apart (no 
   const net = D.discoverFromNetwork(graph, hubble);
   const map = M.buildApmMap({ ...graph, windowMinutes: 60 }, {}, net);
   const disc = map.cards.filter((c) => c.kind === "discovered");
-  assert.deepEqual(disc.map((c) => [c.name, c.status, c.parent]).sort(), [["cache-redis", "stale", "ns:shop"], ["legacy-cron", "stale", "ns:shop"]]);
+  assert.deepEqual(disc.map((c) => [c.name, c.status, c.parent, c.h]).sort(), [["cache-redis", "stale", "disc:shop", M.DISC_CARD_H], ["legacy-cron", "stale", "disc:shop", M.DISC_CARD_H]],
+    "small cards in the namespace's dashed 'not instrumented' box");
+  assert.equal(map.boxes.find((b) => b.id === "disc:shop")!.members, 2);
+  assert.equal(map.boxes.find((b) => b.id === "ns:shop")!.members, 5, "3 services + the 2 in its 'not instrumented' box");
   assert.equal(map.totals.discovered, 2);
   assert.equal(map.totals.netLinks, 3);
   assert.equal(map.totals.links, 2, "trace links counted apart from network links");
@@ -55,4 +58,31 @@ test("the map: discovered cards in their namespace box, network links apart (no 
   assert.equal(map.links.find((l) => l.id === "web>pay")!.edge.requests, 0, "a network link carries no request count");
   assert.equal(M.buildApmMap({ ...graph, windowMinutes: 60 }, { failing: true }, net).totals.netLinks, 0);
   assert.equal(M.buildApmMap({ ...graph, windowMinutes: 60 }).totals.discovered, 0, "no discovery = the map as before");
+});
+
+test("the map (2nd pass): traced services keep their places; a namespace without traces = one card until opened; nothing lost", () => {
+  const plain = M.buildApmMap({ ...graph, windowMinutes: 60 });
+  const all = D.discoverFromNetwork(graph, hubble, "all");
+  const map = M.buildApmMap({ ...graph, windowMinutes: 60 }, {}, all);
+  const at = (m: typeof map) => Object.fromEntries(m.cards.filter((c) => c.kind === "service" || c.kind === "entry").map((c) => [c.id, [c.x, c.y]]));
+  assert.deepEqual(at(map), at(plain), "switching discovery on does not move a traced service");
+  // kube-system holds no traced service → one card in the lane of closed namespaces
+  const g = map.cards.find((c) => c.id === "nsg:kube-system")!;
+  assert.deepEqual([g.kind, g.members, g.net, g.parent], ["nsGroup", 1, { flows: 100, dropped: 0, pods: 2 }, "lane:untraced"]);
+  assert.equal(map.links.find((l) => l.id === "web>nsg:kube-system")!.net!.flows, 900, "the connection goes to the namespace card");
+  // conservation: every discovered workload is a card or counted in its namespace card; every flow is on a line
+  assert.equal(map.totals.discovered, all.cards.length);
+  assert.equal(map.totals.closedNamespaces, 1);
+  const flows = (links: { net?: { flows: number } }[]) => links.reduce((n, l) => n + (l.net?.flows ?? 0), 0);
+  assert.equal(flows(map.links), all.links.reduce((n, l) => n + l.flows, 0), "no flow lost when ends are folded into a namespace card");
+  // opened: its workloads as small cards in their own box, the lane gone
+  const open = M.buildApmMap({ ...graph, windowMinutes: 60 }, { open: new Set(["kube-system"]) }, all);
+  assert.deepEqual(open.cards.filter((c) => c.namespace === "kube-system").map((c) => [c.id, c.kind, c.parent]), [["net:kube-system/coredns", "discovered", "nso:kube-system"]]);
+  assert.equal(open.boxes.some((b) => b.kind === "untraced"), false);
+  assert.equal(open.totals.discovered, all.cards.length);
+  // two connections into the same closed namespace are summed into one line (busiest port kept, count said)
+  const two = { ...all, cards: [...all.cards, { id: "net:kube-system/metrics", namespace: "kube-system", workload: "metrics", flows: 10, dropped: 1, pods: 1 }],
+    links: [...all.links, { source: "web", target: "net:kube-system/metrics", flows: 30, dropped: 1, port: 443, protocol: "TCP" }] };
+  const merged = M.buildApmMap({ ...graph, windowMinutes: 60 }, {}, two).links.find((l) => l.id === "web>nsg:kube-system")!;
+  assert.deepEqual(merged.net, { flows: 930, dropped: 1, port: 53, protocol: "TCP", merged: 2 });
 });

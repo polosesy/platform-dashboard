@@ -132,30 +132,47 @@ export function TracesView({ clusterId, range, nonce, report, seed, linked }: { 
     </form>
   );
 
+  // Two ranked tables side by side (a divider between them, one header row each, the numbers in their own aligned
+  // columns): rank · endpoint + service · the measure (errors | p95) · requests
   const groupList = (list: ProblemGroup[], kind: ProblemGroup["kind"]) => (
-    <div className={styles.trGroupCol}>
-      <h4 className={styles.depHead}>{t(`ob.tr.g.${kind}`)}</h4>
-      {list.length === 0 ? <p className={styles.sloCellSub}>{t(`ob.tr.g.${kind}None`, { w: win })}</p> : (
-        <ol className={styles.trGroupList}>
-          {list.map((g) => {
-            const active = origin?.kind === kind && applied.service === g.service && applied.name === g.name;
-            return (
-              <li key={`${g.service}|${g.name}`} data-selected={active || undefined}>
-                <LinkButton ariaExpanded={active} title={g.name}
-                  onClick={() => run({ service: g.service, namespace: "", name: g.name, errorsOnly: kind === "errors", minDurationMs: kind === "slow" ? g.minDurationMs ?? 0 : 0 }, { kind, count: g.count })}>
-                  {endpointLabel(g.name)}
-                </LinkButton>
-                <span className={styles.sloCellSub}>
-                  {g.service} · {kind === "errors"
-                    ? t("ob.tr.g.errorsN", { n: countText(g.count, lc), r: countText(g.requests, lc) })
-                    : t("ob.tr.g.slowN", { p: quantileText(g.p95, rd?.buckets ?? []), r: countText(g.requests, lc) })}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
+    <section className={styles.trGroupCol} aria-label={t(`ob.tr.g.${kind}`)}>
+      <header className={styles.trGroupHead}>
+        <span className={styles.trGroupGlyph} data-kind={kind} aria-hidden="true">{kind === "errors" ? "▲" : "◷"}</span>
+        <h4>{t(`ob.tr.g.${kind}`)}</h4>
+        <span className={styles.trGroupCount}>{list.length}</span>
+      </header>
+      {list.length === 0 ? (
+        <p className={styles.trGroupEmpty}><span aria-hidden="true">●</span>{t(`ob.tr.g.${kind}None`, { w: win })}</p>
+      ) : (
+        <>
+          <div className={styles.trGroupCols} aria-hidden="true">
+            <span>#</span><span>{t("ob.tr.g.colEndpoint")}</span>
+            <span>{kind === "errors" ? t("ob.tr.g.colErrors") : "p95"}</span><span>{t("ob.tr.g.colRequests")}</span>
+          </div>
+          <ol className={styles.trGroupList}>
+            {list.map((g, i) => {
+              const active = origin?.kind === kind && applied.service === g.service && applied.name === g.name;
+              return (
+                <li key={`${g.service}|${g.name}`} data-selected={active || undefined}>
+                  <span className={styles.trGroupRank}>{i + 1}</span>
+                  <span className={styles.trGroupName}>
+                    <LinkButton ariaExpanded={active} title={g.name}
+                      onClick={() => run({ service: g.service, namespace: "", name: g.name, errorsOnly: kind === "errors", minDurationMs: kind === "slow" ? g.minDurationMs ?? 0 : 0 }, { kind, count: g.count })}>
+                      {endpointLabel(g.name)}
+                    </LinkButton>
+                    <span className={styles.sloCellSub}>{g.service}</span>
+                  </span>
+                  <span className={styles.trGroupNum} data-num data-hot={kind === "errors" || undefined}>
+                    {kind === "errors" ? countText(g.count, lc) : quantileText(g.p95, rd?.buckets ?? [])}
+                  </span>
+                  <span className={styles.trGroupNum}>{countText(g.requests, lc)}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </>
       )}
-    </div>
+    </section>
   );
 
   let body;
@@ -504,15 +521,16 @@ function SpanListView({ spans, matches, onPick }: { spans: TraceSpan[]; matches:
   );
 }
 
-function AttrTreeView({ nodes, root }: { nodes: AttrNode[]; root?: boolean }) {
+function AttrTreeView({ nodes, root, depth = 0 }: { nodes: AttrNode[]; root?: boolean; depth?: number }) {
+  // the indent goes to the key only, so every value starts in the same column at any depth
   return (
-    <ul className={root ? `${styles.trAttrTree} ${styles.trAttrRoot}` : styles.trAttrTree}>
+    <ul className={root ? `${styles.trAttrTree} ${styles.trAttrRoot}` : styles.trAttrTree} style={{ ["--depth" as string]: depth }}>
       {nodes.map((n) => (
         <li key={n.path}>
           {n.children.length ? (
             <details open>
               <summary>{n.key}{n.value !== undefined ? ` = ${n.value}` : ""}</summary>
-              <AttrTreeView nodes={n.children} />
+              <AttrTreeView nodes={n.children} depth={depth + 1} />
             </details>
           ) : (
             <span className={styles.trAttrLeaf}><span>{n.key}</span><span>{n.value}</span></span>
@@ -544,7 +562,7 @@ function SpanDetail({ span, totalMs }: { span: TraceSpan; totalMs: number | null
       {span.attributes.length ? (
         <>
           <div className={styles.trInlineHead}>
-            <h5 className={styles.depHead}>{t("ob.tr.attrs", { n: span.attributes.length })}</h5>
+            <h5 className={styles.trLabel}>{t("ob.tr.attrs", { n: span.attributes.length })}</h5>
             <CopyButton text={attrJson(span.attributes)} label={t("ob.tr.copyJson")} copiedLabel={t("ob.slo.copied")} />
           </div>
           <AttrTreeView nodes={tree} root />

@@ -97,3 +97,36 @@ test("store: upload (device label override, author), newest first, delete; the p
   assert.equal(P.NETPATH_PROBE_PS1, file, "regenerate apps/web/src/lib/netPathProbe.ts from the .ps1");
   assert.match(file, /format = 'aud-netpath\/1'/);
 });
+
+test("the target: an address bar pasted as it is → its host; bare words, IPv6 and junk refused; commands carry it", () => {
+  assert.deepEqual(V.targetOf("login.microsoftonline.com"), { host: "login.microsoftonline.com", changed: false });
+  assert.deepEqual(V.targetOf("  https://Outlook.Office365.com/mail/inbox?x=1#y "), { host: "outlook.office365.com", changed: true });
+  assert.deepEqual(V.targetOf("http://user:pw@portal.example.com:8443/a"), { host: "portal.example.com", changed: true });
+  assert.deepEqual(V.targetOf("203.0.113.10"), { host: "203.0.113.10", changed: false });
+  assert.deepEqual(V.targetOf("example.com."), { host: "example.com", changed: true });
+  assert.equal(V.targetOf("").reason, "empty");
+  assert.equal(V.targetOf("intranet").reason, "invalid", "a bare word: the device's DNS search list decides — not measured");
+  assert.equal(V.targetOf("bad_host!.com").reason, "invalid");
+  assert.equal(V.targetOf("-a.example.com").reason, "invalid");
+  assert.equal(V.targetOf("https://[2001:db8::1]/").reason, "ipv6");
+  assert.match(V.probeCommand("login.example.com"), /-Target login\.example\.com \| Set-Clipboard$/);
+  assert.ok(V.probeCommand("login.example.com").includes('-File "$HOME\\Downloads\\netpath-probe.ps1"'), "the downloaded script's path, Windows separators");
+  assert.match(V.mtrCommand("login.example.com"), /^mtr --json -n -c 10 login\.example\.com /);
+  assert.ok(V.TARGET_PRESETS.every((p) => V.targetOf(p.host).host === p.host), "every preset is a valid target");
+});
+
+test("the route top-down: silent runs folded, the biggest added step, the profile (answering hops only) and its axis", () => {
+  const run = parseNetPath(probe([
+    H(1, { "192.168.1.1": 5 }, 5, [2, 2, 2, 2, 2]), H(2, {}, 0, undefined), H(3, {}, 0, undefined), H(4, { "198.51.100.1": 5 }, 5, [10, 10, 12, 10, 8]),
+    H(5, {}, 0, undefined), H(6, { "203.0.113.10": 5 }, 5, [70, 71, 72, 70, 67]),
+  ]));
+  const v = V.pathView(run);
+  assert.deepEqual(V.routeRows(v).map((r) => (r.kind === "hop" ? r.hop.ttl : `${r.from}-${r.to}×${r.count}`)), [1, "2-3×2", 4, "5-5×1", 6]);
+  assert.deepEqual(V.biggestJump(v), { ttl: 6, ms: 60 }, "2 → 10 → 70: +8 at hop 4, +60 at hop 6");
+  const p = V.latencyProfile(v);
+  assert.deepEqual(p.points.map((x) => [x.ttl, x.avg, x.min, x.max]), [[1, 2, 2, 2], [4, 10, 8, 12], [6, 70, 67, 72]]);
+  assert.deepEqual([p.top, p.ttls], [72, 6]);
+  assert.deepEqual(V.msTicks(72), [0, 20, 40, 60, 80]);
+  assert.deepEqual(V.msTicks(3.2), [0, 1, 2, 3, 4]);
+  assert.equal(V.biggestJump(V.pathView(parseNetPath(probe([H(1, { "203.0.113.10": 5 }, 5, [5, 5, 5, 5, 5])])))), null, "one hop: nothing added");
+});

@@ -227,6 +227,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Inline code, keys and samples wear the code face. Without this the browser's own `monospace` (Consolas, a fixed
+   13px) showed beside Geist Mono — two code fonts on one screen (trace detail, 2026-11-18 measurement). */
+code, kbd, samp { font-family: var(--font-mono); }
+
 * {
   box-sizing: border-box;
   padding: 0;

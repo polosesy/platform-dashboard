@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-18
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/app/observability/components/TracesView.tsx]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -273,6 +273,29 @@ stg 실측 결과(30개):
 **플레임 그래프 색**(사용자 요청 — 4d의 '한 색' 결정을 바꿈): Datadog처럼 색 = 서비스. dataviz 참고 팔레트에서 이 플랫폼의 상태색과 겹치는 초록·노랑·빨강을 빼고 5색, 24개 순서를 검증기(인접 쌍 — 블록은 부모·자식으로 붙음)로 돌려 양쪽 모드를 통과하는 순서 중 파랑·주황·청록·보라·자홍(최악 색약 ΔE 9.2 밝음 / 9.4 어두움, 목표 8 이상). `globals.css` `--series1…5-rgb`(어두운 단계 따로) + `palette.ts` VIZ. 칸 = 트레이스에 처음 나타난 순서(`serviceSlots` — 거르기·확대로 다시 칠하지 않음), 6번째부터 slate '기타'(색을 만들지 않음). 인접하지 않은 블록끼리는 기준 밖 쌍이 붙을 수 있어 **색만으로 정체를 말하지 않음**: 블록 이름표 · 범례(실행 시간 목록의 색 견본 + 이름) · 고르면 강조. 오류는 색이 아니라 빨간 테두리 + '!'. '색: 서비스별 | 한 색'. 화면 측정: 서비스 7개 → 1–5칸 + slate 2, 채우기 6가지, 한 색 = 1가지.
 
 **계측 없는 서비스 발견**(Datadog Service Discovery — 그쪽은 eBPF 에이전트): 같은 질문을 **Cilium이 이미 보는 네트워크 흐름**(Hubble 서비스 맵, Pod 트래픽과 같은 표본)으로 답함 — 앱 계측과 무관. `lib/apmDiscovery.ts`: Hubble 워크로드 ↔ 트레이스 서비스를 정확한 이름으로만(서비스 그래프·RED가 준 워크로드, 없으면 유일한 같은 이름) 짝짓고, 짝 없는 워크로드 = '네트워크로 발견 · 트레이스 없음' 카드(점선 ○, 흐름·드롭 — 요청·지연 없음), 트레이스에 없는 연결 = 청록 점선(흐름·드롭·포트). 범위 '트레이스 있는 네임스페이스'(기본) | 모든 네임스페이스. 켤 때만 표본을 읽음(Hubble UI 백엔드 보호 — CLAUDE.md Hubble UI 절). 합성 표본 화면 측정: 발견 2 · 연결 2 · 짝 2 = 기대값. stg 실데이터 대조는 로그인 토큰이 필요한 API라 배포본에서 아래 확인.
+
+## 4f. 화면 다듬기 — 트레이스 글꼴 · 문제 그룹 · 서비스 발견 (2026-11-18, 3차)
+
+사용자 검토 세 가지를 측정으로 확인하고 고쳤습니다. 측정 = 로컬 웹 + 헤드리스 Chrome, stg 모양의 합성 데이터(이름 지어냄, 문서용 IP).
+
+| 항목 | 전 | 후 | 기준 |
+|---|---|---|---|
+| 트레이스 상세 — 고정폭 글꼴 | 2벌(브라우저 기본 Consolas 14px + Geist Mono 12px) | 1벌(Geist Mono 13px) | 요소마다 계산된 글꼴·크기·굵기 |
+| 트레이스 상세 — (글꼴, 크기, 굵기) 조합 | 11 | 10 | 같은 측정 |
+| 속성 표 | 키·값 모두 고정폭 12px, 키는 파랑 | 키 = 본문 글꼴 회색 · 값 = 고정폭, 깊이와 상관없이 값이 한 열에서 시작 | 화면 |
+| 문제 그룹 — 두 주제의 경계 | 없음(간격만) | 세로 구분선 1px(좁은 화면은 가로선), 주제마다 머리 줄·개수 | 계산된 테두리 |
+| 문제 그룹 — 숫자 열 | 문장 속에 섞임 | 순위 · 엔드포인트 + 서비스 · p95 또는 오류 · 요청, 숫자의 오른쪽 끝 x 좌표 8행 모두 같음 | DOM 좌표 |
+| 서비스 발견(모든 네임스페이스) — 맵 크기 | 노드 41 · 2,904×1,146px, 트레이스 서비스가 시스템 네임스페이스 뒤로 밀림 | 노드 19 · 1,584×370px(넓이 −82%), 트레이스 서비스가 맨 앞 | 노드 좌표 |
+| 서비스 발견 — 선 이름표 | 카드를 고르면 그 카드의 네트워크 선마다 | 기본 0 · 선을 가리키면 그 선 하나(`흐름 3 · 드롭 0 · 4317/TCP` = 합성 값) · 누르면 고정 | 실제 마우스 이동(CDP) |
+
+**서비스 발견 배치**(`lib/apmServiceMap.ts`): 트레이스 서비스가 지도의 몸통이고, 트레이스가 없는 것은 한 단계 조용하게 그립니다.
+- 트레이스 있는 네임스페이스 안: 서비스 뒤에 점선 상자 '계측 없음 · n'과 작은 카드(이름 + 흐름 · 드롭).
+- 트레이스 서비스가 하나도 없는 네임스페이스(kube-system·모니터링·GitOps …): 네임스페이스마다 카드 하나, 레인 '트레이스 없는 네임스페이스 n'에 모읍니다. 누르면 그 네임스페이스가 펼쳐지고(워크로드마다 작은 카드), 머리의 '접기'로 닫습니다.
+- 접힌 네임스페이스로 가는 연결은 그 카드로 모으고 흐름을 더합니다('연결 n개 합침'). 접힌 네임스페이스 안끼리의 연결만 선이 없고 `hiddenInside`로 셉니다.
+- 단계(왼→오)는 트레이스 연결만으로 정합니다. 그래서 발견을 켜도 트레이스 서비스의 자리가 그대로입니다(테스트).
+- 검증(`apmDiscovery.test.ts`): 발견한 워크로드 수 = 카드 + 네임스페이스 카드가 품은 수, 선의 흐름 합 = 원본 연결의 흐름 합(접어도 잃지 않음), 펼치기·접기 왕복.
+
+React Flow는 노드 선택을 끈 화면에서 선에 마우스 이벤트를 보내지 않습니다(선 클릭 핸들러가 없으면 `pointer-events: none`). 그래서 선 클릭(이름표 고정)을 함께 둡니다. 터치 화면에는 가리키기가 없기도 합니다.
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

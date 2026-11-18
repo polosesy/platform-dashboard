@@ -29,6 +29,8 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 - **Pretendard**(한글·영문 한 벌, OFL) — `pretendard` 패키지의 dynamic-subset CSS를 `layout.tsx`에서 가져옵니다. 글꼴이 92조각(`unicode-range`)으로 나뉘어 페이지가 쓰는 글자의 조각만 받습니다. 빌드에 인터넷이 필요 없습니다.
 - **Geist Mono** — 코드·ID·질의(`var(--font-mono)`).
 - CSS 모듈의 `font-family`는 `var(--font-sans)`·`var(--font-mono)`·`inherit`만 씁니다.
+- `code`·`kbd`·`samp`도 `var(--font-mono)`(globals.css). 이 규칙이 없을 때는 브라우저 기본 `monospace`(Windows는 Consolas, 13px 고정)가 Geist Mono 옆에 나와 한 화면에 고정폭 글꼴이 두 벌이었습니다(2026-11-18 트레이스 상세 측정).
+- **역할로 고릅니다**(2026-11-18, 트레이스 상세에 처음 적용): 사람이 읽는 말(라벨·속성 키·설명) = Pretendard · 기계가 만든 값(ID·URL·속성 값·HTTP 대상·IP) = Geist Mono를 `small`(13px)에서 · 열로 늘어선 숫자 = `font-variant-numeric: tabular-nums`. 제목은 `heading`, 절 라벨은 `small` 600, 보조 줄은 `caption` + `--subtle`. 같은 값이 화면마다 다른 글꼴로 나오지 않게 합니다.
 - 애플의 SF Pro는 애플 기기 전용 라이선스라 웹에 묶을 수 없고, Windows에서는 맑은 고딕으로 보입니다. 그래서 Pretendard를 씁니다.
 
 ## 3. 글자 크기 6단계 · 굵기 4단계

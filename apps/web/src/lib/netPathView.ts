@@ -79,3 +79,84 @@ export function samePath(a: NetPathRun, b: NetPathRun): boolean {
   const ips = (r: NetPathRun) => r.hops.filter((h) => h.ip).map((h) => h.ip).join(">");
   return ips(a) === ips(b);
 }
+
+// ── what to measure (2026-11-18 2nd pass — "which value goes in -Target?") ──
+
+/** Hosts people measure most — the sign-in and the apps their users say are slow. The dashboard's own host is added on
+ *  the page (it is the SaaS too). */
+export const TARGET_PRESETS = [
+  { id: "m365Login", host: "login.microsoftonline.com" },
+  { id: "outlook", host: "outlook.office365.com" },
+  { id: "teams", host: "teams.microsoft.com" },
+  { id: "azurePortal", host: "portal.azure.com" },
+  { id: "github", host: "github.com" },
+] as const;
+
+const HOST_LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+
+/**
+ * Pure: what a person typed or pasted → the host to measure. People paste the address bar: the scheme, a user, the
+ * port, the path, the query and the fragment are dropped (`changed` says so); upper case is folded. A host name needs
+ * a dot (a bare word is a local name the device's DNS may not resolve the same); IPv4 is taken as it is; IPv6 is not
+ * supported by the probe.
+ */
+export function targetOf(input: string): { host: string | null; changed: boolean; reason?: "empty" | "invalid" | "ipv6" } {
+  const raw = input.trim();
+  if (!raw) return { host: null, changed: false, reason: "empty" };
+  let s = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  s = s.replace(/^[^/@]*@/, "");
+  s = s.split(/[/?#]/)[0] ?? "";
+  if (s.startsWith("[") || (s.match(/:/g)?.length ?? 0) > 1) return { host: null, changed: false, reason: "ipv6" };
+  s = s.replace(/:\d+$/, "").replace(/\.$/, "").toLowerCase();
+  const ok = IPV4.test(s) || (s.length <= 253 && s.includes(".") && s.split(".").every((l) => HOST_LABEL.test(l)));
+  return ok ? { host: s, changed: s !== raw } : { host: null, changed: false, reason: "invalid" };
+}
+
+/** The commands with the chosen host (the probe script is saved to Downloads by the page's button) */
+export const probeCommand = (host: string) => `powershell -ExecutionPolicy Bypass -File "$HOME\\Downloads\\netpath-probe.ps1" -Target ${host} | Set-Clipboard`;
+export const mtrCommand = (host: string) => `mtr --json -n -c 10 ${host} | pbcopy   # Linux: | xclip -selection clipboard`;
+
+// ── the path, read top-down like mtr ──
+
+/** One row of the route: a hop, or a run of silent hops folded into one row (they say nothing but "the path goes on") */
+export type RouteRow = { kind: "hop"; hop: HopView } | { kind: "silent"; from: number; to: number; count: number; segment: HopView["segment"] };
+
+/** Pure: the route rows — consecutive silent hops folded into one */
+export function routeRows(v: PathView): RouteRow[] {
+  const out: RouteRow[] = [];
+  for (const h of v.hops) {
+    const last = out[out.length - 1];
+    if (h.verdict === "silent") {
+      if (last?.kind === "silent" && last.to === h.ttl - 1) { last.to = h.ttl; last.count++; continue; }
+      out.push({ kind: "silent", from: h.ttl, to: h.ttl, count: 1, segment: h.segment });
+      continue;
+    }
+    out.push({ kind: "hop", hop: h });
+  }
+  return out;
+}
+
+/** Pure: the hop where the most latency is added (the largest positive step) — null when none adds any */
+export function biggestJump(v: PathView): { ttl: number; ms: number } | null {
+  let best: { ttl: number; ms: number } | null = null;
+  for (const h of v.hops) if (h.addedMs !== null && (!best || h.addedMs > best.ms)) best = { ttl: h.ttl, ms: h.addedMs };
+  return best;
+}
+
+/** One point of the latency profile: an answering hop's average with its min–max over the probes */
+export type ProfilePoint = { ttl: number; avg: number; min: number; max: number; verdict: HopVerdict };
+
+/** Pure: the latency profile (answering hops in TTL order) and the scale's top (the largest max, ≥ 1 ms) */
+export function latencyProfile(v: PathView): { points: ProfilePoint[]; top: number; ttls: number } {
+  const points = v.hops.filter((h) => h.rttAvg !== null).map((h) => ({ ttl: h.ttl, avg: h.rttAvg!, min: h.rttMin ?? h.rttAvg!, max: h.rttMax ?? h.rttAvg!, verdict: h.verdict }));
+  return { points, top: Math.max(1, ...points.map((p) => p.max)), ttls: v.end.hops };
+}
+
+/** Pure: a "nice" axis top and ticks for ms (1-2-5 steps, 3–5 ticks) */
+export function msTicks(top: number): number[] {
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+  const step = steps.find((s) => top / s <= 4) ?? 10_000;
+  const n = Math.ceil(top / step);
+  return Array.from({ length: n + 1 }, (_, i) => i * step);
+}
