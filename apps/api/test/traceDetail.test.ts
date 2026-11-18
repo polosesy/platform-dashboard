@@ -104,3 +104,17 @@ test("request line: OpenTelemetry semantic conventions, new names before old; no
   assert.ok(TV.TRACE_ID.test("4bf92f3577b34da6a3ce929d0e0e4736") && !TV.TRACE_ID.test("x' or 1=1"));
   assert.equal(TV.traceLink("https://aud.example", "abc"), "https://aud.example/observability?trace=abc");
 });
+
+test("colour by service: slots in order of first appearance (root first), the 6th on = other; one hue = accent", () => {
+  const slots = TV.serviceSlots(trace, 130);
+  assert.deepEqual([...slots], [["web", 1], ["api", 2], ["db", 3], ["cache", 4], ["worker", 5]], "waterfall order: r(web) a(api) d1(db) … j(worker)");
+  const seven = [...trace, span("x1", "r", "six", 95, 1), span("x2", "r", "seven", 96, 1)];
+  const s7 = TV.serviceSlots(seven, 130);
+  assert.equal(s7.get("six"), 0);
+  assert.equal(s7.get("seven"), 0, "beyond five = other (slate), never a generated hue");
+  assert.equal(s7.get("web"), 1, "adding services never repaints the ones before");
+  assert.equal(TV.slotVar(3, "service"), "var(--series3-rgb)");
+  assert.equal(TV.slotVar(0, "service"), "var(--slate-rgb)");
+  assert.equal(TV.slotVar(3, "none"), "var(--accent-rgb)");
+  assert.equal(TV.SERIES_SLOTS, 5);
+});

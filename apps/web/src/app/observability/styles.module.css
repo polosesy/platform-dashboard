@@ -1115,8 +1115,8 @@
 .trName { display: grid; min-width: 0; }
 .trName > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .trTrack { position: relative; height: 12px; background: rgba(var(--ink-rgb), 0.04); border-radius: var(--radius-sm); }
-.trBar { position: absolute; top: 2px; bottom: 2px; background: rgba(var(--accent-rgb), 0.55); border-radius: var(--radius-sm); }
-.trBar[data-error] { background: rgba(var(--warning-rgb), 0.85); }
+.trBar { position: absolute; top: 2px; bottom: 2px; background: rgba(var(--svc-rgb, var(--accent-rgb)), 0.7); border-radius: var(--radius-sm); }
+.trBar[data-error] { box-shadow: inset 0 0 0 2px var(--danger); }
 .trDur { font-size: var(--text-caption); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .trSpan { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; display: grid; gap: 8px; min-width: 0; }
 .trValue { overflow-wrap: anywhere; font-size: var(--text-small); }
@@ -1157,12 +1157,14 @@
 .trFlameSvg { display: block; }
 .trBlock { cursor: pointer; outline: none; }
 /* geometry in CSS: the block's own nested <svg> is its % width; the rect sits 1px inside it so both edges show */
-.trBlockRect { width: calc(100% - 1px); fill: rgba(var(--accent-rgb), 0.16); stroke: rgba(var(--accent-rgb), 0.5); stroke-width: 1; }
-.trBlock:hover .trBlockRect { fill: rgba(var(--accent-rgb), 0.26); }
-.trBlock[data-service] .trBlockRect { fill: rgba(var(--accent-rgb), 0.36); stroke: rgba(var(--accent-rgb), 0.85); }
+/* colour = the block's service (--svc-rgb from lib/traceView slotVar: a validated series slot, slate = "other", accent = one hue);
+   a tint under ink text keeps every label readable on any slot */
+.trBlockRect { width: calc(100% - 1px); fill: rgba(var(--svc-rgb, var(--accent-rgb)), 0.3); stroke: rgba(var(--svc-rgb, var(--accent-rgb)), 0.95); stroke-width: 1; }
+.trBlock:hover .trBlockRect { fill: rgba(var(--svc-rgb, var(--accent-rgb)), 0.45); }
+.trBlock[data-service] .trBlockRect { fill: rgba(var(--svc-rgb, var(--accent-rgb)), 0.55); stroke-width: 1.5; }
 .trBlock[data-error] .trBlockRect { stroke: var(--danger); stroke-width: 2; }
 .trBlock[data-dim] { opacity: 0.28; }
-.trBlock[data-selected] .trBlockRect, .trBlock:focus-visible .trBlockRect { stroke: var(--accent); stroke-width: 2.5; }
+.trBlock[data-selected] .trBlockRect, .trBlock:focus-visible .trBlockRect { stroke: var(--ink); stroke-width: 2.5; }
 .trBlockText { font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 500; fill: var(--ink); pointer-events: none; }
 .trBlockMark { font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 700; fill: var(--danger-strong); pointer-events: none; }
 .trExec { display: grid; gap: 6px; min-width: 0; align-content: start; }
@@ -1171,8 +1173,11 @@
 .trExecRow { display: grid; grid-template-columns: minmax(0, 1fr) 52px; align-items: center; gap: 4px 8px; min-width: 0; padding-bottom: 4px; font-size: var(--text-small); }
 /* the service's name gets the whole line (long OTel service names), its bar and share below */
 .trExecRow > :first-child { grid-column: 1 / -1; min-width: 0; max-width: 100%; overflow: hidden; justify-self: start; }
+.trExecName { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.trExecName > :last-child { min-width: 0; overflow: hidden; }
+.trSwatch { flex: none; width: 12px; height: 12px; border-radius: var(--radius-sm); background: rgba(var(--svc-rgb, var(--accent-rgb)), 0.75); border: 1px solid rgb(var(--svc-rgb, var(--accent-rgb))); }
 .trExecBar { position: relative; height: 6px; background: rgba(var(--ink-rgb), 0.06); border-radius: var(--radius-pill); overflow: hidden; }
-.trExecBar > span { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: var(--radius-pill); }
+.trExecBar > span { position: absolute; inset: 0 auto 0 0; background: var(--muted); border-radius: var(--radius-pill); }
 .trExecPct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 .trAttrTree { list-style: none; margin: 0; padding: 0 0 0 14px; display: grid; gap: 2px; font-family: var(--font-mono); font-size: var(--text-caption); min-width: 0; }
 .trAttrTree > li { min-width: 0; }

@@ -7,6 +7,7 @@
 // failures are facts (▲), never a judgement — there is no target here (the 서비스 SLO view judges).
 
 import type { ServiceGraphEdge, ServiceGraphResponse } from "@aud/types";
+import type { NetDiscovery } from "./apmDiscovery";
 import { measure, place, type PackBox, type PackNode } from "./boxPack";
 import { NET, NET_GLYPH, requestSteps, type NetStatus } from "./k8sNetMap";
 
@@ -14,7 +15,8 @@ export { NET_GLYPH };
 
 export type ApmCard = {
   id: string;
-  kind: "service" | "entry";
+  /** discovered = seen on the network (Hubble), sends no traces (lib/apmDiscovery.ts) */
+  kind: "service" | "entry" | "discovered";
   name: string;
   /** the box: the namespace, "" when the pipeline gave none */
   namespace: string;
@@ -26,15 +28,20 @@ export type ApmCard = {
   outRequests: number;
   status: NetStatus;
   rank: number;
+  /** discovered cards: what Cilium saw in the sample */
+  net?: { flows: number; dropped: number; pods: number };
 };
 export type ApmLink = {
   id: string;
   source: string;
   target: string;
   edge: ServiceGraphEdge;
-  tone: "forward" | "fail" | "async";
+  /** net = a connection seen on the network only (no trace edge) */
+  tone: "forward" | "fail" | "async" | "net";
   /** Stroke width 1–4 by requests per second (log) */
   width: number;
+  /** net links: flows Cilium saw (never requests) */
+  net?: { flows: number; dropped: number; port: number; protocol: string };
 };
 export type ApmBox = { id: string; kind: "namespace" | "laneIn"; title: string; x: number; y: number; w: number; h: number; counts: Record<NetStatus, number> };
 export type ApmPlacedCard = ApmCard & { x: number; y: number; w: number; h: number; parent: string };
@@ -45,7 +52,7 @@ export type ApmMap = {
   width: number;
   height: number;
   structure: string;
-  totals: { services: number; links: number; failingLinks: number; requests: number; failed: number };
+  totals: { services: number; links: number; failingLinks: number; requests: number; failed: number; discovered: number; netLinks: number };
 };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -59,7 +66,7 @@ export const toneOfEdge = (e: Pick<ServiceGraphEdge, "failed" | "kind">): ApmLin
  * Pure: the drawable map. `failing` keeps lines with failures (and the cards they touch); `search` keeps services whose
  * name / namespace matches, plus the services they call or are called by.
  */
-export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" | "windowMinutes">, opts: { failing?: boolean; search?: string } = {}): ApmMap {
+export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" | "windowMinutes">, opts: { failing?: boolean; search?: string } = {}, net: NetDiscovery | null = null): ApmMap {
   const secs = data.windowMinutes * 60;
   const cards = new Map<string, ApmCard>();
   for (const n of data.nodes) {
@@ -69,10 +76,20 @@ export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" |
       outRequests: n.outbound.requests, status: n.inbound.failed > 0 ? "warn" : "ok", rank: 0,
     });
   }
+  for (const c of net?.cards ?? []) {
+    cards.set(c.id, {
+      id: c.id, kind: "discovered", name: c.workload, namespace: c.namespace, workload: null, inRequests: 0, inFailed: 0, inRate: 0,
+      outRequests: 0, status: "stale", rank: 0, net: { flows: c.flows, dropped: c.dropped, pods: c.pods },
+    });
+  }
+  const NONE: Omit<ServiceGraphEdge, "client" | "server"> = { kind: "other", requests: 0, rate: 0, failed: 0, errorRate: null, p95: null, p99: null, lowTraffic: false };
+  const netLinks: ApmLink[] = opts.failing ? [] : (net?.links ?? []).filter((l) => cards.has(l.source) && cards.has(l.target))
+    .map((l) => ({ id: `${l.source}>${l.target}`, source: l.source, target: l.target, edge: { ...NONE, client: l.source, server: l.target }, tone: "net", width: 1, net: { flows: l.flows, dropped: l.dropped, port: l.port, protocol: l.protocol } }));
   let links: ApmLink[] = data.edges
     .filter((e) => cards.has(e.client) && cards.has(e.server))
     .filter((e) => !opts.failing || e.failed > 0)
-    .map((e) => ({ id: `${e.client}>${e.server}`, source: e.client, target: e.server, edge: e, tone: toneOfEdge(e), width: widthOf(e.rate) }));
+    .map((e): ApmLink => ({ id: `${e.client}>${e.server}`, source: e.client, target: e.server, edge: e, tone: toneOfEdge(e), width: widthOf(e.rate) }))
+    .concat(netLinks.filter((l) => !data.edges.some((e) => `${e.client}>${e.server}` === l.id)));
 
   const q = opts.search?.trim().toLowerCase();
   const hits = new Set(q ? [...cards.values()].filter((c) => c.name.toLowerCase().includes(q) || c.namespace.toLowerCase().includes(q)).map((c) => c.id) : []);
@@ -94,7 +111,7 @@ export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" |
   const column = (cs: ApmCard[], key: string): PackBox<Shape> => ({ t: "box", shape: { kind: "box", id: key }, dir: "col", children: cs.map(leaf), head: 0, pad: 0, gap: NET.GAP, framed: false, maxW: 0 });
   const byName = (a: ApmCard, b: ApmCard) => cmp(a.name, b.name);
   const groups = new Map<string, ApmCard[]>();
-  for (const c of cards.values()) if (c.kind === "service") (groups.get(c.namespace) ?? groups.set(c.namespace, []).get(c.namespace)!).push(c);
+  for (const c of cards.values()) if (c.kind !== "entry") (groups.get(c.namespace) ?? groups.set(c.namespace, []).get(c.namespace)!).push(c);
   const order = [...groups.entries()].map(([ns, cs]) => ({ ns, cs, min: Math.min(...cs.map((c) => c.rank)) }))
     // the unnamed namespace last
     .sort((a, b) => Number(a.ns === "") - Number(b.ns === "") || a.min - b.min || cmp(a.ns, b.ns));
@@ -137,7 +154,8 @@ export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" |
     width: Math.max(0, ...placed.map((p) => p.x + p.w)), height: Math.max(0, ...placed.map((p) => p.y + p.h)),
     structure: [...out.map((c) => c.id).sort(), "|", ...links.map((l) => l.id)].join(","),
     totals: {
-      services: out.filter((c) => c.kind === "service").length, links: links.length, failingLinks: links.filter((l) => l.edge.failed > 0).length,
+      services: out.filter((c) => c.kind === "service").length, links: links.filter((l) => l.tone !== "net").length, failingLinks: links.filter((l) => l.edge.failed > 0).length,
+      discovered: out.filter((c) => c.kind === "discovered").length, netLinks: links.filter((l) => l.tone === "net").length,
       requests: links.reduce((n, l) => n + l.edge.requests, 0), failed: links.reduce((n, l) => n + l.edge.failed, 0),
     },
   };

@@ -10,7 +10,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position, ReactFlowProvider, useNodesInitialized, useReactFlow, type Edge, type Node, type NodeProps } from "reactflow";
 import "reactflow/dist/style.css";
-import type { AppDependencies, AppMetricsResponse, RedService, ServiceGraphResponse, WorkloadRedResponse } from "@aud/types";
+import type { AppDependencies, AppMetricsResponse, HubbleServiceMapResponse, RedService, ServiceGraphResponse, WorkloadRedResponse } from "@aud/types";
+import { discoverFromNetwork } from "@/lib/apmDiscovery";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useI18n } from "@/lib/i18n";
@@ -54,15 +55,23 @@ const CardNode = memo(function CardNode({ data }: NodeProps<CardData>) {
         <span className={styles.nmCardName} title={c.name}>{c.kind === "entry" ? t("ob.apm.entry") : c.name}</span>
       </div>
       <div className={styles.nmCardKind}>
-        <span>{c.kind === "entry" ? c.name : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}</span>
+        <span>{c.kind === "entry" ? c.name : c.kind === "discovered" ? t("ob.apm.disc.kind", { ns: c.namespace }) : c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : t("ob.apm.noWorkload")}</span>
       </div>
-      <div className={styles.nmCells}>
-        {c.kind === "entry"
-          ? <span><small>{t("ob.apm.out")}</small>{countText(c.outRequests, locale)}</span>
-          : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
-        <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
-      </div>
-      {data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
+      {c.kind === "discovered" && c.net ? (
+        // seen on the network only: Cilium's flows and drops in the sample — no requests, no latency (no spans)
+        <div className={styles.nmCells}>
+          <span><small>{t("ob.apm.disc.flows")}</small>{countText(c.net.flows, locale)}</span>
+          <span data-hot={c.net.dropped > 0 || undefined}><small>{t("ob.apm.disc.drops")}</small>{countText(c.net.dropped, locale)}</span>
+        </div>
+      ) : (
+        <div className={styles.nmCells}>
+          {c.kind === "entry"
+            ? <span><small>{t("ob.apm.out")}</small>{countText(c.outRequests, locale)}</span>
+            : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
+          <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
+        </div>
+      )}
+      {c.kind === "discovered" ? <div className={styles.nmSignals}><span>○ {t("ob.apm.disc.noTraces")}</span></div> : data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
     </div>
   );
 });
@@ -100,6 +109,8 @@ const TONE: Record<ApmLink["tone"], { color: string; dash?: string; legend: stri
   forward: { color: rgba("ink", 0.38), legend: "forward" },
   fail: { color: rgba("warning", 0.95), dash: "6 4", legend: "dropOther" },
   async: { color: rgba("ink", 0.38), dash: "2 4", legend: "dropIpv6" },
+  // seen on the network only (Hubble) — no trace edge: a fine dotted line, no rate
+  net: { color: rgba("integration", 0.7), dash: "1 4", legend: "net" },
 };
 
 function FitOnKey({ fitKey }: { fitKey: string }) {
@@ -149,15 +160,24 @@ export function ServiceMapView({ clusterId, range, nonce, report }: { clusterId:
   return (
     <ReactFlowProvider>
       <ServiceMap d={d} deps={deps.d?.metricsState === "ok" ? deps.d.apps : undefined} fitKey={`${clusterId}|${fit.value}|${atQ ?? "now"}`} windowChip={fit.differs ? t("ob.apm.window", { n: fit.value }) : null}
-        red={rd?.services ?? null} redState={red.loading && !rd ? "loading" : rd ? "ok" : "none"} workloads={ad?.workloads ?? null} />
+        red={rd?.services ?? null} redState={red.loading && !rd ? "loading" : rd ? "ok" : "none"} workloads={ad?.workloads ?? null} clusterId={clusterId} />
     </ReactFlowProvider>
   );
 }
 
-function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
+function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads, clusterId }: {
   d: ServiceGraphResponse; deps?: AppDependencies[]; fitKey: string; windowChip: string | null;
-  red: RedService[] | null; redState: "loading" | "ok" | "none"; workloads: AppMetricsResponse["workloads"] | null;
+  red: RedService[] | null; redState: "loading" | "ok" | "none"; workloads: AppMetricsResponse["workloads"] | null; clusterId: string;
 }) {
+  // Service discovery without instrumentation (lib/apmDiscovery.ts): the Hubble sample, read only when asked — it opens a
+  // Hubble UI channel (the backend replays its buffer), so not on every map view
+  const [discover, setDiscover] = useState(false);
+  const [discScope, setDiscScope] = useState<"traced" | "all">("traced");
+  const { locale: lang } = useI18n();
+  const hq = useApiQuery(discover && clusterId ? `apm-disc:${clusterId}:${lang}` : null, (token) =>
+    fetchJsonWithBearer<HubbleServiceMapResponse>(apiUrl("/api/hubble/service-map", { clusterId, timeWindow: "5", lang }), token),
+  );
+  const net = useMemo(() => (discover && hq.data && hq.data.clusterId === clusterId ? discoverFromNetwork(d, hq.data, discScope) : null), [discover, hq.data, clusterId, d, discScope]);
   const { t, locale } = useI18n();
   const [failing, setFailing] = useState(false);
   const [signal, setSignal] = useState<SignalKind | null>(null);
@@ -169,7 +189,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
-  const map: ApmMap = useMemo(() => buildApmMap(d, { failing, search }), [d, failing, search]);
+  const map: ApmMap = useMemo(() => buildApmMap(d, { failing, search }, net), [d, failing, search, net]);
   const rate = useRate();
 
   const focus = selected ?? hover;
@@ -201,7 +221,9 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
       id: l.id, source: l.source, target: l.target, type: "smoothstep",
       style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: (focus && !on) || (!focus && marked && !marked.has(l.source) && !marked.has(l.target)) ? 0.06 : on ? 1 : l.tone === "fail" ? 0.95 : 0.5 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
-      ...(on ? { label: `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
+      ...(on ? { label: l.net
+        ? t("ob.apm.disc.linkLabel", { f: countText(l.net.flows, locale), d: countText(l.net.dropped, locale), p: `${l.net.port}/${l.net.protocol}` })
+        : `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
       zIndex: on ? 20 : 5,
     } satisfies Edge;
   }), [map.links, focus, t, locale, rate, d.buckets, marked]);
@@ -221,6 +243,20 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
           items={[{ id: "all", label: t("ob.apm.all") }, { id: "failing", label: t("ob.apm.failingOnly") }]} />
         <SearchInput label={t("ob.apm.search")} value={search} onChange={setSearch} placeholder={t("ob.apm.search")} />
         <Segmented label={t("ob.apm.mode")} value={mode} onChange={setMode} items={[{ id: "map", label: t("ob.apm.mode.map") }, { id: "list", label: t("ob.apm.mode.list") }]} />
+      </div>
+      <div className={styles.nmBar} role="group" aria-label={t("ob.apm.disc.title")}>
+        <FilterChip pressed={discover} title={t("ob.apm.disc.hint")} onClick={() => setDiscover(!discover)}>{t("ob.apm.disc.toggle")}</FilterChip>
+        {discover ? (
+          <>
+            <Segmented label={t("ob.apm.disc.scope")} value={discScope} onChange={setDiscScope}
+              items={[{ id: "traced", label: t("ob.apm.disc.scope.traced") }, { id: "all", label: t("ob.apm.disc.scope.all") }]} />
+            <span className={styles.nmSigLabel}>
+              {hq.error ? t("ob.apm.disc.failed", { e: hq.error })
+                : !net ? t("ob.apm.disc.loading")
+                : t("ob.apm.disc.summary", { c: net.cards.length, l: net.links.length, m: net.matched, f: countText(net.sample.flows, locale), w: net.sample.windowMinutes })}
+            </span>
+          </>
+        ) : null}
       </div>
       <div className={styles.nmBar} role="group" aria-label={t("ob.apm.sig.filter")}>
         <span className={styles.nmSigLabel}>{t("ob.apm.sig.filter")}</span>
@@ -243,6 +279,7 @@ function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
           <li><span className={styles.nmLine} data-tone="forward" />{t("ob.apm.line.forward")}</li>
           <li><span className={styles.nmLine} data-tone="dropOther" />{t("ob.apm.line.fail")}</li>
           <li><span className={styles.nmLine} data-tone="dropIpv6" />{t("ob.apm.line.async")}</li>
+          {net ? <li><span className={styles.nmLine} data-tone="net" />{t("ob.apm.line.net")}</li> : null}
         </ul>
       </div>
 
@@ -291,9 +328,11 @@ function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlaced
         <span className={styles.nmLinkPeer} title={peer}>{peer}</span>
         <span className={styles.nmLinkPort}>{t(`ob.apm.kind.${l.edge.kind}`)}</span>
         <span className={styles.nmLinkFlows}>
-          {rate(l.edge.rate)} · p95 {quantileText(l.edge.p95, d.buckets)}
-          {l.edge.failed ? <b> · {t("ob.apm.failed")} {countText(l.edge.failed, locale)} ({errorRateText(l.edge.errorRate)})</b> : null}
-          {l.edge.lowTraffic ? <> · {t("ob.apm.lowTraffic")}</> : null}
+          {l.net ? t("ob.apm.disc.linkLabel", { f: countText(l.net.flows, locale), d: countText(l.net.dropped, locale), p: `${l.net.port}/${l.net.protocol}` }) : <>
+            {rate(l.edge.rate)} · p95 {quantileText(l.edge.p95, d.buckets)}
+            {l.edge.failed ? <b> · {t("ob.apm.failed")} {countText(l.edge.failed, locale)} ({errorRateText(l.edge.errorRate)})</b> : null}
+            {l.edge.lowTraffic ? <> · {t("ob.apm.lowTraffic")}</> : null}
+          </>}
         </span>
       </button>
     </li>
@@ -308,7 +347,7 @@ function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlaced
         </div>
         <Button size="sm" variant="ghost" ariaLabel={t("hb.nm.close")} onClick={onClose}>✕</Button>
       </header>
-      <p className={styles.nmWhy}>{c.kind === "entry" ? t("ob.apm.entryHint") : c.inFailed > 0 ? t("ob.apm.why.warn", { f: countText(c.inFailed, locale), m: d.windowMinutes }) : t("ob.apm.why.ok", { m: d.windowMinutes })}</p>
+      <p className={styles.nmWhy}>{c.kind === "discovered" ? t("ob.apm.disc.why", { p: c.net?.pods ?? 0 }) : c.kind === "entry" ? t("ob.apm.entryHint") : c.inFailed > 0 ? t("ob.apm.why.warn", { f: countText(c.inFailed, locale), m: d.windowMinutes }) : t("ob.apm.why.ok", { m: d.windowMinutes })}</p>
       <dl className={styles.nmKv}>
         {c.kind !== "entry" && <><dt>{t("ob.apm.in")}</dt><dd>{countText(c.inRequests, locale)}{c.inRequests > 0 ? ` (${rate(c.inRate)})` : ""}</dd></>}
         {c.kind !== "entry" && <><dt>{t("ob.apm.failed")}</dt><dd>{countText(c.inFailed, locale)}</dd></>}

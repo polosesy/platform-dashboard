@@ -1026,6 +1026,7 @@
 .nmLine[data-tone="l7err"] { border-top-color: var(--warning); }
 .nmLine[data-tone="dropOther"] { border-top: 2px dashed var(--warning); }
 .nmLine[data-tone="dropIpv6"] { border-top: 2px dotted rgba(var(--ink-rgb), 0.35); }
+.nmLine[data-tone="net"] { border-top: 2px dotted rgba(var(--integration-rgb), 0.7); }
 .nmLayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .nmLayout[data-open] { grid-template-columns: minmax(0, 1fr) 340px; }
 .nmCanvas { height: calc(100vh - 300px); min-height: 460px; border: 1px solid rgba(var(--ink-rgb), 0.1); border-radius: var(--radius-md); background: rgba(var(--ink-rgb), 0.015); overflow: hidden; }

@@ -36,6 +36,15 @@
   --workload-rgb: 37, 99, 235;
   --secret-rgb: 8, 145, 178;
   --slate-rgb: 51, 65, 85;
+  /* Categorical series (trace flame graph: colour = service, 2026-11-18) — dataviz reference hues without its green /
+     yellow / red (the status hues stay reserved), order blue · orange · aqua · violet · magenta = the one of 24 orders that
+     passes the validator in both modes on adjacent pairs (worst CVD ΔE 9.2 light / 9.4 dark). Identity never by colour
+     alone: every block is labelled and the exec-time list is the legend. A 6th service and beyond = slate ("other"). */
+  --series1-rgb: 42, 120, 214;
+  --series2-rgb: 235, 104, 52;
+  --series3-rgb: 27, 175, 122;
+  --series4-rgb: 98, 80, 214;
+  --series5-rgb: 232, 123, 164;
 
   /* Surfaces — a quiet cool ground and opaque white panels (the old translucent panels blurred numbers) */
   --bg: #f6f7f9;
@@ -137,6 +146,11 @@
   --warning-strong-rgb: 240, 182, 90;
   --danger-strong-rgb: 255, 154, 139;
   --success-strong-rgb: 111, 207, 122;
+  --series1-rgb: 57, 135, 229;
+  --series2-rgb: 217, 89, 38;
+  --series3-rgb: 25, 158, 112;
+  --series4-rgb: 144, 133, 233;
+  --series5-rgb: 213, 81, 129;
   --bg: #0f1114;
   --panel-sunken: #1e2228;
   --muted: #b4bac3;
@@ -160,6 +174,11 @@
     --warning-strong-rgb: 240, 182, 90;
     --danger-strong-rgb: 255, 154, 139;
     --success-strong-rgb: 111, 207, 122;
+    --series1-rgb: 57, 135, 229;
+    --series2-rgb: 217, 89, 38;
+    --series3-rgb: 25, 158, 112;
+    --series4-rgb: 144, 133, 233;
+    --series5-rgb: 213, 81, 129;
     --bg: #0f1114;
     --panel-sunken: #1e2228;
     --muted: #b4bac3;

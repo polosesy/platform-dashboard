@@ -149,6 +149,29 @@ export function flameLayout(spans: TraceSpan[], totalMs?: number): { blocks: Fla
   return { blocks, rows: used.length };
 }
 
+/** Colour slots of the categorical series (globals.css --series1…5-rgb); beyond = "other" (slate) */
+export const SERIES_SLOTS = 5;
+
+/**
+ * Pure: service → colour slot 1…SERIES_SLOTS in the order the services first appear in the waterfall (the root's first);
+ * the 6th service on = 0 ("other"). Colour follows the service within this trace — filtering, zooming or picking never
+ * repaints a service (dataviz: colour follows the entity, never its rank).
+ */
+export function serviceSlots(spans: TraceSpan[], totalMs?: number): Map<string, number> {
+  const out = new Map<string, number>();
+  let next = 1;
+  for (const w of waterfall(spans, totalMs)) {
+    const k = w.span.service ?? "";
+    if (out.has(k)) continue;
+    out.set(k, next <= SERIES_SLOTS ? next : 0);
+    next++;
+  }
+  return out;
+}
+/** The CSS channel token of a slot ("none" colouring = the accent) */
+export const slotVar = (slot: number | undefined, colorBy: "service" | "none") =>
+  colorBy === "none" ? "var(--accent-rgb)" : slot ? `var(--series${slot}-rgb)` : "var(--slate-rgb)";
+
 /** A zoomed time window of the flame graph (ms from the trace's start) */
 export type FlameZoom = { from: number; to: number };
 

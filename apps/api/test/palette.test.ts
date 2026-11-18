@@ -17,7 +17,7 @@ test("JS palette channels equal the --*-rgb tokens in globals.css", () => {
   const kebab = (k: string) => k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   for (const [k, v] of Object.entries(p.UI)) assert.deepEqual(tokens[k], [...v], `UI ${k}`);
   const vizInCss = Object.keys(tokens).filter((k) => !(k in p.UI));
-  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "integration", "peering", "private-link", "secret", "slate", "subnet", "violet", "workload"], "CSS visualization channels");
+  assert.deepEqual(vizInCss.sort(), ["canvas", "egress", "fault", "integration", "peering", "private-link", "secret", "series1", "series2", "series3", "series4", "series5", "slate", "subnet", "violet", "workload"], "CSS visualization channels");
   for (const k of vizInCss) {
     const key = Object.keys(p.VIZ).find((x) => kebab(x) === k) as keyof typeof p.VIZ;
     assert.ok(key, `palette VIZ has ${k}`);

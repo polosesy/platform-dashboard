@@ -22,7 +22,7 @@ import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { countText, endpointLabel, quantileText } from "@/lib/redView";
 import {
-  TRACE_MIN_DURATIONS, TRACE_WINDOWS, attrJson, attrTree, exceptionOf, execTimeByService, flameLayout, flameWindow, httpSummary, matchedSpans, mergePages, msText,
+  TRACE_MIN_DURATIONS, TRACE_WINDOWS, attrJson, attrTree, exceptionOf, execTimeByService, flameLayout, flameWindow, httpSummary, serviceSlots, slotVar, matchedSpans, mergePages, msText,
   problemGroups, rowErrors, rowSpans, spanGroups, spanMatches, traceCounts, traceLink, waterfall,
   type AttrNode, type FlameZoom, type ProblemGroup,
 } from "@/lib/traceView";
@@ -269,10 +269,13 @@ export function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string
   const [view, setView] = useState<TraceViewKind>("flame");
   const [filter, setFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
-  // a service picked in the exec-time list: its blocks stand out (identity by choice and label, not by colour)
+  // a service picked in the exec-time list: its blocks stand out (with colour, its label and the legend say it too)
   const [service, setService] = useState<string | null>(null);
   const [zoom, setZoom] = useState<FlameZoom | null>(null);
+  // Datadog "Color by": service (default — validated series, apm-parity 4e) or none (one hue)
+  const [colorBy, setColorBy] = useState<"service" | "none">("service");
   const d = q.data?.traceId === traceId ? q.data : null;
+  const slots = useMemo(() => serviceSlots(d?.state === "ok" ? d.spans : [], d?.durationMs), [d]);
   const box = useRef<HTMLElement>(null);
   const still = useReducedMotion();
   // Bring the opened trace into view and move focus there (keyboard and screen readers land on it, not at the list's end)
@@ -336,6 +339,10 @@ export function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string
           <SearchInput label={t("ob.tr.spanFilter")} value={filter} onChange={setFilter} placeholder={t("ob.tr.spanFilterPh")} />
           <Toggle checked={errorsOnly} onChange={setErrorsOnly} disabled={!c.errors}>{t("ob.tr.errorsOnlyN", { n: c.errors })}</Toggle>
           {filter.trim() || errorsOnly ? <span className={styles.sloCellSub}>{t("ob.tr.shownN", { n: shown, total: c.spans })}</span> : null}
+          {view !== "list" ? (
+            <Select label={t("ob.tr.colorBy")} value={colorBy} onChange={(v) => setColorBy(v === "none" ? "none" : "service")}
+              options={[{ value: "service", label: t("ob.tr.colorBy.service") }, { value: "none", label: t("ob.tr.colorBy.none") }]} />
+          ) : null}
           {view === "flame" ? (
             <>
               <Button size="sm" disabled={!chosen} title={t("ob.tr.zoomHint")} onClick={() => chosen && setZoom({ from: chosen.offsetMs, to: chosen.offsetMs + Math.max(chosen.durationMs, 1e-3) })}>{t("ob.tr.zoomTo")}</Button>
@@ -344,7 +351,7 @@ export function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string
           ) : null}
         </div>
         {view === "flame" ? (
-          <FlameView d={d} sel={sel} onPick={pick} matches={matches} service={service} onService={setService} zoom={zoom} onZoom={setZoom} />
+          <FlameView d={d} sel={sel} onPick={pick} matches={matches} service={service} onService={setService} zoom={zoom} onZoom={setZoom} slots={slots} colorBy={colorBy} />
         ) : view === "waterfall" ? (
           <ol className={styles.trWaterfall} aria-label={t("ob.tr.waterfall")}>
             {waterfall(d.spans, d.durationMs).map((r) => (
@@ -356,7 +363,8 @@ export function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string
                   <span className={styles.sloCellSub}>{r.span.service ?? "—"} · {t(`ob.tr.kind.${r.span.kind}`)}</span>
                 </span>
                 <span className={styles.trTrack} aria-hidden="true">
-                  <span className={styles.trBar} data-error={r.span.status === "error" || undefined} style={{ left: `${r.leftPct}%`, width: `${r.widthPct}%` }} />
+                  <span className={styles.trBar} data-error={r.span.status === "error" || undefined}
+                    style={{ left: `${r.leftPct}%`, width: `${r.widthPct}%`, ["--svc-rgb" as string]: slotVar(slots.get(r.span.service ?? ""), colorBy) }} />
                 </span>
                 <span className={styles.trDur}>{msText(r.span.durationMs)}</span>
               </li>
@@ -393,10 +401,11 @@ const FLAME_ROW = 24;
 const AXIS_TICKS = [0, 0.25, 0.5, 0.75, 1];
 
 /** Flame graph (time axis = the trace's) + exec time per service — pure layout lib/traceView flameLayout · execTimeByService */
-function FlameView({ d, sel, onPick, matches, service, onService, zoom, onZoom }: {
+function FlameView({ d, sel, onPick, matches, service, onService, zoom, onZoom, slots, colorBy }: {
   d: TraceDetailResponse; sel: string | null; onPick: (id: string) => void; matches: (s: TraceSpan) => boolean; service: string | null; onService: (s: string | null) => void;
-  zoom: FlameZoom | null; onZoom: (z: FlameZoom | null) => void;
+  zoom: FlameZoom | null; onZoom: (z: FlameZoom | null) => void; slots: Map<string, number>; colorBy: "service" | "none";
 }) {
+  const svc = (name: string | null) => ({ ["--svc-rgb" as string]: slotVar(slots.get(name ?? ""), colorBy) });
   const { t } = useI18n();
   const total = d.durationMs ?? 0;
   const { blocks: laid, rows } = useMemo(() => flameLayout(d.spans, d.durationMs), [d.spans, d.durationMs]);
@@ -425,7 +434,7 @@ function FlameView({ d, sel, onPick, matches, service, onService, zoom, onZoom }
               const label = `${s.service ?? "—"} · ${s.name} · ${msText(s.durationMs)}${err ? ` · ${t("ob.tr.status.error")}` : ""}`;
               return (
                 <svg key={s.spanId} x={`${b.leftPct}%`} y={(b.row - rowBase) * FLAME_ROW} width={`${b.widthPct}%`} height={FLAME_ROW - 2} overflow="hidden">
-                  <g className={styles.trBlock} role="button" tabIndex={0} aria-label={label} aria-pressed={sel === s.spanId}
+                  <g className={styles.trBlock} style={svc(s.service)} role="button" tabIndex={0} aria-label={label} aria-pressed={sel === s.spanId}
                     data-error={err || undefined} data-selected={sel === s.spanId || undefined}
                     data-service={service !== null && (s.service ?? "") === service ? true : undefined}
                     data-dim={!matches(s) || (service !== null && (s.service ?? "") !== service) || undefined}
@@ -448,7 +457,11 @@ function FlameView({ d, sel, onPick, matches, service, onService, zoom, onZoom }
         <ul className={styles.trExecList}>
           {exec.map((e) => (
             <li key={e.service} className={styles.trExecRow} title={t("ob.tr.exec.row", { s: e.service || "—", ms: msText(e.selfMs), n: e.spans })}>
-              <FilterChip pressed={service === e.service} onClick={() => onService(service === e.service ? null : e.service)}>{e.service || "—"}</FilterChip>
+              <span className={styles.trExecName}>
+                {/* the legend: the block colour beside the name (identity is the name; the colour only matches it) */}
+                <span className={styles.trSwatch} style={svc(e.service)} aria-hidden="true" />
+                <FilterChip pressed={service === e.service} onClick={() => onService(service === e.service ? null : e.service)}>{e.service || "—"}</FilterChip>
+              </span>
               <span className={styles.trExecBar} aria-hidden="true"><span style={{ width: `${Math.max(1, e.share * 100)}%` }} /></span>
               <span className={styles.trExecPct}>{(e.share * 100).toFixed(1)}%</span>
             </li>

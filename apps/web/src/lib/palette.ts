@@ -42,6 +42,12 @@ export const VIZ = {
   secret: [8, 145, 178], // secret nodes of the attack path (cyan)
   slate: [51, 65, 85], // node (machine) nodes of the attack path
   violet: [112, 48, 160], // security advisories, user-defined routes
+  // categorical series (trace flame graph: colour = service) — light values; dark steps live in globals.css
+  series1: [42, 120, 214],
+  series2: [235, 104, 52],
+  series3: [27, 175, 122],
+  series4: [98, 80, 214],
+  series5: [232, 123, 164],
 } as const satisfies Record<string, Rgb>;
 
 export type UiColor = keyof typeof UI;
