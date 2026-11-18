@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-18
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/app/observability/components/TracesView.tsx]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/app/observability/components/TracesView.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -260,6 +260,19 @@ stg 실측 결과(30개):
 | 화면(로컬 웹 + 헤드리스 Chrome) | 블록 2,000 렌더 · 패널 넘침 0 · 링크로 열기 · 키보드 Enter · 확대 2,000 → 5블록 → 전체 2,000 · 신호 칩 2·1·1 = 합성 기대값 · 카드 넘침 0 · 목록 필터 1행 · 계측 범위 8개 중 5 | DOM 측정 |
 
 지연 신호는 버킷 비교라 stg 대조에서 빼고 단위 테스트로만 확인했습니다(`apmSignals.test.ts`). 테스트 `traceDetail.test.ts`·`apmSignals.test.ts`.
+
+## 4e. 지연 신호 실측 대조 · 플레임 그래프 색 · 계측 없는 서비스 발견 (2026-11-18, 2차)
+
+**지연 신호 — stg 실데이터**: 대시보드 경로(API `redQueries` → `aggregateRed` → 웹 `serviceSignals`)와 독립 계산(따로 쓴 PromQL `sum by (service_name, le)` 지금·`offset 7d` + 별도로 구현한 p95 버킷 — 경계 오름차순, +Inf 개수의 95% 이상인 첫 경계)을 같은 작업 영역에서 비교.
+
+| 기간 | 판정 대상(양쪽 ≥ 20건) | 대시보드 | 독립 계산 |
+|---|---|---|---|
+| 1시간 | 5 | 0 | 0 |
+| 6시간 | 6 | 1 | 1 (같은 서비스, p95 버킷 0.1 → 0.3초) |
+
+**플레임 그래프 색**(사용자 요청 — 4d의 '한 색' 결정을 바꿈): Datadog처럼 색 = 서비스. dataviz 참고 팔레트에서 이 플랫폼의 상태색과 겹치는 초록·노랑·빨강을 빼고 5색, 24개 순서를 검증기(인접 쌍 — 블록은 부모·자식으로 붙음)로 돌려 양쪽 모드를 통과하는 순서 중 파랑·주황·청록·보라·자홍(최악 색약 ΔE 9.2 밝음 / 9.4 어두움, 목표 8 이상). `globals.css` `--series1…5-rgb`(어두운 단계 따로) + `palette.ts` VIZ. 칸 = 트레이스에 처음 나타난 순서(`serviceSlots` — 거르기·확대로 다시 칠하지 않음), 6번째부터 slate '기타'(색을 만들지 않음). 인접하지 않은 블록끼리는 기준 밖 쌍이 붙을 수 있어 **색만으로 정체를 말하지 않음**: 블록 이름표 · 범례(실행 시간 목록의 색 견본 + 이름) · 고르면 강조. 오류는 색이 아니라 빨간 테두리 + '!'. '색: 서비스별 | 한 색'. 화면 측정: 서비스 7개 → 1–5칸 + slate 2, 채우기 6가지, 한 색 = 1가지.
+
+**계측 없는 서비스 발견**(Datadog Service Discovery — 그쪽은 eBPF 에이전트): 같은 질문을 **Cilium이 이미 보는 네트워크 흐름**(Hubble 서비스 맵, Pod 트래픽과 같은 표본)으로 답함 — 앱 계측과 무관. `lib/apmDiscovery.ts`: Hubble 워크로드 ↔ 트레이스 서비스를 정확한 이름으로만(서비스 그래프·RED가 준 워크로드, 없으면 유일한 같은 이름) 짝짓고, 짝 없는 워크로드 = '네트워크로 발견 · 트레이스 없음' 카드(점선 ○, 흐름·드롭 — 요청·지연 없음), 트레이스에 없는 연결 = 청록 점선(흐름·드롭·포트). 범위 '트레이스 있는 네임스페이스'(기본) | 모든 네임스페이스. 켤 때만 표본을 읽음(Hubble UI 백엔드 보호 — CLAUDE.md Hubble UI 절). 합성 표본 화면 측정: 발견 2 · 연결 2 · 짝 2 = 기대값. stg 실데이터 대조는 로그인 토큰이 필요한 API라 배포본에서 아래 확인.
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

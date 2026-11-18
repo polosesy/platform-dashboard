@@ -38,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
     key: "network", labelKey: "nav.group.network", icon: "waypoints", items: [
       item("/network", "vnetTraffic", "arrows"),
       item("/hubble", "podTraffic", "share"),
+      item("/network-path", "networkPath", "globe"),
     ],
   },
   {

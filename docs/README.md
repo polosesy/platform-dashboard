@@ -46,6 +46,7 @@ last-verified: 2026-11-12
 - [hubble-guide.md](observability/hubble-guide.md) · [hubble-troubleshooting.md](observability/hubble-troubleshooting.md) — Pod 트래픽(Hubble)
 - [vnet-flow-logs.md](observability/vnet-flow-logs.md) — VNet 트래픽(흐름 로그·Traffic Analytics)
 - [alert-center.md](observability/alert-center.md) — 알림 센터: Azure Monitor(일반 경고 스키마)·Grafana 웹훅을 대시보드가 직접 받기(메신저 웹훅 없이), 분류·심각도·권한·설정
+- [network-path.md](observability/network-path.md) — 네트워크 경로: 사용자 장치 → SaaS 홉별 지연·손실(장치에서 측정해 올림, 손실 읽는 법)
 - [aks-monitoring-integration.md](observability/aks-monitoring-integration.md) — 워크로드 히트맵·kube 이벤트·Loki 로그 스트림·Hubble 드롭·AKS 관리형 파드 연동
 
 ## 문제 해결 — `troubleshooting/`

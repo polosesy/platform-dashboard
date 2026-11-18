@@ -25,3 +25,4 @@ export * from "./issues.js";
 export * from "./netpol.js";
 export * from "./notify.js";
 export * from "./runbook.js";
+export * from "./netpath.js";

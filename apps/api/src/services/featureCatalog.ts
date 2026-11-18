@@ -65,6 +65,8 @@ export const FEATURES: FeatureDef[] = [
   { id: "resourceHealth", tier: "core", routes: ["/health"], requires: ["inventory"], optional: [] },
   { id: "costManagement", tier: "core", routes: ["/cost"], requires: ["cost"], optional: [] },
   { id: "vnetTraffic", tier: "pro", routes: ["/network"], requires: ["inventory", "logs"], optional: [] },
+  // device-measured paths (the device probes and uploads — no Azure permission); kept on the platform volume
+  { id: "networkPath", tier: "pro", routes: ["/network-path"], requires: [], optional: [], preconditions: STATE },
   { id: "privateLinkUsage", tier: "pro", routes: ["/live-diagram"], requires: ["inventory", "logs"], optional: [] },
   { id: "defenderPosture", tier: "pro", routes: ["/security", "/security/findings", "/security/identity", "/security/threats", "/security/compliance"], requires: ["security"], optional: [] },
   { id: "aksClusters", tier: "pro", routes: ["/kubernetes"], requires: ["aksCredential", "k8sRead"], optional: ["inventory"], preconditions: AKS_PRE },

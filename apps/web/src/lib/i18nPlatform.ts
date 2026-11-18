@@ -323,6 +323,8 @@ export const PLATFORM_T: Translations = {
   "feat.costManagement.desc": { ko: "비용 추이·예산·예측", en: "Cost trend, budgets, forecast" },
   "feat.vnetTraffic.name": { ko: "VNet 트래픽", en: "VNet traffic" },
   "feat.vnetTraffic.desc": { ko: "흐름 로그 + Traffic Analytics 감사", en: "Flow logs + Traffic Analytics audit" },
+  "feat.networkPath.name": { ko: "네트워크 경로", en: "Network path" },
+  "feat.networkPath.desc": { ko: "사용자 장치에서 잰 SaaS까지의 홉별 지연·손실과 이력", en: "Per-hop latency, loss and history from a user's device to a SaaS" },
   "feat.privateLinkUsage.name": { ko: "Private Link 사용", en: "Private Link usage" },
   "feat.privateLinkUsage.desc": { ko: "어떤 워크로드가 Private Endpoint를 쓰는지 (로그 근거)", en: "Which workloads use each Private Endpoint (from logs)" },
   "feat.defenderPosture.name": { ko: "Defender 보안", en: "Defender security" },

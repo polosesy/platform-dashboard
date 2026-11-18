@@ -13,6 +13,7 @@ import { registerObservabilityRoutes } from "./observability.js";
 import { registerHubbleRoutes } from "./hubble.js";
 import { registerNotifyRoutes } from "./notify.js";
 import { registerOpsRoutes } from "./ops.js";
+import { registerNetPathRoutes } from "./netpath.js";
 
 export function registerAllRoutes(router: Router, env: Env) {
   // Health check
@@ -34,4 +35,5 @@ export function registerAllRoutes(router: Router, env: Env) {
   registerHubbleRoutes(router, env);
   registerNotifyRoutes(router, env);
   registerOpsRoutes(router, env);
+  registerNetPathRoutes(router, env);
 }
