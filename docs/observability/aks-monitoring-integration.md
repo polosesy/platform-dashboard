@@ -314,7 +314,7 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 "aks": { "observability": {
   "grafana": { "endpoint": "https://<grafana>.<region>.grafana.azure.com", "datasources": { "prometheus": "<uid>", "loki": "<uid>", "tempo": "<uid>" } },
   "loki": { "url": "http://<loki-svc>.<namespace>:3100" },
-  "hubbleUi": { "url": "http://hubble-ui.kube-system:80" },
+  "hubbleUi": { "url": "http://hubble-ui.kube-system.svc.cluster.local:80" },
   "logErrors": { "metric": "<collector log-error counter>", "podLabel": "exported_pod" },
   "slo": { "windowDays": 30, "availability": 0.999, "latency": { "thresholdMs": 1000, "target": 0.99 },
     "services": { "<namespace>/<application>": { "excludeUris": ["/public/*/webhooks/**"] } } } } }

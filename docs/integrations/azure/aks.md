@@ -112,7 +112,7 @@ sed -e 's/<NAMESPACE>/app/' -e 's/<CONNECTION_IDENTITY_OBJECT_ID>/<오브젝트 
 
 `entra.readApplications`(선택, 연결 단위)를 켜면 워크로드 ID가 SP(앱 등록)로 로그인할 때 그 SP의 이름·Azure 역할·API 권한·비밀 만료·페더레이션 자격 증명을 Microsoft Graph로 읽습니다. 그 연결의 앱에 `Application.Read.All`(관리자 동의)이 필요합니다([권한](./permissions.md)). 끄면 '관리 ID로 찾지 못함'으로 남습니다.
 
-`observability.hubbleUi`(선택, `{ "url": "http://hubble-ui.kube-system:80" }`)는 Hubble exec가 꺼진 연결에서 Hubble 흐름·서비스 맵을 **클러스터의 Hubble UI 백엔드**로 읽습니다(Relay 최근 흐름 표본 — Secret·exec·새 RBAC 없음, 대시보드 파드 → `kube-system/hubble-ui:8081` 네트워크만). 자세한 이유·한계는 [AKS 모니터링 연동](../../observability/aks-monitoring-integration.md).
+`observability.hubbleUi`(선택, `{ "url": "http://hubble-ui.kube-system.svc.cluster.local:80" }` — 끝까지 쓴 이름: 파드는 `ndots:1`이라 `hubble-ui.kube-system`(점 1개)을 먼저 바깥 DNS에 묻고 NXDOMAIN 뒤에야 클러스터 이름으로 풂)는 Hubble exec가 꺼진 연결에서 Hubble 흐름·서비스 맵을 **클러스터의 Hubble UI 백엔드**로 읽습니다(Relay 최근 흐름 표본 — Secret·exec·새 RBAC 없음, 대시보드 파드 → `kube-system/hubble-ui:8081` 네트워크만). 자세한 이유·한계는 [AKS 모니터링 연동](../../observability/aks-monitoring-integration.md).
 
 ## 5. 설정 — 수동 (Portal)
 
