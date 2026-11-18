@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform-ops
-last-verified: 2026-11-17
+last-verified: 2026-11-18
 covers: [Dockerfile, deploy/docker, scripts/onprem.sh, apps/api/src/infra/lifecycle.ts, apps/api/test/runtimeSecurity.test.ts]
 ---
 # 컨테이너 배포 — 온프레미스 Docker → AKS
@@ -239,7 +239,7 @@ Host aud-onprem
 
 ## 보안 패치 기준 (Node.js·Next.js)
 
-- **최소 버전**: Node.js **24.22.1**([2026-10-21 보안 릴리스](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) — Brotli 해제기 원격 코드 실행 CVE-2026-111497, TLS 호스트 이름 검증 우회 CVE-2026-105483·106069, `dns.resolve` NUL 잘림 CVE-2026-105482 등 High 4건), Next.js **16.4.2**(rewrites의 HTTP 요청 밀반입 — 웹이 `/api`를 rewrites로 넘김). `apps/api/test/runtimeSecurity.test.ts`가 Dockerfile 기본 이미지·`next` 버전이 이 아래로 내려가면 실패합니다.
+- **최소 버전**: Node.js **24.22.1**([2026-10-21 보안 릴리스](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) — Brotli 해제기 원격 코드 실행 CVE-2026-111497, TLS 호스트 이름 검증 우회 CVE-2026-105483·106069, `dns.resolve` NUL 잘림 CVE-2026-105482 등 High 4건), Next.js **16.4.5**(16.4.2 = rewrites의 HTTP 요청 밀반입 — 웹이 `/api`를 rewrites로 넘김 · 16.4.5 = `'use cache'` 결과가 루트 매개변수 사이로 새는 문제 GHSA-mfr8-8qww-v76h·GHSA-vc7v-qv4w-wrv8, 이 앱은 `'use cache'`를 쓰지 않음 — 2026-11-18 16.4.6으로 올림), fast-xml-parser **5.12.0**(GHSA-474x-hrwr-fgx4, `@azure/storage-blob` 경유). `apps/api/test/runtimeSecurity.test.ts`가 Dockerfile 기본 이미지·`next` 버전이 이 아래로 내려가면 실패합니다.
 - **왜 우리에게 해당하나**: API의 HTTP 클라이언트(Node `fetch`·쿠버네티스 클라이언트의 node-fetch)는 Brotli를 요청하지 않지만 상대가 `content-encoding: br`로 보내면 그대로 풉니다(2026-10-23 실험) — Azure·쿠버네티스 API는 TLS지만 클러스터 안 Loki(`http://…:3100`)는 평문이라 그 응답 경로가 열려 있습니다. API 파드는 Azure 자격 증명(워크로드 ID)을 가지므로 원격 코드 실행은 곧 Azure 권한 탈취입니다.
 - **해당 없음(설정 기준)**: Permission Model(`--permission`) 미사용, startup snapshot·SEA 미사용, HTTP/2 서버 없음(Next 표준 서버는 HTTP/1.1), Express `trust proxy` 미사용(proxy-addr), API에 `HTTPS_PROXY` 없음(프록시 자격 증명 노출 CVE-2026-48615 — 온프렘에서 프록시를 쓰면 URL에 자격 증명을 넣지 말 것).
 - **새 보안 릴리스가 나오면**: 공지의 24.x 수정 버전으로 Dockerfile `ARG`와 위 테스트 상수를 올리고 → 온프렘 `scripts/onprem.sh deploy`, 클러스터는 고객 DHI 미러 이미지 버전도 함께 올린 뒤 GitOps 재배포. 실행 중인 버전 확인: `kubectl exec … -c api -- node -p process.versions.node` / 서버 `docker run --rm --entrypoint node aud-dashboard:<tag> -v`.

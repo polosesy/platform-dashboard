@@ -5,9 +5,10 @@ import { readFileSync } from "node:fs";
 // Minimum patched runtime / framework versions — raise them when a new security release lands:
 // Node.js 24.x: https://nodejs.org/en/blog/vulnerability/october-2026-security-releases (Brotli decoder RCE CVE-2026-111497,
 // TLS hostname bypasses, dns NUL truncation …) → v24.22.1. Next.js 16.4.2 fixes request smuggling in rewrites
-// (the web proxies /api through rewrites).
+// (the web proxies /api through rewrites); 16.4.5 fixes the 'use cache' leaks across root params (GHSA-mfr8-8qww-v76h,
+// GHSA-vc7v-qv4w-wrv8 — 2026-11-16·17; this app has no 'use cache').
 const MIN_NODE_24 = [24, 22, 1];
-const MIN_NEXT = [16, 4, 2];
+const MIN_NEXT = [16, 4, 5];
 
 const ver = (s: string) => s.split(".").map(Number);
 const atLeast = (v: number[], min: number[]) => {
@@ -22,7 +23,7 @@ test("Dockerfile base images are at least the patched Node.js 24.x", () => {
   for (const v of images) assert.ok(atLeast(ver(v), MIN_NODE_24), `node:${v} is older than ${MIN_NODE_24.join(".")}`);
 });
 
-test("Next.js is at least the version that fixes request smuggling in rewrites", () => {
+test("Next.js is at least the version that fixes request smuggling in rewrites and the 'use cache' leaks", () => {
   const pkg = JSON.parse(readFileSync(new URL("../../web/package.json", import.meta.url), "utf8")) as { dependencies: Record<string, string> };
   const v = pkg.dependencies.next!.replace(/^[^\d]*/, "");
   assert.ok(atLeast(ver(v), MIN_NEXT), `next ${v} < ${MIN_NEXT.join(".")}`);
@@ -31,8 +32,9 @@ test("Next.js is at least the version that fixes request smuggling in rewrites",
 // Packages that run in the image, with the first fixed version (2026-11-04 — OSV over every package.json in the running
 // image): zod < 4.6.6 GHSA-mrhx-c7xc-m3w5 (memory exhaustion on large arrays), @azure/msal-node < 7.1.0
 // GHSA-xcx6-jx8p-x3h5 (auth code flow parameters), uuid 8.3.2 GHSA-w5hq-g745-h8pq via the retired @azure/ms-rest-js
-// (gone with @azure/arm-resourcegraph 5). Checked in the lockfile — what `npm ci` installs, not the ranges.
-const MIN_LOCKED: Record<string, number[]> = { zod: [4, 6, 6], "@azure/msal-node": [7, 1, 0], "@azure/identity": [4, 14, 1] };
+// (gone with @azure/arm-resourcegraph 5), fast-xml-parser < 5.12.0 GHSA-474x-hrwr-fgx4 (2026-11-18 — quadratic stopNodes scan, via
+// @azure/storage-blob → core-xml, which passes stopNodes through). Checked in the lockfile — what `npm ci` installs, not the ranges.
+const MIN_LOCKED: Record<string, number[]> = { zod: [4, 6, 6], "@azure/msal-node": [7, 1, 0], "@azure/identity": [4, 14, 1], "fast-xml-parser": [5, 12, 0] };
 const RETIRED = ["@azure/ms-rest-js", "uuid"];
 
 test("locked API runtime packages are at least the fixed versions; retired packages are gone", () => {
