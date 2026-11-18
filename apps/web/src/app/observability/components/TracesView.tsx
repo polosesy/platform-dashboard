@@ -9,20 +9,22 @@
 // counts, the same read as 엔드포인트) — then that group's traces, newest first, page after page to the window's start
 // (Tempo `most_recent` makes the pages gapless). A trace opens right under its row, scrolled into view.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { TraceDetailResponse, TraceSearchResponse, TraceSpan, TraceState, TraceSummary, WorkloadRedResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useApiToken } from "@/lib/useApiToken";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { dateLocale, useI18n } from "@/lib/i18n";
-import { Button, Chip, CodeBlock, CopyButton, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel, Segmented, Select, TextInput } from "@/components/ui";
+import { Button, Chip, CodeBlock, CopyButton, EmptyState, ErrorNotice, FilterChip, LinkButton, LoadingState, Notice, Panel, SearchInput, Segmented, Select, TextInput, Toggle } from "@/components/ui";
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { countText, endpointLabel, quantileText } from "@/lib/redView";
 import {
-  TRACE_MIN_DURATIONS, TRACE_WINDOWS, exceptionOf, matchedSpans, mergePages, msText, problemGroups, rowErrors, rowSpans, traceCounts, waterfall,
-  type ProblemGroup,
+  TRACE_MIN_DURATIONS, TRACE_WINDOWS, attrJson, attrTree, exceptionOf, execTimeByService, flameLayout, flameWindow, httpSummary, matchedSpans, mergePages, msText,
+  problemGroups, rowErrors, rowSpans, spanGroups, spanMatches, traceCounts, traceLink, waterfall,
+  type AttrNode, type FlameZoom, type ProblemGroup,
 } from "@/lib/traceView";
 import styles from "../styles.module.css";
 
@@ -51,7 +53,7 @@ const filtersOf = (seed?: TraceSeed): Filters => ({
   service: seed?.service ?? "", namespace: "", name: seed?.name ?? "", errorsOnly: seed?.errorsOnly ?? false, minDurationMs: seed?.minDurationMs ?? 0,
 });
 
-export function TracesView({ clusterId, range, nonce, report, seed }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; seed?: TraceSeed }) {
+export function TracesView({ clusterId, range, nonce, report, seed, linked }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; seed?: TraceSeed; linked?: string | null }) {
   const { t, locale } = useI18n();
   const lc = dateLocale(locale);
   const fit = fitWindow(range, TRACE_WINDOWS);
@@ -64,6 +66,17 @@ export function TracesView({ clusterId, range, nonce, report, seed }: { clusterI
   // A new seed (another view's "traces →") replaces the filters and runs the search
   useEffect(() => { const f = filtersOf(seed); setDraft(f); setApplied(f); setOrigin(null); setTraceId(null); }, [seed]);
   const run = (f: Filters, o: Origin) => { setDraft(f); setApplied(f); setOrigin(o); setTraceId(null); };
+  // ?trace=<id>: shown above the search until closed (closing drops it from the address too)
+  const [linkedOpen, setLinkedOpen] = useState<string | null>(linked ?? null);
+  useEffect(() => { setLinkedOpen(linked ?? null); }, [linked]);
+  const router = useRouter();
+  const closeLinked = () => {
+    setLinkedOpen(null);
+    const q = new URLSearchParams(window.location.search);
+    q.delete("trace");
+    const rest = q.toString();
+    router.replace(`${window.location.pathname}${rest ? `?${rest}` : ""}`, { scroll: false });
+  };
 
   // Problem groups: the RED read (same key as RED · 엔드포인트 — one request, one cache)
   const red = useApiQuery(clusterId ? `obs-red:${clusterId}:${fit.value}:${atQ ?? "now"}` : null, (token) =>
@@ -197,6 +210,12 @@ export function TracesView({ clusterId, range, nonce, report, seed }: { clusterI
   const matched = matchedSpans(rows);
   return (
     <>
+      {/* a copied trace link (?trace=): that trace first, whatever the search shows */}
+      {linked && linkedOpen === linked ? (
+        <Panel title={t("ob.tr.linked")} sub={t("ob.tr.linkedSub")}>
+          <TraceDetail key={`linked:${clusterId}:${linked}`} clusterId={clusterId} traceId={linked} onClose={closeLinked} />
+        </Panel>
+      ) : null}
       <Panel title={t("ob.tr.g.title")} sub={t("ob.tr.g.sub", { w: win })}>
         {red.error ? <ErrorNotice error={red.error} /> : !rd ? <LoadingState label={t("ob.tr.g.loading")} />
           : rd.metricsState !== "ok" ? <Notice tone="info" title={t(`hb.m.state.${rd.metricsState}`)}>{t("ob.tr.g.noMetrics")}</Notice>
@@ -239,12 +258,20 @@ function TraceStateNotice({ state, message }: { state: TraceState; message?: str
   );
 }
 
-function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string; traceId: string; onClose: () => void }) {
+type TraceViewKind = "flame" | "waterfall" | "list";
+
+export function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string; traceId: string; onClose: () => void }) {
   const { t, locale } = useI18n();
   const q = useApiQuery(`obs-trace:${clusterId}:${traceId}`, (token) =>
     fetchJsonWithBearer<TraceDetailResponse>(apiUrl("/api/observability/trace", { clusterId, traceId }), token),
   );
   const [sel, setSel] = useState<string | null>(null);
+  const [view, setView] = useState<TraceViewKind>("flame");
+  const [filter, setFilter] = useState("");
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  // a service picked in the exec-time list: its blocks stand out (identity by choice and label, not by colour)
+  const [service, setService] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<FlameZoom | null>(null);
   const d = q.data?.traceId === traceId ? q.data : null;
   const box = useRef<HTMLElement>(null);
   const still = useReducedMotion();
@@ -257,12 +284,20 @@ function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string; trace
     const tall = el.getBoundingClientRect().height > window.innerHeight * 0.8;
     el.scrollIntoView({ block: tall ? "start" : "nearest", behavior: still ? "auto" : "smooth" });
   }, [still, d !== null]);
+  const spans = d?.state === "ok" ? d.spans : [];
+  const root = useMemo(() => waterfall(spans, d?.durationMs)[0]?.span ?? null, [spans, d?.durationMs]);
+  const link = typeof window === "undefined" ? "" : traceLink(window.location.origin, traceId);
   const head = (
     <div className={styles.trInlineHead}>
-      <h4 className={styles.depHead}>{t("ob.tr.detail")}</h4>
+      <nav className={styles.trCrumbs} aria-label={t("ob.tr.detail")}>
+        <span>{t("ob.slo.view.traces")}</span><span aria-hidden="true">›</span>
+        <span><strong>{root?.service ?? "—"}</strong></span><span aria-hidden="true">›</span>
+        <span>{root?.name ?? t("ob.tr.noRoot")}</span><span aria-hidden="true">›</span>
+        <span><code>{traceId}</code></span>
+      </nav>
       <span className={styles.trHead}>
-        <code>{traceId}</code>
-        <CopyButton text={traceId} label={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
+        <CopyButton text={traceId} label={t("ob.tr.copyId")} copiedLabel={t("ob.slo.copied")} />
+        {link ? <CopyButton text={link} label={t("ob.tr.copyLink")} copiedLabel={t("ob.slo.copied")} /> : null}
         {d?.exploreUrl ? <a href={d.exploreUrl} target="_blank" rel="noreferrer noopener">{t("ob.tr.openGrafana")}</a> : null}
         <LinkButton tone="muted" onClick={onClose}>{t("ob.tr.close")}</LinkButton>
       </span>
@@ -274,29 +309,63 @@ function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string; trace
   else if (d.state !== "ok") content = <TraceStateNotice state={d.state} message={d.message} />;
   else {
     const c = traceCounts(d.spans);
-    const rows = waterfall(d.spans, d.durationMs);
+    const http = httpSummary(root);
+    const matches = (s: TraceSpan) => spanMatches(s, filter, errorsOnly);
+    const shown = d.spans.filter(matches).length;
     const chosen = d.spans.find((s) => s.spanId === sel) ?? null;
+    const pick = (id: string) => setSel(sel === id ? null : id);
+    const startAt = d.start ? new Date(d.start) : null;
     content = (
       <>
-        <p className={styles.sloCellSub}>{t("ob.tr.detailSub", { at: d.start ? new Date(d.start).toLocaleString(dateLocale(locale)) : "—", d: msText(d.durationMs), n: c.spans, s: c.services })}</p>
-        {c.errors ? <p className={styles.sloText}>▲ {t("ob.tr.errorSpans", { n: c.errors })}</p> : null}
-        <ol className={styles.trWaterfall} aria-label={t("ob.tr.waterfall")}>
-          {rows.map((r) => (
-            <li key={r.span.spanId} className={styles.trRow} data-selected={sel === r.span.spanId || undefined}>
-              <span className={styles.trName} style={{ paddingLeft: `${Math.min(r.depth, 16) * 12}px` }}>
-                <LinkButton ariaExpanded={sel === r.span.spanId} onClick={() => setSel(sel === r.span.spanId ? null : r.span.spanId)} title={r.span.name}>
-                  {r.span.status === "error" ? "▲ " : ""}{r.span.name}
-                </LinkButton>
-                <span className={styles.sloCellSub}>{r.span.service ?? "—"} · {t(`ob.tr.kind.${r.span.kind}`)}</span>
-              </span>
-              <span className={styles.trTrack} aria-hidden="true">
-                <span className={styles.trBar} data-error={r.span.status === "error" || undefined} style={{ left: `${r.leftPct}%`, width: `${r.widthPct}%` }} />
-              </span>
-              <span className={styles.trDur}>{msText(r.span.durationMs)}</span>
-            </li>
-          ))}
-        </ol>
-        {chosen ? <SpanDetail span={chosen} /> : <p className={styles.sloCellSub}>{t("ob.tr.pickSpan")}</p>}
+        <p className={styles.trReqLine}>
+          <span>{msText(d.durationMs)}</span>
+          {http ? (
+            <span>
+              <code>{http.method} {http.target ?? ""}</code>{" "}
+              {http.status ? <Chip level={http.status >= 500 ? "warn" : "plain"} glyph={http.status >= 500 ? undefined : false}>{http.status}</Chip> : null}
+            </span>
+          ) : null}
+          {startAt ? <span title={startAt.toISOString()}>{startAt.toLocaleString(dateLocale(locale))} ({relativeText(startAt, locale)})</span> : null}
+          <span>{t("ob.tr.countLine", { n: c.spans, s: c.services })}</span>
+          {c.errors ? <span>▲ {t("ob.tr.errorSpans", { n: c.errors })}</span> : null}
+        </p>
+        <div className={styles.trTools}>
+          <Segmented label={t("ob.tr.viewLabel")} value={view} onChange={setView} items={[
+            { id: "flame", label: t("ob.tr.view.flame") }, { id: "waterfall", label: t("ob.tr.view.waterfall") }, { id: "list", label: t("ob.tr.view.list", { n: spanGroups(d.spans).length }) },
+          ]} />
+          <SearchInput label={t("ob.tr.spanFilter")} value={filter} onChange={setFilter} placeholder={t("ob.tr.spanFilterPh")} />
+          <Toggle checked={errorsOnly} onChange={setErrorsOnly} disabled={!c.errors}>{t("ob.tr.errorsOnlyN", { n: c.errors })}</Toggle>
+          {filter.trim() || errorsOnly ? <span className={styles.sloCellSub}>{t("ob.tr.shownN", { n: shown, total: c.spans })}</span> : null}
+          {view === "flame" ? (
+            <>
+              <Button size="sm" disabled={!chosen} title={t("ob.tr.zoomHint")} onClick={() => chosen && setZoom({ from: chosen.offsetMs, to: chosen.offsetMs + Math.max(chosen.durationMs, 1e-3) })}>{t("ob.tr.zoomTo")}</Button>
+              {zoom ? <><Chip level="plain" glyph={false}>{t("ob.tr.zoomed", { a: msText(zoom.from), d: msText(zoom.to - zoom.from) })}</Chip><Button size="sm" variant="ghost" onClick={() => setZoom(null)}>{t("ob.tr.zoomReset")}</Button></> : null}
+            </>
+          ) : null}
+        </div>
+        {view === "flame" ? (
+          <FlameView d={d} sel={sel} onPick={pick} matches={matches} service={service} onService={setService} zoom={zoom} onZoom={setZoom} />
+        ) : view === "waterfall" ? (
+          <ol className={styles.trWaterfall} aria-label={t("ob.tr.waterfall")}>
+            {waterfall(d.spans, d.durationMs).map((r) => (
+              <li key={r.span.spanId} className={styles.trRow} data-selected={sel === r.span.spanId || undefined} style={matches(r.span) ? undefined : { opacity: 0.35 }}>
+                <span className={styles.trName} style={{ paddingLeft: `${Math.min(r.depth, 16) * 12}px` }}>
+                  <LinkButton ariaExpanded={sel === r.span.spanId} onClick={() => pick(r.span.spanId)} title={r.span.name}>
+                    {r.span.status === "error" ? "▲ " : ""}{r.span.name}
+                  </LinkButton>
+                  <span className={styles.sloCellSub}>{r.span.service ?? "—"} · {t(`ob.tr.kind.${r.span.kind}`)}</span>
+                </span>
+                <span className={styles.trTrack} aria-hidden="true">
+                  <span className={styles.trBar} data-error={r.span.status === "error" || undefined} style={{ left: `${r.leftPct}%`, width: `${r.widthPct}%` }} />
+                </span>
+                <span className={styles.trDur}>{msText(r.span.durationMs)}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <SpanListView spans={d.spans} matches={matches} onPick={(id) => setSel(id)} />
+        )}
+        {chosen ? <SpanDetail span={chosen} totalMs={d.durationMs ?? null} /> : <p className={styles.sloCellSub}>{t("ob.tr.pickSpan")}</p>}
         <p className={styles.sloCellSub}>{t("ob.tr.detailFoot")}{d.redacted ? ` · ${t("ob.tr.redacted", { n: d.redacted })}` : ""}{d.truncated ? ` · ${t("ob.tr.truncated", { n: d.truncated })}` : ""}</p>
       </>
     );
@@ -309,14 +378,148 @@ function TraceDetail({ clusterId, traceId, onClose }: { clusterId: string; trace
   );
 }
 
-function SpanDetail({ span }: { span: TraceSpan }) {
+/** "3 min ago" in the app's language */
+function relativeText(at: Date, locale: Parameters<typeof dateLocale>[0]): string {
+  const s = Math.round((at.getTime() - Date.now()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(dateLocale(locale), { numeric: "auto" });
+  const a = Math.abs(s);
+  if (a < 60) return rtf.format(s, "second");
+  if (a < 3600) return rtf.format(Math.round(s / 60), "minute");
+  if (a < 86400) return rtf.format(Math.round(s / 3600), "hour");
+  return rtf.format(Math.round(s / 86400), "day");
+}
+
+const FLAME_ROW = 24;
+const AXIS_TICKS = [0, 0.25, 0.5, 0.75, 1];
+
+/** Flame graph (time axis = the trace's) + exec time per service — pure layout lib/traceView flameLayout · execTimeByService */
+function FlameView({ d, sel, onPick, matches, service, onService, zoom, onZoom }: {
+  d: TraceDetailResponse; sel: string | null; onPick: (id: string) => void; matches: (s: TraceSpan) => boolean; service: string | null; onService: (s: string | null) => void;
+  zoom: FlameZoom | null; onZoom: (z: FlameZoom | null) => void;
+}) {
+  const { t } = useI18n();
+  const total = d.durationMs ?? 0;
+  const { blocks: laid, rows } = useMemo(() => flameLayout(d.spans, d.durationMs), [d.spans, d.durationMs]);
+  // the window shown: the whole trace, or the span zoomed into (double-click a block · "zoom to span")
+  const blocks = useMemo(() => flameWindow(laid, total, zoom), [laid, total, zoom]);
+  const from = zoom?.from ?? 0, width = (zoom ? zoom.to - zoom.from : total) || 0;
+  // zoomed: the rows above the zoomed span are empty there — the shown rows start at the top
+  const rowBase = zoom && blocks.length ? Math.min(...blocks.map((b) => b.row)) : 0;
+  const shownRows = zoom && blocks.length ? Math.max(...blocks.map((b) => b.row)) - rowBase + 1 : rows;
+  const exec = useMemo(() => execTimeByService(d.spans), [d.spans]);
+  // axis: the trace's own time; zoomed, the window's start then "+ offset" (absolute ticks were all "47.8 min")
+  const tick = (f: number) => (zoom ? (f === 0 ? msText(from) : `+${msText(width * f)}`) : from + width * f === 0 ? "0" : msText(from + width * f));
+  return (
+    <div className={styles.trFlameWrap}>
+      <div className={styles.trFlame}>
+        <div className={styles.trAxis} aria-hidden="true">
+          {AXIS_TICKS.map((f) => <span key={f} style={{ left: `${f * 100}%` }}>{tick(f)}</span>)}
+        </div>
+        <div className={styles.trFlameBody} style={{ height: Math.min(480, shownRows * FLAME_ROW) }}>
+          {/* SVG like the other charts (attack path, network map): a block = a nested <svg> at % x/width, so its label is
+              clipped to the block; each block is a keyboard button (Enter / Space) */}
+          <svg className={styles.trFlameSvg} width="100%" height={shownRows * FLAME_ROW} role="group" aria-label={t("ob.tr.view.flame")}>
+            {blocks.map((b) => {
+              const s = b.span;
+              const err = s.status === "error";
+              const label = `${s.service ?? "—"} · ${s.name} · ${msText(s.durationMs)}${err ? ` · ${t("ob.tr.status.error")}` : ""}`;
+              return (
+                <svg key={s.spanId} x={`${b.leftPct}%`} y={(b.row - rowBase) * FLAME_ROW} width={`${b.widthPct}%`} height={FLAME_ROW - 2} overflow="hidden">
+                  <g className={styles.trBlock} role="button" tabIndex={0} aria-label={label} aria-pressed={sel === s.spanId}
+                    data-error={err || undefined} data-selected={sel === s.spanId || undefined}
+                    data-service={service !== null && (s.service ?? "") === service ? true : undefined}
+                    data-dim={!matches(s) || (service !== null && (s.service ?? "") !== service) || undefined}
+                    onClick={() => onPick(s.spanId)}
+                    onDoubleClick={() => onZoom({ from: s.offsetMs, to: s.offsetMs + Math.max(s.durationMs, 1e-3) })}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(s.spanId); } }}>
+                    <title>{label}</title>
+                    <rect className={styles.trBlockRect} x="0.5" y="0.5" width="100%" height={FLAME_ROW - 3} rx="4" />
+                    <text className={styles.trBlockText} x={err ? 16 : 6} y={FLAME_ROW / 2 + 3}>{s.name}</text>
+                    {err ? <text className={styles.trBlockMark} x="5" y={FLAME_ROW / 2 + 3} aria-hidden="true">!</text> : null}
+                  </g>
+                </svg>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+      <aside className={styles.trExec} aria-label={t("ob.tr.exec.title")}>
+        <h5>{t("ob.tr.exec.title")}</h5>
+        <ul className={styles.trExecList}>
+          {exec.map((e) => (
+            <li key={e.service} className={styles.trExecRow} title={t("ob.tr.exec.row", { s: e.service || "—", ms: msText(e.selfMs), n: e.spans })}>
+              <FilterChip pressed={service === e.service} onClick={() => onService(service === e.service ? null : e.service)}>{e.service || "—"}</FilterChip>
+              <span className={styles.trExecBar} aria-hidden="true"><span style={{ width: `${Math.max(1, e.share * 100)}%` }} /></span>
+              <span className={styles.trExecPct}>{(e.share * 100).toFixed(1)}%</span>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.sloCellSub}>{t("ob.tr.exec.hint")}{d.truncated ? ` ${t("ob.tr.exec.truncated", { n: d.spans.length })}` : ""}</p>
+      </aside>
+    </div>
+  );
+}
+
+/** The span list — service × name groups, most total time first (Datadog span list) */
+function SpanListView({ spans, matches, onPick }: { spans: TraceSpan[]; matches: (s: TraceSpan) => boolean; onPick: (id: string) => void }) {
+  const { t, locale } = useI18n();
+  const groups = useMemo(() => spanGroups(spans.filter(matches)), [spans, matches]);
+  if (!groups.length) return <EmptyState title={t("ob.tr.noSpansMatch")} />;
+  return (
+    <div className={styles.sloTableWrap}>
+      <table className={styles.sloTable}>
+        <thead><tr>
+          <th>{t("ob.tr.col.service")}</th><th>{t("ob.tr.col.spanName")}</th>
+          <th className={styles.redNum}>{t("ob.tr.col.count")}</th><th className={styles.redNum}>{t("ob.tr.col.total")}</th>
+          <th className={styles.redNum}>{t("ob.tr.col.avg")}</th><th className={styles.redNum}>{t("ob.tr.col.max")}</th><th className={styles.redNum}>{t("ob.tr.col.errors")}</th>
+        </tr></thead>
+        <tbody>
+          {groups.map((g) => (
+            <tr key={`${g.service}|${g.name}`}>
+              <td><span className={styles.sloCellSub}>{g.service || "—"}</span></td>
+              <td><LinkButton onClick={() => onPick(g.first)} title={g.name}>{g.name}</LinkButton></td>
+              <td className={styles.redNum}>{g.count.toLocaleString(dateLocale(locale))}</td>
+              <td className={styles.redNum}>{msText(g.totalMs)}</td>
+              <td className={styles.redNum}>{msText(g.avgMs)}</td>
+              <td className={styles.redNum}>{msText(g.maxMs)}</td>
+              <td className={styles.redNum}>{g.errors ? `▲ ${g.errors}` : "0"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AttrTreeView({ nodes, root }: { nodes: AttrNode[]; root?: boolean }) {
+  return (
+    <ul className={root ? `${styles.trAttrTree} ${styles.trAttrRoot}` : styles.trAttrTree}>
+      {nodes.map((n) => (
+        <li key={n.path}>
+          {n.children.length ? (
+            <details open>
+              <summary>{n.key}{n.value !== undefined ? ` = ${n.value}` : ""}</summary>
+              <AttrTreeView nodes={n.children} />
+            </details>
+          ) : (
+            <span className={styles.trAttrLeaf}><span>{n.key}</span><span>{n.value}</span></span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SpanDetail({ span, totalMs }: { span: TraceSpan; totalMs: number | null }) {
   const { t } = useI18n();
   const ex = exceptionOf(span);
+  const tree = useMemo(() => attrTree(span.attributes), [span.attributes]);
   return (
     <section className={styles.trSpan}>
-      <h4 className={styles.depHead}>{span.name}</h4>
+      <h4 className={styles.depHead}>{span.service ?? "—"} › {span.name}</h4>
       <p className={styles.sloCellSub}>
-        {[span.service, span.namespace, span.pod].filter(Boolean).join(" · ") || "—"} · {t(`ob.tr.kind.${span.kind}`)} · {msText(span.durationMs)} · +{msText(span.offsetMs)}
+        {[span.namespace, span.pod].filter(Boolean).join(" · ") || "—"} · {t(`ob.tr.kind.${span.kind}`)} · {msText(span.durationMs)}
+        {totalMs ? ` (${t("ob.tr.ofTrace", { p: (span.durationMs / totalMs) * 100 < 0.1 && span.durationMs > 0 ? "<0.1" : ((span.durationMs / totalMs) * 100).toFixed(1) })})` : ""} · +{msText(span.offsetMs)}
       </p>
       <p className={styles.sloCellSub}>
         <Chip level={span.status === "error" ? "warn" : span.status === "ok" ? "ok" : "neutral"}>{t(`ob.tr.status.${span.status}`)}</Chip>
@@ -326,10 +529,13 @@ function SpanDetail({ span }: { span: TraceSpan }) {
         <CodeBlock label={`${t("ob.tr.exception")}${ex.type ? ` — ${ex.type}` : ""}`} code={[ex.message, ex.stack].filter(Boolean).join("\n\n") || "—"} maxHeight={280} copyLabel={t("ob.slo.copy")} copiedLabel={t("ob.slo.copied")} />
       ) : null}
       {span.attributes.length ? (
-        <table className={styles.sloTable}>
-          <thead><tr><th>{t("ob.tr.attr")}</th><th>{t("ob.tr.value")}</th></tr></thead>
-          <tbody>{span.attributes.map((a) => <tr key={a.key}><td><code>{a.key}</code></td><td><span className={styles.trValue}>{a.value}</span></td></tr>)}</tbody>
-        </table>
+        <>
+          <div className={styles.trInlineHead}>
+            <h5 className={styles.depHead}>{t("ob.tr.attrs", { n: span.attributes.length })}</h5>
+            <CopyButton text={attrJson(span.attributes)} label={t("ob.tr.copyJson")} copiedLabel={t("ob.slo.copied")} />
+          </div>
+          <AttrTreeView nodes={tree} root />
+        </>
       ) : null}
       {span.events.filter((e) => e.name !== "exception").length ? (
         <p className={styles.sloCellSub}>{t("ob.tr.events")}: {span.events.filter((e) => e.name !== "exception").map((e) => `${e.name} (+${msText(e.offsetMs)})`).join(" · ")}</p>

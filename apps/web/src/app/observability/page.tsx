@@ -24,6 +24,7 @@ import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { EmptyState, ErrorNotice, LoadingState, PageHeader, Segmented, Select, Tabs, TimeRangeBar } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useTimeRange } from "@/lib/useTimeRange";
+import { TRACE_ID } from "@/lib/traceView";
 
 // Six places, heatmap first (Datadog's Kubernetes overview): the cluster at a glance + every workload as a tile and,
 // under it, the cluster's Warning events (kubectl get events — what is wrong and why Kubernetes says so, on one
@@ -51,11 +52,17 @@ function ObservabilityView() {
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => { if (wlParam) setTabState("overview"); }, [wlParam]);
+  // `?trace=<id>` (a copied trace link — 서비스 (APM) › 트레이스 › 링크 복사): open 서비스 (APM) with that trace; leaving the
+  // tab drops it like `wl`. The cluster stays the viewer's own (a trace ID belongs to one cluster's Tempo).
+  const traceRaw = searchParams.get("trace");
+  const traceParam = traceRaw && TRACE_ID.test(traceRaw) ? traceRaw.toLowerCase() : null;
+  useEffect(() => { if (traceParam) setTabState("slo"); }, [traceParam]);
   const setTab = (next: Tab) => {
     setTabState(next);
-    if (next !== "overview" && wlParam) {
+    if ((next !== "overview" && wlParam) || (next !== "slo" && traceParam)) {
       const q = new URLSearchParams(window.location.search);
-      q.delete("wl");
+      if (next !== "overview") q.delete("wl");
+      if (next !== "slo") q.delete("trace");
       const rest = q.toString();
       router.replace(`${pathname}${rest ? `?${rest}` : ""}`, { scroll: false });
     }
@@ -155,7 +162,7 @@ function ObservabilityView() {
           {tab === "overview" && <EventsSection key={`events:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
 
           {tab === "signals" && <RecommendedAlertsTab key={`signals:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
-          {tab === "slo" && <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
+          {tab === "slo" && <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} linkedTrace={traceParam} />}
           {tab === "infra" && <NodeMaintenancePanel key={`maint:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />}
           {tab === "infra" && nodesResp && (
             <InfraTab nodes={nodesResp.nodes} past={time.range.to !== null} />

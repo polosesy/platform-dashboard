@@ -14,7 +14,7 @@
 //                     targets (on-prem file / Helm values) with a draft filled from the measured tiers · the fields ·
 //                     workloads without HTTP metrics
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SloService, SloSettingsResponse, SloSli, WorkloadSloResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -47,7 +47,7 @@ management.metrics.tags.application=\${spring.application.name}`;
 
 type View = "map" | "deps" | "endpoints" | "traces" | "errors" | "rollouts" | "services" | "red" | "settings" | "guide";
 
-export function SloTab({ clusterId, range, nonce, report }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void }) {
+export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; linkedTrace?: string | null }) {
   const { t, locale } = useI18n();
   const atQ = atParam(range);
   const q = useApiQuery(clusterId ? `obs-slo:${clusterId}:${atQ ?? "now"}` : null, (token) =>
@@ -61,7 +61,9 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
   const settings = sq.data?.clusterId === clusterId ? sq.data : null;
   // A save or a reset changes the settings version — the SLO numbers' cache key — so both reload
   const changed = () => { sq.reload(); q.reload(); };
-  const [view, setView] = useState<View>("map");
+  const [view, setView] = useState<View>(linkedTrace ? "traces" : "map");
+  // a trace link (?trace=) opens the trace view — also when it arrives while this tab is open
+  useEffect(() => { if (linkedTrace) setView("traces"); }, [linkedTrace]);
   // Another view's "traces →" (an endpoint row) opens the trace search with its filters — kept in state, one object per click
   const [traceSeed, setTraceSeed] = useState<TraceSeed | undefined>(undefined);
   const openTraces = (seed: TraceSeed) => { setTraceSeed(seed); setView("traces"); };
@@ -107,7 +109,7 @@ export function SloTab({ clusterId, range, nonce, report }: { clusterId: string;
     return (
       <div className={styles.slo}>
         <Toolbar start={switcher} />
-        <TracesView clusterId={clusterId} range={range} nonce={nonce} report={report} seed={traceSeed} />
+        <TracesView clusterId={clusterId} range={range} nonce={nonce} report={report} seed={traceSeed} linked={linkedTrace ?? null} />
       </div>
     );
   }

@@ -1135,3 +1135,49 @@
 .trInline:focus-visible { box-shadow: var(--ring-accent); }
 .trInlineHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .trFoot { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+
+/* Trace detail (2026-11-18, Datadog trace view): breadcrumb head · request line · [flame graph | waterfall | span list]
+   · span filter · exec time per service. One hue for every block (a validated categorical set could not keep clear of
+   the status hues — docs/architecture/apm-parity.md 4d); a service is picked from the exec-time list, not by colour. */
+.trCrumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; font-size: var(--text-body); }
+.trCrumbs > span { min-width: 0; overflow-wrap: anywhere; }
+.trCrumbs > span[aria-hidden] { color: var(--subtle); }
+.trCrumbs strong { font-weight: 600; }
+.trReqLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: var(--text-small); color: var(--muted); }
+.trReqLine code { overflow-wrap: anywhere; color: var(--ink); }
+.trTools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; min-width: 0; }
+.trFlameWrap { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; min-width: 0; align-items: start; }
+@media (max-width: 1100px) { .trFlameWrap { grid-template-columns: minmax(0, 1fr); } }
+.trFlame { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.trAxis { position: relative; height: 18px; border-bottom: 1px solid var(--border); font-size: var(--text-caption); color: var(--subtle); font-variant-numeric: tabular-nums; }
+.trAxis > span { position: absolute; bottom: 2px; transform: translateX(-50%); white-space: nowrap; }
+.trAxis > span:first-child { transform: none; }
+.trAxis > span:last-child { transform: translateX(-100%); }
+.trFlameBody { position: relative; min-width: 0; max-height: 480px; overflow-y: auto; overflow-x: hidden; }
+.trFlameSvg { display: block; }
+.trBlock { cursor: pointer; outline: none; }
+/* geometry in CSS: the block's own nested <svg> is its % width; the rect sits 1px inside it so both edges show */
+.trBlockRect { width: calc(100% - 1px); fill: rgba(var(--accent-rgb), 0.16); stroke: rgba(var(--accent-rgb), 0.5); stroke-width: 1; }
+.trBlock:hover .trBlockRect { fill: rgba(var(--accent-rgb), 0.26); }
+.trBlock[data-service] .trBlockRect { fill: rgba(var(--accent-rgb), 0.36); stroke: rgba(var(--accent-rgb), 0.85); }
+.trBlock[data-error] .trBlockRect { stroke: var(--danger); stroke-width: 2; }
+.trBlock[data-dim] { opacity: 0.28; }
+.trBlock[data-selected] .trBlockRect, .trBlock:focus-visible .trBlockRect { stroke: var(--accent); stroke-width: 2.5; }
+.trBlockText { font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 500; fill: var(--ink); pointer-events: none; }
+.trBlockMark { font-family: var(--font-sans); font-size: var(--text-caption); font-weight: 700; fill: var(--danger-strong); pointer-events: none; }
+.trExec { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.trExec h5 { margin: 0; font-size: var(--text-small); font-weight: 600; }
+.trExecList { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.trExecRow { display: grid; grid-template-columns: minmax(0, 1fr) 52px; align-items: center; gap: 4px 8px; min-width: 0; padding-bottom: 4px; font-size: var(--text-small); }
+/* the service's name gets the whole line (long OTel service names), its bar and share below */
+.trExecRow > :first-child { grid-column: 1 / -1; min-width: 0; max-width: 100%; overflow: hidden; justify-self: start; }
+.trExecBar { position: relative; height: 6px; background: rgba(var(--ink-rgb), 0.06); border-radius: var(--radius-pill); overflow: hidden; }
+.trExecBar > span { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: var(--radius-pill); }
+.trExecPct { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.trAttrTree { list-style: none; margin: 0; padding: 0 0 0 14px; display: grid; gap: 2px; font-family: var(--font-mono); font-size: var(--text-caption); min-width: 0; }
+.trAttrTree > li { min-width: 0; }
+.trAttrTree summary { cursor: pointer; color: var(--accent-strong); }
+.trAttrLeaf { display: grid; grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); gap: 12px; }
+.trAttrLeaf > span:first-child { color: var(--accent-strong); }
+.trAttrLeaf > span:last-child { overflow-wrap: anywhere; color: var(--ink); }
+.trAttrRoot { padding-left: 0; }

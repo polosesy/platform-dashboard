@@ -102,7 +102,8 @@ test("wiring: the route, the view in the 서비스 (APM) tab, the strings", () =
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
   assert.match(read("../src/routes/observability.ts"), /"\/api\/observability\/service-map"[\s\S]{0,400}getServiceGraph\(/);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
-  assert.match(tab, /useState<View>\("map"\)/, "the service map opens first — APM's landing view");
+  // the service map opens first — APM's landing view; only a copied trace link (?trace=, 2026-11-18) opens the traces
+  assert.match(tab, /useState<View>\(linkedTrace \? "traces" : "map"\)/, "the service map opens first — APM's landing view");
   assert.match(tab, /<ServiceMapView clusterId=\{clusterId\}/);
   const all = read("../../web/src/lib/i18nOps.ts") + read("../../web/src/lib/i18nMessages.ts");
   assert.match(all, /"obs\.tab\.slo": \{ ko: "서비스 \(APM\)"/);

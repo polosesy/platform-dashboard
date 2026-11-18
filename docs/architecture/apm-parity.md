@@ -1,8 +1,8 @@
 ---
 status: draft
 owner: platform-observability
-last-verified: 2026-11-16
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts]
+last-verified: 2026-11-18
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/app/observability/components/TracesView.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -218,6 +218,48 @@ stg 실측 결과(30개):
 - Tempo의 `metrics.completedJobs < totalJobs`는 '한도에 차서 일찍 멈춤'이라 화면은 '더 있을 수 있음'으로만 말합니다.
 - 시험 배포(2026-11-17): 배포본이 **자기 연결 신원**으로 읽음 — 1시간 오류 트레이스 3쪽 60개 · 일치 스팬 60 = spanmetrics 60.00, 트레이스 상세 정상. (2026-11-16엔 그 신원이 Grafana 401이었음 — 이후 역할이 생김.)
 - 기능 × 권한 카탈로그에는 아직 없습니다(Grafana 데이터 평면 미모델 — Graph와 같음).
+
+## 4d. 레퍼런스(Datadog DASH 2026) 대비 — 트레이스 상세 · 서비스 맵 신호 · 계측 범위 (2026-11-18)
+
+**원본**: 사용자가 준 Datadog 화면 4장(서비스 맵 '신호로 거르기', OTel 수집기 토폴로지, 트레이스 플레임 그래프 2장)과 [DASH 2026 관측 기능 정리](https://www.datadoghq.com/blog/dash-2026-new-feature-roundup-observability/) 원문. 화면은 저장소에 넣지 않았습니다(제3자 이미지).
+
+| Datadog 기능 | 이 플랫폼 (전) | 데이터 | 이번 결과 |
+|---|---|---|---|
+| 트레이스 플레임 그래프 · 워터폴 · 스팬 목록 · 맵 · JSON 탭 | 워터폴만 | Tempo(Grafana 경유) | **플레임 그래프 · 워터폴 · 스팬 목록** 보기 전환. 맵·JSON 탭 대신 스팬 속성 트리 + 'JSON 복사' |
+| % 실행 시간(서비스별) · 색 = 서비스 | 없음 | 같음 | **서비스별 실행 시간**(자기 시간, 합 100%). 색 대신 목록에서 고른 서비스 강조 — 아래 '색' |
+| 스팬 거르기(속성) · 오류만 n | 없음 | 같음 | 이름·서비스·속성 키·값 단어 거르기 + 오류만(n) — 안 맞는 블록은 흐림 |
+| 스팬 속성 트리(JSON) | 키·값 표 | 같음 | 점 구분 키를 트리로(OTel semconv), JSON 복사 |
+| 머리: 서비스 › 리소스 › trace_id · 길이 · HTTP 메서드·URL·상태 · 몇 분 전 · 링크 | 일부 | 같음 | 경로 머리 + 요청 줄(semconv 새·옛 이름) + 상대 시각 + **링크 복사**(`/observability?trace=<id>` → APM 탭이 그 트레이스를 엶) |
+| 플레임 그래프 확대 | — | 같음 | 블록 두 번 누르기 · '고른 스팬으로 확대' · '전체 보기' (스팬 2,000개·286분 트레이스에서 필요) |
+| 서비스 맵 '신호로 거르기: 지연 n · 오류율 n · 요청량 n' + 노드 신호 | 실패 ▲만 | spanmetrics 지금·1주 전, 서비스 그래프 | **신호 칩 3개 + 카드 신호 줄** — 판정 규칙은 아래(사실 비교) |
+| 노드 주석 Critical dependency · High fan-out | 없음 | 서비스 그래프 | 카드에 '← 부르는 서비스 수 · → 부르는 대상 수'(사실 숫자, 등급 없음) |
+| Map / List 전환 | 맵만 | 같음 | **목록** 보기(신호 먼저 · 요청 많은 순 · p95와 1주 전) |
+| Service Discovery — 계측이 필요한 서비스 | 없음 | 앱 종류 API(실행 중인 파드 소유자) | **계측 범위** 패널 — 아래 |
+| Trace Patterns(구조가 비슷한 트레이스 묶음) | 문제 그룹(엔드포인트 오류·p95) | 검색 표본 30개씩 | **하지 않음** — 표본 30개로 묶음을 만들면 순위가 표본에 좌우됨. spanmetrics 전수 '문제 그룹'이 같은 질문(어디부터)에 답함 |
+| OTel 수집기 토폴로지(초당 points 선) | 관측 스택 표 | 수집기 간 연결 정보 없음 | **하지 않음** — Alloy 지표에 '누가 누구에게 보내는지'(내보내기 대상 라벨)가 없어 선을 그으면 추측. 관측 스택 탭의 구성 요소별 송신·수신·실패가 사실 범위 |
+| (Wiz CTEM 대시보드 · 공격 경로 화면) | 보안 메뉴 | — | 이번 범위(APM) 밖 — security-roadmap에서 따로 |
+
+**판정 규칙**(`lib/apmSignals.ts` — 모델·숨은 임계값 없음, 칩 툴팁에 같은 문장)
+- 오류 = 이 기간 오류 상태 서버 스팬 > 0(RED), 없으면 서비스 그래프 실패 호출 > 0
+- 지연 = p95 버킷이 1주 전 같은 시각의 p95 버킷보다 높음(버킷 경계, 보간 없음), 양쪽 요청 ≥ `RED_MIN_REQUESTS`(20)
+- 요청량 = 지금 / 1주 전 ≥ 2 또는 ≤ ½(1주 전 0이면 '새로 생김'), 큰 쪽 ≥ 20
+- 부르는/부름 받는 수 = 서비스 그래프의 서로 다른 상대(자기 호출 제외)
+
+**계측 범위**: 범위 = 트레이스를 보내는 워크로드가 하나라도 있는 네임스페이스(시스템 네임스페이스를 이름으로 추측하지 않음). 워크로드 = 앱 종류 API의 실행 중인 파드 소유자. 짝 = 서비스 그래프·RED가 준 워크로드, 없으면 같은 네임스페이스의 정확히 같은 이름. 짝 없는 트레이스 서비스는 따로 적음(다른 이름으로 보내는 워크로드일 수 있음).
+
+**색**: Datadog은 블록을 서비스마다 칠합니다. 이 플랫폼의 상태색(초록·주황·빨강)을 뺀 분류색으로 검증기(dataviz `validate_palette.js`, 블록은 아무 둘이나 붙으므로 모든 쌍)를 돌렸더니 4색은 파랑↔보라가 색약 ΔE 4.5·정상 시각 10.5로 실패, 3색은 어두운 모드에서 청록↔자홍 색약 ΔE 1.6으로 실패. 남는 색은 상태색과 겹침 → **블록은 한 색**, 서비스는 실행 시간 목록에서 골라 강조(진하게) + 블록 이름표 — 색만으로 정체를 말하지 않음. 오류 블록 = 빨간 테두리 + '!'.
+
+**검증**
+| 대조 | 결과 | 기준 |
+|---|---|---|
+| 실행 시간 — stg 트레이스 15개(스팬 75) | 15/15 일치, 최대 차이 0 ms, 비율 합 100% | 원본 OTLP JSON을 따로 읽어 나노초 BigInt · 사건 정렬(다른 알고리즘)로 계산 |
+| 플레임 배치 — 같은 15개 + 스팬 3,581~4,704개 트레이스 3개(2,000개로 잘림) | 겹침 0 · 부모보다 위 0 · 배치 5–16 ms | 같은 줄 구간 비교 |
+| 스팬 목록 | 개수·오류 합 = 원본 | 원본 스팬 수 |
+| 서비스 맵 신호 — stg 1시간(서비스 18 · 연결 16) | 오류 1 = 1 · 요청량 8 = 8(같은 서비스) · 부르는 수 18/18 | 내 토큰으로 작업 영역에 PromQL 직접(지금·`offset 7d`) + 집합 계산 |
+| 계측 범위 — stg | 범위 네임스페이스 1 · 워크로드 23 = 23 · 트레이스 없는 6 = 6(같은 목록) · 짝 없는 서비스 1 | `kubectl get deploy,sts,ds`(준비된 파드 > 0) − spanmetrics·서비스 그래프 이름 |
+| 화면(로컬 웹 + 헤드리스 Chrome) | 블록 2,000 렌더 · 패널 넘침 0 · 링크로 열기 · 키보드 Enter · 확대 2,000 → 5블록 → 전체 2,000 · 신호 칩 2·1·1 = 합성 기대값 · 카드 넘침 0 · 목록 필터 1행 · 계측 범위 8개 중 5 | DOM 측정 |
+
+지연 신호는 버킷 비교라 stg 대조에서 빼고 단위 테스트로만 확인했습니다(`apmSignals.test.ts`). 테스트 `traceDetail.test.ts`·`apmSignals.test.ts`.
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

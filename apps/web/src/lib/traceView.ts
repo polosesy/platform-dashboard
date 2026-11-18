@@ -117,3 +117,169 @@ export function mergePages(pages: TraceSummary[][]): TraceSummary[] {
 
 /** Pure: spans that matched the filters, over the loaded traces (compare with a group's spanmetrics count) */
 export const matchedSpans = (rows: TraceSummary[]) => rows.reduce((n, t) => n + t.matched, 0);
+
+// ── trace detail views (2026-11-18 — Datadog trace view: flame graph · waterfall · span list, exec time per service) ──
+
+/** One block of the flame graph: the span, its row (children always below their parent), its place on the time axis */
+export type FlameBlock = { span: TraceSpan; row: number; leftPct: number; widthPct: number };
+
+/**
+ * Pure: the flame graph — a time axis (the trace's), every span below its parent; spans whose times overlap never
+ * share a row (asynchronous siblings take the next free row), so no block hides another. Order: the waterfall's
+ * (depth-first, siblings by start) — each span takes the first free row under its parent.
+ */
+export function flameLayout(spans: TraceSpan[], totalMs?: number): { blocks: FlameBlock[]; rows: number } {
+  const total = totalMs && totalMs > 0 ? totalMs : Math.max(1e-6, ...spans.map((s) => s.offsetMs + s.durationMs));
+  const byId = new Map(spans.map((s) => [s.spanId, s]));
+  const used: Array<Array<[number, number]>> = [];
+  const free = (r: number, a: number, b: number) => !(used[r] ?? []).some(([x, y]) => a < y && x < b);
+  const rowOf = new Map<string, number>();
+  const blocks: FlameBlock[] = [];
+  for (const w of waterfall(spans, total)) {
+    const s = w.span;
+    const parentRow = s.parentId && byId.has(s.parentId) ? rowOf.get(s.parentId) : undefined;
+    // a zero-length span still takes a sliver
+    const a = s.offsetMs, b = s.offsetMs + Math.max(s.durationMs, total * 1e-4);
+    let r = parentRow === undefined ? 0 : parentRow + 1;
+    while (!free(r, a, b)) r++;
+    (used[r] ??= []).push([a, b]);
+    rowOf.set(s.spanId, r);
+    blocks.push({ span: s, row: r, leftPct: w.leftPct, widthPct: w.widthPct });
+  }
+  return { blocks, rows: used.length };
+}
+
+/** A zoomed time window of the flame graph (ms from the trace's start) */
+export type FlameZoom = { from: number; to: number };
+
+/**
+ * Pure: the blocks inside a time window, placed on it (0–100 %). Outside the window = left out; a block cut by an edge
+ * is clipped to it; a block thinner than 0.3 % still shows, kept inside the right edge (2026-11-18: a short span at the
+ * trace's end drew 0.3 % past it). No zoom = the whole trace.
+ */
+export function flameWindow(blocks: FlameBlock[], totalMs: number, zoom: FlameZoom | null): FlameBlock[] {
+  const from = zoom ? zoom.from : 0;
+  const to = zoom ? zoom.to : totalMs > 0 ? totalMs : Math.max(1e-6, ...blocks.map((b) => b.span.offsetMs + b.span.durationMs));
+  const w = Math.max(1e-9, to - from);
+  const out: FlameBlock[] = [];
+  for (const b of blocks) {
+    const a = ((b.span.offsetMs - from) / w) * 100, z = ((b.span.offsetMs + b.span.durationMs - from) / w) * 100;
+    if (z < 0 || a > 100) continue;
+    const width = Math.max(0.3, Math.min(100, z) - Math.max(0, a));
+    out.push({ ...b, leftPct: Math.min(Math.max(0, a), 100 - width), widthPct: width });
+  }
+  return out;
+}
+
+/** Pure: the length of the union of intervals (ms) */
+function unionLength(iv: Array<[number, number]>): number {
+  const s = iv.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  let n = 0;
+  let cur: [number, number] | null = null;
+  for (const [a, b] of s) {
+    if (!cur || a > cur[1]) { if (cur) n += cur[1] - cur[0]; cur = [a, b]; } else cur[1] = Math.max(cur[1], b);
+  }
+  return cur ? n + cur[1] - cur[0] : n;
+}
+
+/**
+ * Pure: a span's own time = its length minus the time any child of it ran (children clipped to the span — the union,
+ * so parallel children count once). Per service: the sum of its spans' own time; share = of the sum over all services
+ * (it adds up to 100 %; with asynchronous work the sum can exceed the trace's length — the shares say where time went).
+ */
+export function execTimeByService(spans: TraceSpan[]): Array<{ service: string; selfMs: number; share: number; spans: number }> {
+  const ids = new Set(spans.map((s) => s.spanId));
+  const kids = new Map<string, TraceSpan[]>();
+  for (const s of spans) if (s.parentId && s.parentId !== s.spanId && ids.has(s.parentId)) (kids.get(s.parentId) ?? kids.set(s.parentId, []).get(s.parentId)!).push(s);
+  const by = new Map<string, { selfMs: number; spans: number }>();
+  for (const s of spans) {
+    const a = s.offsetMs, b = s.offsetMs + s.durationMs;
+    const covered = unionLength((kids.get(s.spanId) ?? []).map((c) => [Math.max(a, c.offsetMs), Math.min(b, c.offsetMs + c.durationMs)] as [number, number]));
+    const self = Math.max(0, s.durationMs - covered);
+    const k = s.service ?? "";
+    const e = by.get(k) ?? { selfMs: 0, spans: 0 };
+    e.selfMs += self;
+    e.spans++;
+    by.set(k, e);
+  }
+  const sum = [...by.values()].reduce((n, e) => n + e.selfMs, 0);
+  return [...by.entries()].map(([service, e]) => ({ service, selfMs: e.selfMs, spans: e.spans, share: sum > 0 ? e.selfMs / sum : 0 }))
+    .sort((x, y) => y.selfMs - x.selfMs || (x.service < y.service ? -1 : 1));
+}
+
+export type SpanGroup = { service: string; name: string; count: number; totalMs: number; avgMs: number; maxMs: number; errors: number; first: string };
+/** Pure: the span list — spans grouped by service × name (Datadog's span list), most total time first */
+export function spanGroups(spans: TraceSpan[]): SpanGroup[] {
+  const by = new Map<string, { service: string; name: string; count: number; totalMs: number; maxMs: number; errors: number; first: TraceSpan }>();
+  for (const s of spans) {
+    const k = `${s.service ?? ""}|${s.name}`;
+    const e = by.get(k);
+    if (!e) by.set(k, { service: s.service ?? "", name: s.name, count: 1, totalMs: s.durationMs, maxMs: s.durationMs, errors: s.status === "error" ? 1 : 0, first: s });
+    else {
+      e.count++;
+      e.totalMs += s.durationMs;
+      e.maxMs = Math.max(e.maxMs, s.durationMs);
+      if (s.status === "error") e.errors++;
+      if (s.offsetMs < e.first.offsetMs) e.first = s;
+    }
+  }
+  return [...by.values()].map((e) => ({ service: e.service, name: e.name, count: e.count, totalMs: e.totalMs, avgMs: e.totalMs / e.count, maxMs: e.maxMs, errors: e.errors, first: e.first.spanId }))
+    .sort((x, y) => y.totalMs - x.totalMs || (x.name < y.name ? -1 : 1));
+}
+
+/** Pure: the span filter — every word of the query in the span's name, service, namespace, pod, an attribute key or value */
+export function spanMatches(s: TraceSpan, query: string, errorsOnly = false): boolean {
+  if (errorsOnly && s.status !== "error") return false;
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [s.name, s.service ?? "", s.namespace ?? "", s.pod ?? "", ...s.attributes.flatMap((a) => [a.key, a.value])].join("\n").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/** An attribute tree node: dotted keys nested (http.request.method → http › request › method) */
+export type AttrNode = { key: string; path: string; value?: string; children: AttrNode[] };
+
+/** Pure: attributes as a tree by their dotted keys (OpenTelemetry semantic conventions), keys sorted */
+export function attrTree(attributes: TraceSpan["attributes"]): AttrNode[] {
+  const root: AttrNode = { key: "", path: "", children: [] };
+  for (const a of attributes) {
+    let cur = root;
+    const parts = a.key.split(".").filter(Boolean);
+    parts.forEach((p, i) => {
+      let next = cur.children.find((c) => c.key === p);
+      if (!next) { next = { key: p, path: parts.slice(0, i + 1).join("."), children: [] }; cur.children.push(next); }
+      cur = next;
+    });
+    cur.value = a.value;
+  }
+  const sort = (n: AttrNode) => { n.children.sort((x, y) => (x.key < y.key ? -1 : 1)); n.children.forEach(sort); };
+  sort(root);
+  return root.children;
+}
+
+/** Pure: the tree as nested JSON (a key that is both a value and a prefix keeps its value under "") — for copying */
+export function attrJson(attributes: TraceSpan["attributes"]): string {
+  const walk = (ns: AttrNode[]): Record<string, unknown> => Object.fromEntries(ns.map((n) => [n.key, n.children.length
+    ? { ...(n.value !== undefined ? { "": n.value } : {}), ...walk(n.children) }
+    : n.value ?? null]));
+  return JSON.stringify(walk(attrTree(attributes)), null, 2);
+}
+
+/** Pure: an HTTP span's request line — OpenTelemetry semantic conventions, the new names first, then the older ones */
+export function httpSummary(s: TraceSpan | null | undefined): { method: string; target: string | null; status: number | null } | null {
+  if (!s) return null;
+  const v = (...keys: string[]) => {
+    for (const k of keys) { const x = s.attributes.find((a) => a.key === k)?.value; if (x) return x; }
+    return null;
+  };
+  const method = v("http.request.method", "http.method");
+  if (!method) return null;
+  const target = v("url.full", "http.url", "http.route", "url.path", "http.target");
+  const status = Number(v("http.response.status_code", "http.status_code"));
+  return { method, target, status: Number.isFinite(status) && status > 0 ? status : null };
+}
+
+/** The address of one trace in this dashboard (the cluster stays the viewer's own — a trace ID is per cluster) */
+export const traceLink = (origin: string, traceId: string) => `${origin}/observability?trace=${encodeURIComponent(traceId)}`;
+/** A trace ID as Tempo writes it (hex, 1–32) — anything else in ?trace= is ignored */
+export const TRACE_ID = /^[0-9a-f]{1,32}$/i;

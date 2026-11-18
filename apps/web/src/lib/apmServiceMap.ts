@@ -49,6 +49,8 @@ export type ApmMap = {
 };
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** APM cards are one row taller than the Pod traffic map's: the signal row (lib/apmSignals.ts) */
+export const APM_CARD_H = NET.CARD_H + 20;
 /** Line width by rate: 1 at ≤ 0.1/s … 4 at ≥ 100/s */
 export const widthOf = (rate: number) => Math.round((1 + Math.min(3, Math.max(0, Math.log10(Math.max(0.1, rate)) + 1))) * 10) / 10;
 export const toneOfEdge = (e: Pick<ServiceGraphEdge, "failed" | "kind">): ApmLink["tone"] => (e.failed > 0 ? "fail" : e.kind === "messaging" ? "async" : "forward");
@@ -88,7 +90,7 @@ export function buildApmMap(data: Pick<ServiceGraphResponse, "nodes" | "edges" |
 
   // ── layout (boxPack): [callers outside the traces] [namespaces …] ──
   type Shape = { kind: "box"; id: string } | { kind: "card"; id: string } | { kind: "frame" };
-  const leaf = (c: ApmCard): PackNode<Shape> => ({ t: "leaf", shape: { kind: "card", id: c.id }, w: NET.CARD_W, h: NET.CARD_H });
+  const leaf = (c: ApmCard): PackNode<Shape> => ({ t: "leaf", shape: { kind: "card", id: c.id }, w: NET.CARD_W, h: APM_CARD_H });
   const column = (cs: ApmCard[], key: string): PackBox<Shape> => ({ t: "box", shape: { kind: "box", id: key }, dir: "col", children: cs.map(leaf), head: 0, pad: 0, gap: NET.GAP, framed: false, maxW: 0 });
   const byName = (a: ApmCard, b: ApmCard) => cmp(a.name, b.name);
   const groups = new Map<string, ApmCard[]>();

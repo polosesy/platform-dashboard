@@ -10,21 +10,23 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactFlow, { Background, Controls, Handle, MarkerType, Position, ReactFlowProvider, useNodesInitialized, useReactFlow, type Edge, type Node, type NodeProps } from "reactflow";
 import "reactflow/dist/style.css";
-import type { AppDependencies, ServiceGraphResponse } from "@aud/types";
+import type { AppDependencies, AppMetricsResponse, RedService, ServiceGraphResponse, WorkloadRedResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useI18n } from "@/lib/i18n";
 import { rgba } from "@/lib/palette";
-import { Button, Chip, CodeBlock, EmptyState, ErrorNotice, LoadingState, Notice, SearchInput, Segmented } from "@/components/ui";
+import { Button, Chip, CodeBlock, EmptyState, ErrorNotice, FilterChip, LinkButton, LoadingState, Notice, SearchInput, Segmented } from "@/components/ui";
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { RED_WINDOWS, countText, errorRateText, quantileText, rateText } from "@/lib/redView";
 import { NET_GLYPH, apmLinksOf, buildApmMap, type ApmBox, type ApmLink, type ApmMap, type ApmPlacedCard } from "@/lib/apmServiceMap";
 import { depsOf, durationText } from "@/lib/depsView";
+import { SIGNAL_MIN_REQUESTS, VOLUME_FACTOR, instrumentationCoverage, serviceSignals, signalCounts, withSignal, type Coverage, type ServiceSignals, type SignalKind } from "@/lib/apmSignals";
+import obs from "../styles.module.css";
 import { useDependencies } from "./DependenciesView";
 import styles from "../../hubble/styles.module.css";
 
-type CardData = { card: ApmPlacedCard; dim: boolean; selected: boolean };
+type CardData = { card: ApmPlacedCard; dim: boolean; selected: boolean; sig: ServiceSignals | null; buckets: number[] };
 type BoxData = { box: ApmBox };
 
 const HiddenHandles = () => (
@@ -60,9 +62,23 @@ const CardNode = memo(function CardNode({ data }: NodeProps<CardData>) {
           : <span><small>{t("ob.apm.in")}</small>{c.inRequests > 0 ? rate(c.inRate) : "—"}</span>}
         <span data-hot={c.inFailed > 0 || undefined}><small>{t("ob.apm.failed")}</small>{c.kind === "entry" ? "—" : countText(c.inFailed, locale)}</span>
       </div>
+      {data.sig ? <SignalRow sig={data.sig} buckets={data.buckets} /> : null}
     </div>
   );
 });
+
+/** A card's signal line: errors · p95 slower than a week ago · volume ×n · callers / callees (facts — rules in lib/apmSignals) */
+function SignalRow({ sig, buckets, fan = true }: { sig: ServiceSignals; buckets: number[]; fan?: boolean }) {
+  const { t, locale } = useI18n();
+  return (
+    <div className={styles.nmSignals}>
+      {sig.error ? <span data-hot title={t("ob.apm.sig.errorHint")}>▲ {t("ob.apm.sig.errorN", { n: countText(sig.error.count, locale) })}</span> : null}
+      {sig.latency ? <span data-warm title={t("ob.apm.sig.latencyHint", { a: quantileText(sig.latency.weekAgo, buckets), b: quantileText(sig.latency.now, buckets) })}>◷ p95 ↑</span> : null}
+      {sig.volume ? <span data-warm title={t("ob.apm.sig.volumeHint", { a: countText(sig.volume.weekAgo, locale), b: countText(sig.volume.now, locale) })}>⇅ {sig.volume.ratio === null ? t("ob.apm.sig.new") : "×" + (sig.volume.ratio < 1 ? sig.volume.ratio.toFixed(2) : sig.volume.ratio.toFixed(1))}</span> : null}
+      {fan ? <span className={styles.nmSigFan} title={t("ob.apm.sig.fanHint", { i: sig.callers, o: sig.callees })}>← {sig.callers} · → {sig.callees}</span> : null}
+    </div>
+  );
+}
 
 const BoxNode = memo(function BoxNode({ data }: NodeProps<BoxData>) {
   const { t } = useI18n();
@@ -108,6 +124,16 @@ export function ServiceMapView({ clusterId, range, nonce, report }: { clusterId:
   useRangeRefresh("svcmap", nonce, q.loading, q.reload, report);
   // What each service calls outside the traces (Micrometer) — the panel's "dependencies" (exact name only)
   const deps = useDependencies(clusterId, range);
+  // Signals (RED now vs a week ago, same window) and instrumentation coverage (every running workload) — the same keys as
+  // the RED view and the heatmap, so one request each
+  const red = useApiQuery(clusterId ? "obs-red:" + clusterId + ":" + fit.value + ":" + (atQ ?? "now") : null, (token) =>
+    fetchJsonWithBearer<WorkloadRedResponse>(apiUrl("/api/observability/red", { clusterId, window: String(fit.value), at: atQ }), token),
+  );
+  const apps = useApiQuery(clusterId ? "app-metrics:" + clusterId + ":" + (atQ ?? "now") : null, (token) =>
+    fetchJsonWithBearer<AppMetricsResponse>(apiUrl("/api/observability/app-metrics", { clusterId, at: atQ }), token),
+  );
+  const rd = red.data?.clusterId === clusterId && red.data.windowMinutes === fit.value && answersAt(red.data.at, atQ) && red.data.metricsState === "ok" ? red.data : null;
+  const ad = apps.data?.clusterId === clusterId && answersAt(apps.data.at, atQ) && apps.data.metricsState === "ok" ? apps.data : null;
   const d = q.data?.clusterId === clusterId && q.data.windowMinutes === fit.value && answersAt(q.data.at, atQ) ? q.data : null;
 
   if (q.error) return <ErrorNotice error={q.error} />;
@@ -122,14 +148,24 @@ export function ServiceMapView({ clusterId, range, nonce, report }: { clusterId:
   if (!d.instrumented) return <Notice tone="info" title={t("ob.apm.notInstrumented")}>{t("ob.apm.notInstrumentedHint")}</Notice>;
   return (
     <ReactFlowProvider>
-      <ServiceMap d={d} deps={deps.d?.metricsState === "ok" ? deps.d.apps : undefined} fitKey={`${clusterId}|${fit.value}|${atQ ?? "now"}`} windowChip={fit.differs ? t("ob.apm.window", { n: fit.value }) : null} />
+      <ServiceMap d={d} deps={deps.d?.metricsState === "ok" ? deps.d.apps : undefined} fitKey={`${clusterId}|${fit.value}|${atQ ?? "now"}`} windowChip={fit.differs ? t("ob.apm.window", { n: fit.value }) : null}
+        red={rd?.services ?? null} redState={red.loading && !rd ? "loading" : rd ? "ok" : "none"} workloads={ad?.workloads ?? null} />
     </ReactFlowProvider>
   );
 }
 
-function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; deps?: AppDependencies[]; fitKey: string; windowChip: string | null }) {
+function ServiceMap({ d, deps, fitKey, windowChip, red, redState, workloads }: {
+  d: ServiceGraphResponse; deps?: AppDependencies[]; fitKey: string; windowChip: string | null;
+  red: RedService[] | null; redState: "loading" | "ok" | "none"; workloads: AppMetricsResponse["workloads"] | null;
+}) {
   const { t, locale } = useI18n();
   const [failing, setFailing] = useState(false);
+  const [signal, setSignal] = useState<SignalKind | null>(null);
+  const [mode, setMode] = useState<"map" | "list">("map");
+  const signals = useMemo(() => serviceSignals(d, red), [d, red]);
+  const counts = signalCounts(signals);
+  const marked = useMemo(() => withSignal(signals, signal), [signals, signal]);
+  const coverage = useMemo(() => (workloads ? instrumentationCoverage(d, red, workloads) : null), [d, red, workloads]);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
@@ -152,23 +188,23 @@ function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; 
     for (const c of map.cards) {
       out.push({
         id: c.id, type: "aCard", position: { x: c.x, y: c.y }, width: c.w, height: c.h, style: { width: c.w, height: c.h },
-        data: { card: c, dim: !!near && !near.has(c.id), selected: selected === c.id } satisfies CardData, draggable: false, zIndex: 10,
+        data: { card: c, dim: (!!near && !near.has(c.id)) || (!near && !!marked && !marked.has(c.id)), selected: selected === c.id, sig: signals.get(c.id) ?? null, buckets: d.buckets } satisfies CardData, draggable: false, zIndex: 10,
       });
     }
     return out;
-  }, [map, near, selected]);
+  }, [map, near, selected, marked, signals, d.buckets]);
 
   const edges: Edge[] = useMemo(() => map.links.map((l) => {
     const tone = TONE[l.tone];
     const on = !!focus && (l.source === focus || l.target === focus);
     return {
       id: l.id, source: l.source, target: l.target, type: "smoothstep",
-      style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: focus && !on ? 0.06 : on ? 1 : l.tone === "fail" ? 0.95 : 0.5 },
+      style: { stroke: tone.color, strokeWidth: on ? l.width + 0.8 : l.width * 0.7, strokeDasharray: tone.dash, opacity: (focus && !on) || (!focus && marked && !marked.has(l.source) && !marked.has(l.target)) ? 0.06 : on ? 1 : l.tone === "fail" ? 0.95 : 0.5 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone.color, width: 14, height: 14 },
       ...(on ? { label: `${rate(l.edge.rate)}${l.edge.failed ? ` · ${t("ob.apm.failed")} ${countText(l.edge.failed, locale)}` : ""} · p95 ${quantileText(l.edge.p95, d.buckets)}`, labelStyle: { fontSize: 12 }, labelBgPadding: [4, 2] as [number, number] } : {}),
       zIndex: on ? 20 : 5,
     } satisfies Edge;
-  }), [map.links, focus, t, locale, rate, d.buckets]);
+  }), [map.links, focus, t, locale, rate, d.buckets, marked]);
 
   useEffect(() => {
     if (!selected) return;
@@ -184,6 +220,15 @@ function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; 
         <Segmented label={t("ob.apm.show")} value={failing ? "failing" : "all"} onChange={(v) => setFailing(v === "failing")}
           items={[{ id: "all", label: t("ob.apm.all") }, { id: "failing", label: t("ob.apm.failingOnly") }]} />
         <SearchInput label={t("ob.apm.search")} value={search} onChange={setSearch} placeholder={t("ob.apm.search")} />
+        <Segmented label={t("ob.apm.mode")} value={mode} onChange={setMode} items={[{ id: "map", label: t("ob.apm.mode.map") }, { id: "list", label: t("ob.apm.mode.list") }]} />
+      </div>
+      <div className={styles.nmBar} role="group" aria-label={t("ob.apm.sig.filter")}>
+        <span className={styles.nmSigLabel}>{t("ob.apm.sig.filter")}</span>
+        {(["latency", "error", "volume"] as const).map((k) => (
+          <FilterChip key={k} pressed={signal === k} disabled={(k !== "error" && redState !== "ok") || counts[k] === 0} title={t(`ob.apm.sig.${k}Rule`, { n: SIGNAL_MIN_REQUESTS, f: VOLUME_FACTOR })}
+            onClick={() => setSignal(signal === k ? null : k)}>{t(`ob.apm.sig.${k}`)} {counts[k]}</FilterChip>
+        ))}
+        {redState === "none" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.noRed")}</span> : redState === "loading" ? <span className={styles.nmSigLabel}>{t("ob.apm.sig.loadingRed")}</span> : null}
       </div>
 
       <div className={styles.nmSummary}>
@@ -201,7 +246,8 @@ function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; 
         </ul>
       </div>
 
-      <div className={styles.nmLayout} data-open={!!sel || undefined}>
+      {mode === "list" ? <ServiceList map={map} signals={signals} marked={marked} buckets={d.buckets} red={red} onPick={(id) => { setSelected(id); setMode("map"); }} /> : null}
+      <div className={styles.nmLayout} data-open={!!sel || undefined} hidden={mode === "list"}>
         <div className={styles.nmCanvas}>
           {map.cards.length === 0 ? (
             <EmptyState title={t(failing ? "ob.apm.noFailing" : "ob.apm.noData")}>{t(failing ? "ob.apm.noFailingHint" : "ob.apm.noDataHint")}</EmptyState>
@@ -224,6 +270,7 @@ function ServiceMap({ d, deps, fitKey, windowChip }: { d: ServiceGraphResponse; 
         {sel && <CardPanel card={sel} map={map} d={d} deps={depsOf(deps, sel.id)} onPick={setSelected} onClose={() => setSelected(null)} />}
       </div>
 
+      {coverage ? <CoveragePanel c={coverage} /> : null}
       <details className={styles.nmAt}>
         <summary>{t("ob.apm.howMeasured")}</summary>
         <p>{t("ob.apm.howMeasuredHint")}</p>
@@ -305,5 +352,79 @@ function CardPanel({ card: c, map, d, deps, onPick, onClose }: { card: ApmPlaced
       ) : null}
       <p className={styles.nmAt}>{t("ob.apm.panelNote")}</p>
     </aside>
+  );
+}
+
+/** Map | List — the same services as rows (Datadog's list toggle): signals first, then most requests */
+function ServiceList({ map, signals, marked, buckets, red, onPick }: {
+  map: ApmMap; signals: Map<string, ServiceSignals>; marked: Set<string> | null; buckets: number[]; red: RedService[] | null; onPick: (id: string) => void;
+}) {
+  const { t, locale } = useI18n();
+  const rate = useRate();
+  const redOf = new Map((red ?? []).map((r) => [r.service, r]));
+  const weight = (s: ServiceSignals | undefined) => (s ? (s.error ? 4 : 0) + (s.latency ? 2 : 0) + (s.volume ? 1 : 0) : 0);
+  const rows = map.cards.filter((c) => c.kind === "service" && (!marked || marked.has(c.id)))
+    .sort((a, b) => weight(signals.get(b.id)) - weight(signals.get(a.id)) || b.inRequests - a.inRequests || (a.name < b.name ? -1 : 1));
+  if (!rows.length) return <EmptyState title={t("ob.apm.noData")} />;
+  return (
+    <div className={obs.sloTableWrap}>
+      <table className={obs.sloTable}>
+        <thead><tr>
+          <th>{t("ob.apm.col.service")}</th><th className={obs.redNum}>{t("ob.apm.in")}</th><th className={obs.redNum}>{t("ob.apm.failed")}</th>
+          <th className={obs.redNum}>p95</th><th>{t("ob.apm.col.signals")}</th><th className={obs.redNum}>{t("ob.apm.col.fan")}</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((c) => {
+            const s = signals.get(c.id);
+            const r = redOf.get(c.id);
+            return (
+              <tr key={c.id}>
+                <td>
+                  <LinkButton onClick={() => onPick(c.id)} title={c.name}>{c.name}</LinkButton>
+                  <span className={obs.sloCellSub}>{c.workload ? `${c.workload.kind} · ${c.workload.namespace}` : c.namespace || t("ob.apm.noWorkload")}</span>
+                </td>
+                <td className={obs.redNum}>{c.inRequests > 0 ? rate(c.inRate) : "—"}</td>
+                <td className={obs.redNum}>{c.inFailed ? `▲ ${countText(c.inFailed, locale)}` : "0"}</td>
+                <td className={obs.redNum}>
+                  <span className={obs.sloCellMain}>{r?.p95 ? quantileText(r.p95, buckets) : "—"}</span>
+                  {r?.weekAgo?.p95 ? <span className={obs.sloCellSub}>{t("ob.apm.col.weekAgo", { v: quantileText(r.weekAgo.p95, buckets) })}</span> : null}
+                </td>
+                <td>{s ? <SignalRow sig={s} buckets={buckets} fan={false} /> : "—"}</td>
+                <td className={obs.redNum}>← {s?.callers ?? 0} · → {s?.callees ?? 0}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Instrumentation coverage — the running workloads of the traced namespaces that send no traces */
+function CoveragePanel({ c }: { c: Coverage }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  if (!c.total) return null;
+  const shown = open ? c.untraced : c.untraced.slice(0, 12);
+  return (
+    <section className={styles.nmCoverage} aria-label={t("ob.apm.cov.title")}>
+      <h4>{t("ob.apm.cov.title")}</h4>
+      <p>{t("ob.apm.cov.summary", { ns: c.namespaces.length, t: c.traced, n: c.total, u: c.untraced.length })}</p>
+      {c.untraced.length ? (
+        <>
+          <ul className={styles.nmCoverageList}>
+            {shown.map((w) => (
+              <li key={`${w.namespace}/${w.workload}`}>
+                <span title={`${w.namespace}/${w.workload}`}>{w.workload}</span>
+                <small>{w.namespace}{w.kinds.length ? ` · ${w.kinds.join(", ")}` : ""}</small>
+              </li>
+            ))}
+          </ul>
+          {c.untraced.length > 12 ? <LinkButton onClick={() => setOpen(!open)}>{open ? t("ob.apm.cov.less") : t("ob.apm.cov.more", { n: c.untraced.length - 12 })}</LinkButton> : null}
+        </>
+      ) : <p>{t("ob.apm.cov.all")}</p>}
+      {c.unmatchedServices.length ? <p className={styles.nmAt}>{t("ob.apm.cov.unmatched", { s: c.unmatchedServices.join(", ") })}</p> : null}
+      <p className={styles.nmAt}>{t("ob.apm.cov.hint")}</p>
+    </section>
   );
 }
