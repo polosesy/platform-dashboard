@@ -26,3 +26,4 @@ export * from "./netpol.js";
 export * from "./notify.js";
 export * from "./runbook.js";
 export * from "./netpath.js";
+export * from "./exposure.js";

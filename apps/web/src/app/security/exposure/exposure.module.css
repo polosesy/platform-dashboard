@@ -1,0 +1,70 @@
+/* 노출 관리 (CTEM) — five stage columns in one board (Wiz Exposure Management layout), a funnel band through
+   discovery → prioritization → validation; one column per stage on narrow screens (the band is hidden there). */
+.page { display: grid; gap: 16px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 16px; }
+.meta { font-size: var(--text-small); color: var(--muted); }
+
+.board {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); overflow: hidden;
+}
+@media (max-width: 1100px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } .band { display: none; } }
+@media (max-width: 640px) { .board { grid-template-columns: minmax(0, 1fr); } }
+.col { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border-left: 1px solid var(--border); }
+.col:first-child { border-left: 0; }
+@media (max-width: 1100px) { .col { border-left: 0; border-top: 1px solid var(--border); } .col:first-child { border-top: 0; } }
+.col[data-stage="validation"] { background: rgba(var(--danger-rgb), 0.03); }
+
+.head { display: grid; gap: 2px; }
+.stage { margin: 0 0 6px; display: flex; align-items: center; gap: 8px; font-size: var(--text-heading); font-weight: 600; }
+.step {
+  display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(var(--series1-rgb), 0.12); color: var(--ink); font-size: var(--text-caption); font-weight: 600;
+}
+.col[data-stage="validation"] .step { background: rgba(var(--danger-rgb), 0.12); }
+.value { font-size: var(--text-display); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.label { font-size: var(--text-small); color: var(--muted); }
+.sub { font-size: var(--text-caption); color: var(--subtle); min-height: 1.4em; }
+
+.band { height: 56px; }
+.band svg { display: block; width: 100%; height: 100%; }
+.bandFill { fill: rgba(var(--series1-rgb), 0.28); }
+.bandHot { fill: rgba(var(--danger-rgb), 0.45); }
+
+.subHead { margin: 6px 0 0; font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
+.subBlock { display: grid; gap: 4px; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rows li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0;
+  padding: 5px 0; border-bottom: 1px solid var(--border); font-size: var(--text-small);
+}
+.rows li:last-child { border-bottom: 0; }
+.rows li > :first-child { min-width: 0; overflow-wrap: anywhere; } /* names wrap — a narrow column must not cut "취약점 — 레…" */
+.rows a { color: var(--ink); text-decoration: none; }
+.rows a:hover { text-decoration: underline; }
+.count { flex: none; display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cov { font-size: var(--text-caption); font-weight: 500; color: var(--subtle); }
+.crit { font-size: var(--text-caption); font-weight: 600; color: var(--danger-strong); }
+.zero, .off { color: var(--subtle); }
+.zero a, .off a { color: var(--subtle); }
+.off .count { font-weight: 500; }
+.note { margin: 0; font-size: var(--text-caption); color: var(--muted); }
+
+.meter { display: grid; gap: 4px; }
+.meterHead { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-small); }
+.meterHead b { font-variant-numeric: tabular-nums; }
+.meterTrack { height: 8px; border-radius: var(--radius-pill); background: rgba(var(--ink-rgb), 0.08); overflow: hidden; }
+.meterFill { display: block; height: 100%; border-radius: var(--radius-pill); background: rgb(var(--series1-rgb)); }
+.meterFill[data-warn] { background: var(--warning); }
+.meterHint { font-size: var(--text-caption); color: var(--subtle); }
+
+.overdue { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.overdue li { display: grid; gap: 0; font-size: var(--text-small); min-width: 0; }
+.overdue a { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overdue small { font-size: var(--text-caption); color: var(--danger-strong); }
+
+.how summary { cursor: pointer; font-size: var(--text-small); color: var(--muted); }
+.how ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: var(--text-small); }
+.how .kql { list-style: none; padding-left: 0; }
+.kql li { display: grid; gap: 2px; }
+.kql code { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--muted); overflow-wrap: anywhere; }

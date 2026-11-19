@@ -75,3 +75,39 @@ test("Defender query: per image, unhealthy only, no tenant data", () => {
   assert.match(DEFENDER_IMAGE_QUERY, /by registry = .*repo = .*digest = .*tags = /);
   assert.doesNotMatch(DEFENDER_IMAGE_QUERY, /[0-9a-f]{8}-[0-9a-f]{4}-/);
 });
+
+// ── Defender per-package assessments (2026-11-19): stg had 0 sub-assessments and 11,448 image + 668 running-container
+// package rows — the entry point read only the former. Checked on stg: the module's query = an independent KQL for
+// every running image of the cluster (68 / 68 equal per severity) and every registry image (680 = 680 by host · repo · digest).
+import { DEFENDER_PKG_QUERY, pkgRows, withKev } from "../src/services/imageVulns.js";
+
+test("package rows: a running container's image reference (repo:tag@digest) is parsed like a pod's, then matched by digest", () => {
+  const rows = pkgRows([
+    { rt: "K8s-container", uri: "registry.example.test/team/api:1.4.2@sha256:aaa", registry: "", repo: "", digest: "", tags: "", critical: 1, high: 2, medium: 0, low: 3, fixable: 3, cves: ["CVE-2024-0001"], top: [{ cve: "CVE-2024-0001", sev: "critical", pkg: "openssl", ver: "3.0.1", fixed: "3.0.9" }] },
+    { rt: ".containerimage", uri: "", registry: "registry.example.test", repo: "team/web", digest: "sha256:bbb", tags: "[\"2.0\"]", critical: 0, high: 1, medium: 0, low: 0, fixable: 0, cves: ["CVE-2024-0002"], top: [] },
+  ]);
+  assert.deepEqual(rows.map((r) => [r.registry, r.repo, r.digest, r.tags]), [
+    ["registry.example.test", "team/api", "sha256:aaa", "[\"1.4.2\"]"],
+    ["registry.example.test", "team/web", "sha256:bbb", "[\"2.0\"]"],
+  ]);
+  const v = defenderVulns(["registry.example.test/team/api:1.4.2@sha256:aaa", "registry.example.test/team/web:2.0", "registry.example.test/team/other:1"], rows);
+  assert.deepEqual(v.map((x) => [x.image, x.basis, x.counts.critical, x.counts.high, x.exploited]), [
+    ["registry.example.test/team/api:1.4.2@sha256:aaa", "digest", 1, 2, null],
+    ["registry.example.test/team/web:2.0", "tag", 0, 1, null],
+  ]);
+  // KEV: a critical / high CVE of the image in the catalogue → "kev" on the image and on that finding
+  const k = withKev(v, rows, new Set(["CVE-2024-0001"]));
+  assert.equal(k[0]!.exploited, "kev");
+  assert.equal(k[0]!.top[0]!.exploited, "kev");
+  assert.equal(k[1]!.exploited, null);
+  assert.equal(withKev(v, rows, new Set()), v);
+});
+
+test("package query: running containers of this cluster only (its ARM id or a child security entity), exact counts", () => {
+  const q = DEFENDER_PKG_QUERY("/subscriptions/x/resourceGroups/RG/providers/Microsoft.ContainerService/managedClusters/AKS1");
+  assert.match(q, /cl == "\/subscriptions\/x\/resourcegroups\/rg\/providers\/microsoft\.containerservice\/managedclusters\/aks1"/);
+  assert.match(q, /cl startswith "\/subscriptions\/x\/resourcegroups\/rg\/providers\/microsoft\.containerservice\/managedclusters\/aks1\/"/);
+  assert.doesNotMatch(q, /dcount/); // one row per (image, CVE) first, then counted
+  assert.doesNotMatch(q, /\bextend kind\b/); // `kind` is a Resource Graph column — a parser failure
+  assert.match(DEFENDER_PKG_QUERY('a"b'), /"a\\"b"/); // the id is a KQL string literal
+});

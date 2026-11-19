@@ -12,11 +12,13 @@ import { getResourceSecurityCard } from "../services/resourceSecurityCard.js";
 import { getSecurityTeamScope } from "../services/securityTeamScope.js";
 import { checkNow, earlyWatchResponse, setWatch } from "../services/earlyWatch.js";
 import { deliverAlerts } from "./notify.js";
-import type { IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
+import type { IssueSightingsResponse, IssueStatesResponse, SavedQueriesResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { connectionForSubscription } from "../infra/connectionRegistry.js";
 import { IssueStateBody, issueStateDir, readIssueStates, writeIssueState } from "../services/issueStateStore.js";
 import { SavedQueryBody, readSavedQueries, writeSavedQuery } from "../services/savedQueryStore.js";
+import { SightingsBody, readSightings, recordSightings } from "../services/issueSightingStore.js";
+import { getExposure } from "../services/exposure.js";
 
 export function registerSecurityRoutes(router: Router, env: Env) {
   // (2026-11-13) the old /api/security/score and /api/security/alerts are gone: nothing called them (the web reads
@@ -32,6 +34,20 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       res.json(await getAzureRiskCombos(env, req.auth.bearerToken, subscriptionId));
     } catch (e: unknown) {
       sendError(res, e, "azure_risk_failed", "security");
+    }
+  });
+
+  // 노출 관리 (CTEM): scoping · discovery · Defender's contextual risk · mitigating controls of the subscriptions the
+  // caller may use (or the one asked for) — signed in; prioritization / validation / remediation come from the issue list
+  router.get("/api/security/exposure", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const one = querySubscriptionId(req, env);
+      const subs = one ? [one] : defaultSubscriptions(env, req.auth.bearerToken);
+      if (!subs.length) return res.status(400).json({ error: "subscription_required" });
+      res.json(await getExposure(env, req.auth.bearerToken, subs));
+    } catch (e: unknown) {
+      sendError(res, e, "exposure_failed", "security");
     }
   });
 
@@ -152,6 +168,30 @@ export function registerSecurityRoutes(router: Router, env: Env) {
       res.status(400).json({ error: r.error });
     } catch (e: unknown) {
       sendError(res, e, "issue_state_write_failed");
+    }
+  });
+  // 노출 관리 › 조치 SLA: when the dashboard first / last saw each issue (issueSightingStore — the server's clock; any
+  // signed-in caller who may use the subscription reports the keys its issue list computed)
+  router.get("/api/security/issue-sightings", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      res.json({ sightings: await readSightings(stateDir, subscriptionId), durable: !!stateDir } satisfies IssueSightingsResponse);
+    } catch (e: unknown) {
+      sendError(res, e, "issue_sightings_failed");
+    }
+  });
+  router.post("/api/security/issue-sightings", async (req: Request, res: Response) => {
+    try {
+      if (req.auth?.kind !== "user") return res.status(401).json({ error: "signin_required" });
+      const subscriptionId = querySubscriptionId(req, env);
+      if (!subscriptionId) return res.status(400).json({ error: "subscription_required" });
+      const body = SightingsBody.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: "issue_sightings_invalid" });
+      res.json({ sightings: await recordSightings(stateDir, subscriptionId, body.data.items), durable: !!stateDir } satisfies IssueSightingsResponse);
+    } catch (e: unknown) {
+      sendError(res, e, "issue_sightings_failed");
     }
   });
   // 그래프 탐색 › 팀 저장 질문 (P5): the questions only (results are recomputed). Same rights as the issue states.

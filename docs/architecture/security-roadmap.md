@@ -1,8 +1,8 @@
 ---
 status: draft
 owner: platform-security
-last-verified: 2026-11-17
-covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts, apps/web/src/app/security, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+last-verified: 2026-11-19
+covers: [apps/api/src/services/exposure.ts, apps/api/src/services/issueSightingStore.ts, apps/web/src/lib/exposureView.ts, apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts, apps/web/src/app/security, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -382,4 +382,41 @@ covers: [apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts
 검증(실데이터, 구독 3개 × 팀 2개 — A = 가장 바쁜 그룹, B = 나머지): 권고 행마다 (키, 심각도)의 팀 발견 수 = 독립 KQL `count() by name, severity` — 다른 행 0, 행 수·합 같음(구독 1: A 276행 Σ 9,516 · B 239행 Σ 2,197), 경고 목록 = 팀 범위 = 독립 집계(1·1 / 0·4 / 0·0).
 검증에서 발견: Defender는 **같은 권고 키를 심각도별로 따로** 줌(개요는 키·제목·심각도로 묶음 — 구독 1에서 259키 = 280행) → 키로만 맞추면 팀 건수가 두 행에 붙어 Σ 11,151(팀 발견 9,516). (키, 심각도)로 맞춤(`recId`) — 개요의 '우선 조치 권고'·영역별 종류 수도 같은 원인이었음, 회귀 테스트.
 - 시험 배포의 팀 규칙은 네임스페이스 규칙 2개뿐 → 화면은 '모두 소유 미지정 — 리소스 그룹 규칙을 넣으면 나뉨' + 연결 파일 예(복사).
+
+## 6. 노출 관리 (CTEM) — Wiz Exposure Management 이식 (2026-11-19)
+
+**참고 자료**: Wiz 블로그 'Exposure Management Dashboard: Your CTEM Command Center'와 그 화면(범위 · 발견 · 우선순위 · 검증 · 조치 다섯 칸, 지난 90일). 블로그는 단계의 뜻만 적고 **숫자를 어떻게 세는지·'검증'의 정의·SLA 기준은 공개하지 않습니다** — 그래서 이 플랫폼에서는 숫자마다 '어떤 원시 기록을 어떻게 셌는가'를 먼저 정하고, 그 KQL을 화면에 함께 둡니다.
+
+### 6.1 Wiz와 비교한 빈 곳
+
+| Wiz 화면 | 우리 (이전) | 이번에 한 것 | 남은 차이 |
+|---|---|---|---|
+| Scoping — 덮는 자산 수(구독·코드 저장소·엔드포인트·워크스테이션·K8s·ID·레지스트리·AI·온프렘·데이터 저장소) | 화면 없음 | 자산 10종 + **Defender 플랜 보호 수**(리소스 수준 플랜 우선) | 코드 저장소·워크스테이션·SaaS·모의 해킹 = '연결 없음'(데이터원 없음) |
+| Discovery — 발견 종류별 수 | 보안 권고·긴급 취약점·위협이 화면마다 따로 | Defender 비정상 평가를 종류별로(취약점 이미지·실행 중 컨테이너·호스트 / 클라우드·컨테이너 구성 / ID / 비밀 / 지원 종료 / 위협) | SAST·코드 취약점·데이터 분류(민감 데이터)·외부 공격 표면 스캔 없음 |
+| Prioritization — 공격 경로 유형별 우선 이슈 | 이슈 목록은 있으나 유형 묶음 없음 | 이슈마다 `pathType`(외부 노출 · 과도한 권한 · 데이터 유출 · 긴급 취약점 · 활성 위협 · 팀 질문), 치명·높음 열림·진행만 | — |
+| Validation — 밖에서 증명된 경로 + 완화 통제 | 없음 | **관측 근거(`obs`)가 있는 우선 이슈** + 완화 통제 9종(WAF 방지/탐지, WAF 없는 AGW, Firewall, DDoS, AKS 승인 컨트롤러·Defender 센서, Storage·Key Vault 기본 거부) | 외부 공격 시험(ASM·Red Agent) 없음 — '본 것'이지 '공격해 증명한 것'이 아님 |
+| Remediation — 해결 수·담당률·SLA·예외·워크플로 | 이슈 상태만 | 해결(90일)·더 이상 탐지 안 됨·담당 지정률·**SLA**(CISA BOD 19-02 치명 15일·높음 30일)·예외(14일)·SLA 넘긴 목록 | 워크플로 자동화(티켓·PR) 없음 |
+
+### 6.2 숫자의 정의 (원시 데이터 → 숫자)
+
+- **자산** = Resource Graph `resources`의 유형별 행. 엔드포인트 = ipConfiguration에 붙은 공용 IP(NAT 게이트웨이 송신 IP 제외) + Front Door 엔드포인트 + App Service + Container App + APIM. **보호** = 그 유형을 덮는 Defender 플랜이 Standard(리소스 수준 플랜이 있으면 그것), 분모 `coverable` = 플랜이 있는 유형의 자산만.
+- **발견** = `securityresources` 비정상 평가(리소스 하나 × 권고 하나). 패키지 단위 취약점(`additionalData.CvesDetails`)은 위치별, 나머지는 Defender 분류. 리소스 수 = `summarize by cls, rid | summarize count()`(정확 — dcount 금지). 비밀 = Defender CSPM이 켜진 구독에서만 찾음(`someSubscriptions`·`noPlan`). 지원 종료 = 소프트웨어 인벤토리 `endOfSupportStatus`가 None·빈 값이 아닌 행(인벤토리 없음 = '—').
+- **우선순위·검증·조치** = 이슈 목록(`buildIssueQueue` — 통합 위험과 **같은 함수**, 공용 훅 `useIssueSources`)을 `lib/exposureView.ts`가 셈.
+- **처음 본 시각**(`services/issueSightingStore.ts`): 페이지가 계산한 키를 보고하면 서버 시계로 `first`(다시 오지 않음)·`last` — 보고는 이슈를 '더 오래된 것'으로만 만들 수 있어 기한 넘김을 숨길 수 없음, SLA는 지금 목록의 이슈에만 적용(가짜 키는 숫자를 안 바꿈), 180일 안 보이면 지움·구독당 2만 개. 나이 = '이 대시보드가 처음 본 뒤'(하한). 기록 전 이슈 = '모름'(제외).
+
+### 6.3 만들면서 찾은 것
+
+1. **이미지 취약성 진입점이 Defender의 새 모델을 읽지 않았음** — Defender는 이제 취약점을 패키지 단위 권고("Update openssl" …)로 주는데(`.containerimage` 레지스트리 이미지 · `K8s-container` 실행 중 컨테이너), 진입점은 옛 하위 평가(`assessments/subassessments`)만 읽었음. stg: 하위 평가 0건, 패키지 권고 이미지 11,448건 · 실행 중 컨테이너 617건 → 진입점 대부분 '미확인'의 원인. `imageVulns.ts` `DEFENDER_PKG_QUERY`(실행 중 컨테이너는 그 클러스터 ARM ID 또는 하위 `…/securityentitydata/…`만) + CVE를 CISA KEV와 대조(`withKev`). stg 대조: 실행 중 이미지 68개 모두 심각도별 CVE 수 = 독립 KQL, 레지스트리 이미지 680 = (호스트·저장소·다이제스트) 독립 집계 — 같은 이미지가 두 레지스트리에 복제돼 다이제스트만으로는 608.
+2. **Resource Graph 페이지 넘김은 `id`를 투영해야 정확** — 검증 스크립트가 `id` 없이 1만 3천 행을 받았더니 행이 겹치고 빠져(리소스 663 vs 680) 모듈이 틀린 것처럼 보였음. 모듈은 KQL 안에서 세어 한 쪽만 받음; 원시 행을 넘겨 받는 질의는 `id`를 함께 투영할 것.
+3. `kind`는 Resource Graph 기본 열 — `extend kind=`는 파서 오류.
+
+### 6.4 stg 실측 (내 토큰, 구독 3개 — 화면 숫자 = 독립 계산)
+
+자산 10종 · 보호(클러스터 2/2 · VM 6) · 완화 통제 9종 · 발견 9종(건수·리소스 수 모두)이 원시 행을 TS로 따로 분류한 값과 같음. Defender 상황 위험(CSPM `properties.risk.level`) 높음 11 · 중간 463 · 낮음 167 — 두 번째 의견으로 표시.
+
+### 6.5 다음
+
+- 공격 경로 그림(Wiz Attack Path Visualization — 인터넷 → 엔드포인트 → 컴퓨트(발견 묶음 펼침) → ID → 데이터 저장소): 지금 Azure 경로는 목록(`AzurePathsPanel`) — 같은 레인 그림(정책 인사이트 공격 경로)으로.
+- 조치 자동화(Wiz Workflows): 알림 센터 중계로 '치명 이슈 → 담당 팀 채널' 규칙.
+- 외부 검증: 공용 엔드포인트의 TLS·포트 점검(대시보드가 밖에서 직접 연결)은 보안 승인 뒤.
 

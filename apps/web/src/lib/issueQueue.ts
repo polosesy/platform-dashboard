@@ -14,6 +14,16 @@ export type IssueSource = "combo" | "wi" | "alert" | "vuln" | "query" | "azure";
 export type IssueSev = "critical" | "high" | "medium" | "low";
 
 /**
+ * The kind of attack path an issue is (노출 관리 › 우선순위 — Wiz groups its prioritized issues the same way):
+ * exposure = reachable from outside (a cluster's exposed workloads without ingress isolation · an Azure resource
+ * exposed with a High finding or a privileged identity · an Internet path to data or control) · privilege = an
+ * identity that can do too much (cluster takeover, standing privilege, AKS local accounts, workload identity findings,
+ * a privileged identity on a vulnerable Azure resource) · exfiltration = a compromised workload can send data out ·
+ * vulnerability = urgent vulnerabilities in what runs · threat = an active Defender alert · custom = a team question
+ */
+export type PathType = "exposure" | "privilege" | "exfiltration" | "vulnerability" | "threat" | "custom";
+
+/**
  * Pure: an urgent vulnerability's issue severity — exploited (CISA KEV or SSVC active) = critical, else the highest
  * CVSS: ≥ 9 critical · ≥ 7 high · ≥ 4 medium · else low; no score anywhere = medium (stated as unscored on the page,
  * never "high" by default — every affected advisory used to be "high", a CVSS 4 too).
@@ -29,6 +39,7 @@ export function vulnSeverity(cves: Array<{ kev?: unknown; exploitation?: string 
 export type QueueItem = {
   key: string;
   source: IssueSource;
+  pathType: PathType;
   sev: IssueSev;
   title: string;
   /** Where — workloads, owner, resources (short) */
@@ -136,7 +147,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
     for (const i of input.insights.issues) {
       const ev: EvidenceKind = i.edges.some((e) => e.ev === "obs") ? "obs" : i.edges.some((e) => e.ev === "perm") ? "perm" : "cfg";
       raw.push({
-        key: `combo:${scope}:${ascii(i.id, 400)}`, source: "combo", sev: i.sev === "crit" ? "critical" : "high",
+        key: `combo:${scope}:${ascii(i.id, 400)}`, source: "combo", pathType: i.kind === "vnet" ? "exposure" : i.kind === "exfil" ? "exfiltration" : "privilege", sev: i.sev === "crit" ? "critical" : "high",
         title: i.title, target: i.owner, evidence: ev, href: `/policies?tab=overview&cluster=${cluster}&issue=${encodeURIComponent(i.id)}`,
         seenAt: input.insights.generatedAt,
         namespaces: uniq([...(i.members ?? []).map((m) => m.namespace), ...i.nodes.flatMap((n) => n.refs).map(nsOf), i.id.startsWith("vnet:") ? i.id.slice(5) : null]),
@@ -149,7 +160,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
     for (const f of input.wi.findings) {
       if (f.sev !== "crit" && f.sev !== "warn") continue;
       raw.push({
-        key: `wi:${scope}:${ascii(f.id, 400)}`, source: "wi", sev: f.sev === "crit" ? "critical" : "high",
+        key: `wi:${scope}:${ascii(f.id, 400)}`, source: "wi", pathType: "privilege", sev: f.sev === "crit" ? "critical" : "high",
         title: f.title, target: f.rule, evidence: f.ev, href: `/policies?tab=workloadIdentity&cluster=${cluster}`, seenAt: input.wi.generatedAt,
         namespaces: uniq(f.refs.map(nsOf)), resourceGroups: uniq([clusterRg]),
       });
@@ -165,7 +176,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
       if (!inCluster.length) continue;
       const where = [...new Set(inCluster.map((x) => x.where))];
       raw.push({
-        key: `vuln:${scope}:${ascii(a.key, 400)}`, source: "vuln", sev: vulnSeverity(a.cves),
+        key: `vuln:${scope}:${ascii(a.key, 400)}`, source: "vuln", pathType: "vulnerability", sev: vulnSeverity(a.cves),
         title: a.title, target: where.slice(0, 2).join(", ") + (where.length > 2 ? ` +${where.length - 2}` : ""), evidence: "cfg",
         href: "/security/advisories", seenAt: input.advisories.generatedAt,
         namespaces: uniq(inCluster.flatMap((x) => x.workloads).map(nsOf)), resourceGroups: uniq([clusterRg]),
@@ -183,7 +194,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
       for (const w of runQuery(graph, keys, { includeManaged: q.includeManaged }).matches) {
         const ev = keys.map((k) => w.facts[k].ev).sort((a, b) => EV_RANK[a] - EV_RANK[b])[0] ?? "cfg";
         raw.push({
-          key: `query:${scope}:${q.id}/${ascii(w.id, 300)}`, source: "query", sev: q.sev,
+          key: `query:${scope}:${q.id}/${ascii(w.id, 300)}`, source: "query", pathType: "custom", sev: q.sev,
           title: `${q.name} · ${w.name}`, target: `${w.namespace}/${w.name}`, evidence: ev,
           href: `/security/explore?cluster=${cluster}&q=${encodeURIComponent(q.q)}`, seenAt: input.insights.generatedAt,
           namespaces: [w.namespace], resourceGroups: uniq([clusterRg]),
@@ -195,7 +206,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
   if (input.azureRisk) {
     for (const c of input.azureRisk.combos) {
       raw.push({
-        key: c.key, source: "azure", sev: c.sev, title: input.azureTitle ? input.azureTitle(c) : c.kind,
+        key: c.key, source: "azure", pathType: c.kind === "highIdentity" ? "privilege" : "exposure", sev: c.sev, title: input.azureTitle ? input.azureTitle(c) : c.kind,
         target: `${c.name} (${c.resourceGroup})`, evidence: c.exposure.state === "yes" || c.high.state === "yes" ? "cfg" : "perm",
         href: `/security/risk#azure-${c.key.slice(6).replace(/[^a-z0-9-]/g, "-")}`, seenAt: input.azureRisk.generatedAt,
         namespaces: [], resourceGroups: [c.resourceGroup],
@@ -206,7 +217,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
     for (const p of input.azureRisk.paths ?? []) {
       if (p.ends === "entry") continue;
       raw.push({
-        key: p.key, source: "azure", sev: p.sev, title: input.azurePathTitle ? input.azurePathTitle(p) : `path ${p.entry.name}`,
+        key: p.key, source: "azure", pathType: "exposure", sev: p.sev, title: input.azurePathTitle ? input.azurePathTitle(p) : `path ${p.entry.name}`,
         target: `${p.entry.name} (${p.entry.resourceGroup})`, evidence: "perm",
         href: `/security/risk#azure-${p.key.slice(5).replace(/[^a-z0-9-]/g, "-")}-path`, seenAt: input.azureRisk.generatedAt,
         namespaces: [], resourceGroups: [p.entry.resourceGroup],
@@ -218,7 +229,7 @@ export function buildIssueQueue(input: QueueInput): IssueQueue {
     for (const g of groupAlerts(input.alerts)) {
       if (g.severity === "Informational") continue;
       raw.push({
-        key: `alert:${g.severity.toLowerCase()}:${slug(g.title)}`, source: "alert", sev: g.severity === "High" ? "high" : g.severity === "Medium" ? "medium" : "low",
+        key: `alert:${g.severity.toLowerCase()}:${slug(g.title)}`, source: "alert", pathType: "threat", sev: g.severity === "High" ? "high" : g.severity === "Medium" ? "medium" : "low",
         title: g.items.length > 1 ? `${g.title} ×${g.items.length}` : g.title, target: g.resources.slice(0, 2).join(", ") + (g.resources.length > 2 ? ` +${g.resources.length - 2}` : ""),
         evidence: "obs", href: "/security/threats", seenAt: input.alertsAt ?? g.lastAt,
         namespaces: uniq(g.items.map((a) => a.k8s?.namespace)), resourceGroups: uniq(g.items.flatMap((a) => a.resources.map((r) => r.resourceGroup))),

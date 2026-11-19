@@ -2,30 +2,25 @@
 
 import { useId, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AdvisoriesResponse, ArchitectureGraph, IssueState, IssueStatesResponse, IssueStatus, PolicyInsightsResponse, SavedQueriesResponse, WorkloadIdentityResponse, AzureRiskResponse } from "@aud/types";
+import type { ArchitectureGraph, PolicyInsightsResponse } from "@aud/types";
 import { Badge, EmptyState, ErrorNotice, LoadingState, Notice, Panel, Select, Stat } from "@/components/ui";
-import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
+import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { buildIssueQueue, type IssueSource, type QueueItem } from "@/lib/issueQueue";
-import { AzureRiskPanel, useAzurePathTitle, useAzureTitle } from "./AzureRiskPanel";
+import { AzureRiskPanel } from "./AzureRiskPanel";
 import { AzurePathsPanel } from "./AzurePathsPanel";
 import { joinRisk, type RiskRow } from "@/lib/riskJoin";
-import { useApiToken } from "@/lib/useApiToken";
-import { IssueQueue, type SaveResult, type SourceState } from "./IssueQueue";
-import { useAksClusters } from "@/lib/useAksClusters";
+import { IssueQueue } from "./IssueQueue";
+import { useIssueSources } from "../useIssueSources";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { EvidenceChip } from "../../policies/insights/Inspector";
 import { useSecurity } from "../SecurityContext";
 import { PostureNotices, SecurityHeader, SeverityBadge, useLabel } from "../components";
 import s from "./risk.module.css";
 
-// mockClusters (API fallback) use the all-zero subscription — never query insights for them
-const MOCK_SUB = "/subscriptions/00000000-0000-0000-0000-000000000000/";
-
 /** 통합 위험 — cluster risk combinations next to the Defender findings and alerts of Azure resources
  *  that are linked to the cluster by evidence (ID match, observed egress, LB backend). */
 export default function SecurityRiskPage() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const label = useLabel();
   const { subscriptionId, posture, loading: postureLoading, ready } = useSecurity();
   const sub = subscriptionId || undefined;
@@ -33,86 +28,19 @@ export default function SecurityRiskPage() {
   const graphQ = useApiQuery(ready ? `arch:${subscriptionId}` : null, (token) =>
     fetchJsonWithBearer<ArchitectureGraph>(apiUrl("/api/architecture/graph", { subscriptionId: sub }), token),
   );
-  const { clusters, clusterId, setClusterId, loading: clustersLoading, error: clustersError } = useAksClusters(ready ? sub : undefined);
-  const clustersMock = clusters.length > 0 && clusters.every((c) => c.id.toLowerCase().startsWith(MOCK_SUB));
-  const insightsQ = useApiQuery(ready && clusterId && !clustersMock && !clustersLoading ? `k8s-policy-insights:${clusterId}:${locale}` : null, (token) =>
-    fetchJsonWithBearer<PolicyInsightsResponse>(apiUrl("/api/kubernetes/policies/insights", { clusterId, lang: locale }), token),
-  );
+  const src = useIssueSources();
+  const { clusters, clusterId, setClusterId, clustersLoading, clustersError, clustersMock, insightsQ, insights, cluster, azQ, azureRisk, statesQ, queue, sources, saveState } = src;
 
   // Join only responses that belong to the current subscription and cluster — stale data from the
   // previous selection is never mixed in (useApiQuery keeps old data while a new key loads).
   const graph = graphQ.loading ? undefined : graphQ.data;
-  const insights = !insightsQ.loading && insightsQ.data && insightsQ.data.clusterId.toLowerCase() === clusterId.toLowerCase() ? insightsQ.data : undefined;
   const freshPosture = postureLoading ? undefined : posture;
-  const cluster = clusters.find((c) => c.id === clusterId);
 
   const result = useMemo(
     () => (freshPosture && graph && insights && cluster ? joinRisk({ posture: freshPosture, graph, insights, clusterArmId: cluster.id }) : null),
     [freshPosture, graph, insights, cluster],
   );
-  const sample = freshPosture?.source === "mock" || graph?.source === "mock" || clustersMock;
-
-  // 이슈 목록: two more sources for the selected cluster + the team's status (subscription)
-  const live = ready && !!clusterId && !clustersMock && !clustersLoading;
-  const wiQ = useApiQuery(live ? `k8s-wi:${clusterId}:${locale}:false` : null, (token) =>
-    fetchJsonWithBearer<WorkloadIdentityResponse>(apiUrl("/api/kubernetes/policies/workload-identity", { clusterId, lang: locale }), token),
-  );
-  // Azure resource combinations of the subscription (not tied to a cluster)
-  const azQ = useApiQuery(ready && !sample ? `azure-risk:${subscriptionId}` : null, (token) =>
-    fetchJsonWithBearer<AzureRiskResponse>(apiUrl("/api/security/azure-risk", { subscriptionId: sub }), token),
-  );
-  const azureRisk = !azQ.loading && azQ.data && (!sub || azQ.data.subscriptionId.toLowerCase() === sub.toLowerCase()) ? azQ.data : undefined;
-  const azureTitle = useAzureTitle();
-  const azurePathTitle = useAzurePathTitle();
-  const advQ = useApiQuery(live ? `advisories:${clusterId}:${locale}` : null, (token) =>
-    fetchJsonWithBearer<AdvisoriesResponse>(apiUrl("/api/security/advisories", { clusterId, lang: locale }), token),
-  );
-  const statesQ = useApiQuery(ready && !sample ? `issue-states:${subscriptionId}` : null, (token) =>
-    fetchJsonWithBearer<IssueStatesResponse>(apiUrl("/api/security/issue-states", { subscriptionId: sub }), token),
-  );
-  // Team questions of the graph explorer — the watched ones raise issues (source "query")
-  const queriesQ = useApiQuery(ready && !sample ? `saved-queries:${subscriptionId}` : null, (token) =>
-    fetchJsonWithBearer<SavedQueriesResponse>(apiUrl("/api/security/saved-queries", { subscriptionId: sub }), token),
-  );
-  const [saved, setSaved] = useState<Record<string, IssueState>>({});
-  const getToken = useApiToken();
-  const wi = !wiQ.loading && wiQ.data?.clusterId.toLowerCase() === clusterId.toLowerCase() ? wiQ.data : undefined;
-  const adv = !advQ.loading && advQ.data?.clusterId?.toLowerCase() === clusterId.toLowerCase() ? advQ.data : undefined;
-  const states = useMemo(() => ({ ...(statesQ.data?.states ?? {}), ...saved }), [statesQ.data, saved]);
-  const queue = useMemo(() => buildIssueQueue({
-    clusterId: cluster?.id ?? null, insights, wi, advisories: adv, queries: queriesQ.data?.queries ?? null,
-    alerts: freshPosture && !freshPosture.gaps.some((g) => g.section === "alerts") ? freshPosture.alerts : null,
-    alertsAt: freshPosture?.generatedAt ?? null, states, owners: statesQ.data?.owners ?? [], now: new Date(),
-    azureRisk: azureRisk ?? null, azureTitle, azurePathTitle,
-  }), [cluster, insights, wi, adv, queriesQ.data, freshPosture, states, statesQ.data?.owners, azureRisk, azureTitle, azurePathTitle]);
-  const srcState = (loading: boolean, error: unknown, data: unknown, on: boolean): SourceState => (!on ? "off" : loading ? "loading" : error ? "failed" : data ? "ok" : "loading");
-  const sources: Record<IssueSource, SourceState> = {
-    combo: srcState(insightsQ.loading, insightsQ.error, insights, live),
-    wi: srcState(wiQ.loading, wiQ.error, wi, live),
-    vuln: srcState(advQ.loading, advQ.error, adv, live),
-    // No watched question = nothing to read ("n/a"); otherwise it rests on the questions and the cluster insights
-    query: !live ? "off" : queriesQ.loading ? "loading" : queriesQ.error ? "failed" : !queriesQ.data?.queries.some((q) => q.watch) ? "off"
-      : srcState(insightsQ.loading, insightsQ.error, insights, true),
-    alert: postureLoading ? "loading" : !freshPosture || freshPosture.gaps.some((g) => g.section === "alerts") ? "failed" : "ok",
-    azure: sample || !ready ? "off" : azQ.loading ? "loading" : azQ.error ? "failed" : azureRisk ? (azureRisk.gaps.length ? "failed" : "ok") : "loading",
-  };
-  const saveState = async (item: QueueItem, change: { status: IssueStatus; note?: string; assignee?: string; until?: string }): Promise<SaveResult> => {
-    try {
-      const token = await getToken().catch(() => null);
-      const r = await fetchJsonWithBearer<{ state: IssueState }>(apiUrl("/api/security/issue-states", { subscriptionId: sub, key: item.key }), token,
-        { method: "PUT", body: JSON.stringify({ ...change, baseRev: item.stored?.rev ?? null }) });
-      setSaved((m) => ({ ...m, [item.key]: r.state }));
-      return "ok";
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        // Someone changed it since this page loaded — show theirs, the user decides again
-        await statesQ.reload?.();
-        setSaved((m) => { const n = { ...m }; delete n[item.key]; return n; });
-        return "conflict";
-      }
-      return e instanceof ApiError && e.code ? e.code : "issue_state_write_failed";
-    }
-  };
+  const sample = src.sample || graph?.source === "mock";
   const loading = !ready || postureLoading || graphQ.loading || clustersLoading || (!!clusterId && !clustersMock && insightsQ.loading);
 
   let body: React.ReactNode;

@@ -163,7 +163,9 @@ test("wiring: signed-in route, the queue's source list, the evidence panel, i18n
   assert.match(read("../../web/src/app/security/risk/IssueQueue.tsx"), /const SOURCES: IssueSource\[\] = \["combo", "azure",/);
   const page = read("../../web/src/app/security/risk/page.tsx");
   assert.match(page, /<AzureRiskPanel data=\{azureRisk\}/);
-  assert.match(page, /azureRisk: azureRisk \?\? null, azureTitle/);
+  // the queue's sources moved to a shared hook (2026-11-19 — 노출 관리 counts the same queue)
+  assert.match(read("../../web/src/app/security/useIssueSources.ts"), /azureRisk: azureRisk \?\? null, azureTitle/);
+  assert.match(page, /useIssueSources\(\)/);
   const panel = read("../../web/src/app/security/risk/AzureRiskPanel.tsx");
   const all = read("../../web/src/lib/i18nMessages.ts");
   const keys = new Set([...panel.matchAll(/t\("(azr\.[\w.]+)"/g)].map((m) => m[1]!));

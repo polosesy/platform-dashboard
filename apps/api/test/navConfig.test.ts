@@ -35,7 +35,7 @@ test("every page route appears in the menu exactly once (the sign-in page is the
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 38); // + /observability/services/metrics (APM 메트릭, 2026-11-19) · + /settings/preferences (보기 설정, 2026-11-19) · + 7 APM views of their own (2026-11-19 — were buttons inside 서비스 (APM)) · + 6 monitoring views of their own (2026-11-19 — they were tabs of /observability) · + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
+  assert.equal(routes.length, 39); // + /security/exposure (노출 관리 CTEM, 2026-11-19) · + /observability/services/metrics (APM 메트릭, 2026-11-19) · + /settings/preferences (보기 설정, 2026-11-19) · + 7 APM views of their own (2026-11-19 — were buttons inside 서비스 (APM)) · + 6 monitoring views of their own (2026-11-19 — they were tabs of /observability) · + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -78,7 +78,7 @@ test("three levels: top category › category (section) › screen — six top c
     ["nav.section.monData", ["/observability/logs", "/observability/collection"]],
   ]);
   assert.deepEqual(shape("security"), [
-    ["nav.section.secPriority", ["/security", "/security/risk", "/security/explore"]],
+    ["nav.section.secPriority", ["/security", "/security/exposure", "/security/risk", "/security/explore"]],
     ["nav.section.secVulns", ["/security/advisories"]],
     ["nav.section.secPosture", ["/security/findings", "/policies"]],
     ["nav.section.secAccess", ["/security/identity", "/security/threats"]],
@@ -105,7 +105,7 @@ test("categories: contiguous within their top category, translated, no name said
   }
   // sectionBefore (the home page's card labels) still reads the same categories
   const sec = NAV_GROUPS.find((g) => g.key === "security")!;
-  assert.deepEqual(sec.items.map((_, i) => sectionBefore(sec.items, i)), ["nav.section.secPriority", null, null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
+  assert.deepEqual(sec.items.map((_, i) => sectionBefore(sec.items, i)), ["nav.section.secPriority", null, null, null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
 });
 
 test("every label, description and section has ko and en text", () => {

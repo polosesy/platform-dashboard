@@ -1,7 +1,15 @@
 // AKS 보안 점검 — image vulnerabilities, the entry point of an attack path ("could a running image be broken into?").
 // Two sources, merged per running image reference; neither is a guess:
-//  ① Microsoft Defender for Containers — vulnerability sub-assessments in Resource Graph, summarised per image
-//     (registry · repository · digest · tags) and tied to a pod's image by digest, else by tag.
+//  ① Microsoft Defender for Containers — summarised per image (registry · repository · digest · tags) and tied to a
+//     pod's image by digest, else by tag. Two shapes in Resource Graph, both read:
+//       a. vulnerability sub-assessments (the older model) — `assessments/subassessments`
+//       b. one assessment per vulnerable package (2026-11-19 — "Update openssl", …): `resourceDetails.ResourceType`
+//          `.containerimage` (registry image: RepositoryDetails · Digest · Tags) and `K8s-container` (a running
+//          container: ClusterDetails.ClusterResourceId · Namespace · Controller · ImageDetails.ImageUri = repo:tag@digest),
+//          CVEs in `additionalData.CvesDetails` (CveId · Severity · FixStatus · FixedVersion). stg had 0 rows of (a) and
+//          11,448 image + 668 running-container rows of (b) — reading only (a) left every entry point "not scanned".
+//          A running container's cluster id is the cluster's ARM id, or a child `…/securityentitydata/…` (system pods).
+//     Defender gives no exploitation signal in (b): its CVEs are checked against the CISA KEV catalogue instead.
 //  ② SBOM — a well-known open-source image at an exact semver tag (sbom.ts KNOWN_IMAGES) → OSV, with CVE.org
 //     exploitation (CISA ADP SSVC) and the CISA KEV catalogue. Mirrors and hardened rebuilds (e.g. "-dhi") are not
 //     mapped: a rebuilt image may carry patches the upstream version number does not show.
@@ -12,7 +20,7 @@ import type { Env } from "../env.js";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { getArmFetcherAuto } from "../infra/azureClientFactory.js";
 import { debug } from "../infra/logger.js";
-import { safeMessage } from "../infra/requestParams.js";
+import { kqlString, safeMessage } from "../infra/requestParams.js";
 import { imageCoord, type Coord } from "./sbom.js";
 import { cveOrgRecords, fixedFor, osvScan, type CveOrgInfo, type OsvVuln } from "./vulnDb.js";
 import { isCveId, loadFeeds } from "./advisoryFeeds.js";
@@ -40,7 +48,53 @@ export type DefenderImageRow = {
   registry: string; repo: string; digest: string; tags: string;
   critical: number; high: number; medium: number; low: number; exploited: number; fixable: number;
   top: Array<{ cve?: string; sev?: string; pkg?: string; ver?: string; fixed?: string; ex?: boolean }> | null;
+  /** (b) only: the critical / high CVE ids — checked against CISA KEV */
+  cves?: string[] | null;
 };
+
+/**
+ * (b) Per-package assessments: registry images of the subscription + running containers of THIS cluster, one row per
+ * image. Exact counts — one row per (image, CVE) first, then counted (no dcount estimate). A CVE's severity is Defender's
+ * per-CVE `Severity` ("Unknown" is in none of the four counts); fixable = `FixStatus` FixAvailable.
+ */
+export const DEFENDER_PKG_QUERY = (clusterId: string) => `securityresources
+| where type =~ "microsoft.security/assessments" and tostring(properties.status.code) =~ "Unhealthy"
+| extend rt = tostring(properties.resourceDetails.ResourceType)
+| where rt in (".containerimage", "K8s-container")
+| extend ra = parse_json(tostring(properties.resourceAdditionalData)), ad = properties.additionalData
+| extend cl = tolower(tostring(ra.ClusterDetails.ClusterResourceId))
+| where rt == ".containerimage" or cl == ${kqlString(clusterId.toLowerCase())} or cl startswith ${kqlString(`${clusterId.toLowerCase()}/`)}
+| extend uri = iff(rt == "K8s-container", tostring(ra.ImageDetails.ImageUri), ""), registry = tolower(tostring(ra.RepositoryDetails.RegistryHost)), repo = tolower(tostring(ra.RepositoryDetails.RepositoryName)), digest = tostring(ra.Digest), tags = tostring(ra.Tags)
+| extend pkg = tostring(ad.SoftwareName), ver = tostring(ad.DetectedSoftwareVersions), pfx = tostring(ad.FixedVersion)
+| mv-expand c = parse_json(tostring(ad.CvesDetails))
+| extend cve = tostring(c.CveId), sev = tolower(tostring(c.Severity)), fx = iff(tostring(c.FixStatus) =~ "FixAvailable", coalesce(tostring(c.FixedVersion), pfx, "yes"), "")
+| where isnotempty(cve)
+| summarize fx = max(fx), pkg = take_any(pkg), ver = take_any(ver) by rt, uri, registry, repo, digest, tags, cve, sev
+| summarize critical = countif(sev == "critical"), high = countif(sev == "high"), medium = countif(sev == "medium"), low = countif(sev == "low"), fixable = countif(isnotempty(fx)), cves = make_list_if(cve, sev in ("critical", "high"), 500), top = make_list_if(pack("cve", cve, "sev", sev, "pkg", pkg, "ver", ver, "fixed", fx), sev in ("critical", "high"), 20) by rt, uri, registry, repo, digest, tags
+| take 3000`;
+
+export type DefenderPkgRow = Omit<DefenderImageRow, "exploited"> & { rt: string; uri: string };
+
+/** (b) rows → the image rows of (a): a running container's image reference (repo:tag@digest) is parsed like a pod's */
+export function pkgRows(rows: DefenderPkgRow[]): DefenderImageRow[] {
+  return rows.map((r) => {
+    if (r.rt !== "K8s-container") return { ...r, exploited: 0 };
+    const p = imageParts(r.uri);
+    return { ...r, registry: p.registry, repo: p.repo, digest: p.digest, tags: JSON.stringify(p.tag ? [p.tag] : []), exploited: 0 };
+  });
+}
+
+/** CVEs of (b) in the CISA KEV catalogue → that image's result is "kev" (exploited in the wild) */
+export function withKev(v: ImageVuln[], rows: DefenderImageRow[], kev: Set<string>): ImageVuln[] {
+  if (!kev.size) return v;
+  return v.map((x) => {
+    const p = imageParts(x.image);
+    const hit = rows.some((r) => r.registry === p.registry && r.repo === p.repo && (r.cves ?? []).some((c) => kev.has(c)) && (!p.digest || !r.digest || r.digest === p.digest));
+    if (!hit) return x;
+    const kevIds = new Set(rows.filter((r) => r.registry === p.registry && r.repo === p.repo).flatMap((r) => (r.cves ?? []).filter((c) => kev.has(c))));
+    return { ...x, exploited: "kev", top: x.top.map((t) => (t.cve && kevIds.has(t.cve) ? { ...t, exploited: "kev" as const } : t)) };
+  });
+}
 
 /** "acr.azurecr.io/team/app:1.2@sha256:…" → parts; no registry = Docker Hub (docker.io, library/ for single names) */
 export function imageParts(image: string): { registry: string; repo: string; tag: string; digest: string } {
@@ -151,9 +205,18 @@ export async function collectImageVulns(env: Env, bearerToken: string | undefine
   const defenderP = (async () => {
     const arm = await getArmFetcherAuto(env, bearerToken);
     const sub = /\/subscriptions\/([^/]+)\//i.exec(clusterId)?.[1];
-    const res = await arm.postJson<{ data?: DefenderImageRow[] }>(ARG, { query: DEFENDER_IMAGE_QUERY, ...(sub ? { subscriptions: [sub] } : {}), options: { resultFormat: "objectArray", $top: 1000 } }, { timeoutMs: 20_000 });
-    return res.data ?? [];
+    const ask = <T>(query: string) => arm.postJson<{ data?: T[] }>(ARG, { query, ...(sub ? { subscriptions: [sub] } : {}), options: { resultFormat: "objectArray", $top: 1000 } }, { timeoutMs: 20_000 }).then((r) => r.data ?? []);
+    // Each shape on its own: one failing still leaves the other (both failing = the Defender source failed)
+    const [a, b] = await Promise.allSettled([ask<DefenderImageRow>(DEFENDER_IMAGE_QUERY), ask<DefenderPkgRow>(DEFENDER_PKG_QUERY(clusterId))]);
+    if (a.status === "rejected" && b.status === "rejected") throw a.reason;
+    if (a.status === "rejected") debug(`[image-vulns] defender sub-assessments: ${safeMessage(a.reason)}`);
+    if (b.status === "rejected") debug(`[image-vulns] defender packages: ${safeMessage(b.reason)}`);
+    return [...(a.status === "fulfilled" ? a.value : []), ...(b.status === "fulfilled" ? pkgRows(b.value) : [])];
   })();
+  // KEV for the Defender package CVEs (6-hour cached feed; a cold start waits at most 8 s)
+  const kevP = env.AUD_ADVISORY_FEEDS
+    ? Promise.race([loadFeeds(env).then((f) => new Set((f.kev ?? []).map((k) => k.cve))), new Promise<Set<string>>((r) => setTimeout(() => r(new Set()), 8_000).unref?.())]).catch(() => new Set<string>())
+    : Promise.resolve(new Set<string>());
 
   const sbomOn = env.AUD_ADVISORY_FEEDS && env.AUD_ADVISORY_OSV;
   const coords = new Map<string, Coord>();
@@ -177,10 +240,10 @@ export async function collectImageVulns(env: Env, bearerToken: string | undefine
     return { byCoord, records: org.records, kev: new Set((feeds ?? []).map((k) => k.cve)), pending: scan.pending + org.pending + (feeds ? 0 : 1) };
   })();
 
-  const [dR, sR] = await Promise.allSettled([defenderP, sbomP]);
+  const [dR, sR, kevSet] = await Promise.all([Promise.allSettled([defenderP]).then((x) => x[0]), Promise.allSettled([sbomP]).then((x) => x[0]), kevP]);
   if (dR.status === "rejected") debug(`[image-vulns] defender: ${safeMessage(dR.reason)}`);
   if (sR.status === "rejected") debug(`[image-vulns] sbom: ${safeMessage(sR.reason)}`);
-  const defender = dR.status === "fulfilled" ? defenderVulns(list, dR.value) : [];
+  const defender = dR.status === "fulfilled" ? withKev(defenderVulns(list, dR.value), dR.value, kevSet) : [];
   const sbom = sR.status === "fulfilled" ? sbomVulns(list, sR.value.byCoord, sR.value.records, sR.value.kev) : [];
   const byImage = mergeVulns(defender, sbom);
   const pending = sR.status === "fulfilled" ? sR.value.pending : 0;

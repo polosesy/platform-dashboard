@@ -20,7 +20,7 @@ export type NavIcon =
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
   | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph"
   | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes"
-  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target" | "sliders" | "lineChart";
+  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target" | "sliders" | "lineChart" | "funnel";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -69,6 +69,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // By the question a person comes with (Wiz: Issues → domains), not by where the data comes from — 2026-11-17.
       // Each domain holds the Azure and the cluster view side by side.
       item("/security", "securityOverview", "shieldCheck", "nav.section.secPriority"),
+      // Wiz Exposure Management (CTEM five stages) — scoping → discovery → prioritization → validation → remediation (2026-11-19)
+      item("/security/exposure", "securityExposure", "funnel", "nav.section.secPriority"),
       item("/security/risk", "securityRisk", "radar", "nav.section.secPriority"),
       // Wiz's Security Graph: ask the graph with conditions — before, a tab inside AKS 보안 점검 (security-roadmap 5.3 ①)
       item("/security/explore", "securityExplore", "graph", "nav.section.secPriority"),
@@ -124,6 +126,7 @@ export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster"
   "/observability/profiles": ["cluster"],
   "/observability/logs": ["cluster"],
   "/observability/collection": ["cluster"],
+  "/security/exposure": ["subscription"],
   "/security/risk": ["subscription"],
   "/security/explore": ["cluster"],
   "/security/advisories": ["cluster"],
