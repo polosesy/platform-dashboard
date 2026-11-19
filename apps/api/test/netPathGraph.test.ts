@@ -208,3 +208,18 @@ test("the probe keeps Datadog's defaults and the page's commands use its paramet
   // nothing but ASCII (Windows PowerShell 5.1 reads a file without a BOM in the ANSI code page)
   assert.ok([...ps].every((c) => c.charCodeAt(0) < 128));
 });
+
+test("screen regressions (2026-11-19): the destination card is taller than a hop card; the health bar's tooltip is not cut, a click draws no frame", () => {
+  // the destination card has a status band over the two rows every card has — at 64 px its last row was cut in half
+  assert.ok(G.PATH_DEST_H >= G.PATH_NODE_H + 20);
+  const graph = readFileSync(new URL("../../web/src/app/network-path/PathGraph.tsx", import.meta.url), "utf8");
+  assert.match(graph, /n\.kind === "dest" \? PATH_DEST_H : PATH_NODE_H/);
+  const css = readFileSync(new URL("../../web/src/app/network-path/styles.module.css", import.meta.url), "utf8");
+  // the tooltip sat above the bar inside an overflow: hidden box — only its shadow showed
+  assert.match(css, /\.hbBox \{[^}]*overflow: visible/);
+  assert.match(css, /\.hbBox svg:focus:not\(:focus-visible\) \{ outline: none; \}/);
+  const bar = readFileSync(new URL("../../web/src/app/network-path/HealthBar.tsx", import.meta.url), "utf8");
+  assert.match(bar, /top: H \+ 2/, "under the bar");
+  assert.match(bar, /np\.hb\.single/, "one run says what a trend needs");
+  assert.match(bar, /np\.hb\.top/, "the latency bars' scale is said");
+});

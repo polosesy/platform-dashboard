@@ -31,21 +31,18 @@ const item = (href: string, key: string, icon: NavIcon, section?: string): NavIt
 export const NAV_GROUPS: NavGroup[] = [
   { key: "overview", labelKey: "nav.group.overview", icon: "home", items: [item("/", "overview", "dashboard")] },
   {
-    key: "azure", labelKey: "nav.group.azure", icon: "cloud", items: [
-      // Widest scope first: whole subscription → one VNet live → per-resource health
-      item("/architecture", "architecture", "sitemap"),
-      item("/live-diagram", "liveDiagram", "activity"),
-      item("/health", "health", "heartPulse"),
+    // 2026-11-19: three levels — top category › category (a section, folds) › screen. 인프라 = what runs: the Azure
+    // resources (widest scope first: whole subscription → one VNet live → per-resource health), the network, the cluster
+    key: "infra", labelKey: "nav.group.infra", icon: "cloud", items: [
+      item("/architecture", "architecture", "sitemap", "nav.group.azure"),
+      item("/live-diagram", "liveDiagram", "activity", "nav.group.azure"),
+      item("/health", "health", "heartPulse", "nav.group.azure"),
+      item("/network", "vnetTraffic", "arrows", "nav.group.network"),
+      item("/hubble", "podTraffic", "share", "nav.group.network"),
+      item("/network-path", "networkPath", "globe", "nav.group.network"),
+      item("/kubernetes", "aksClusters", "boxes", "nav.group.kubernetes"),
     ],
   },
-  {
-    key: "network", labelKey: "nav.group.network", icon: "waypoints", items: [
-      item("/network", "vnetTraffic", "arrows"),
-      item("/hubble", "podTraffic", "share"),
-      item("/network-path", "networkPath", "globe"),
-    ],
-  },
-  { key: "kubernetes", labelKey: "nav.group.kubernetes", icon: "helm", items: [item("/kubernetes", "aksClusters", "boxes")] },
   {
     key: "monitoring", labelKey: "nav.group.monitoring", icon: "monitor", items: [
       item("/observability", "aksMonitoring", "gauge", "nav.section.monState"),
@@ -73,10 +70,15 @@ export const NAV_GROUPS: NavGroup[] = [
       item("/security/compliance", "securityCompliance", "scale", "nav.section.secAudit"),
     ],
   },
-  { key: "cost", labelKey: "nav.group.cost", icon: "coins", items: [item("/cost", "costManagement", "wallet")] },
-  // Alerts received from Azure Monitor and Grafana (the dashboard is the receiver — no messenger webhook needed)
-  // …and what the team learned answering them: cases (how it was fixed) and runbooks (what to do) — docs/architecture/ops-knowledge.md
-  { key: "notify", labelKey: "nav.group.notify", icon: "inbox", items: [item("/notifications", "notifications", "bell"), item("/runbooks", "runbooks", "book")] },
+  // 운영 = running it: the cost, and the alerts received from Azure Monitor and Grafana (the dashboard is the receiver — no
+  // messenger webhook needed) with what the team learned answering them (cases · runbooks — docs/architecture/ops-knowledge.md)
+  {
+    key: "ops", labelKey: "nav.group.ops", icon: "coins", items: [
+      item("/cost", "costManagement", "wallet", "nav.group.cost"),
+      item("/notifications", "notifications", "bell", "nav.group.notify"),
+      item("/runbooks", "runbooks", "book", "nav.group.notify"),
+    ],
+  },
   // How the platform reaches Azure (connections, permission check) — last, like other platforms' settings
   { key: "settings", labelKey: "nav.group.settings", icon: "settings", items: [
     item("/settings/connections", "connections", "plug"),
@@ -170,8 +172,24 @@ export function activeGroupKey(pathname: string): string | null {
 
 // ── Folding the menu's groups (this browser only) ──
 
-/** localStorage key: the group keys the viewer folded (JSON array) */
+/** localStorage key: the groups and sections the viewer folded (JSON array of `group` / `group:section` keys) */
 export const NAV_COLLAPSE_KEY = "aud.nav.collapsed";
+
+/** A group's sections in order (contiguous items sharing a section); a group without sections = one unnamed section */
+export type NavSection = { key: string; labelKey: string | null; items: NavItem[] };
+export function sectionsOf(g: NavGroup): NavSection[] {
+  const out: NavSection[] = [];
+  for (const it of g.items) {
+    const last = out[out.length - 1];
+    if (last && last.labelKey === (it.section ?? null)) last.items.push(it);
+    else out.push({ key: it.section ? `${g.key}:${it.section}` : g.key, labelKey: it.section ?? null, items: [it] });
+  }
+  return out;
+}
+/** Every foldable key: the headed groups and their named sections */
+export function foldableKeys(): string[] {
+  return NAV_GROUPS.filter(isCollapsible).flatMap((g) => [g.key, ...sectionsOf(g).filter((s) => s.labelKey).map((s) => s.key)]);
+}
 
 /** Groups with a heading fold; 개요 (one link, no heading) does not */
 export function isCollapsible(g: NavGroup): boolean {
@@ -183,7 +201,7 @@ export function parseCollapsed(raw: string | null): Set<string> {
   if (!raw) return new Set();
   try {
     const v: unknown = JSON.parse(raw);
-    const known = new Set(NAV_GROUPS.filter(isCollapsible).map((g) => g.key));
+    const known = new Set(foldableKeys());
     return new Set(Array.isArray(v) ? v.filter((k): k is string => typeof k === "string" && known.has(k)) : []);
   } catch {
     return new Set();
@@ -195,7 +213,11 @@ export function parseCollapsed(raw: string | null): Set<string> {
  * you are) or none
  */
 export function shownItems(g: NavGroup, folded: boolean, pathname: string): NavItem[] {
-  if (!folded) return g.items;
+  return visibleItems(g.items, folded, pathname);
+}
+/** Pure: the links a group or a section lists — all, or folded: the current page's only */
+export function visibleItems(items: NavItem[], folded: boolean, pathname: string): NavItem[] {
+  if (!folded) return items;
   const active = activeNavItem(pathname)?.href;
-  return g.items.filter((it) => it.href === active);
+  return items.filter((it) => it.href === active);
 }

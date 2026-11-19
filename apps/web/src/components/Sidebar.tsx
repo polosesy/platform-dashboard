@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { NAV_COLLAPSE_KEY, NAV_GROUPS, isCollapsible, isItemActive, navHref, parseCollapsed, sectionBefore, shownItems } from "@/lib/navConfig";
+import { NAV_COLLAPSE_KEY, NAV_GROUPS, foldableKeys, isCollapsible, isItemActive, navHref, parseCollapsed, sectionsOf, shownItems, visibleItems } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import { NavIcon } from "./navIcons";
 import { BrandMark } from "./BrandMark";
@@ -44,13 +44,22 @@ export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
     setFolded(next);
     try { window.localStorage.setItem(NAV_COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* not remembered */ }
   };
-  const foldable = NAV_GROUPS.filter(isCollapsible).map((g) => g.key);
+  const foldable = foldableKeys();
   const allFolded = foldable.every((k) => folded.has(k));
   const toggle = (key: string) => {
     const next = new Set(folded);
     if (next.has(key)) next.delete(key); else next.add(key);
     remember(next);
   };
+  /** A folding heading — a top category or a category (sub): name · count when folded · chevron */
+  const foldButton = (key: string, label: string, count: number, isFolded: boolean, controls: string, level: "top" | "sub") => (
+    <button id={`nav-sec-${key}`} type="button" className={styles.sectionToggle} data-level={level} aria-expanded={!isFolded} aria-controls={controls}
+      title={t(isFolded ? "nav.expandGroup" : "nav.collapseGroup", { group: label })} onClick={() => toggle(key)}>
+      <span className={styles.sectionName}>{label}</span>
+      {isFolded ? <span className={styles.sectionCount}>{count}</span> : null}
+      <span className={styles.chevron} data-open={!isFolded || undefined} aria-hidden="true">▾</span>
+    </button>
+  );
 
   // Move focus into the drawer when it opens (DOM only — no state change)
   useEffect(() => {
@@ -95,43 +104,38 @@ export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
           {NAV_GROUPS.map((g) => {
             const headed = isCollapsible(g);
             const isFolded = headed && folded.has(g.key);
-            const items = shownItems(g, isFolded, pathname);
-            const list = (
-              <ul id={`nav-list-${g.key}`} className={styles.list} aria-labelledby={headed ? `nav-sec-${g.key}` : undefined} aria-label={headed ? undefined : t(g.labelKey)}>
-                {items.map((it, i) => {
-                  const active = isItemActive(pathname, it.href);
-                  const section = isFolded ? null : sectionBefore(g.items, i);
-                  return (
-                    <li key={it.href}>
-                      {section ? <div className={styles.subLabel} aria-hidden="true">{t(section)}</div> : null}
-                      <Link
-                        href={it.href}
-                        className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
-                        aria-current={active ? "page" : undefined}
-                        title={t(it.descKey)}
-                        onClick={go(it.href)}
-                      >
-                        <span className={styles.navIcon}><NavIcon name={it.icon} /></span>
-                        {t(it.labelKey)}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            );
+            // three levels (2026-11-19): top category › category (a section — folds on its own) › screen. A folded
+            // level still lists the current page's link, so the menu always says where you are.
+            const secs = sectionsOf(g);
+            const link = (it: (typeof g.items)[number]) => {
+              const active = isItemActive(pathname, it.href);
+              return (
+                <li key={it.href}>
+                  <Link href={it.href} className={`${styles.navItem} ${active ? styles.navItemActive : ""}`} aria-current={active ? "page" : undefined}
+                    title={t(it.descKey)} onClick={go(it.href)}>
+                    <span className={styles.navIcon}><NavIcon name={it.icon} /></span>
+                    {t(it.labelKey)}
+                  </Link>
+                </li>
+              );
+            };
             return (
               <div key={g.key} className={styles.section}>
-                {headed && (
-                  <h2 className={styles.sectionLabel}>
-                    <button id={`nav-sec-${g.key}`} type="button" className={styles.sectionToggle} aria-expanded={!isFolded} aria-controls={`nav-list-${g.key}`}
-                      title={t(isFolded ? "nav.expandGroup" : "nav.collapseGroup", { group: t(g.labelKey) })} onClick={() => toggle(g.key)}>
-                      <span className={styles.sectionName}>{t(g.labelKey)}</span>
-                      {isFolded ? <span className={styles.sectionCount}>{g.items.length}</span> : null}
-                      <span className={styles.chevron} data-open={!isFolded || undefined} aria-hidden="true">▾</span>
-                    </button>
-                  </h2>
-                )}
-                {list}
+                {headed ? <h2 className={styles.sectionLabel}>{foldButton(g.key, t(g.labelKey), g.items.length, isFolded, `nav-list-${g.key}`, "top")}</h2> : null}
+                <ul id={`nav-list-${g.key}`} className={styles.list} aria-labelledby={headed ? `nav-sec-${g.key}` : undefined} aria-label={headed ? undefined : t(g.labelKey)}>
+                  {isFolded ? shownItems(g, true, pathname).map(link) : secs.map((sec) => {
+                    if (!sec.labelKey) return sec.items.map(link);
+                    const secFolded = folded.has(sec.key);
+                    return (
+                      <li key={sec.key} className={styles.subGroup}>
+                        {foldButton(sec.key, t(sec.labelKey), sec.items.length, secFolded, `nav-list-${sec.key}`, "sub")}
+                        <ul id={`nav-list-${sec.key}`} className={styles.list} aria-labelledby={`nav-sec-${sec.key}`}>
+                          {visibleItems(sec.items, secFolded, pathname).map(link)}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             );
           })}

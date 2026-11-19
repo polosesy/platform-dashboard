@@ -184,6 +184,11 @@
   font-size: var(--text-caption);
 }
 
+/* a category inside a top category: its own fold, indented under the top heading */
+.subGroup { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.sectionToggle[data-level="sub"] { min-height: 26px; padding-left: 22px; font-size: var(--text-caption); font-weight: 600; color: var(--subtle); }
+.subGroup > .list { padding-left: 8px; }
+
 .subLabel {
   padding: 6px 10px 2px 38px;
   font-size: var(--text-caption);

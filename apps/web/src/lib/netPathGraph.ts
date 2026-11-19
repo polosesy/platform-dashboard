@@ -316,6 +316,8 @@ export function collapse(g: PathGraph, groups: HopGroup[], collapsed: Set<string
 
 export const PATH_NODE_W = 168;
 export const PATH_NODE_H = 64;
+/** The destination card has a status band on top of the two rows every card has (64 px cut its last row in half) */
+export const PATH_DEST_H = PATH_NODE_H + 22;
 export const PATH_COL_GAP = 72;
 export const PATH_ROW_GAP = 18;
 

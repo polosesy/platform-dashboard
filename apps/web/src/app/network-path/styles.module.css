@@ -139,9 +139,13 @@
 /* the health bar — latency on top, reachability below, the picked runs shaded */
 .hb { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 4px 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .hbLabels { display: grid; grid-template-rows: 34px 16px; align-items: center; font-size: var(--text-caption); color: var(--muted); }
-.hbBox { position: relative; min-width: 0; overflow: hidden; touch-action: none; }
+.hbLabels small { display: block; font-size: var(--text-caption); color: var(--subtle); font-variant-numeric: tabular-nums; }
+/* visible: the tooltip sits under the bar and must not be cut (the svg is sized to the box, nothing else overflows) */
+.hbBox { position: relative; min-width: 0; overflow: visible; touch-action: none; }
 .hbBox svg { display: block; cursor: pointer; }
 .hbBox svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* a mouse click focuses the svg too — no ring then (Chrome drew a black frame round the whole bar) */
+.hbBox svg:focus:not(:focus-visible) { outline: none; }
 .hbSel { fill: rgba(var(--accent-rgb), 0.1); stroke: rgba(var(--accent-rgb), 0.5); stroke-width: 1; }
 .hbHandle { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
 .hbLat { fill: rgba(var(--accent-rgb), 0.45); }

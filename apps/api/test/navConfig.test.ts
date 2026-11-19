@@ -54,45 +54,57 @@ test("each route activates exactly one item (longest match) and its group", () =
   assert.equal(activeNavItem("/security/risk")?.href, "/security/risk");
   assert.equal(isItemActive("/security/risk", "/security"), false);
   assert.equal(activeGroupKey("/policies"), "security");
+  assert.equal(activeGroupKey("/hubble"), "infra");
+  assert.equal(activeGroupKey("/runbooks"), "ops");
   assert.equal(activeGroupKey("/does-not-exist"), null);
   assert.equal(activeNavItem("/does-not-exist"), null);
 });
 
-test("group order and shape: 7 slots, single-item groups are direct links", () => {
-  assert.deepEqual(NAV_GROUPS.map((g) => g.key), ["overview", "azure", "network", "kubernetes", "monitoring", "security", "cost", "notify", "settings"]);
-  // 알림·대응 = 알림 센터 + 사례·런북 (2026-11-13) — no longer a single link
-  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview", "kubernetes", "cost"]);
-  assert.deepEqual(NAV_GROUPS.find((g) => g.key === "settings")!.items.map((i) => i.href), ["/settings/connections", "/settings/features"]);
-  assert.deepEqual(NAV_GROUPS.find((g) => g.key === "azure")!.items.map((i) => i.href), ["/architecture", "/live-diagram", "/health"]);
-  assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble", "/network-path"]);
-  assert.deepEqual(
-    NAV_GROUPS.find((g) => g.key === "security")!.items.map((i) => i.href),
-    ["/security", "/security/risk", "/security/explore", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"],
-  );
+test("three levels: top category › category (section) › screen — six top categories, one shape", () => {
+  // 2026-11-19: 10 top entries of uneven depth (개요 alone, '클러스터 › 클러스터', sections only in two groups) →
+  // 6 top categories; every multi-screen top category is divided into categories (except 설정 — two screens)
+  assert.deepEqual(NAV_GROUPS.map((g) => g.key), ["overview", "infra", "monitoring", "security", "ops", "settings"]);
+  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview"], "only 개요 is a direct link");
+  const shape = (k: string) => nav.sectionsOf(NAV_GROUPS.find((g) => g.key === k)!).map((s) => [s.labelKey, s.items.map((i) => i.href)]);
+  assert.deepEqual(shape("infra"), [
+    ["nav.group.azure", ["/architecture", "/live-diagram", "/health"]],
+    ["nav.group.network", ["/network", "/hubble", "/network-path"]],
+    ["nav.group.kubernetes", ["/kubernetes"]],
+  ]);
+  assert.deepEqual(shape("monitoring"), [
+    ["nav.section.monState", ["/observability", "/observability/signals", "/observability/nodes"]],
+    ["nav.section.monApp", ["/observability/services", "/observability/profiles"]],
+    ["nav.section.monData", ["/observability/logs", "/observability/collection"]],
+  ]);
+  assert.deepEqual(shape("security"), [
+    ["nav.section.secPriority", ["/security", "/security/risk", "/security/explore"]],
+    ["nav.section.secVulns", ["/security/advisories"]],
+    ["nav.section.secPosture", ["/security/findings", "/policies"]],
+    ["nav.section.secAccess", ["/security/identity", "/security/threats"]],
+    ["nav.section.secAudit", ["/security/compliance"]],
+  ]);
+  assert.deepEqual(shape("ops"), [["nav.group.cost", ["/cost"]], ["nav.group.notify", ["/notifications", "/runbooks"]]]);
+  assert.deepEqual(shape("settings"), [[null, ["/settings/connections", "/settings/features"]]]);
 });
 
-test("sections: only in the security group, contiguous, translated, never repeating an item label", () => {
+test("categories: contiguous within their top category, translated, no name said twice on a path", () => {
   for (const g of NAV_GROUPS) {
-    const secs = g.items.map((i) => i.section);
-    if (g.key === "monitoring") {
-      // 2026-11-19: one item per monitoring view, in three sections — the cluster's state · the applications · logs and collection
-      assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.monState", null, null, "nav.section.monApp", null, "nav.section.monData", null]);
-      assert.deepEqual(g.items.map((i) => i.href), ["/observability", "/observability/signals", "/observability/nodes", "/observability/services", "/observability/profiles", "/observability/logs", "/observability/collection"]);
-      continue;
+    const secs = nav.sectionsOf(g);
+    const named = secs.filter((s) => s.labelKey).map((s) => s.labelKey!);
+    assert.equal(new Set(named).size, named.length, `${g.key}: a category appears once (contiguous)`);
+    assert.ok(secs.every((s) => !!s.labelKey) || secs.length === 1, `${g.key}: all items in categories, or none`);
+    for (const sec of secs) {
+      if (sec.labelKey) assert.notEqual(msg.T[sec.labelKey]!.ko, msg.T[g.labelKey]!.ko, `${sec.key} differs from its top category`);
+      for (const it of sec.items) {
+        // a single-link group (개요) has no heading — its link is the category
+        if (nav.isCollapsible(g)) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[g.labelKey]!.ko, `${it.href} differs from its top category`);
+        if (sec.labelKey) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[sec.labelKey]!.ko, `${it.href} differs from its category`);
+      }
     }
-    if (g.key !== "security") { assert.ok(secs.every((s) => !s), `${g.key} has no sections`); continue; }
-    assert.ok(secs.every(Boolean), "every security item has a section");
-    const seen = new Set<string>();
-    secs.forEach((s, i) => {
-      if (s !== secs[i - 1]) { assert.ok(!seen.has(s!), `section ${s} is contiguous`); seen.add(s!); }
-    });
-    // 2026-11-17: by the question (what first · vulnerabilities · configuration & exposure · identity & threats · audit),
-    // not by data source — the cluster's posture sits next to the cloud's
-    assert.deepEqual([...seen], ["nav.section.secPriority", "nav.section.secVulns", "nav.section.secPosture", "nav.section.secAccess", "nav.section.secAudit"]);
-    assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.secPriority", null, null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
-    assert.deepEqual(g.items.map((i) => i.href), ["/security", "/security/risk", "/security/explore", "/security/advisories", "/security/findings", "/policies", "/security/identity", "/security/threats", "/security/compliance"]);
-    for (const it of g.items) assert.notEqual(msg.T[it.labelKey]!.ko, msg.T[it.section!]!.ko, `${it.href} label differs from its section heading`);
   }
+  // sectionBefore (the home page's card labels) still reads the same categories
+  const sec = NAV_GROUPS.find((g) => g.key === "security")!;
+  assert.deepEqual(sec.items.map((_, i) => sectionBefore(sec.items, i)), ["nav.section.secPriority", null, null, "nav.section.secVulns", "nav.section.secPosture", null, "nav.section.secAccess", null, "nav.section.secAudit"]);
 });
 
 test("every label, description and section has ko and en text", () => {
@@ -122,14 +134,20 @@ test("scope bar: PAGE_SCOPE names only menu screens; the AKS screens share the c
   assert.equal(nav.PAGE_SCOPE["/live-diagram"], undefined, "the live diagram picks its connection and VNet inside");
 });
 
-test("folding the menu: headed groups fold (개요 does not); storage is read defensively; a folded group keeps the current page's link", () => {
+test("folding the menu at both levels: top categories and categories fold; storage is read defensively; a folded level keeps the current page's link", () => {
   assert.equal(nav.isCollapsible(NAV_GROUPS.find((g) => g.key === "overview")!), false);
   assert.ok(NAV_GROUPS.filter((g) => g.key !== "overview").every(nav.isCollapsible));
-  assert.deepEqual([...nav.parseCollapsed('["security","azure","overview","nope",3]')].sort(), ["azure", "security"], "only known foldable keys");
+  const keys = nav.foldableKeys();
+  assert.ok(keys.includes("security") && keys.includes("security:nav.section.secVulns") && keys.includes("infra:nav.group.network"), "both levels");
+  assert.ok(!keys.includes("overview") && !keys.some((k) => k.startsWith("settings:")), "개요 and the unnamed list of 설정 have no category fold");
+  assert.deepEqual([...nav.parseCollapsed('["security","monitoring:nav.section.monApp","azure","overview","nope",3]')].sort(), ["monitoring:nav.section.monApp", "security"], "only known keys (old group keys such as azure are dropped)");
   for (const bad of [null, "", "{", '{"a":1}', "42"]) assert.equal(nav.parseCollapsed(bad).size, 0, String(bad));
   const security = NAV_GROUPS.find((g) => g.key === "security")!;
   assert.equal(nav.shownItems(security, false, "/cost"), security.items, "open: every link");
   assert.deepEqual(nav.shownItems(security, true, "/cost"), [], "folded, elsewhere: none");
   assert.deepEqual(nav.shownItems(security, true, "/security/findings").map((i) => i.href), ["/security/findings"], "folded, here: the current page only");
+  const app = nav.sectionsOf(NAV_GROUPS.find((g) => g.key === "monitoring")!).find((x) => x.labelKey === "nav.section.monApp")!;
+  assert.deepEqual(nav.visibleItems(app.items, true, "/observability/profiles").map((i) => i.href), ["/observability/profiles"], "a folded category keeps the current page");
+  assert.deepEqual(nav.visibleItems(app.items, true, "/observability/logs"), []);
   assert.ok(nav.NAV_COLLAPSE_KEY.startsWith("aud."));
 });

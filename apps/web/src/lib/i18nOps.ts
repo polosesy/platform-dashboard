@@ -2653,6 +2653,8 @@ export const OPS_T: Translations = {
   "np.link.vpn": { ko: "터널·VPN", en: "Tunnel / VPN" },
   "np.link.other": { ko: "기타", en: "Other" },
   "np.an.link": { ko: "{k} · {m} Mbps", en: "{k} · {m} Mbps" },
+  "np.hb.top": { ko: "최대 {v}", en: "max {v}" },
+  "np.hb.single": { ko: "측정이 1회뿐이라 막대가 하나입니다 — 시간에 따른 변화는 반복 측정(-Repeat, 예: 5분마다 1시간)을 올리면 나타납니다.", en: "One run, so one bar — the change over time shows once a repeated run (-Repeat, e.g. every 5 minutes for an hour) is uploaded." },
   "np.hb.latency": { ko: "지연", en: "Latency" },
   "np.hb.reach": { ko: "도달", en: "Reachability" },
   "np.hb.aria": { ko: "측정 고르기 — 화살표로 옮기고 Shift+화살표로 넓힙니다", en: "Pick runs — arrows move, Shift+arrows extend" },

@@ -74,7 +74,11 @@ export function HealthBar({ points, sel, onSel }: { points: RunPoint[]; sel: [nu
   const desc = i0 === i1 ? t("np.hb.selOne", { at: fmt(points[i0]!.at) }) : t("np.hb.selRange", { n: i1 - i0 + 1, a: fmt(points[i0]!.at), b: fmt(points[i1]!.at) });
   return (
     <div className={s.hb}>
-      <div className={s.hbLabels} aria-hidden="true"><span>{t("np.hb.latency")}</span><span>{t("np.hb.reach")}</span></div>
+      {/* the latency bars' scale: the tallest bar is this value (one run = a full bar — say how much it is) */}
+      <div className={s.hbLabels} aria-hidden="true">
+        <span>{t("np.hb.latency")}<small>{t("np.hb.top", { v: ms(top) })}</small></span>
+        <span>{t("np.hb.reach")}</span>
+      </div>
       <div ref={box} className={s.hbBox} onPointerLeave={() => setHover(null)}>
         <svg width={w} height={H} role="slider" tabIndex={0} aria-label={t("np.hb.aria")} aria-valuemin={1} aria-valuemax={points.length} aria-valuenow={i1 + 1} aria-valuetext={desc}
           onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }} onKeyDown={key} data-health-bar>
@@ -99,7 +103,8 @@ export function HealthBar({ points, sel, onSel }: { points: RunPoint[]; sel: [nu
           ))}
         </svg>
         {hp ? (
-          <div className={s.tip} style={{ left: Math.min(w - 216, Math.max(0, x(hp.at) + 10)), bottom: H - 4 }} role="status">
+          // below the bar: above it the tooltip was cut by the box (only its shadow showed — 2026-11-19)
+          <div className={s.tip} style={{ left: Math.min(w - 216, Math.max(0, x(hp.at) + 10)), top: H + 2 }} role="status">
             <strong>{fmt(hp.at)}</strong>
             <dl>
               <dt>{t("np.hb.latency")}</dt><dd>{ms(hp.latency)}</dd>
@@ -112,6 +117,7 @@ export function HealthBar({ points, sel, onSel }: { points: RunPoint[]; sel: [nu
         ) : null}
       </div>
       <p className={s.hbDesc} aria-live="polite">{desc}</p>
+      {points.length === 1 ? <p className={s.hbDesc}>{t("np.hb.single")}</p> : null}
     </div>
   );
 }

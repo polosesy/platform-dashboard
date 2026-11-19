@@ -14,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { hex } from "@/lib/palette";
 import { Button, Chip, SearchInput, Select, TextInput, Toggle } from "@/components/ui";
 import {
-  DEST_ID, PATH_NODE_H, PATH_NODE_W, buildGraph, collapse, edgeLabel, groupsOf, layoutPath, matchHops, mergedE2e,
+  DEST_ID, PATH_DEST_H, PATH_NODE_H, PATH_NODE_W, buildGraph, collapse, edgeLabel, groupsOf, layoutPath, matchHops, mergedE2e,
   type GEdge, type GNode, type GroupBy, type GroupNode, type HopGroup,
 } from "@/lib/netPathGraph";
 import { ms } from "./LatencyProfile";
@@ -176,9 +176,11 @@ export function PathGraph({ runs, target, device }: { runs: NetPathRun[]; target
     for (const n of view.nodes) {
       const p = pos.get(n.id)!;
       const isGroup = "group" in n;
+      // the destination card is taller (status band + two rows) and stays centred on its row
+      const h = n.kind === "dest" ? PATH_DEST_H : PATH_NODE_H;
       out.push({
-        id: n.id, type: "card", position: { x: p.x, y: p.y }, draggable: false, zIndex: 2,
-        style: { width: PATH_NODE_W, height: PATH_NODE_H }, width: PATH_NODE_W, height: PATH_NODE_H,
+        id: n.id, type: "card", position: { x: p.x, y: p.y - (h - PATH_NODE_H) / 2 }, draggable: false, zIndex: 2,
+        style: { width: PATH_NODE_W, height: h }, width: PATH_NODE_W, height: h,
         data: { n, passes: g.passes, dim: !!hits && !hits.has(n.id), hit: !!hits?.has(n.id), selected: picked === n.id, target, device, e2e, ...(isGroup ? { onToggle: () => toggle(n.group.id) } : {}) } satisfies CardData,
       });
     }
