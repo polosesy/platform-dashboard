@@ -24,10 +24,32 @@ export type NetPathHop = {
   scope: NetPathScope | null;
 };
 
+/** One traceroute probe as the device saw it (aud-netpath/2): the TTL, who answered (null = no answer) and its time */
+export type NetPathProbe = { ttl: number; ip: string | null; rtt: number | null; /** the destination answered (not "TTL expired") */ dest: boolean };
+
+/** End-to-end probes to the destination (aud-netpath/2) — every time kept in order, a lost one = null; the rest computed */
+export type NetPathE2e = {
+  protocol: "tcp" | "icmp";
+  /** tcp: the port connected to */
+  port: number | null;
+  rtt: Array<number | null>;
+  sent: number;
+  received: number;
+  lossPct: number;
+  rttMin: number | null;
+  rttAvg: number | null;
+  rttMax: number | null;
+  /** mean |difference| of consecutive answered probes, ms (RFC 3550 / 5481 IPDV without smoothing) — null under 2 pairs */
+  jitter: number | null;
+};
+
+/** What the device looked up for a public hop, only with the probe's -Lookup (its DNS · Team Cymru DNS TXT) */
+export type NetPathHopInfo = { name?: string; asn?: number; asName?: string; prefix?: string; country?: string };
+
 export type NetPathRun = {
   id: string;
   /** the probe that measured it */
-  source: "aud-netpath/1" | "mtr";
+  source: "aud-netpath/1" | "aud-netpath/2" | "mtr";
   target: string;
   targetIp: string | null;
   /** the device's label as the probe reported it */
@@ -36,10 +58,20 @@ export type NetPathRun = {
   uploadedAt: string;
   /** who uploaded it (display name) */
   by?: string;
+  /** aud-netpath/1 · mtr: probes per TTL — aud-netpath/2: traceroutes (passes) */
   probes: number;
-  /** the destination answered */
+  /** a traceroute reached the destination (ICMP — many SaaS hosts never answer it; see e2e) */
   reached: boolean;
+  /** per TTL over every probe (aud-netpath/2: over its passes) */
   hops: NetPathHop[];
+  /** aud-netpath/2: every traceroute as measured, probe by probe — the paths (which hop followed which) */
+  passes?: NetPathProbe[][];
+  /** aud-netpath/2: end-to-end probes to the destination */
+  e2e?: NetPathE2e;
+  /** aud-netpath/2: the link the device used — its type (.NET NetworkInterfaceType) and speed, nothing else */
+  link?: { type: string; mbps: number | null };
+  /** aud-netpath/2 with -Lookup: per public address */
+  hopInfo?: Record<string, NetPathHopInfo>;
 };
 
 export type NetPathResponse = {

@@ -95,7 +95,7 @@ test("store: upload (device label override, author), newest first, delete; the p
   await assert.rejects(addRun(undefined, "{}"), /netpath_unknown_format/);
   const file = readFileSync(new URL("../../../scripts/netpath-probe.ps1", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.equal(P.NETPATH_PROBE_PS1, file, "regenerate apps/web/src/lib/netPathProbe.ts from the .ps1");
-  assert.match(file, /format = 'aud-netpath\/1'/);
+  assert.match(file, /format = 'aud-netpath\/2'/);
 });
 
 test("the target: an address bar pasted as it is → its host; bare words, IPv6 and junk refused; commands carry it", () => {

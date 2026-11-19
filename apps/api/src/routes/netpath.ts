@@ -6,7 +6,7 @@ import type { Env } from "../env.js";
 import type { NetPathResponse } from "@aud/types";
 import { callerOf, requireRole, roleAtLeast } from "../infra/platformAccess.js";
 import { sendError } from "../infra/requestParams.js";
-import { MAX_UPLOAD_BYTES, addRun, deleteRun, netPathDir, readRuns } from "../services/netPath.js";
+import { MAX_UPLOAD_BYTES, addRuns, deleteRun, netPathDir, readRuns } from "../services/netPath.js";
 
 const Upload = z.object({ text: z.string().min(2).max(MAX_UPLOAD_BYTES), device: z.string().max(64).optional() }).strict();
 const PARSE_ERRORS = new Set(["netpath_too_large", "netpath_not_json", "netpath_unknown_format"]);
@@ -30,8 +30,9 @@ export function registerNetPathRoutes(router: Router, env: Env) {
       const body = Upload.safeParse(req.body);
       if (!body.success) return res.status(400).json({ error: "netpath_invalid" });
       try {
-        const run = await addRun(dir, body.data.text, { by: req.auth.principal.name, ...(body.data.device ? { device: body.data.device } : {}) });
-        res.status(201).json(run);
+        // one run or many (the probe's -Repeat lines) — the answer lists them
+        const runs = await addRuns(dir, body.data.text, { by: req.auth.principal.name, ...(body.data.device ? { device: body.data.device } : {}) });
+        res.status(201).json({ runs });
       } catch (e: unknown) {
         const code = e instanceof Error ? e.message : "";
         if (PARSE_ERRORS.has(code)) return res.status(400).json({ error: code });

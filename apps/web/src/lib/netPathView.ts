@@ -115,6 +115,10 @@ export function targetOf(input: string): { host: string | null; changed: boolean
 
 /** The commands with the chosen host (the probe script is saved to Downloads by the page's button) */
 export const probeCommand = (host: string) => `powershell -ExecutionPolicy Bypass -File "$HOME\\Downloads\\netpath-probe.ps1" -Target ${host} | Set-Clipboard`;
+/** A series over time (the health bar): every 5 minutes for an hour, each run one line of the file — upload the file's text */
+export const probeRepeatCommand = (host: string) => `powershell -ExecutionPolicy Bypass -File "$HOME\\Downloads\\netpath-probe.ps1" -Target ${host} -Repeat 12 -IntervalSec 300 -OutFile "$HOME\\Downloads\\netpath.jsonl"`;
+/** The same with the AS of each public hop (opt-in: the hop addresses go to the device's DNS and Team Cymru's DNS) */
+export const probeLookupCommand = (host: string) => `powershell -ExecutionPolicy Bypass -File "$HOME\\Downloads\\netpath-probe.ps1" -Target ${host} -Lookup | Set-Clipboard`;
 export const mtrCommand = (host: string) => `mtr --json -n -c 10 ${host} | pbcopy   # Linux: | xclip -selection clipboard`;
 
 // ── the path, read top-down like mtr ──
