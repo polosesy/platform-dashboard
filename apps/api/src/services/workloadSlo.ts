@@ -63,10 +63,16 @@ export const SLO_QUERY_TIMEOUT_MS = 25_000;
 export const SLO_PART_DAYS = 3;
 
 export type SloTargets = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
-export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean }> };
+export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean; windowDays?: number; onlyUris?: string[] }> };
 
 type Source = "platform" | "config" | "default";
-type Resolved = { availability: { target: number; source: Source }; latency: { thresholdMs: number; target: number; source: Source }; exclude: Set<string> };
+type Resolved = {
+  availability: { target: number; source: Source }; latency: { thresholdMs: number; target: number; source: Source }; exclude: Set<string>;
+  /** core endpoints — only these URIs count (null = every URI); the service's platform value › its file value */
+  only: Set<string> | null;
+  /** the service's own window in days (null = the cluster's); platform › file */
+  windowDays: number | null;
+};
 /**
  * Pure: a service's targets — the most specific wins: the service's platform value › the service's file value
  * (`services["<ns>/<application>"]`) › the cluster's platform value › the file's top level › the defaults. Excluded URIs
@@ -88,6 +94,8 @@ export function targetsFor(cfg: SloConfig | undefined, namespace: string, applic
     availability: { target: av?.v ?? SLO_DEFAULTS.availability, source: av?.source ?? "default" },
     latency: { ...(lat?.v ?? SLO_DEFAULTS.latency), source: lat?.source ?? "default" },
     exclude: new Set([...(cfg?.excludeUris ?? []), ...(fs?.excludeUris ?? []), ...(platform?.excludeUris ?? []), ...(ps?.excludeUris ?? [])]),
+    only: (ps?.onlyUris?.length ? ps.onlyUris : fs?.onlyUris?.length ? fs.onlyUris : null) ? new Set(ps?.onlyUris?.length ? ps.onlyUris : fs!.onlyUris!) : null,
+    windowDays: ps?.windowDays ?? fs?.windowDays ?? null,
     skip: (ps?.exclude ?? fs?.exclude) === true,
   };
 }
@@ -107,6 +115,23 @@ export function resetPlans(resets: SloBudgetReset[], endMs: number, windowDays: 
       return { reset, ageMin, full, remMin: ageMin - full * PART_MIN };
     });
 }
+/**
+ * Pure: a service window shorter than the cluster's, as a reset at its start (2026-11-19) — the parts and pieces of
+ * the reset plans already count a service from a time; a later real reset of the service is newer and wins
+ */
+export function serviceWindowStarts(cfg: SloConfig | undefined, platform: SloConfig | undefined, clusterDays: number, endMs: number): SloBudgetReset[] {
+  const keys = new Set([...Object.keys(cfg?.services ?? {}), ...Object.keys(platform?.services ?? {})]);
+  const out: SloBudgetReset[] = [];
+  for (const key of keys) {
+    const [ns, app] = [key.slice(0, key.indexOf("/")), key.slice(key.indexOf("/") + 1)];
+    const wd = targetsFor(cfg, ns, app, platform).windowDays;
+    if (wd === null || wd >= clusterDays) continue;
+    const at = new Date(endMs - wd * 86_400_000).toISOString();
+    out.push({ id: `window:${key}`, service: key, at, reason: `window ${wd}d`, createdAt: at, window: true });
+  }
+  return out;
+}
+
 /** Pure: which plan counts for a service (the latest matching reset) — index into `plans`, -1 = none */
 export function planIndex(plans: SloResetPlan[], namespace: string, application: string): number {
   const best = resetFor(plans.map((p) => p.reset), namespace, application, Infinity, Infinity);
@@ -273,7 +298,7 @@ export function aggregateSlo(raw: SloRaw, opts: {
       const key = keyOf(r);
       const t = targets(key);
       const uri = r.metric.uri ?? "";
-      if (t.skip || t.exclude.has(uri)) continue;
+      if (t.skip || t.exclude.has(uri) || (t.only && !t.only.has(uri))) continue;
       const status = r.metric.status ?? "";
       if (kind === "availability") add(key, uri, r.metric.method ?? "", r.value, /^5/.test(status) ? r.value : 0);
       else if (!/^1/.test(status)) add(key, uri, r.metric.method ?? "", r.value, r.value);
@@ -285,7 +310,7 @@ export function aggregateSlo(raw: SloRaw, opts: {
           const key = keyOf(r);
           const t = targets(key);
           const uri = r.metric.uri ?? "";
-          if (t.skip || t.exclude.has(uri) || /^1/.test(r.metric.status ?? "") || leFor(key)?.le !== le) continue;
+          if (t.skip || t.exclude.has(uri) || (t.only && !t.only.has(uri)) || /^1/.test(r.metric.status ?? "") || leFor(key)?.le !== le) continue;
           const c = out.get(key);
           if (!c) continue;
           c.bad -= r.value;
@@ -390,7 +415,7 @@ export function aggregateSlo(raw: SloRaw, opts: {
     const state = slis.reduce<SloState>((w, s) => (RANK[s.state] > RANK[w] ? s.state : w), "noData");
     const workload = names.get(namespace)?.has(application) ? application : null;
     const reset: SloBudgetResetApplied | undefined = plan ? {
-      id: plan.reset.id, at: plan.reset.at, scope: plan.reset.service === "*" ? "all" : "service", windowHours,
+      id: plan.reset.id, at: plan.reset.at, scope: plan.reset.service === "*" ? "all" : "service", windowHours, ...(plan.reset.window ? { window: true } : {}),
       ...(plan.reset.by ? { by: plan.reset.by } : {}), ...(plan.reset.reason ? { reason: plan.reset.reason } : {}),
     } : undefined;
     services.push({ namespace, application, workload, slis, state, coverage: hours === undefined ? null : { hours, windowHours }, advice, ...(reset ? { reset } : {}) });
@@ -446,7 +471,7 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
   const platform = settings.settings as SloConfig;
   const windowDays = platform.windowDays ?? cfg?.windowDays ?? 30;
   const endMs = (at ?? Math.floor(Date.now() / 60_000) * 60) * 1000;
-  const plans = resetPlans(settings.resets, endMs, windowDays);
+  const plans = resetPlans([...settings.resets, ...serviceWindowStarts(cfg, platform, windowDays, endMs)], endMs, windowDays);
   const base: WorkloadSloResponse = {
     clusterId, generatedAt: new Date().toISOString(), ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
     metricsState: "ok", cluster: null, windowDays, configured: setsTargets(cfg) || setsTargets(platform),

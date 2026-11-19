@@ -36,7 +36,13 @@ export const SloSchema = z.object({
   ...SloTargetsSchema,
   services: z.record(
     z.string().regex(SLO_SERVICE_KEY, "\"<namespace>/<application>\""),
-    z.object({ ...SloTargetsSchema, exclude: z.boolean().optional() }).strict(),
+    z.object({
+      ...SloTargetsSchema, exclude: z.boolean().optional(),
+      // 2026-11-19 (Datadog suite SLO: a window and the critical tests per suite): the service's own window (at most the
+      // cluster's — counted from its start like a reset) and its core endpoints (only these URIs count, when set)
+      windowDays: z.union([z.literal(7), z.literal(14), z.literal(28), z.literal(30)]).optional(),
+      onlyUris: z.array(z.string().min(1).max(300)).max(50).optional(),
+    }).strict(),
   ).optional(),
 }).strict();
 

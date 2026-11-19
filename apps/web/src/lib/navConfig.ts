@@ -19,7 +19,8 @@ export type NavIcon =
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
   | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph"
-  | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes";
+  | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes"
+  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -48,7 +49,15 @@ export const NAV_GROUPS: NavGroup[] = [
       item("/observability", "aksMonitoring", "gauge", "nav.section.monState"),
       item("/observability/signals", "monSignals", "triangle", "nav.section.monState"),
       item("/observability/nodes", "monNodes", "server", "nav.section.monState"),
+      // the APM views (2026-11-19 — were a row of buttons inside one page)
       item("/observability/services", "monServices", "nodes", "nav.section.monApp"),
+      item("/observability/services/red", "apmRed", "pulse", "nav.section.monApp"),
+      item("/observability/services/endpoints", "apmEndpoints", "route", "nav.section.monApp"),
+      item("/observability/services/traces", "apmTraces", "waterfall", "nav.section.monApp"),
+      item("/observability/services/deps", "apmDeps", "link", "nav.section.monApp"),
+      item("/observability/services/errors", "apmErrors", "bug", "nav.section.monApp"),
+      item("/observability/services/rollouts", "apmRollouts", "rocket", "nav.section.monApp"),
+      item("/observability/services/slo", "apmSlo", "target", "nav.section.monApp"),
       item("/observability/profiles", "monProfiles", "flame", "nav.section.monApp"),
       item("/observability/logs", "monLogs", "scroll", "nav.section.monData"),
       item("/observability/collection", "monCollection", "pipeline", "nav.section.monData"),
@@ -101,6 +110,13 @@ export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster"
   "/observability/signals": ["cluster"],
   "/observability/nodes": ["cluster"],
   "/observability/services": ["cluster"],
+  "/observability/services/red": ["cluster"],
+  "/observability/services/endpoints": ["cluster"],
+  "/observability/services/traces": ["cluster"],
+  "/observability/services/deps": ["cluster"],
+  "/observability/services/errors": ["cluster"],
+  "/observability/services/rollouts": ["cluster"],
+  "/observability/services/slo": ["cluster"],
   "/observability/profiles": ["cluster"],
   "/observability/logs": ["cluster"],
   "/observability/collection": ["cluster"],

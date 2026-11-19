@@ -2,7 +2,7 @@
 status: current
 owner: platform-observability
 last-verified: 2026-11-19
-covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/ObservabilityView.tsx, apps/web/src/lib/navConfig.ts, apps/web/src/components/Sidebar.tsx]
+covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/ObservabilityView.tsx, apps/web/src/lib/navConfig.ts, apps/web/src/components/Sidebar.tsx, apps/web/src/app/observability/components/SloTab.tsx]
 ---
 # Kubernetes 메뉴 구조 검토 — AKS 클러스터 · AKS 모니터링
 
@@ -255,3 +255,19 @@ covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/Clust
 **확인**:
 - `navConfig.test.ts`: 세 단계 모양, 이름이 경로에서 두 번 나오지 않음, 두 단계 접기, 접혀도 현재 화면.
 - 헤드리스 Chrome(1440·390px): Azure 리소스를 접으면 링크 0·개수 3, 네트워크를 접어도 현재 화면 '네트워크 경로'는 남음, 보안을 접으면 링크 0, 새로 고침 뒤에도 유지, 가로 넘침 0.
+
+### 8.2 APM 보기도 메뉴 항목으로 (2026-11-19, 같은 날)
+
+'서비스 (APM)' 화면은 위에 버튼 8개(서비스 맵 · RED · 엔드포인트 · 트레이스 · 의존성 · 오류 · 배포 · SLO)로 보기를 바꿨습니다. 8절과 같은 이유(주소 없음 · 2클릭 · 메뉴에서 안 보임)로 버튼을 없애고 **모니터링 › 애플리케이션 (APM)** 분류의 메뉴 항목으로 옮겼습니다.
+
+| 메뉴 | 주소 |
+|---|---|
+| 서비스 맵 | `/observability/services` |
+| RED · 엔드포인트 · 트레이스 · 의존성 · 오류 · 배포 · SLO | `/observability/services/<red·endpoints·traces·deps·errors·rollouts·slo>` |
+| 프로필 | `/observability/profiles`(그대로) |
+
+- 같은 틀(`ObservabilityView` `apm`) — 클러스터 범위·시간 막대·출처 칩을 그대로 씀, 메뉴가 `range·to·refresh`를 가져감.
+- 옛 링크 `?trace=`는 트레이스 보기로 보냄, 엔드포인트·RED의 '트레이스 →'는 `service`·`name`·`errors`를 주소로 넘김.
+- SLO 안의 [서비스 SLO | 설정 | 가이드]는 한 화면 안의 작업이라 버튼으로 남김.
+
+**확인**: `navConfig.test.ts`(경로 36 · 애플리케이션 분류 9개). 헤드리스 Chrome: 메뉴 9개 · 현재 항목 'SLO' · 'RED'를 누르면 `/observability/services/red?range=1h` · 옛 `?trace=` 링크 → 트레이스 보기.

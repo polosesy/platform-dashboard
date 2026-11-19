@@ -22,6 +22,7 @@ import { RecommendedAlertsTab } from "./components/RecommendedAlertsTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
 import { WorkloadHeatmap } from "./components/WorkloadHeatmap";
 import { ProfilesView } from "./components/ProfilesView";
+import { apmHref, type ApmView } from "./components/SloTab";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useAksClusters } from "@/lib/useAksClusters";
@@ -32,24 +33,29 @@ import { TRACE_ID } from "@/lib/traceView";
 
 export type ObsView = "overview" | "signals" | "services" | "profiles" | "nodes" | "logs" | "collection";
 
-export function ObservabilityPage({ view }: { view: ObsView }) {
+export function ObservabilityPage({ view, apm }: { view: ObsView; apm?: ApmView }) {
   return (
     <Suspense fallback={<LoadingState />}>
-      <ObservabilityView view={view} />
+      <ObservabilityView view={view} apm={apm ?? "map"} />
     </Suspense>
   );
 }
 
-function ObservabilityView({ view }: { view: ObsView }) {
+function ObservabilityView({ view, apm }: { view: ObsView; apm: ApmView }) {
   const { t, locale } = useI18n();
   const searchParams = useSearchParams();
   const router = useRouter();
   // `?trace=<id>` (a copied trace link) lives in 서비스 (APM) — links made before the split pointed at /observability
   const traceRaw = searchParams.get("trace");
   const traceParam = traceRaw && TRACE_ID.test(traceRaw) ? traceRaw.toLowerCase() : null;
+  // a trace link lives in the traces view (links made before 2026-11-19 pointed at /observability or /observability/services)
   useEffect(() => {
-    if (view === "overview" && traceParam) router.replace(`/observability/services${window.location.search}`);
-  }, [view, traceParam, router]);
+    if (traceParam && (view === "overview" || (view === "services" && apm !== "traces"))) router.replace(`${apmHref("traces")}${window.location.search}`);
+  }, [view, apm, traceParam, router]);
+  // an endpoint row's "traces →": the search's filters in the URL
+  const seed = apm === "traces" && (searchParams.get("service") || searchParams.get("name"))
+    ? { ...(searchParams.get("service") ? { service: searchParams.get("service")! } : {}), ...(searchParams.get("name") ? { name: searchParams.get("name")! } : {}), ...(searchParams.get("errors") === "1" ? { errorsOnly: true } : {}) }
+    : undefined;
   // one range and one refresh for every view (Grafana's dashboard time)
   const time = useTimeRange();
   const { clusters, clusterId, loading: clustersLoading } = useAksClusters();
@@ -107,7 +113,7 @@ function ObservabilityView({ view }: { view: ObsView }) {
             </>
           ) : null}
           {view === "signals" ? <RecommendedAlertsTab key={`signals:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} /> : null}
-          {view === "services" ? <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} linkedTrace={traceParam} /> : null}
+          {view === "services" ? <SloTab key={`slo:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} linkedTrace={traceParam} apm={apm} seed={seed} /> : null}
           {view === "profiles" ? <ProfilesView key={`prof:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} /> : null}
           {view === "nodes" ? (
             <>

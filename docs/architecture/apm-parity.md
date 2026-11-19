@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-19
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx, apps/api/src/services/sloUptime.ts, apps/web/src/lib/sloUptimeView.ts, apps/web/src/app/observability/components/SloDetail.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -364,6 +364,28 @@ stg 앱은 이 변수들을 사내 라이브러리의 다른 이름으로 설정
 - 중첩 집합 일관성(value = self + 자식) 0 / 6,503 위반 · self 합 = 루트(세 종류 모두).
 - 실제 트리 화면: 프레임 5,187 · 상위 함수 100행 · 호출 그래프 부르는 함수 12 / 대상 2 · 오류 0.
 - 테스트 `profiles.test.ts`(손으로 계산한 트리 — 폭·위치·재귀 total·호출 무게·비교 %p).
+
+## 4i. SLO — 서비스 상세 · 글로벌 업타임 · 주요 기여자 · 서비스별 목표 (2026-11-19)
+
+참고: Datadog Synthetics 테스트 스위트의 스위트 SLO(기간·에러 버짓) · Global Uptime 막대 · Primary Contributors · 핵심(critical) 테스트. 여기는 합성 테스트가 아니라 **실제 요청**(Micrometer `http_server_requests_seconds`, 기존 SLO와 같은 SLI)으로 같은 질문에 답합니다.
+
+| Datadog | 여기 | 규칙 |
+|---|---|---|
+| 스위트 SLO · 롤링 기간 | 서비스 카드 'SLO 상세 ↑' → 기간의 SLI · 남은 에러 버짓 · 구간별 SLI 그래프(목표 선) | 기간 = 서비스 설정이 더 짧으면 그것, 아니면 클러스터 기간. 예산 초기화가 더 나중이면 거기부터 |
+| Global Uptime | 칸 약 168개(7일 = 1시간 · 14일 = 2시간 · 28/30일 = 4시간) — 정상 · 오류 · 데이터 없음 | 요청 < 0.5 = 데이터 없음 · 실패 ≥ 0.5이고 그 칸 SLI < 목표 = 오류 · 그 밖 정상(`increase()`의 소수는 개수로 안 셈) |
+| Primary Contributors | 실패를 낸 엔드포인트(메서드 + uri) 상위 · 실패 비율 · 에러 버짓을 쓴 엔드포인트 수 | 칸별 범위 질의를 엔드포인트마다 더함 |
+| 핵심 테스트 | 서비스별 **핵심 엔드포인트**(`onlyUris`) — 적으면 그 URI만 SLO 카드·상세에 셈 | uri 태그와 정확히 같은 문자열(패턴 아님) |
+| 스위트별 목표 | SLO › 설정 서비스 행에 **기간**(7·14·28·30일, 클러스터보다 짧을 때만) · 핵심 엔드포인트 칸 | 기간 = 기간 시작에 '예산 초기화'를 둔 것과 같은 계산(`serviceWindowStarts` → `resetPlans`) — 3일 조각 질의를 그대로 씀 |
+
+**API**: `GET /api/observability/slo/uptime?clusterId&namespace&application[&at]` → `services/sloUptime.ts`(범위 = `pickScope`, 매처에 `uri!~`(뺀 URI)·`uri=~`(핵심 — 정규식 문자 이스케이프 `uriAlternation`), 모든 개수 `counterIncrease`, 5분 캐시 · 키에 설정 `version`). 웹 `SloDetail.tsx` + 순수 `lib/sloUptimeView.ts`(`budgetLeft`·`uptimeSegments`·`topShare`·`sliTicks`·`tickDecimals`·`tipLeft`).
+
+**실측(stg, 내 토큰, 개수만)**:
+- 7일 = 1시간 칸 168개: 실패 칸 합 10 = 기간 전체 질의 10, 요청 21,976 vs 21,825(+0.6% — 칸 경계의 `increase()` 외삽), 엔드포인트별 칸 합 = 막대 합(10 = 10 · 21,976 = 21,976), 약 1초.
+- 30일 = 4시간 칸 180개: 실패 164 vs 기간 전체 168. **기간 전체를 엔드포인트별로 묻는 질의는 Azure 질의 비용 상한에 거부**(시계열 4,857개, 비용 18,930 > 15,000 → 429 — OBS-004와 같은 상한) → 엔드포인트별 **칸 질의**를 더하는 방식으로 바꿈(164 = 164 · 241,017 = 241,017), 약 2.5초.
+
+**확인**: 테스트 `sloUptime.test.ts`(칸 판정·합계·기여자·기간/핵심 엔드포인트 상속·카드에서 빠지는 URI·설정 왕복·축 눈금·툴팁 위치). 헤드리스 Chrome(합성 응답, 1440·390px): 상세 열림 · 칸 168(정상 146 · 오류 3 · 데이터 없음 19) · 툴팁 · 기여자 2행 · 설정 칸 2개(기간 7 · `/orders`) · 가로 넘침 0 · 콘솔 오류 0. 처음 화면에서 축 눈금이 '100% · 100% · 99%'로 겹쳐 → 값을 정확히 말하는 자릿수(`tickDecimals`), 좁은 화면에서 툴팁이 오른쪽으로 잘려 → 막대 안에 고정(`tipLeft`).
+
+**서비스 (APM) 보기 → 메뉴 항목**(같은 날, kubernetes-ia 8.2): 서비스 맵 · RED · 엔드포인트 · 트레이스 · 의존성 · 오류 · 배포 · SLO가 '애플리케이션 (APM)' 분류의 메뉴 항목(`/observability/services/<보기>`)이 됨 — 화면 위 8개 버튼 삭제, SLO 안의 [서비스 SLO | 설정 | 가이드]만 남김.
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

@@ -221,7 +221,7 @@ test("wiring: operator-gated routes, the opt-in in the connection schema, the íŠ
   assert.match(routes, /"\/api\/observability\/trace", requireRole\(env, "operator"\)/);
   assert.match(read("../src/infra/connectionRegistry.ts"), /traces: z\.boolean\(\)\.optional\(\)/);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
-  assert.match(tab, /id: "traces"/);
+  assert.ok(readFileSync(new URL("../../web/src/lib/navConfig.ts", import.meta.url), "utf8").includes('"/observability/services/traces"'), "the traces view is a menu item (2026-11-19)");
   assert.match(tab, /onTraces=\{openTraces\}/);
   const all = read("../../web/src/lib/i18nOps.ts");
   const view = read("../../web/src/app/observability/components/TracesView.tsx");

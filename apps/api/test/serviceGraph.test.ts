@@ -103,7 +103,9 @@ test("wiring: the route, the view in the 서비스 (APM) tab, the strings", () =
   assert.match(read("../src/routes/observability.ts"), /"\/api\/observability\/service-map"[\s\S]{0,400}getServiceGraph\(/);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
   // the service map opens first — APM's landing view; only a copied trace link (?trace=, 2026-11-18) opens the traces
-  assert.match(tab, /useState<View>\(linkedTrace \? "traces" : "map"\)/, "the service map opens first — APM's landing view");
+  // 2026-11-19: the first APM menu item is the service map (/observability/services); a trace link goes to the traces route
+  assert.match(tab, /apm = "map"/, "the service map opens first — APM's landing view");
+  assert.match(tab, /v === "map" \? "\/observability\/services"/);
   assert.match(tab, /<ServiceMapView clusterId=\{clusterId\}/);
   const all = read("../../web/src/lib/i18nOps.ts") + read("../../web/src/lib/i18nMessages.ts");
   assert.match(all, /"obs\.tab\.slo": \{ ko: "서비스 \(APM\)"/);

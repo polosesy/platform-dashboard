@@ -14,11 +14,12 @@ export const WINDOW_DAYS = [7, 14, 28, 30] as const;
 const SERVICE_KEY = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\/[\w.-]{1,128}$/;
 
 export type TargetsDraft = { availability: string; thresholdMs: string; latencyTarget: string; excludeUris: string };
-export type ServiceDraft = TargetsDraft & { exclude: boolean };
+/** per service also (2026-11-19): its own window ("" = the cluster's) and its core endpoints (one URI per line — only these count) */
+export type ServiceDraft = TargetsDraft & { exclude: boolean; windowDays: string; onlyUris: string };
 export type SettingsDraft = TargetsDraft & { windowDays: string; services: Record<string, ServiceDraft> };
 
 export const EMPTY_TARGETS: TargetsDraft = { availability: "", thresholdMs: "", latencyTarget: "", excludeUris: "" };
-export const EMPTY_SERVICE: ServiceDraft = { ...EMPTY_TARGETS, exclude: false };
+export const EMPTY_SERVICE: ServiceDraft = { ...EMPTY_TARGETS, exclude: false, windowDays: "", onlyUris: "" };
 
 const num = (v: number | undefined) => (v === undefined ? "" : String(v));
 const targetsDraft = (t: SloTargetsSetting | undefined): TargetsDraft => ({
@@ -31,7 +32,7 @@ const targetsDraft = (t: SloTargetsSetting | undefined): TargetsDraft => ({
 /** Pure: the form for saved settings */
 export function draftOf(s: SloSettings): SettingsDraft {
   const services: Record<string, ServiceDraft> = {};
-  for (const [k, v] of Object.entries(s.services ?? {})) services[k] = { ...targetsDraft(v), exclude: v.exclude === true };
+  for (const [k, v] of Object.entries(s.services ?? {})) services[k] = { ...targetsDraft(v), exclude: v.exclude === true, windowDays: num(v.windowDays), onlyUris: (v.onlyUris ?? []).join("\n") };
   return { ...targetsDraft(s), windowDays: num(s.windowDays), services };
 }
 
@@ -108,7 +109,14 @@ export function settingsOf(d: SettingsDraft, r: Pick<SloSettingsResponse, "file"
   for (const [k, v] of Object.entries(d.services)) {
     if (!SERVICE_KEY.test(k)) { errors.push({ field: k, code: "serviceKey" }); continue; }
     const t = targetsOf(v, inherited(r, settings, k), k, errors);
-    const e = { ...t, ...(v.exclude ? { exclude: true } : {}) };
+    const wd = Number(v.windowDays);
+    const only = parseUris(v.onlyUris ?? "");
+    if (only === null) errors.push({ field: `${k}.onlyUris`, code: "uri" });
+    const e = {
+      ...t, ...(v.exclude ? { exclude: true } : {}),
+      ...(v.windowDays && (WINDOW_DAYS as readonly number[]).includes(wd) ? { windowDays: wd as 7 | 14 | 28 | 30 } : {}),
+      ...(only?.length ? { onlyUris: only } : {}),
+    };
     if (Object.keys(e).length) services[k] = e;
   }
   if (Object.keys(services).length) settings.services = services;

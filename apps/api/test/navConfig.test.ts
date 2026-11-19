@@ -35,7 +35,7 @@ test("every page route appears in the menu exactly once (the sign-in page is the
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 29); // + 6 monitoring views of their own (2026-11-19 — they were tabs of /observability) · + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
+  assert.equal(routes.length, 36); // + 7 APM views of their own (2026-11-19 — were buttons inside 서비스 (APM)) · + 6 monitoring views of their own (2026-11-19 — they were tabs of /observability) · + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -73,7 +73,8 @@ test("three levels: top category › category (section) › screen — six top c
   ]);
   assert.deepEqual(shape("monitoring"), [
     ["nav.section.monState", ["/observability", "/observability/signals", "/observability/nodes"]],
-    ["nav.section.monApp", ["/observability/services", "/observability/profiles"]],
+    ["nav.section.monApp", ["/observability/services", "/observability/services/red", "/observability/services/endpoints", "/observability/services/traces",
+      "/observability/services/deps", "/observability/services/errors", "/observability/services/rollouts", "/observability/services/slo", "/observability/profiles"]],
     ["nav.section.monData", ["/observability/logs", "/observability/collection"]],
   ]);
   assert.deepEqual(shape("security"), [

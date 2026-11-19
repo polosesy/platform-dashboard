@@ -125,7 +125,7 @@ export function settingsDiff(before: SloSettings, after: SloSettings): string {
 export function cleanSettings(s: SloSettings): SloSettings {
   const services: NonNullable<SloSettings["services"]> = {};
   for (const [k, v] of Object.entries(s.services ?? {})) {
-    const e = { ...v, ...(v.excludeUris?.length ? {} : { excludeUris: undefined }) };
+    const e = { ...v, ...(v.excludeUris?.length ? {} : { excludeUris: undefined }), ...(v.onlyUris?.length ? {} : { onlyUris: undefined }) };
     const kept = Object.fromEntries(Object.entries(e).filter(([, x]) => x !== undefined && x !== false));
     if (Object.keys(kept).length) services[k] = kept as typeof v;
   }

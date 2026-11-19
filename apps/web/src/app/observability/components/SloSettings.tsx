@@ -257,6 +257,8 @@ export function SloSettingsView({ clusterId, d, r, onChanged, onGuide }: {
                     <th scope="col">{t("ob.slo.set.threshold")}</th>
                     <th scope="col">{t("ob.slo.set.latencyTarget")}</th>
                     <th scope="col">{t("ob.slo.set.excludeUris")}</th>
+                    <th scope="col" title={t("ob.slo.set.svcWindowHint")}>{t("ob.slo.set.svcWindow")}</th>
+                    <th scope="col" title={t("ob.slo.set.onlyUrisHint")}>{t("ob.slo.set.onlyUris")}</th>
                     <th scope="col">{t("ob.slo.set.leaveOut")}</th>
                   </tr>
                 </thead>
@@ -291,6 +293,14 @@ export function SloSettingsView({ clusterId, d, r, onChanged, onGuide }: {
                         <td>
                           <TextInput label={t("ob.slo.set.excludeUris")} hideLabel value={v.excludeUris} disabled={ro} width={200} placeholder="—"
                             onChange={(x) => setSvc(key, { excludeUris: x })} hint={bad.has(`${key}.excludeUris`) ? t("ob.slo.set.badUris") : undefined} />
+                        </td>
+                        <td>
+                          <Select label={t("ob.slo.set.svcWindow")} hideLabel value={v.windowDays ?? ""} disabled={ro} onChange={(x) => setSvc(key, { windowDays: x })}
+                            options={[{ value: "", label: t("ob.slo.set.svcWindowCluster") }, ...[7, 14, 28, 30].map((n) => ({ value: String(n), label: t("ob.slo.set.days", { n }) }))]} />
+                        </td>
+                        <td>
+                          <TextInput label={t("ob.slo.set.onlyUris")} hideLabel value={v.onlyUris ?? ""} disabled={ro} width={200} placeholder={t("ob.slo.set.onlyUrisPh")}
+                            onChange={(x) => setSvc(key, { onlyUris: x })} hint={bad.has(`${key}.onlyUris`) ? t("ob.slo.set.badUris") : undefined} />
                         </td>
                         <td><Toggle checked={v.exclude} disabled={ro} onChange={(x) => setSvc(key, { exclude: x })}>{t("ob.slo.set.leaveOutShort")}</Toggle></td>
                       </tr>

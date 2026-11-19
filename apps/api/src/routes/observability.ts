@@ -31,6 +31,7 @@ import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { getTrace, searchTraces } from "../services/grafanaTraces.js";
 import { getProfile, getProfileCatalog } from "../services/grafanaProfiles.js";
+import { getSloUptime } from "../services/sloUptime.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
@@ -267,6 +268,18 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getWorkloadSlo(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_slo_failed", "observability");
+    }
+  });
+
+  // SLO › 서비스 상세 (Datadog suite SLO): the service's window, the global uptime bar, primary contributors — signed-in
+  // like the SLO cards (counts only — no URL values beyond the URI templates the cards already show)
+  router.get("/api/observability/slo/uptime", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [namespace] = requireQuery(req, ["namespace"]);
+      res.json(await getSloUptime(env, req.auth?.bearerToken, clusterId, namespace!, queryString(req, "application") ?? "", queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_slo_uptime_failed", "observability");
     }
   });
 

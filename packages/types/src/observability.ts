@@ -810,7 +810,11 @@ export type SloService = {
   /** The error budget was reset (counted from `at`, not the whole window) — scope `all` = the cluster-wide reset */
   reset?: SloBudgetResetApplied;
 };
-export type SloBudgetResetApplied = { id: string; at: string; scope: "service" | "all"; by?: string; reason?: string; windowHours: number };
+export type SloBudgetResetApplied = {
+  id: string; at: string; scope: "service" | "all"; by?: string; reason?: string; windowHours: number;
+  /** not a reset: the service's own window (shorter than the cluster's) starts here */
+  window?: boolean;
+};
 export type WorkloadSloResponse = {
   clusterId: string;
   generatedAt: string;
@@ -846,9 +850,12 @@ export type WorkloadSloResponse = {
 export type SloTargetsSetting = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
 export type SloSettings = SloTargetsSetting & {
   windowDays?: 7 | 14 | 28 | 30;
-  services?: Record<string, SloTargetsSetting & { exclude?: boolean }>;
+  /** per service: its targets, and (2026-11-19) its own window (≤ the cluster's) and core endpoints (only these URIs count) */
+  services?: Record<string, SloTargetsSetting & { exclude?: boolean; windowDays?: 7 | 14 | 28 | 30; onlyUris?: string[] }>;
 };
 export type SloBudgetReset = {
+  /** a service window's start, made by the API (never stored) — counted like a reset, said as the window */
+  window?: boolean;
   id: string;
   /** "<namespace>/<application>" or "*" (every service of the cluster) */
   service: string;
@@ -1413,4 +1420,39 @@ export type ProfileResponse = {
   stepSeconds: number | null;
   /** the comparison window's tree (same service and type) — `compareFrom` / `compareTo` */
   compare?: { from: string; to: string; tree: ProfileTree | null; total: number | null };
+};
+
+// ── SLO › 서비스 상세 (Datadog suite SLO: the SLO over its window, the global uptime bar, primary contributors) ──
+
+/** One bucket of the uptime bar: requests, failed (5xx) and its state against the target — noData = no request */
+export type SloUptimeBucket = { t: number; total: number; bad: number; sli: number | null; state: "ok" | "error" | "noData" };
+export type SloContributor = { method: string; uri: string; bad: number; total: number; share: number };
+export type SloUptimeResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadSloResponse["metricsState"];
+  message?: string;
+  namespace: string;
+  application: string;
+  /** the availability target and where it came from */
+  target: number;
+  targetSource: "platform" | "config" | "default";
+  /** the service's window (its own, else the cluster's) — counted from a later budget reset when there is one */
+  windowDays: number;
+  windowSource: "service" | "cluster";
+  from: string;
+  to: string;
+  bucketMinutes: number;
+  buckets: SloUptimeBucket[];
+  totals: { total: number; bad: number; sli: number | null; allowed: number; budgetUsed: number | null; uptime: number | null };
+  /** the endpoints that spent the error budget — failed requests, share of all failed */
+  contributors: SloContributor[];
+  /** how many endpoints failed at least once */
+  consumedBy: number;
+  /** URIs counted: only these (core endpoints) / all but these */
+  only: string[];
+  excluded: string[];
+  reset?: { at: string; reason?: string };
+  queries: { total: string; bad: string; byUri: string };
 };

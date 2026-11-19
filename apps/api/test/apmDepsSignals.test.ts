@@ -229,7 +229,9 @@ test("wiring: routes, the 경고 신호 tab, the 서비스 (APM) views, every ru
   assert.match(read("../../web/src/lib/navConfig.ts"), /item\("\/observability\/signals", "monSignals"/);
   assert.match(page, /key=\{`signals:\$\{clusterId\}`\}/);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
-  for (const v of ["map", "deps", "endpoints"]) assert.match(tab, new RegExp(`id: "${v}"`), v);
+  // 2026-11-19: the APM views are menu items (one route each), not a row of buttons
+  for (const v of ["map", "deps", "endpoints"]) assert.match(tab, new RegExp(`"${v}"`), v);
+  for (const h of ["/observability/services/deps", "/observability/services/endpoints"]) assert.ok(readFileSync(new URL("../../web/src/lib/navConfig.ts", import.meta.url), "utf8").includes(`"${h}"`), h);
   assert.match(read("../../web/src/app/observability/components/ServiceMapView.tsx"), /deps=\{depsOf\(deps, sel\.id\)\}/, "the map panel lists the service's dependencies");
   const all = read("../../web/src/lib/i18nOps.ts") + read("../../web/src/lib/i18nMessages.ts");
   const keys = [...MS_RECOMMENDED_RULES.map((r) => `ob.ra.rule.${r.alert}`), "obs.tab.signals", "ob.slo.view.deps", "ob.slo.view.endpoints", "ob.ra.noDataWhy", "ob.ra.failedWhy", "ob.ra.summary", "ob.ra.jobMismatch", "ob.ra.chip.jobMismatch", "ob.ra.fix.state",

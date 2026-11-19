@@ -1298,3 +1298,59 @@
 .pfCov h4 span { font-weight: 400; color: var(--muted); font-size: var(--text-caption); }
 .pfCov ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .pfCov li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--text-caption); color: var(--muted); }
+
+/* ── SLO › 서비스 상세 (Datadog suite SLO) — SLO + budget left · SLI per bucket · primary contributors · global uptime ── */
+.sloUdNs { margin-left: 6px; font-size: var(--text-caption); font-weight: 400; color: var(--muted); }
+.sloUd { display: grid; gap: 16px; min-width: 0; }
+.sloUdTop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; min-width: 0; }
+@media (max-width: 1100px) { .sloUdTop { grid-template-columns: minmax(0, 1fr); } }
+.sloUdCard { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.sloUdCard h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; font-size: var(--text-heading); font-weight: 600; }
+.sloUdHead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.sloUdSli { padding: 6px 12px; border-radius: var(--radius-sm); font-size: var(--text-title); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); background: rgba(var(--ink-rgb), 0.06); }
+.sloUdSli[data-level="ok"] { color: var(--success-strong); background: var(--success-soft); }
+.sloUdSli[data-level="danger"] { color: #fff; /* white on the danger fill: the kit's critical pairing */ background: var(--danger); }
+.sloUdBudget { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 4px 10px; flex: 1 1 240px; font-size: var(--text-small); color: var(--muted); }
+.sloUdBar { height: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--panel-sunken); overflow: hidden; }
+.sloUdBar > span { display: block; height: 100%; background: var(--success); }
+.sloUdBar > span[data-low] { background: var(--danger); }
+.sloUdBudget strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.sloUdStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.sloUdStats > div { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-sunken); }
+.sloUdStats span { font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
+.sloUdStats strong { font-size: var(--text-heading); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sloUdCaption { margin: 0; font-size: var(--text-caption); font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+.sloContrib { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sloContrib li { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-raise); }
+.sloContribShare { padding: 2px 6px; border-radius: var(--radius-sm); font-size: var(--text-caption); font-weight: 700; text-align: center; color: var(--danger-strong); background: var(--danger-soft); font-variant-numeric: tabular-nums; }
+.sloContribName { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sloContribName code { font-size: var(--text-small); }
+.sloContribN { font-size: var(--text-caption); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sloChart { margin: 0; min-width: 0; }
+.sloChartBox { position: relative; min-width: 0; }
+.sloChartBox svg { display: block; }
+.sloChartGrid { stroke: rgba(var(--ink-rgb), 0.08); stroke-width: 1; }
+.sloChartAxis { font-family: var(--font-sans); font-size: var(--text-caption); fill: var(--subtle); font-variant-numeric: tabular-nums; }
+.sloChartTarget { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+.sloChartLine { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.sloChartCross { stroke: rgba(var(--ink-rgb), 0.3); stroke-width: 1; stroke-dasharray: 3 3; }
+.sloTip {
+  position: absolute; z-index: 3; max-width: 300px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); box-shadow: var(--shadow-pop); font-size: var(--text-caption); pointer-events: none; width: max-content; max-width: min(300px, 80vw);
+}
+.sloUptime { display: grid; gap: 6px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.sloUptimeHead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.sloUptimeHead h3 { margin: 0; font-size: var(--text-heading); font-weight: 600; }
+.sloUptimeHead span { font-size: var(--text-caption); color: var(--muted); }
+.sloUptimeRow { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 10px; }
+@media (max-width: 640px) { .sloUptimeRow { grid-template-columns: minmax(0, 1fr); } }
+.sloUptimeLabel { font-size: var(--text-small); font-weight: 600; }
+.sloUptimeBar { position: relative; display: flex; height: 30px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: visible; background: var(--panel-sunken); }
+.sloUptimeSeg { display: inline-block; height: 100%; background: rgba(var(--ink-rgb), 0.18); }
+.sloUptimeSeg[data-state="ok"] { background: rgba(var(--success-rgb), 0.45); }
+.sloUptimeSeg[data-state="error"] { background: var(--danger); }
+.sloUptimeBar > .sloUptimeSeg:hover { outline: 2px solid var(--ink); outline-offset: -2px; }
+.sloUptimeAxis { display: flex; justify-content: space-between; padding-left: 106px; font-size: var(--text-caption); color: var(--subtle); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .sloUptimeAxis { padding-left: 0; } }
+.sloUptimeLegend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--text-caption); color: var(--muted); }
+.sloUptimeLegend .sloUptimeSeg { width: 12px; height: 12px; margin-right: 6px; vertical-align: middle; border-radius: var(--radius-sm); }

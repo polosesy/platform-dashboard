@@ -14,7 +14,8 @@
 //                     targets (on-prem file / Helm values) with a draft filled from the measured tiers · the fields ·
 //                     workloads without HTTP metrics
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { SloService, SloSettingsResponse, SloSli, WorkloadSloResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
@@ -33,6 +34,7 @@ import { EndpointsView } from "./EndpointsView";
 import { ErrorsView } from "./ErrorsView";
 import { RolloutsView } from "./RolloutsView";
 import { TracesView, type TraceSeed } from "./TracesView";
+import { SloDetail } from "./SloDetail";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
   sloConfigDraft, sloCounts, targetText, type SloLevel,
@@ -45,9 +47,16 @@ const MICROMETER_HINT = `management.metrics.distribution.percentiles-histogram.h
 management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
-type View = "map" | "deps" | "endpoints" | "traces" | "errors" | "rollouts" | "services" | "red" | "settings" | "guide";
+/** The APM views — menu items of their own since 2026-11-19 (모니터링 › 애플리케이션 (APM) › …, one route each) */
+export type ApmView = "map" | "red" | "endpoints" | "traces" | "deps" | "errors" | "rollouts" | "slo";
+export const APM_VIEWS: ApmView[] = ["map", "red", "endpoints", "traces", "deps", "errors", "rollouts", "slo"];
+/** the route of an APM view */
+export const apmHref = (v: ApmView) => (v === "map" ? "/observability/services" : `/observability/services/${v}`);
+type SloSub = "services" | "settings" | "guide";
 
-export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; linkedTrace?: string | null }) {
+export function SloTab({ clusterId, range, nonce, report, linkedTrace, apm = "map", seed }: {
+  clusterId: string; range: TimeRange; nonce: number; report?: (id: string, loading: boolean) => void; linkedTrace?: string | null; apm?: ApmView; seed?: TraceSeed;
+}) {
   const { t, locale } = useI18n();
   const atQ = atParam(range);
   const q = useApiQuery(clusterId ? `obs-slo:${clusterId}:${atQ ?? "now"}` : null, (token) =>
@@ -61,35 +70,29 @@ export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clust
   const settings = sq.data?.clusterId === clusterId ? sq.data : null;
   // A save or a reset changes the settings version — the SLO numbers' cache key — so both reload
   const changed = () => { sq.reload(); q.reload(); };
-  const [view, setView] = useState<View>(linkedTrace ? "traces" : "map");
-  // a trace link (?trace=) opens the trace view — also when it arrives while this tab is open
-  useEffect(() => { if (linkedTrace) setView("traces"); }, [linkedTrace]);
-  // Another view's "traces →" (an endpoint row) opens the trace search with its filters — kept in state, one object per click
-  const [traceSeed, setTraceSeed] = useState<TraceSeed | undefined>(undefined);
-  const openTraces = (seed: TraceSeed) => { setTraceSeed(seed); setView("traces"); };
+  // the view is the route's (2026-11-19 — was a row of eight buttons); SLO keeps its own three sub-views here
+  const router = useRouter();
+  const [sub, setSub] = useState<SloSub>("services");
+  const view: ApmView | SloSub = apm === "slo" ? sub : apm;
+  const setView = (v: SloSub) => setSub(v);
+  // Another view's "traces →" (an endpoint row) opens the trace route with its filters (the time range comes along)
+  const openTraces = (s: TraceSeed) => {
+    const p = new URLSearchParams(window.location.search);
+    for (const k of ["trace", "service", "name", "errors"]) p.delete(k);
+    if (s.service) p.set("service", s.service);
+    if (s.name) p.set("name", s.name);
+    if (s.errorsOnly) p.set("errors", "1");
+    router.push(`${apmHref("traces")}?${p.toString()}`);
+  };
+  const traceSeed = seed;
   const d = q.data?.clusterId === clusterId && answersAt(q.data.at, atQ) ? q.data : null;
-  // Two rows: the APM views, and — when SLO is chosen — its own three (one row of nine did not fit)
-  const sloView = view === "services" || view === "settings" || view === "guide";
-  // Narrow screens (2026-11-18): eight views do not fit 390 px — the row scrolls in its own box (the page column stays
-  // the screen's width; before, this row's 514 px widened the column and cut the map's frame), and the chosen view is
-  // scrolled into sight
-  const switchRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    for (const el of switchRef.current?.querySelectorAll<HTMLElement>('button[aria-pressed="true"]') ?? []) {
-      const box = el.closest<HTMLElement>("[data-view-scroll]");
-      if (box && box.scrollWidth > box.clientWidth) box.scrollLeft = Math.max(0, el.offsetLeft - box.clientWidth / 2 + el.offsetWidth / 2);
-    }
-  }, [view]);
-  const switcher = (
-    <div ref={switchRef} className={styles.viewSwitch}>
-      <div className={styles.viewScroll} data-view-scroll><Segmented label={t("ob.slo.view")} value={sloView ? "slo" : view} onChange={(v) => setView(v === "slo" ? "services" : v)}
-        items={[{ id: "map", label: t("ob.slo.view.map") }, { id: "red", label: t("ob.slo.view.red") }, { id: "endpoints", label: t("ob.slo.view.endpoints") }, { id: "traces", label: t("ob.slo.view.traces") }, { id: "deps", label: t("ob.slo.view.deps") }, { id: "errors", label: t("ob.slo.view.errors") }, { id: "rollouts", label: t("ob.slo.view.rollouts") }, { id: "slo", label: t("ob.slo.view.slo") }]} /></div>
-      {sloView ? (
-        <div className={styles.viewScroll} data-view-scroll><Segmented label={t("ob.slo.view.sloSub")} value={view} onChange={setView}
-          items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} /></div>
-      ) : null}
+  const sloView = apm === "slo";
+  const switcher = sloView ? (
+    <div className={styles.viewSwitch}>
+      <div className={styles.viewScroll} data-view-scroll><Segmented label={t("ob.slo.view.sloSub")} value={sub} onChange={setSub}
+        items={[{ id: "services", label: t("ob.slo.view.services") }, { id: "settings", label: t("ob.slo.view.settings") }, { id: "guide", label: t("ob.slo.view.guide") }]} /></div>
     </div>
-  );
+  ) : null;
   // The service map reads the service graph, RED spanmetrics — not Micrometer: both open whatever the SLO data's state
   if (view === "map") {
     return (
@@ -183,7 +186,7 @@ export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clust
           <Chip level="info" glyph={false} title={t("ob.slo.windowFixedHint")}>{t("ob.slo.windowFixed", { days: d.windowDays })}</Chip>
         </>} />
       {view === "settings" ? null : notice}
-      {view === "services" ? <ServicesView d={d} clusterId={clusterId} canWrite={!!settings?.canWrite} onChanged={changed} onGuide={() => setView("guide")} />
+      {view === "services" ? <ServicesView d={d} clusterId={clusterId} range={range} canWrite={!!settings?.canWrite} onChanged={changed} onGuide={() => setView("guide")} onSettings={() => setView("settings")} />
         : view === "settings" ? (
           sq.error ? <ErrorNotice error={sq.error} />
             : settings ? <SloSettingsView key={`${clusterId}:${settings.rev}`} clusterId={clusterId} d={d} r={settings} onChanged={changed} onGuide={() => setView("guide")} />
@@ -196,8 +199,12 @@ export function SloTab({ clusterId, range, nonce, report, linkedTrace }: { clust
 
 /* ── 서비스 SLO ── */
 
-function ServicesView({ d, clusterId, canWrite, onChanged, onGuide }: { d: WorkloadSloResponse; clusterId: string; canWrite: boolean; onChanged: () => void; onGuide: () => void }) {
+function ServicesView({ d, clusterId, range, canWrite, onChanged, onGuide, onSettings }: {
+  d: WorkloadSloResponse; clusterId: string; range: TimeRange; canWrite: boolean; onChanged: () => void; onGuide: () => void; onSettings: () => void;
+}) {
   const { t } = useI18n();
+  // one service's detail (Datadog suite SLO: uptime bar · contributors) above the cards
+  const [detail, setDetail] = useState<{ namespace: string; application: string } | null>(null);
   const [show, setShow] = useState<"problems" | "all">("problems");
   const [ns, setNs] = useState("");
   const namespaces = useMemo(() => [...new Set(d.services.map((s) => s.namespace))].sort(), [d]);
@@ -213,6 +220,12 @@ function ServicesView({ d, clusterId, canWrite, onChanged, onGuide }: { d: Workl
       <Cell span={3}><Stat label={<><span aria-hidden="true">{SLO_GLYPH.warn}</span> {t("ob.slo.stat.warn")}</>} value={counts.warn} tone={counts.warn ? "medium" : undefined} hint={t("ob.slo.stat.warnHint")} /></Cell>
       <Cell span={3}><Stat label={<><span aria-hidden="true">{SLO_GLYPH.ok}</span> {t("ob.slo.stat.ok")}</>} value={counts.ok} tone="success" hint={t("ob.slo.stat.notJudged", { n: notJudged })} /></Cell>
 
+      {detail ? (
+        <Cell span={12}>
+          <SloDetail key={`${detail.namespace}/${detail.application}`} clusterId={clusterId} namespace={detail.namespace} application={detail.application} range={range}
+            onClose={() => setDetail(null)} onSettings={onSettings} />
+        </Cell>
+      ) : null}
       <Cell span={12}>
         <div className={styles.sloBar12}>
           <h2 className={styles.sloSection}>
@@ -238,7 +251,8 @@ function ServicesView({ d, clusterId, canWrite, onChanged, onGuide }: { d: Workl
         </Cell>
       ) : shown.map((s) => (
         <Cell span={6} key={`${s.namespace}/${s.application}`}>
-          <SloCard s={s} days={d.windowDays} grafana={d.grafana} promUid={promUid} clusterId={clusterId} canWrite={canWrite} onChanged={onChanged} />
+          <SloCard s={s} days={d.windowDays} grafana={d.grafana} promUid={promUid} clusterId={clusterId} canWrite={canWrite} onChanged={onChanged}
+            onDetail={() => { setDetail({ namespace: s.namespace, application: s.application }); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
         </Cell>
       ))}
 
@@ -252,8 +266,8 @@ function ServicesView({ d, clusterId, canWrite, onChanged, onGuide }: { d: Workl
   );
 }
 
-function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged }: {
-  s: SloService; days: number; grafana: WorkloadSloResponse["grafana"]; promUid: string | undefined; clusterId: string; canWrite: boolean; onChanged: () => void;
+function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged, onDetail }: {
+  s: SloService; days: number; grafana: WorkloadSloResponse["grafana"]; promUid: string | undefined; clusterId: string; canWrite: boolean; onChanged: () => void; onDetail: () => void;
 }) {
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
@@ -268,7 +282,9 @@ function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged }: 
       title={<span title={name}>{name}</span>}
       sub={[s.namespace, s.workload ? null : t("ob.slo.noWorkload"), short].filter(Boolean).join(" · ")}
       actions={<>
-        {s.reset && since ? (
+        {s.reset?.window ? (
+          <Chip level="neutral" glyph={false} title={t("ob.slo.ud.windowChipHint")}>{t("ob.slo.ud.window", { n: Math.round(s.reset.windowHours / 24) })}</Chip>
+        ) : s.reset && since ? (
           <Chip level="info" glyph="↺"
             title={t("ob.slo.resetChipTitle", { at: new Date(s.reset.at).toLocaleString(dateLocale(locale)), by: s.reset.by ?? "—", reason: s.reset.reason ?? "" })}>
             {t(s.reset.scope === "all" ? "ob.slo.resetChipAll" : "ob.slo.resetChip", { span: since })}
@@ -279,13 +295,14 @@ function SloCard({ s, days, grafana, promUid, clusterId, canWrite, onChanged }: 
       footer={
         <>
           <span className={styles.sloFootActions}>
+            <Button size="sm" variant="ghost" onClick={onDetail}>{t("ob.slo.ud.open")}</Button>
             <Button size="sm" variant="ghost" ariaPressed={open} onClick={() => setOpen(!open)}>{open ? t("ob.slo.hideDetail") : t("ob.slo.detail")}</Button>
             {canWrite && s.application ? (
               <Button size="sm" variant="ghost" ariaPressed={resetting} onClick={() => setResetting(!resetting)}>{t("ob.slo.resetBudget")}</Button>
             ) : null}
           </span>
           <span className={styles.sloFootNote}>
-            {requests <= 0 ? "—" : s.reset && since ? t("ob.slo.cardFootReset", { n: requests.toLocaleString(), span: since }) : t("ob.slo.cardFoot", { n: requests.toLocaleString(), days })}
+            {requests <= 0 ? "—" : s.reset && since && !s.reset.window ? t("ob.slo.cardFootReset", { n: requests.toLocaleString(), span: since }) : t("ob.slo.cardFoot", { n: requests.toLocaleString(), days })}
           </span>
         </>
       }>

@@ -135,8 +135,9 @@ test("wiring: routes, the two new views, the two-row switcher, the strings", () 
   const routes = read("../src/routes/observability.ts");
   for (const r of ["/api/observability/app-errors", "/api/observability/rollouts"]) assert.ok(routes.includes(`"${r}"`), r);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
-  for (const v of ["errors", "rollouts", "slo"]) assert.match(tab, new RegExp(`id: "${v}"`), v);
-  assert.match(tab, /const sloView = view === "services" \|\| view === "settings" \|\| view === "guide";/);
+  // 2026-11-19: menu items of their own
+  for (const v of ["errors", "rollouts", "slo"]) assert.ok(readFileSync(new URL("../../web/src/lib/navConfig.ts", import.meta.url), "utf8").includes(`"/observability/services/${v}"`), v);
+  assert.match(tab, /const sloView = apm === "slo";/, "SLO keeps its own sub-views (services · settings · guide)");
   assert.match(read("../../web/src/app/observability/components/RedView.tsx"), /s\.weekAgo/);
   const all = read("../../web/src/lib/i18nOps.ts");
   for (const k of ["ob.slo.view.errors", "ob.slo.view.rollouts", "ob.slo.view.slo", "ob.red.weekAgo", "ob.red.weekAgoHint", "ob.err.title", "ob.err.summary", "ob.err.foot", "ob.ro.title", "ob.ro.foot", "ob.ro.summary"]) {
