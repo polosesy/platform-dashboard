@@ -8,6 +8,7 @@ import { TopNav } from "./TopNav";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { ScopeBar } from "./ScopeBar";
+import { useViewPrefs } from "@/lib/viewPrefs";
 import { DOCK_QUERY, useMediaQuery } from "@/lib/useMediaQuery";
 import { NAV_EXEMPT_ROUTES } from "@/lib/navConfig";
 import { clearSampleMode, sampleModeStore } from "@/lib/sampleMode";
@@ -20,7 +21,9 @@ import { useI18n } from "@/lib/i18n";
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const docked = useMediaQuery(DOCK_QUERY);
+  // 설정 › 보기 설정 › 메뉴 방식: 'drawer' keeps the menu in the ☰ drawer on wide screens too
+  const [viewPrefs] = useViewPrefs();
+  const docked = useMediaQuery(DOCK_QUERY) && viewPrefs.menu !== "drawer";
   // The drawer stays open only on the path it was opened on — navigating closes it
   const [openedAt, setOpenedAt] = useState<string | null>(null);
   const sidebarOpen = !docked && openedAt === pathname;

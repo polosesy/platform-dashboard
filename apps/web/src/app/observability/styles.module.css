@@ -1383,3 +1383,45 @@
 .upItemHead strong { font-size: var(--text-body); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .upFailed { margin-left: auto; font-size: var(--text-small); color: var(--muted); }
 .upBoard .upLegendWrap { padding-top: 12px; }
+
+/* 수집 상태 › 수집기 신호 (components/CollectorSignals.tsx) — series colours in a fixed order (series1 · 2 · 3) */
+.colWrap { display: grid; gap: 14px; min-width: 0; }
+.colHead { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+.colMeta { font-size: var(--text-caption); color: var(--subtle); }
+.colVerdict { display: grid; gap: 6px; height: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
+.colVerdict[data-state="warn"] { border-color: rgba(var(--warning-rgb), 0.6); }
+.colVerdictHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-small); font-weight: 600; }
+.colVerdictWhy { font-size: var(--text-caption); color: var(--muted); }
+.colCharts { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .colCharts { grid-template-columns: minmax(0, 1fr); } }
+.colChart { margin: 0; display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
+.colChartHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; font-size: var(--text-small); font-weight: 600; }
+.colChartNow { display: inline-flex; flex-wrap: wrap; gap: 8px; font-size: var(--text-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+.colChartNow [data-limit] { color: var(--subtle); font-weight: 500; }
+.colPlot { position: relative; min-width: 0; min-height: 132px; }
+.colEmpty { margin: 0; display: grid; place-items: center; height: 132px; font-size: var(--text-caption); color: var(--subtle); border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+.colGrid { stroke: var(--border); stroke-width: 1; }
+.colAxis { font-size: var(--text-caption); fill: var(--subtle); font-variant-numeric: tabular-nums; }
+.colLine { fill: none; stroke-width: 2; stroke-linejoin: round; stroke: rgb(var(--series1-rgb)); }
+.colLine[data-i="1"] { stroke: rgb(var(--series2-rgb)); }
+.colLine[data-i="2"] { stroke: rgb(var(--series3-rgb)); }
+.colLimit { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.colRule { stroke: var(--warning-strong); stroke-width: 1; stroke-dasharray: 2 3; }
+.colCross { stroke: rgba(var(--ink-rgb), 0.35); stroke-width: 1; }
+.colLegend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: var(--text-caption); color: var(--muted); }
+.colLegend li, .colTipRow { display: inline-flex; align-items: center; gap: 6px; }
+.colLegend i, .colTipRow i { width: 12px; height: 2px; background: rgb(var(--series1-rgb)); }
+.colLegend [data-i="1"] i, .colTipRow[data-i="1"] i { background: rgb(var(--series2-rgb)); }
+.colLegend [data-i="2"] i, .colTipRow[data-i="2"] i { background: rgb(var(--series3-rgb)); }
+.colLegend [data-limit] i, .colTipRow[data-limit] i { background: none; border-top: 2px dashed var(--muted); height: 0; }
+.colLegend [data-rule] i { background: none; border-top: 1px dashed var(--warning-strong); height: 0; }
+.colLegend [data-none] { color: var(--subtle); }
+.colChartNow [data-i="0"] { color: rgb(var(--series1-rgb)); }
+.colChartNow [data-i="1"] { color: rgb(var(--series2-rgb)); }
+.colChartNow [data-i="2"] { color: rgb(var(--series3-rgb)); }
+.colQueries summary { cursor: pointer; font-size: var(--text-small); color: var(--muted); }
+.colQueries ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.colQueries li { display: grid; gap: 2px; font-size: var(--text-caption); }
+.colQueries code { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--muted); overflow-wrap: anywhere; }
+.colUp { display: block; }
+.colUp path { fill: none; stroke: rgb(var(--series1-rgb)); stroke-width: 1.5; }

@@ -1484,3 +1484,67 @@ export type SloUptimeBoardResponse = {
   source: "platform" | "config" | "none";
   services: SloUptimeBoardRow[];
 };
+
+// ── 수집 상태 › 수집기 신호 (2026-11-19) — each collector's own metrics over the page's range ──
+
+/**
+ * A collector signal's series — the workload's pods summed (rates, gauges of amount) or the worst pod (lag, ratios);
+ * `series: null` = the workspace has no such series for this collector (not measured — never 0); `failed` = the query
+ * did not answer
+ */
+export type CollectorSignal = {
+  id: string;
+  unit: "perSecond" | "bytesPerSecond" | "seconds" | "count" | "ratio" | "cores" | "bytes";
+  series: Array<[number, number]> | null;
+  /** the newest point and the range's largest (null without a series) */
+  now: number | null;
+  max: number | null;
+  failed?: true;
+};
+/** The four questions a collector answers (OpenTelemetry Collector · Grafana Alloy monitoring guidance, USE) */
+export type CollectorVerdictId = "throughput" | "errors" | "saturation" | "resources";
+export type CollectorVerdict = {
+  id: CollectorVerdictId;
+  state: "ok" | "warn" | "unknown";
+  /** why — keys of the facts that decided it (web i18n obs.col.why.<key>) with the value */
+  reasons: Array<{ key: string; value: number | null }>;
+};
+export type CollectorPipeline = "metrics" | "logs" | "traces" | "profiles";
+export type CollectorRow = {
+  /** the workload (Deployment / DaemonSet / StatefulSet) whose pods emit collector self-metrics */
+  name: string;
+  namespace: string | null;
+  pods: string[];
+  /** what it carries — from which self-metrics it emits */
+  pipelines: CollectorPipeline[];
+  signals: Record<string, CollectorSignal>;
+  verdicts: CollectorVerdict[];
+};
+export type CollectorScrapeJob = {
+  job: string;
+  targets: number;
+  /** down at the range's end */
+  down: number;
+  /** the share of scrapes that answered over the range */
+  upRatio: number | null;
+  /** the slowest target's scrape (s) and the samples one round brings in */
+  durationMax: number | null;
+  samples: number | null;
+  /** up targets / all, per step */
+  series: Array<[number, number]> | null;
+};
+export type CollectorsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadSloResponse["metricsState"];
+  message?: string;
+  from: string;
+  to: string;
+  stepSeconds: number;
+  collectors: CollectorRow[];
+  scrape: CollectorScrapeJob[];
+  /** the PromQL behind each signal (the collector's pods in place of <pods>) */
+  queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};

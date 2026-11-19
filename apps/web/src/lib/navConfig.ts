@@ -20,7 +20,7 @@ export type NavIcon =
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
   | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph"
   | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes"
-  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target";
+  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target" | "sliders";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -93,6 +93,8 @@ export const NAV_GROUPS: NavGroup[] = [
     item("/settings/connections", "connections", "plug"),
     // Which feature needs which minimum read permission, by package (featureCatalog) — static, shareable
     item("/settings/features", "features", "key"),
+    // 2026-11-19: a person's own view — directories · subscription filter, theme · menu · density, language (per browser)
+    item("/settings/preferences", "preferences", "sliders"),
   ] },
 ];
 

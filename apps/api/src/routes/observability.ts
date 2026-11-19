@@ -31,6 +31,7 @@ import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { getTrace, searchTraces } from "../services/grafanaTraces.js";
 import { getProfile, getProfileCatalog } from "../services/grafanaProfiles.js";
+import { getCollectors } from "../services/collectorTrends.js";
 import { getSloUptime, getSloUptimeBoard } from "../services/sloUptime.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
@@ -247,6 +248,17 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getObservabilityStack(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_stack_failed", "observability");
+    }
+  });
+
+  // 수집 상태 › 수집기 신호: each collector's own metrics over the page's range (services/collectorTrends.ts)
+  router.get("/api/observability/collectors", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const minutes = Number(queryString(req, "minutes") ?? "60");
+      res.json(await getCollectors(env, req.auth?.bearerToken, clusterId, Number.isFinite(minutes) ? minutes : 60, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_collectors_failed", "observability");
     }
   });
 

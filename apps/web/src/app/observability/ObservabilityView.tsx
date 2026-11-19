@@ -17,6 +17,7 @@ import { InfraTab } from "./components/InfraTab";
 import { LogsTab } from "./components/LogsTab";
 import { EventsSection } from "./components/EventsSection";
 import { StackTab } from "./components/StackTab";
+import { CollectorSignals } from "./components/CollectorSignals";
 import { SloTab } from "./components/SloTab";
 import { RecommendedAlertsTab } from "./components/RecommendedAlertsTab";
 import { NodeMaintenancePanel } from "./components/NodeMaintenancePanel";
@@ -122,7 +123,13 @@ function ObservabilityView({ view, apm }: { view: ObsView; apm: ApmView }) {
             </>
           ) : null}
           {view === "logs" ? <LogsTab key={`logs:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} /> : null}
-          {view === "collection" ? <StackTab key={`stack:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} /> : null}
+          {view === "collection" ? (
+            <>
+              {/* the collectors' own signals over the range (2026-11-19), then the pipeline's components now */}
+              <CollectorSignals key={`collectors:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />
+              <StackTab key={`stack:${clusterId}`} clusterId={clusterId} range={time.range} nonce={time.nonce} report={time.report} />
+            </>
+          ) : null}
         </>
       ) : null}
     </div>

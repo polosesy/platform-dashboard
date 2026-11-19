@@ -49,7 +49,8 @@ test("catalog ↔ menu: every feature screen is a menu entry, every menu entry (
   const hrefs = nav.NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href));
   for (const f of FEATURES) for (const r of f.routes) assert.ok(hrefs.includes(r), `${f.id}: ${r}`);
   const covered = new Set(FEATURES.flatMap((f) => f.routes));
-  for (const h of hrefs) if (h !== "/" && h !== "/settings/features") assert.ok(covered.has(h), `${h} belongs to a feature`);
+  // home, this page and 보기 설정 (a person's own view — no Azure permission, nothing read from a tenant) are no feature
+  for (const h of hrefs) if (h !== "/" && h !== "/settings/features" && h !== "/settings/preferences") assert.ok(covered.has(h), `${h} belongs to a feature`);
 });
 
 test("catalog shape: tiers chain from core, each has features, every permission used is defined, ids unique", () => {

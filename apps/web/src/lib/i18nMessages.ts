@@ -710,6 +710,7 @@ const CORE: Translations = {
   "nav.item.costManagement": { ko: "비용 관리", en: "Cost Management" },
   "nav.item.connections": { ko: "Azure 연결", en: "Azure Connections" },
   "nav.item.features": { ko: "기능·권한", en: "Features & Permissions" },
+  "nav.item.preferences": { ko: "보기 설정", en: "View settings" },
   "nav.item.notifications": { ko: "알림 센터", en: "Alert Center" },
   "nav.item.runbooks": { ko: "사례·런북", en: "Cases & Runbooks" },
   "nav.desc.overview": { ko: "구독 전체 요약 — 리소스·상태·비용·보안", en: "Subscription summary — resources, health, cost, security" },
@@ -748,6 +749,7 @@ const CORE: Translations = {
   "nav.desc.runbooks": { ko: "장애를 고친 경험(사례)과 대응 절차(런북)를 팀이 남기고, 새 오류에 비슷한 경험과 그때 쓴 런북을 바로 찾음", en: "The team keeps how incidents were fixed (cases) and its procedures (runbooks); a new error finds similar experience and the runbooks used" },
   "nav.desc.notifications": { ko: "Azure Monitor·Grafana 알림을 대시보드가 직접 받아 장애·보안·모니터링·변경별로 보여 줌 — 메신저 웹훅 없이", en: "Azure Monitor and Grafana alerts received by the dashboard itself, by incident · security · monitoring · change — no messenger webhook" },
   "nav.desc.features": { ko: "패키지(안)별 기능과 필요한 최소 Azure·Kubernetes 읽기 권한", en: "Features by package (proposal) and the minimum Azure / Kubernetes read permissions they need" },
+  "nav.desc.preferences": { ko: "디렉터리 · 구독 필터 · 테마 · 메뉴 · 간격 · 언어 — 이 브라우저에 저장", en: "Directories · subscription filter · theme · menu · spacing · language — kept in this browser" },
 
   // ── Infrastructure diagram (/architecture) ──
   "arch.liveHint": { ko: "설정(구성) 기준 구성도입니다. VNet 1개의 실시간 상태는 라이브 다이어그램에서 확인하세요.", en: "Configuration-based diagram. For one VNet's live state, use the Live Diagram." },

@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-18
-covers: [apps/api/src/services/workloadRed.ts, apps/web/src/lib/redView.ts, apps/api/src/services/appRuntimes.ts, apps/web/src/lib/workloadBlocks.ts, apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts]
+last-verified: 2026-11-19
+covers: [apps/api/src/services/workloadRed.ts, apps/web/src/lib/redView.ts, apps/api/src/services/appRuntimes.ts, apps/web/src/lib/workloadBlocks.ts, apps/api/src/services/workloadSlo.ts, apps/web/src/lib/sloView.ts, apps/web/src/lib/timeRange.ts, apps/web/src/lib/useTimeRange.ts, apps/api/src/services/nodeMaintenance.ts, apps/web/src/lib/nodeMaintView.ts, apps/web/src/lib/k8sNetMap.ts, apps/api/src/services/observabilitySources.ts, apps/api/src/services/hubbleUiSource.ts, apps/api/src/routes/observability.ts, apps/web/src/lib/workloadHeatView.ts, apps/web/src/lib/logView.ts, apps/web/src/lib/kubeEventsView.ts, apps/web/src/lib/logInsightsView.ts, apps/web/src/lib/podLogView.ts, apps/web/src/lib/sloSettingsView.ts, apps/api/src/services/sloSettingsStore.ts, apps/api/src/services/workloadHeatmap.ts, apps/api/src/services/kubeEvents.ts, apps/api/src/services/lokiLogs.ts, apps/api/src/services/observabilityStack.ts, apps/api/src/services/logRedaction.ts, apps/api/src/services/collectorTrends.ts, apps/web/src/lib/collectorView.ts]
 ---
 # AKS 모니터링 연동 — 워크로드 히트맵 · kube 이벤트 · 로그 스트림 · Hubble 드롭 · AKS 관리형 파드
 
@@ -318,6 +318,34 @@ stg 실측(2026-11-05, 기본 목표): 서비스 16 — 가용성은 모두 목�
 4. **확인**: 판별 메트릭이 작업 영역에 보이면 칩이 실선으로 바뀌고 블록에 값이 찹니다(수집 간격 1~2분).
 
 테스트 `apps/api/test/appRuntimes.test.ts`.
+
+## 3h. 수집기 신호 (모니터링 › 수집 상태, 2026-11-19)
+
+예전 수집 상태 화면은 10분 창의 **지금 값**만 보였습니다(구성 요소 표). 그 위에 수집기마다 **페이지 범위의 추이**를 더했습니다.
+
+**수집기** = 수집기 자기 지표를 내는 파드의 워크로드. 무엇을 나르는지는 그 지표로 정합니다:
+
+| 나르는 것 | 표시 지표 |
+|---|---|
+| 메트릭 | `prometheus_remote_storage_samples_total` |
+| 로그 | `loki_write_sent_entries_total` |
+| 트레이스 | `otelcol_receiver_accepted_spans_total` |
+| 프로필 | `pyroscope_write_sent_bytes_total` |
+
+**네 가지 질문**(OpenTelemetry Collector 모니터링 지침 — 받은 것 vs 보낸 것 · 거부 · 내보내기 대기열 크기/용량, Grafana Alloy 원격 쓰기 지표, 프로세스는 USE):
+
+| 질문 | 확인 필요 조건 | 근거 |
+|---|---|---|
+| 처리량 | 받는데(> 0) 보내지 않음(= 0) — 메트릭·스팬 | 사실 |
+| 오류 | 범위 안 실패 · 버림 · 거부 최대 > 0 | 사실 |
+| 포화 | 원격 쓰기 지연 > 120초(관측 스택과 같은 `RW_LAG_SECONDS`) · 원하는 샤드 > 최대 · 내보내기 대기열 ≥ 80% | 대기열은 차면 버림 |
+| 자원 | 메모리·CPU ≥ 제한의 90% · 범위 안 재시작 · 마지막 종료 OOMKilled | 제한 없음 = 비율 없음(판정 안 함) |
+
+차트는 나르는 것마다(메트릭 5 · 로그 3 · 트레이스 3 · 프로필 2) + 자원 3. 선 색은 위치 순서(series1·2·3), 제한은 점선(데이터의 4배가 넘으면 축에 그리지 않고 '제한 n ↑'), 판정 기준은 점선 규칙, 마우스를 올리면 그 시각의 값. 계열이 없으면 '미측정'(0 아님), 질의가 응답하지 않으면 '조회 실패'. 아래 **수집 대상**은 job마다 대상 수 · 지금 내려감 · 범위 안 응답 비율(추이 선) · 가장 느린 수집 · 1회 샘플.
+
+**API** `GET /api/observability/collectors?clusterId&minutes[&at]` → `services/collectorTrends.ts`(신호마다 범위 질의 하나 — 모든 수집기 파드를 파드별로, 약 120점·간격 ≥ 60초, 동시 4개·일시 오류 1회 재시도, 60초 캐시) + 순수 `combine`(파드 → 수집기: 비율·지연은 최악 파드, 그 밖은 합) · `collectorVerdicts`. 웹 `CollectorSignals.tsx` + 순수 `lib/collectorView.ts`.
+
+**stg 실측(내 토큰)**: 수집기 2개(파드 3개) — 1시간(61점)·6시간(121점) 모두 모듈의 마지막 점 = 독립 instant 질의(신호 13개). 발견: 재시작을 `increase([60s])`로 읽으면 60초 수집 간격에서 샘플이 2개가 안 돼 비었음 → 누적 수를 그리고 범위 안 증가분으로 판정. 이 수집기 파드는 CPU 제한이 없어 CPU 비율·스로틀은 판정하지 않음(제한 없음이라고 표시).
 
 ## 4. 연결 파일
 
