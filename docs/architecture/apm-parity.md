@@ -423,6 +423,7 @@ stg 앱은 이 변수들을 사내 라이브러리의 다른 이름으로 설정
 - 지연은 **버킷 경계**(분위가 든 버킷의 위쪽 경계, 보간 없음 — RED · SLO와 같은 규칙). 요청이 없는 칸은 점 없음. 가장 큰 경계를 넘은 칸은 '> 경계'.
 - 오류율 = 5xx(SLO 가용성 실패와 같은 뜻), 4xx는 따로 선. 없는 계열 = '미측정'(0 아님), 절 전체가 없으면 한 줄로(예: JVM이 아닌 서비스).
 - 모든 카운터는 `counterIncrease`(Micrometer 첫 값 보정).
+- **십자선 동기화**(같은 날 2차 — Grafana shared crosshair · Datadog 동기화 커서): 한 차트에 마우스를 올리면 같은 화면의 모든 차트가 같은 시각에 세로선 · 점을 그리고, 머리의 값이 그 시각 값으로 바뀜(툴팁은 마우스 아래 차트 하나만). 각 차트는 **자기 점** 중 가장 가까운 것을 1.5 간격 안에서만 고름 — 멀면 '—'(요청 없던 칸의 분위수를 옆 칸 값으로 채우지 않음). 키보드: 차트에 초점 → ←/→ 이동 · Esc 해제. 순수 `lib/crosshair.ts`(`snapTime`·`stepOf`·저장소), `MetricChart` `CrosshairGroup`(APM 메트릭 · 수집기 신호), 테스트 `crosshair.test.ts`.
 
 **API** `GET /api/observability/apm-metrics?clusterId&minutes[&namespace&application][&at]` → `services/apmMetrics.ts`(서비스 목록 = 지금 초당 요청 순, 서비스를 주면 신호 23개 + 버킷 질의 하나, 60초 캐시). 웹 `ApmMetricsView.tsx` + 순수 `lib/apmMetricsView.ts`, 차트 하나 = `MetricChart.tsx`(수집기 신호와 공용).
 

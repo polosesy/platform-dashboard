@@ -3318,6 +3318,7 @@ export const OPS_T: Translations = {
   "obs.col.queries": { ko: "이 수집기의 PromQL", en: "This collector's PromQL" },
   "obs.col.failed": { ko: "조회 실패 — 이번에 응답하지 않음", en: "Query failed — did not answer this time" },
   "obs.col.notMeasured": { ko: "미측정 — 작업 영역에 이 지표 계열이 없음", en: "Not measured — the workspace has no such series" },
+  "obs.col.plotKeys": { ko: "{title} — 좌우 화살표로 시각 이동, 모든 차트가 같은 시각을 표시, Esc로 해제", en: "{title} — left and right arrows move the time, every chart shows the same time, Esc leaves" },
   "obs.col.notMeasuredShort": { ko: "미측정", en: "not measured" },
   "obs.col.limitOf": { ko: "제한 {v}", en: "limit {v}" },
   "obs.col.limitOffAxis": { ko: "제한이 값보다 4배 넘게 커서 축에 그리지 않음", en: "The limit is over 4× the values — not drawn on the axis" },

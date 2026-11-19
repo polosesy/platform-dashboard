@@ -15,7 +15,7 @@ import { atParam, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
 import { chartsOf, jobState, valueText, type ChartDef } from "@/lib/collectorView";
 import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Select, type ChipLevel } from "@/components/ui";
-import { MetricChart } from "./MetricChart";
+import { CrosshairGroup, MetricChart } from "./MetricChart";
 import styles from "../styles.module.css";
 
 const STATE: Record<"ok" | "warn" | "unknown" | "danger", ChipLevel> = { ok: "ok", warn: "warn", danger: "danger", unknown: "unknown" };
@@ -61,11 +61,13 @@ export function CollectorSignals({ clusterId, range, nonce, report }: { clusterI
               </Cell>
             ))}
           </Grid>
-          <div className={styles.colCharts}>
-            {chartsOf(c).map(({ group, chart }) => (
-              <SignalChart key={`${group}:${chart.id}`} def={chart} group={group} c={c} d={d} fmt={fmt} />
-            ))}
-          </div>
+          <CrosshairGroup>
+            <div className={styles.colCharts}>
+              {chartsOf(c).map(({ group, chart }) => (
+                <SignalChart key={`${group}:${chart.id}`} def={chart} group={group} c={c} d={d} fmt={fmt} />
+              ))}
+            </div>
+          </CrosshairGroup>
           <details className={styles.colQueries}>
             <summary>{t("obs.col.queries")}</summary>
             <ul>{Object.keys(c.signals).map((id) => <li key={id}><b>{t(`obs.col.sig.${id}`)}</b><code>{d.queries[id]}</code></li>)}</ul>

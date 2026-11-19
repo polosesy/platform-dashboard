@@ -16,7 +16,7 @@ import { useRangeRefresh } from "@/lib/useTimeRange";
 import { APM_CHARTS, APM_SECTIONS, pickService, sectionMeasured } from "@/lib/apmMetricsView";
 import { valueText } from "@/lib/collectorView";
 import { EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel, Select } from "@/components/ui";
-import { MetricChart } from "./MetricChart";
+import { CrosshairGroup, MetricChart } from "./MetricChart";
 import styles from "../styles.module.css";
 
 export function ApmMetricsView({ clusterId, range, nonce, report, onTraces }: {
@@ -57,7 +57,7 @@ export function ApmMetricsView({ clusterId, range, nonce, report, onTraces }: {
         {svc ? <LinkButton onClick={() => onTraces(svc.application)}>{t("ob.am.traces")}</LinkButton> : null}
       </div>
       {q.error ? <ErrorNotice error={q.error} /> : !d || !s ? <LoadingState /> : (
-        <>
+        <CrosshairGroup>
           {d.gaps?.length ? <Notice tone="warning">{t("obs.col.gaps", { n: d.gaps.length })}</Notice> : null}
           {APM_SECTIONS.map((sec) => (
             <Panel key={sec} title={t(`ob.am.sec.${sec}`)} sub={t(`ob.am.secSub.${sec}`)}>
@@ -75,7 +75,7 @@ export function ApmMetricsView({ clusterId, range, nonce, report, onTraces }: {
               {sec === "golden" && s.buckets.length ? <p className={styles.colMeta}>{t("ob.am.bucketNote", { n: s.buckets.length, top: valueText(s.buckets[s.buckets.length - 1]!, "seconds") })}</p> : null}
             </Panel>
           ))}
-        </>
+        </CrosshairGroup>
       )}
     </div>
   );
