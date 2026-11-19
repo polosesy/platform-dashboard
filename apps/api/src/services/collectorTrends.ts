@@ -92,7 +92,7 @@ const MARKERS: Record<CollectorPipeline, string> = {
 /** Pure: a PromQL alternation of pod names (Kubernetes names — the dots escaped) */
 export const podAlternation = (pods: string[]) => [...new Set(pods)].sort().map((p) => p.replace(/[.]/g, "\\\\.")).join("|");
 
-type RangeRow = { metric: Record<string, string>; values: Array<[number, number]> };
+export type RangeRow = { metric: Record<string, string>; values: Array<[number, number]> };
 
 /** Pure: per-pod series → one series per collector (sum or max at each time; a time only some pods have = theirs) */
 export function combine(rows: RangeRow[], pods: Set<string>, agg: Agg): Array<[number, number]> | null {
@@ -180,7 +180,7 @@ export async function getCollectors(env: Env, bearerToken: string | undefined, c
   return job;
 }
 
-async function rangeAll(fetcher: PrometheusFetcher, endpoint: string, queries: Record<string, string>, start: number, end: number, step: number): Promise<{ rows: Record<string, RangeRow[]>; gaps: StackQueryGap[] }> {
+export async function rangeAll(fetcher: PrometheusFetcher, endpoint: string, queries: Record<string, string>, start: number, end: number, step: number): Promise<{ rows: Record<string, RangeRow[]>; gaps: StackQueryGap[] }> {
   const names = Object.keys(queries);
   const rows: Record<string, RangeRow[]> = {};
   const gaps: StackQueryGap[] = [];

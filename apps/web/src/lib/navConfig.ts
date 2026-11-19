@@ -20,7 +20,7 @@ export type NavIcon =
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
   | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph"
   | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes"
-  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target" | "sliders";
+  | "pulse" | "route" | "waterfall" | "link" | "bug" | "rocket" | "target" | "sliders" | "lineChart";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -51,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
       item("/observability/nodes", "monNodes", "server", "nav.section.monState"),
       // the APM views (2026-11-19 — were a row of buttons inside one page)
       item("/observability/services", "monServices", "nodes", "nav.section.monApp"),
+      item("/observability/services/metrics", "apmMetrics", "lineChart", "nav.section.monApp"),
       item("/observability/services/red", "apmRed", "pulse", "nav.section.monApp"),
       item("/observability/services/endpoints", "apmEndpoints", "route", "nav.section.monApp"),
       item("/observability/services/traces", "apmTraces", "waterfall", "nav.section.monApp"),
@@ -112,6 +113,7 @@ export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster"
   "/observability/signals": ["cluster"],
   "/observability/nodes": ["cluster"],
   "/observability/services": ["cluster"],
+  "/observability/services/metrics": ["cluster"],
   "/observability/services/red": ["cluster"],
   "/observability/services/endpoints": ["cluster"],
   "/observability/services/traces": ["cluster"],

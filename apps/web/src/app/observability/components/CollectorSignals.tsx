@@ -6,16 +6,16 @@
 // hover = the values at that time; a series the workspace does not have = "미측정" (never a flat 0). Then the scrape
 // jobs: targets, down now, the share of scrapes that answered over the range (with its line), the slowest scrape.
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { CollectorRow, CollectorSignal, CollectorsResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { atParam, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
-import { chartsOf, jobState, limitOnAxis, niceMax, valueText, type ChartDef } from "@/lib/collectorView";
+import { chartsOf, jobState, valueText, type ChartDef } from "@/lib/collectorView";
 import { Cell, Chip, EmptyState, ErrorNotice, Grid, LoadingState, Notice, Panel, Select, type ChipLevel } from "@/components/ui";
-import { useWidth } from "./UptimeBars";
+import { MetricChart } from "./MetricChart";
 import styles from "../styles.module.css";
 
 const STATE: Record<"ok" | "warn" | "unknown" | "danger", ChipLevel> = { ok: "ok", warn: "warn", danger: "danger", unknown: "unknown" };
@@ -92,82 +92,16 @@ function whyValue(key: string, v: number | null, s: Record<string, CollectorSign
   return valueText(v, unit);
 }
 
-const H = 132, PAD = { l: 52, r: 10, t: 10, b: 20 };
-
 function SignalChart({ def, group, c, d, fmt }: { def: ChartDef; group: string; c: CollectorRow; d: CollectorsResponse; fmt: (ms: number) => string }) {
   const { t } = useI18n();
-  const [ref, w] = useWidth<HTMLDivElement>();
-  const [hover, setHover] = useState<number | null>(null);
-  const lines = def.lines.map((id) => c.signals[id]).filter((s): s is CollectorSignal => !!s);
-  const limit = def.limit ? c.signals[def.limit] ?? null : null;
-  const measured = lines.filter((s) => s.series);
-  const unit = lines[0]?.unit ?? "count";
-  const from = Date.parse(d.from), to = Date.parse(d.to);
-  const dataMax = Math.max(0, ...measured.map((s) => s.max ?? 0));
-  const drawLimit = !!limit?.series && limitOnAxis(dataMax, limit.max);
-  const top = useMemo(() => niceMax(Math.max(dataMax, drawLimit ? limit?.max ?? 0 : 0, def.threshold ?? 0), unit), [dataMax, drawLimit, limit, def.threshold, unit]);
-  const iw = Math.max(40, w - PAD.l - PAD.r), ih = H - PAD.t - PAD.b;
-  const x = (ms: number) => PAD.l + ((ms - from) / Math.max(1, to - from)) * iw;
-  const y = (v: number) => PAD.t + ih - (Math.max(0, v) / top) * ih;
-  const path = (pts: Array<[number, number]>) => pts.map(([ms, v], i) => `${i ? "L" : "M"}${x(ms).toFixed(1)},${y(v).toFixed(1)}`).join("");
-  const times = measured[0]?.series?.map((p) => p[0]) ?? [];
-  const at = hover === null ? null : times[hover] ?? null;
-  const valAt = (s: CollectorSignal | null) => (at === null || !s?.series ? null : s.series.find((p) => p[0] === at)?.[1] ?? null);
-  const promql = [...def.lines, ...(def.limit ? [def.limit] : [])].map((id) => d.queries[id]).filter(Boolean).join("\n");
-  const failed = lines.some((s) => s.failed);
+  const ids = [...def.lines, ...(def.limit ? [def.limit] : [])];
   return (
-    <figure className={styles.colChart} data-chart={def.id}>
-      <figcaption className={styles.colChartHead}>
-        <span title={promql}>{t(`obs.col.chart.${def.id}`)}</span>
-        <span className={styles.colChartNow}>
-          {measured.map((s, i) => <span key={s.id} data-i={i}>{valueText(s.now, s.unit)}</span>)}
-          {limit?.series ? <span data-limit title={drawLimit ? undefined : t("obs.col.limitOffAxis")}>{t("obs.col.limitOf", { v: valueText(limit.now, limit.unit) })}{drawLimit ? "" : " ↑"}</span>
-            : def.limit && group === "resources" && measured.length ? <span data-limit>{t("obs.col.noLimit")}</span> : null}
-        </span>
-      </figcaption>
-      <div ref={ref} className={styles.colPlot} onPointerLeave={() => setHover(null)}
-        onPointerMove={(e) => {
-          if (!times.length) return;
-          const box = e.currentTarget.getBoundingClientRect();
-          const ms = from + ((e.clientX - box.left - PAD.l) / iw) * (to - from);
-          let best = 0;
-          for (let i = 1; i < times.length; i++) if (Math.abs(times[i]! - ms) < Math.abs(times[best]! - ms)) best = i;
-          setHover(best);
-        }}>
-        {failed ? <p className={styles.colEmpty}>{t("obs.col.failed")}</p>
-          : !measured.length ? <p className={styles.colEmpty}>{t("obs.col.notMeasured")}</p>
-          : w > 0 ? (
-            <svg width={w} height={H} role="img" aria-label={t(`obs.col.chart.${def.id}`)}>
-              {[0, 0.5, 1].map((f) => (
-                <g key={f}>
-                  <line className={styles.colGrid} x1={PAD.l} x2={w - PAD.r} y1={y(top * f)} y2={y(top * f)} />
-                  <text className={styles.colAxis} x={PAD.l - 6} y={y(top * f) + 4} textAnchor="end">{valueText(top * f, unit)}</text>
-                </g>
-              ))}
-              {def.threshold !== undefined ? <line className={styles.colRule} x1={PAD.l} x2={w - PAD.r} y1={y(def.threshold)} y2={y(def.threshold)} /> : null}
-              {drawLimit ? <path className={styles.colLimit} d={path(limit!.series!)} /> : null}
-              {measured.map((s) => <path key={s.id} className={styles.colLine} data-i={lines.indexOf(s)} d={path(s.series!)} />)}
-              {at !== null ? <line className={styles.colCross} x1={x(at)} x2={x(at)} y1={PAD.t} y2={PAD.t + ih} /> : null}
-              <text className={styles.colAxis} x={PAD.l} y={H - 4}>{fmt(from)}</text>
-              <text className={styles.colAxis} x={w - PAD.r} y={H - 4} textAnchor="end">{fmt(to)}</text>
-            </svg>
-          ) : null}
-        {at !== null ? (
-          <div className={styles.sloTip} style={{ left: Math.min(Math.max(0, x(at) + 8), Math.max(0, w - 200)), top: 6 }} role="status">
-            <strong className={styles.upTipHead}>{fmt(at)}</strong>
-            {lines.map((s) => <span key={s.id} className={styles.colTipRow} data-i={lines.indexOf(s)}><i aria-hidden="true" />{t(`obs.col.sig.${s.id}`)} {s.series ? valueText(valAt(s), s.unit) : t("obs.col.notMeasuredShort")}</span>)}
-            {limit?.series ? <span className={styles.colTipRow} data-limit><i aria-hidden="true" />{t(`obs.col.sig.${limit.id}`)} {valueText(valAt(limit), limit.unit)}</span> : null}
-          </div>
-        ) : null}
-      </div>
-      {lines.length > 1 || limit || def.threshold !== undefined ? (
-        <ul className={styles.colLegend}>
-          {lines.map((s, i) => <li key={s.id} data-i={i} data-none={!s.series || undefined}><i aria-hidden="true" />{t(`obs.col.sig.${s.id}`)}{s.series ? "" : ` (${t("obs.col.notMeasuredShort")})`}</li>)}
-          {def.limit ? <li data-limit data-none={!limit?.series || undefined}><i aria-hidden="true" />{t(`obs.col.sig.${def.limit}`)}{limit?.series ? "" : ` (${t("obs.col.notMeasuredShort")})`}</li> : null}
-          {def.threshold !== undefined ? <li data-rule><i aria-hidden="true" />{t(`obs.col.rule.${def.id}`, { v: valueText(def.threshold, unit) })}</li> : null}
-        </ul>
-      ) : null}
-    </figure>
+    <MetricChart id={def.id} title={t(`obs.col.chart.${def.id}`)} promql={ids.map((id) => d.queries[id]).filter(Boolean).join("\n")}
+      lines={def.lines.map((id) => ({ signal: c.signals[id], label: t(`obs.col.sig.${id}`) })).filter((l) => l.signal)}
+      limit={def.limit ? c.signals[def.limit] ?? null : undefined} limitLabel={def.limit ? t(`obs.col.sig.${def.limit}`) : undefined}
+      threshold={def.threshold} ruleLabel={def.threshold !== undefined ? t(`obs.col.rule.${def.id}`, { v: valueText(def.threshold, c.signals[def.lines[0]!]?.unit ?? "count") }) : undefined}
+      noLimitText={def.limit && group === "resources" ? t("obs.col.noLimit") : undefined}
+      from={Date.parse(d.from)} to={Date.parse(d.to)} fmt={fmt} />
   );
 }
 

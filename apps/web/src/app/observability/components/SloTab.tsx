@@ -34,6 +34,7 @@ import { EndpointsView } from "./EndpointsView";
 import { ErrorsView } from "./ErrorsView";
 import { RolloutsView } from "./RolloutsView";
 import { TracesView, type TraceSeed } from "./TracesView";
+import { ApmMetricsView } from "./ApmMetricsView";
 import { UptimeBoard } from "./UptimeBoard";
 import { SloDetail } from "./SloDetail";
 import {
@@ -49,8 +50,8 @@ management.metrics.distribution.slo.http.server.requests=100ms,300ms,500ms,1s,3s
 management.metrics.tags.application=\${spring.application.name}`;
 
 /** The APM views — menu items of their own since 2026-11-19 (모니터링 › 애플리케이션 (APM) › …, one route each) */
-export type ApmView = "map" | "red" | "endpoints" | "traces" | "deps" | "errors" | "rollouts" | "slo";
-export const APM_VIEWS: ApmView[] = ["map", "red", "endpoints", "traces", "deps", "errors", "rollouts", "slo"];
+export type ApmView = "map" | "metrics" | "red" | "endpoints" | "traces" | "deps" | "errors" | "rollouts" | "slo";
+export const APM_VIEWS: ApmView[] = ["map", "metrics", "red", "endpoints", "traces", "deps", "errors", "rollouts", "slo"];
 /** the route of an APM view */
 export const apmHref = (v: ApmView) => (v === "map" ? "/observability/services" : `/observability/services/${v}`);
 type SloSub = "services" | "settings" | "guide";
@@ -100,6 +101,15 @@ export function SloTab({ clusterId, range, nonce, report, linkedTrace, apm = "ma
       <div className={styles.slo}>
         <Toolbar start={switcher} />
         <ServiceMapView clusterId={clusterId} range={range} nonce={nonce} report={report} />
+      </div>
+    );
+  }
+  // 메트릭 (2026-11-19): Micrometer over the range — opens whatever the SLO data's state, like the map
+  if (view === "metrics") {
+    return (
+      <div className={styles.slo}>
+        <Toolbar start={switcher} />
+        <ApmMetricsView clusterId={clusterId} range={range} nonce={nonce} report={report} onTraces={(service) => openTraces({ service })} />
       </div>
     );
   }

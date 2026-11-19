@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-19
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx, apps/api/src/services/sloUptime.ts, apps/web/src/lib/sloUptimeView.ts, apps/web/src/app/observability/components/SloDetail.tsx, apps/web/src/app/observability/components/UptimeBars.tsx, apps/web/src/app/observability/components/UptimeBoard.tsx]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx, apps/api/src/services/sloUptime.ts, apps/web/src/lib/sloUptimeView.ts, apps/web/src/app/observability/components/SloDetail.tsx, apps/web/src/app/observability/components/UptimeBars.tsx, apps/web/src/app/observability/components/UptimeBoard.tsx, apps/api/src/services/apmMetrics.ts, apps/web/src/lib/apmMetricsView.ts, apps/web/src/app/observability/components/ApmMetricsView.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -406,6 +406,34 @@ stg 앱은 이 변수들을 사내 라이브러리의 다른 이름으로 설정
 **프로필 색 범례**(같은 날): 플레임 그래프 아래에 있던 범례(코드 · 언어 런타임 · 네이티브)를 **그래프 위**로, 색을 옅은 파랑 · 회색 · 노랑(이웃 ΔE 4.2 — 정상 시력으로도 구분 어려움)에서 파랑 · 밝은 회색 · 주황(`--flame-*`, ΔE 19.2 · 색각 이상 17.8, 글자 대비 7:1 이상)으로.
 
 **서비스 (APM) 보기 → 메뉴 항목**(같은 날, kubernetes-ia 8.2): 서비스 맵 · RED · 엔드포인트 · 트레이스 · 의존성 · 오류 · 배포 · SLO가 '애플리케이션 (APM)' 분류의 메뉴 항목(`/observability/services/<보기>`)이 됨 — 화면 위 8개 버튼 삭제, SLO 안의 [서비스 SLO | 설정 | 가이드]만 남김.
+
+## 4j. 메트릭 — 관측성 세 기둥 중 메트릭 화면 (2026-11-19)
+
+**검토**: 트레이스(트레이스 보기)와 로그(로그 · 오류 보기)는 화면이 있었지만, 메트릭은 흩어져 있었습니다 — RED(spanmetrics 표 · 지금 값), SLO(Micrometer 창 합계), 히트맵(지금 값), 의존성(지금 값). **서비스 하나의 지표를 시간에 따라 나란히** 보는 화면이 없었습니다. Datadog · New Relic의 APM 서비스 화면 구성(골든 시그널 · 런타임 · 의존 자원 · 인프라)을 따라 **모니터링 › 애플리케이션 (APM) › 메트릭**(`/observability/services/metrics`)을 만들었습니다.
+
+| 절 | 차트 | 원시 지표 |
+|---|---|---|
+| 골든 시그널 | 초당 요청(2xx·3xx / 4xx / 5xx) · 5xx 비율 · 지연 p50/p95/p99 | `http_server_requests_seconds_{count,bucket}`(/actuator 제외 — RED · SLO와 같은 범위) |
+| 런타임 (JVM) | 힙 사용/최대 · non-heap · GC 정지 비율 · 가장 긴 GC · 스레드 · 프로세스 CPU | `jvm_memory_*` · `jvm_gc_pause_seconds_*` · `jvm_threads_live_threads` · `process_cpu_usage` |
+| 의존 자원 | DB 연결 풀 사용/대기/최대 · 시간 초과 · 외부 HTTP 요청/실패 · 실행기 대기 | `hikaricp_connections_*` · `http_client_requests_seconds_count` · `executor_queued_tasks` |
+| 파드 자원 | CPU · 메모리 vs 요청/제한 | cAdvisor · kube-state-metrics(그 서비스의 파드) |
+
+규칙:
+- 모든 차트가 **같은 시간축**(페이지 범위, 약 120점) — 지연이 뛴 시각에 GC · 연결 풀 · CPU가 같이 뛰었는지 눈으로 맞춰 봄.
+- 지연은 **버킷 경계**(분위가 든 버킷의 위쪽 경계, 보간 없음 — RED · SLO와 같은 규칙). 요청이 없는 칸은 점 없음. 가장 큰 경계를 넘은 칸은 '> 경계'.
+- 오류율 = 5xx(SLO 가용성 실패와 같은 뜻), 4xx는 따로 선. 없는 계열 = '미측정'(0 아님), 절 전체가 없으면 한 줄로(예: JVM이 아닌 서비스).
+- 모든 카운터는 `counterIncrease`(Micrometer 첫 값 보정).
+
+**API** `GET /api/observability/apm-metrics?clusterId&minutes[&namespace&application][&at]` → `services/apmMetrics.ts`(서비스 목록 = 지금 초당 요청 순, 서비스를 주면 신호 23개 + 버킷 질의 하나, 60초 캐시). 웹 `ApmMetricsView.tsx` + 순수 `lib/apmMetricsView.ts`, 차트 하나 = `MetricChart.tsx`(수집기 신호와 공용).
+
+**stg 실측(내 토큰, 6시간, 요청이 가장 많은 서비스)**:
+- p50 · p95 · p99를 5개 시각씩 원시 버킷 `increase()`로 손 계산 → **15/15 일치**.
+- 5xx 비율 · 초당 요청 · 힙(끝 시각) = 직접 instant 질의.
+- 신호 23개 중 계열 없음: 5xx(그 기간 5xx 0)·외부 HTTP 실패·CPU 제한(이 파드에 CPU 제한 없음).
+
+**발견**:
+1. **작업 영역은 무한대 버킷을 `"+inf"`(소문자)로 줌** — `"+Inf"`만 읽어 넘친 요청 버킷을 버렸고, 표본 분위수가 모두 달랐음 → 대소문자 무시(`leOf`, RED · 롤아웃과 같은 규칙).
+2. 첫 화면에서 마지막 버킷 **안**의 p99가 '> 1 s'로 보였음 — 값만으로는 '경계와 같음'과 '넘음'을 구분할 수 없음 → 넘은 시각을 `overAt`으로 따로 표시.
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

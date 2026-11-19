@@ -35,6 +35,7 @@ const PATHS: Record<NavIconName, React.ReactNode> = {
   bug: <><rect x="8" y="7" width="8" height="12" rx="4" /><path d="M12 7V5M9 4l1.5 2M15 4l-1.5 2M4 11h4M16 11h4M4 17l4-1M20 17l-4-1M12 11v8" /></>,
   rocket: <><path d="M12 15c-1.5-1.5-2-4-1-7 1-3 4-5 8-5 0 4-2 7-5 8-3 1-5.5.5-7-1" /><path d="M9 12l-4 1 2-4M12 15l-1 4 4-2" /><circle cx="15" cy="9" r="1.2" /></>,
   target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></>,
+  lineChart: <><path d="M4 4v16h16" /><path d="M7 15l4-5 3 3 5-6" /></>,
   sliders: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
   server: <><rect x="4" y="4" width="16" height="7" rx="1.5" /><rect x="4" y="13" width="16" height="7" rx="1.5" /><path d="M8 7.5h.01M8 16.5h.01M12 7.5h5M12 16.5h5" /></>,
   flame: <><path d="M12 21c-3.9 0-6.5-2.6-6.5-6.1 0-3.4 2.6-5.2 3.7-8.4.9 1.6 1.4 2.7 2.8 3.4.3-2.6 1.4-4.6 3.2-6.4.3 3.6 4.3 6.2 4.3 11.1C19.5 18.4 16 21 12 21Z" /><path d="M12 21c-1.7 0-2.8-1.2-2.8-2.8 0-1.8 1.4-2.6 2.1-4.2 1 1.3 3.5 2.3 3.5 4.3 0 1.5-1.1 2.7-2.8 2.7Z" /></>,

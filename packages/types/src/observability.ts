@@ -1500,6 +1500,10 @@ export type CollectorSignal = {
   now: number | null;
   max: number | null;
   failed?: true;
+  /** a percentile: the histogram's largest finite bound, and the times whose percentile is over it (read "> cap") —
+   *  a point AT the cap is the last bucket itself (≤ cap), so the value alone cannot say "over" */
+  cap?: number;
+  overAt?: number[];
 };
 /** The four questions a collector answers (OpenTelemetry Collector · Grafana Alloy monitoring guidance, USE) */
 export type CollectorVerdictId = "throughput" | "errors" | "saturation" | "resources";
@@ -1545,6 +1549,34 @@ export type CollectorsResponse = {
   collectors: CollectorRow[];
   scrape: CollectorScrapeJob[];
   /** the PromQL behind each signal (the collector's pods in place of <pods>) */
+  queries: Record<string, string>;
+  gaps?: StackQueryGap[];
+};
+
+// ── APM › 메트릭 (2026-11-19) — one service's metrics on one time axis: golden signals, runtime, dependencies, pods ──
+
+export type ApmMetricSection = "golden" | "runtime" | "deps" | "pods";
+export type ApmMetricsResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadSloResponse["metricsState"];
+  message?: string;
+  from: string;
+  to: string;
+  stepSeconds: number;
+  /** the services with Micrometer HTTP server metrics (namespace/application tags) and their requests per second now */
+  services: Array<{ namespace: string; application: string; rps: number | null }>;
+  /** the chosen service — absent when none was asked or it has no series */
+  service?: {
+    namespace: string;
+    application: string;
+    pods: number;
+    /** the signals by section (same shape as the collector signals — series null = not measured, never 0) */
+    sections: Record<ApmMetricSection, Record<string, CollectorSignal>>;
+    /** the histogram's bucket bounds (s) — a percentile reads as the bound of the bucket that holds it */
+    buckets: number[];
+  };
   queries: Record<string, string>;
   gaps?: StackQueryGap[];
 };
