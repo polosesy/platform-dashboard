@@ -344,6 +344,20 @@ Datadog 'Map and monitor all your services automatically' 화면의 구성을 �
 | 스레드 타임라인 | **만들 수 없음** — 스레드 라벨·샘플 시각이 없음, 화면이 이유와 라벨 목록을 말함 | — |
 | 언어별 프로필 종류 | Datadog 표(Java 10 · Python 7 · Go 8 · Ruby 4 · Node.js 4 · .NET 6 · PHP 5 · 네이티브 3) × 이 클러스터: 수집 중 · 수집 안 함(Java는 Pyroscope 에이전트 설정) · Pyroscope에 없음 | `languageCoverage` |
 
+**Java 켜는 법 — 공식 문서 대조**(grafana.com/docs/pyroscope · Java SDK, 2026-11-19):
+
+| 종류 | 설정 | 문서 |
+|---|---|---|
+| CPU | `PYROSCOPE_PROFILER_EVENT` = `itimer`(기본) · `cpu` · `wall` 중 하나 | 맞음 — stg `jfr_event=itimer` |
+| 할당 | `PYROSCOPE_PROFILER_ALLOC=512k` — 바이트 임계값, 기본 꺼짐, 권장 시작값 | 맞음 |
+| Wall | `EVENT=wall` — CPU 이벤트는 하나라 CPU 대신 | 맞음 |
+| 잠금 | `PYROSCOPE_PROFILER_LOCK=10000000` — **나노초** 임계값 | 처음 적은 `10ms`는 틀림 → 고침 |
+| 여러 이벤트 함께 | `PYROSCOPE_FORMAT=jfr` | 빠졌던 것 → 추가 |
+| 살아 있는 힙 | `PYROSCOPE_ALLOC_LIVE=true` — 할당 샘플 중 살아 있는 객체만 남김(할당 프로필이 바뀜, 종류 이름이 같아 화면에서 구분 불가) | 구체화 |
+| 예외 · 클래스 로드 · 파일/소켓 I/O | — | 문서에 없음 |
+
+stg 앱은 이 변수들을 사내 라이브러리의 다른 이름으로 설정합니다(할당 임계값·서버 주소만 — 17개 앱, Alloy 수신기로 보냄). 그래서 화면은 표준 이름을 보이고, 그 라이브러리가 어떤 키를 넘기는지 확인하라고 적습니다.
+
 **시계열 단위(실측)**: Grafana가 CPU를 **코어**, 바이트를 **초당**, 개수를 **15초 칸마다**로 줌 → Σ × 칸(× 10⁹) ≈ 루트(CPU 6.56 s vs 6.54 s · 717.6 MB vs 716.5 MB · 1,359 vs 1,357 — 창 가장자리 차이).
 
 **확인**:

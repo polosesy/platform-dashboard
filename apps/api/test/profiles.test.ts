@@ -102,6 +102,15 @@ test("frames, units, the series' units, per-language coverage, the thread timeli
     for (const d of P.DD_TYPES[lang]) assert.ok(msgs.includes(`"ob.pf.dd.${d.key}"`), d.key);
   }
   for (const d of P.DD_TYPES.java) assert.ok(msgs.includes(`"ob.pf.enable.java.${d.key}"`), `java enable ${d.key}`);
+  // checked against grafana.com/docs/pyroscope (Java SDK, 2026-11-19): the lock threshold is in NANOSECONDS (a "10ms"
+  // hint was wrong), several events at once need PYROSCOPE_FORMAT=jfr, live objects = PYROSCOPE_ALLOC_LIVE
+  const hint = (k: string) => new RegExp(`"ob\\.pf\\.enable\\.java\\.${k}": \\{ ko: "([^"]+)"`).exec(msgs)![1]!;
+  assert.match(hint("lock"), /PYROSCOPE_PROFILER_LOCK=10000000(?!\d)/);
+  assert.doesNotMatch(hint("lock"), /LOCK=10ms/);
+  assert.match(hint("lock"), /PYROSCOPE_FORMAT=jfr/);
+  assert.match(hint("allocations"), /PYROSCOPE_PROFILER_ALLOC=512k/);
+  assert.match(hint("liveHeap"), /PYROSCOPE_ALLOC_LIVE=true/);
+  assert.match(hint("wallTime"), /PYROSCOPE_PROFILER_EVENT=wall/);
 });
 
 test("menu: the monitoring views carry the time range between them — nowhere else", () => {

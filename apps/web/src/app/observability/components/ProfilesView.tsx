@@ -134,6 +134,7 @@ export function ProfilesView({ clusterId, range, nonce, report }: { clusterId: s
                 </li>
               ))}
             </ul>
+            {lang === "java" ? <p className={styles.pfMeta}>{t("ob.pf.cov.javaNote")}</p> : null}
           </div>
         ))}
         <Notice tone="info" title={t("ob.pf.timeline.title")}>
