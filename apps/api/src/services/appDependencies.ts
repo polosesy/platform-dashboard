@@ -22,7 +22,7 @@ import { getPrometheusFetcherAuto } from "../infra/azureClientFactory.js";
 import { HttpError } from "../infra/requestParams.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
-import { pickScope, scopeMatchers } from "./promScope.js";
+import { counterIncrease, pickScope, scopeMatchers } from "./promScope.js";
 import { runAll } from "./observabilityStack.js";
 
 const QUERY_TIMEOUT_MS = 20_000;
@@ -34,8 +34,9 @@ export function dependencyQueries(C: string, minutes: number): Record<string, st
   const s = C ? `{${C}}` : "";
   const w = `[${minutes}m]`;
   return {
-    outCount: `sum by (${OUT_BY}) (increase(http_client_requests_seconds_count${s}${w}))`,
-    outSum: `sum by (${APP}, client_name, clientname) (increase(http_client_requests_seconds_sum${s}${w}))`,
+    // counterIncrease: a client call that failed once creates its series at 1 — increase() alone never saw it
+    outCount: `sum by (${OUT_BY}) (${counterIncrease(`http_client_requests_seconds_count${s}`, `${minutes}m`)})`,
+    outSum: `sum by (${APP}, client_name, clientname) (${counterIncrease(`http_client_requests_seconds_sum${s}`, `${minutes}m`)})`,
     outMax: `max by (${APP}, client_name, clientname) (max_over_time(http_client_requests_seconds_max${s}${w}))`,
     poolActive: `max by (${APP}, pool) (hikaricp_connections_active${s})`,
     poolMax: `max by (${APP}, pool) (hikaricp_connections_max${s})`,

@@ -46,3 +46,29 @@ export function scopeMatchers(scope: Scope, withJob = true): string {
   return m.join(",");
 }
 
+
+/** Pure: a PromQL duration ("5m", "6h", "3d", "4320m") in minutes — null for anything else */
+export function durationMinutes(d: string): number | null {
+  const m = /^(\d+)([mhd])$/.exec(d.trim());
+  if (!m) return null;
+  return Number(m[1]) * (m[2] === "m" ? 1 : m[2] === "h" ? 60 : 1440);
+}
+
+/**
+ * Pure: a counter's increase over `[range]` (ending `offset` ago — "" or " offset 3d") that also counts series CREATED
+ * inside the window. Micrometer creates a counter at its first increment, so its first sample is already 1 and
+ * increase() — differences between samples — never sees that one (2026-11-19 stg: every 4xx / 5xx series of a service
+ * — 409 ×3, 424, 404, 500 — sat at 1 since it appeared; the 6 h client_error / server_error sums were 0). New series =
+ * present in the window but not at its start (`unless … offset <start>`); their first value = min_over_time (a counter
+ * only grows within a series — a restart is a new pod, a new series). Per series, so a `sum by` over it adds up.
+ * Series already present at the start are increase() as before; a series with one sample only is its first value.
+ */
+export function counterIncrease(sel: string, range: string, offset = ""): string {
+  const rangeMin = durationMinutes(range);
+  const offMatch = /^\s*offset\s+(\S+)\s*$/.exec(offset);
+  const offMin = offset.trim() === "" ? 0 : offMatch ? durationMinutes(offMatch[1]!) : null;
+  if (rangeMin === null || offMin === null) throw new Error(`counterIncrease: unsupported range / offset "${range}" "${offset}"`);
+  const inc = `increase(${sel}[${range}]${offset})`;
+  const fresh = `(min_over_time(${sel}[${range}]${offset}) unless ${sel} offset ${offMin + rangeMin}m)`;
+  return `((${inc} + ${fresh}) or ${inc} or ${fresh})`;
+}

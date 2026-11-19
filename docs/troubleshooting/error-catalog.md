@@ -90,6 +90,13 @@ covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts,
 - **해결**: '지금' 창은 **15초 전에 끝남**(`lokiLogs.ts` `SETTLE_MS`·`windowEndNs`) — 숫자·줄·로그 지표·드롭이 같은 끝, 줄 읽기는 `rangeOf` = [E − m + 1 ns, E + 1 ns)(= count의 (E − m, E]). 응답 `settledSeconds` → 범위 칩 툴팁. stg 대조(살아 있는 2분 창, 20회): 예전 방식 5회 차이(최대 9줄) → 0회. 지난 범위(`at`)는 그대로. 개발 PC 시계가 클러스터보다 약 6초 늦어 PC 시각으로 잰 '지금' 시험은 이 현상을 숨김(측정 때 Loki `Date` 헤더로 보정).
 
 
+### OBS-007: 서비스 로그에 ERROR(예외 스택)가 있는데 RED 오류 건수 0 · Micrometer 4xx/5xx도 0
+- **에러**: AKS 모니터링 › 서비스 (APM) › RED에서 한 서비스의 오류가 0인데, 로그에는 그 시각 ERROR와 트레이스 ID가 있음(예: 비동기 실행기 스레드의 `CompletionException`).
+- **원인 ① 정의 — 오류가 스팬에 없음**(2026-11-19 stg, Tempo 원본): 그 트레이스의 스팬 245개 중 상태 ERROR가 0개. 로그 줄의 스팬은 내부 스팬(`secured request`, 상태 OK, 로그보다 10초 먼저 끝남 — 작업을 넘긴 스레드의 MDC). 요청의 서버 스팬 속성은 `outcome=CLIENT_ERROR`·`exception=none` — 서버가 비동기 실패를 잡아 **HTTP 424**로 답함. OpenTelemetry HTTP 규칙상 서버 스팬의 4xx는 오류가 아니라 상태 UNSET이고, 실패는 실행기 스레드의 로그에만 있습니다. RED 오류 = 서버 스팬 ERROR(5xx·처리 못 한 예외)이므로 0이 정의상 맞습니다.
+- **원인 ② 셈 — Micrometer 카운터의 첫 값**: Micrometer는 카운터를 첫 이벤트 때 만듦 → 그 계열의 첫 샘플이 이미 1이고, `increase()`는 샘플 사이 차이라 그 1을 못 봄. stg에서 그 서비스의 4xx·5xx 계열 7개가 모두 생긴 뒤 1에 머물러 있어 6시간 4xx 0 · 5xx 0(원시 샘플로 센 값 5 · 1). 같은 이유로 **SLO의 5xx도 빠짐**(전체 6시간 0 → 2, 3일 5 → 8). spanmetrics는 0에서 시작하고, log4j2 이벤트 카운터는 시작 때 0으로 등록돼 영향 없음.
+- **해결**: `promScope.ts` `counterIncrease(sel, range, offset)` = `increase()` + 창 안에서 생긴 계열의 첫 값(`min_over_time … unless … offset <창 시작>`), 계열마다 → SLO 개수·버킷·표시 PromQL(`sliExpr`)·의존성 외부 HTTP 개수·합에 적용. RED는 서비스마다 둘째 줄에 **그 밖 오류**(HTTP 4xx·5xx — Micrometer `outcome`, 로그 ERROR — log4j2/logback ERROR·FATAL, 같은 이름의 `application`)를 두고, 스팬 오류 0인데 그쪽이 ≥1이면 ▲. 각 출처는 자기 범위(`group by (cluster, collector)`)로 읽고, 계열 없음 = '—'(0 아님)·조회 실패 = 상태 문장. stg 대조(그 서비스, 원시 샘플 독립 계산): 60분 4xx 4 = 4 · 6시간 4xx 5 = 5 · 5xx 1 = 1(예전 0·0) · 로그 ERROR 8 = 8.02. SLO 질의 28개 모두 200, 최대 8.3초.
+
+
 ---
 
 ## 3. Azure 인증 · 플랫폼 역할

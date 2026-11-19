@@ -948,6 +948,9 @@
 .sloCellSub { display: block; font-size: var(--text-caption); color: var(--subtle); }
 /* RED (트레이스): numbers right-aligned; an endpoint row sits under its service, indented */
 .redNum { text-align: right; white-space: nowrap; }
+.redDef { margin: 0 0 8px; font-size: var(--text-caption); color: var(--muted); }
+/* other sources saw errors while the server spans saw none — the fact RED alone hides */
+.sloCellSub[data-other-errors][data-hot] { color: var(--warning-strong); font-weight: 600; }
 .sloTable th.redNum { text-align: right; }
 .redSubRow td { background: var(--panel-sunken); font-size: var(--text-caption); }
 .redEndpoint { display: block; padding-left: 16px; font-family: var(--font-mono); overflow-wrap: anywhere; }

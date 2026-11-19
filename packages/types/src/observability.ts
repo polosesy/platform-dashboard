@@ -989,12 +989,21 @@ export type RedService = {
   lowTraffic: boolean;
   /** the same window a week earlier (null = not read, or no series then) — a fact to compare with, not a baseline model */
   weekAgo?: { requests: number; rate: number; errors: number; errorRate: number | null; p95: RedQuantile | null } | null;
+  /**
+   * The same service's errors from other sources (2026-11-19 — a workflow failure answered as HTTP 424 and logged as
+   * ERROR from an executor thread had no ERROR span, so `errors` was 0): Micrometer HTTP server answers 4xx / 5xx and
+   * log ERROR / FATAL events of the application named exactly like the service. null = that source has no series for
+   * this application (not instrumented) or was not read — never 0 for "unknown".
+   */
+  other?: { http4xx: number | null; http5xx: number | null; logErrors: number | null };
 };
 export type WorkloadRedResponse = {
   clusterId: string;
   generatedAt: string;
   at?: string;
   windowMinutes: RedWindow;
+  /** the other error sources of `RedService.other`: read · no series in this cluster · the query failed */
+  otherSources?: { http: "ok" | "none" | "failed"; log: "ok" | "none" | "failed" };
   metricsState: "ok" | "noWorkspace" | "noHubbleMetrics" | "ambiguousCluster" | "forbidden" | "throttled" | "tooCostly" | "failed";
   message?: string;
   /** whether spanmetrics exist at all in this cluster's scope */

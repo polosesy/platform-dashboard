@@ -32,7 +32,7 @@ import { clusterConnection, getPrometheusFetcherAuto } from "../infra/azureClien
 import { HttpError } from "../infra/requestParams.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
-import { pickScope, promString, scopeMatchers } from "./promScope.js";
+import { pickScope, promString, scopeMatchers, counterIncrease } from "./promScope.js";
 import { runAll } from "./observabilityStack.js";
 import { readSloSettings, resetFor, sloSettingsDir, type SloSettingsDoc } from "./sloSettingsStore.js";
 import type { SloBudgetReset, SloBudgetResetApplied } from "@aud/types";
@@ -146,8 +146,10 @@ export function sloPartKey(base: string, windowDays: number, i: number): string 
  *  per reset plan the piece between the reset and its part boundary (`r<i>:n` · `r<i>:g:<le>` · `r<i>:coverage`) */
 export function sloQueries(C: string, ksm: string, windowDays: number, les: string[], plans: SloResetPlan[] = []): Record<string, string> {
   const sel = (m: string, ...extra: string[]) => `${m}{${[C, 'uri!~"/actuator.*"', ...extra].filter(Boolean).join(",")}}`;
-  const n = (r: string, off = "", f = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_count", f)}[${r}]${off}))`;
-  const g = (le: string, r: string, off = "", f = "") => `sum by (${BY}) (increase(${sel("http_server_requests_seconds_bucket", `le=${promString(le)}`, f)}[${r}]${off}))`;
+  // counterIncrease: Micrometer creates a series at its first request, so increase() alone misses the first 5xx of
+  // each (pod, uri, status, exception) — a rare error was never counted (2026-11-19, promScope.ts)
+  const n = (r: string, off = "", f = "") => `sum by (${BY}) (${counterIncrease(sel("http_server_requests_seconds_count", f), r, off)})`;
+  const g = (le: string, r: string, off = "", f = "") => `sum by (${BY}) (${counterIncrease(sel("http_server_requests_seconds_bucket", `le=${promString(le)}`, f), r, off)})`;
   const q: Record<string, string> = {};
   for (const w of BURN_WINDOWS) {
     q[`n:${w}`] = n(w);
@@ -178,11 +180,12 @@ const splitService = (k: string): [string, string] => { const i = k.indexOf("/")
 /** Pure: the PromQL shown beside an SLI (one service, the SLO window — days, or a range such as `4320m` since a reset) */
 export function sliExpr(C: string, kind: SloKind, namespace: string, application: string, windowDays: number | string, le: string | null): string {
   const m = [C, `namespace=${promString(namespace)}`, `application=${promString(application)}`, 'uri!~"/actuator.*"'].filter(Boolean).join(",");
-  const w = `[${typeof windowDays === "number" ? `${windowDays}d` : windowDays}]`;
+  const w = typeof windowDays === "number" ? `${windowDays}d` : windowDays;
+  const c = (s: string) => counterIncrease(s, w);
   if (kind === "availability") {
-    return `1 - sum(increase(http_server_requests_seconds_count{${m},status=~"5.."}${w})) / sum(increase(http_server_requests_seconds_count{${m}}${w}))`;
+    return `1 - sum(${c(`http_server_requests_seconds_count{${m},status=~"5.."}`)}) / sum(${c(`http_server_requests_seconds_count{${m}}`)})`;
   }
-  return `sum(increase(http_server_requests_seconds_bucket{${m},status!~"1..",le=${promString(le ?? "")}}${w})) / sum(increase(http_server_requests_seconds_count{${m},status!~"1.."}${w}))`;
+  return `sum(${c(`http_server_requests_seconds_bucket{${m},status!~"1..",le=${promString(le ?? "")}}`)}) / sum(${c(`http_server_requests_seconds_count{${m},status!~"1.."}`)})`;
 }
 
 export type SloRaw = Record<string, PromRow[]>;

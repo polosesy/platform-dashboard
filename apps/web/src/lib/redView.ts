@@ -97,3 +97,20 @@ export function endpointRows(services: RedService[], sort: EndpointSort = "error
   };
   return rows.sort((a, b) => by[sort](a, b) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0) || (a.name < b.name ? -1 : 1));
 }
+
+/**
+ * Pure: a service's errors from the other sources (2026-11-19 — a workflow failure answered HTTP 424 and logged as
+ * ERROR from an executor thread: no ERROR span, RED said 0) — the parts that were measured, in a fixed order, and
+ * whether they disagree with RED's span count (errors elsewhere while the server spans say none).
+ */
+export function otherErrorParts(o: RedService["other"]): { parts: Array<{ key: "ob.red.other4xx" | "ob.red.other5xx" | "ob.red.otherLog"; n: number }>; measured: boolean } {
+  if (!o) return { parts: [], measured: false };
+  const parts: Array<{ key: "ob.red.other4xx" | "ob.red.other5xx" | "ob.red.otherLog"; n: number }> = [];
+  if (o.http4xx !== null) parts.push({ key: "ob.red.other4xx", n: o.http4xx });
+  if (o.http5xx !== null) parts.push({ key: "ob.red.other5xx", n: o.http5xx });
+  if (o.logErrors !== null) parts.push({ key: "ob.red.otherLog", n: o.logErrors });
+  return { parts, measured: parts.length > 0 };
+}
+/** Pure: other sources saw errors (≥ 1 — increase() fractions under 1 are not an event) while the server spans saw none */
+export const errorsElsewhere = (s: Pick<RedService, "errors" | "other">): boolean =>
+  s.errors < 0.5 && otherErrorParts(s.other).parts.some((p) => p.n >= 1);

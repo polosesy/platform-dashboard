@@ -22,7 +22,7 @@ import { getPrometheusFetcherAuto } from "../infra/azureClientFactory.js";
 import { HttpError } from "../infra/requestParams.js";
 import { resolvePrometheusTarget } from "./prometheusCollector.js";
 import { metricsStateOf, type PromRow } from "./hubbleMetrics.js";
-import { pickScope, promString, scopeMatchers } from "./promScope.js";
+import { pickScope, promString, scopeMatchers, counterIncrease } from "./promScope.js";
 import { runAll } from "./observabilityStack.js";
 
 export const RED_WINDOWS: RedWindow[] = [5, 15, 60, 360, 1440];
@@ -53,6 +53,53 @@ export function redQueries(C: string, ksm: string, minutes: number): Record<stri
     resets: `sum(resets(traces_spanmetrics_calls_total{${C}}[${minutes}m]))`,
     workloads: `group by (namespace, deployment) (${k("kube_deployment_created")}) or group by (namespace, statefulset) (${k("kube_statefulset_created")}) or group by (namespace, daemonset) (${k("kube_daemonset_created")})`,
   };
+}
+
+/**
+ * The other error sources of a service, within their own scopes (another collector may write them): Micrometer HTTP
+ * server answers 4xx / 5xx (`outcome`, /actuator apart) and log ERROR / FATAL events (log4j2 or logback) — per
+ * `application`, matched to a trace service by exact name. counterIncrease: these counters are created at their first
+ * event (a service's only 424 sat at 1 — increase() alone said 0).
+ */
+export function otherErrorQueries(Chttp: string | null, Clog: string | null, minutes: number): Record<string, string> {
+  const w = `${minutes}m`;
+  const q: Record<string, string> = {};
+  if (Chttp !== null) {
+    const s = (...m: string[]) => `{${[Chttp, 'uri!~"(?i).*actuator.*"', ...m].filter(Boolean).join(",")}}`;
+    q.httpErrors = `sum by (application, outcome) (${counterIncrease(`http_server_requests_seconds_count${s('outcome=~"(?i)client_error|server_error"')}`, w)})`;
+    q.httpApps = `group by (application) (http_server_requests_seconds_count${s()})`;
+  }
+  if (Clog !== null) {
+    const s = `{${[Clog, 'level=~"(?i)error|fatal"'].filter(Boolean).join(",")}}`;
+    const a = Clog ? `{${Clog}}` : "";
+    q.logErrors = `sum by (application) (${counterIncrease(`log4j2_events_total${s}`, w)}) or sum by (application) (${counterIncrease(`logback_events_total${s}`, w)})`;
+    q.logApps = `group by (application) (log4j2_events_total${a}) or group by (application) (logback_events_total${a})`;
+  }
+  return q;
+}
+
+/** Pure: per application (lower case — the workspace answers label values in lower case) its 4xx · 5xx · log ERROR */
+export function otherErrorsOf(raw: Record<string, PromRow[]>, read: { http: boolean; log: boolean }): Map<string, NonNullable<RedService["other"]>> {
+  const out = new Map<string, NonNullable<RedService["other"]>>();
+  const of = (app: string) => out.get(app) ?? out.set(app, { http4xx: null, http5xx: null, logErrors: null }).get(app)!;
+  if (read.http) {
+    for (const r of raw.httpApps ?? []) { const a = r.metric.application?.toLowerCase(); if (a) { const o = of(a); o.http4xx = 0; o.http5xx = 0; } }
+    for (const r of raw.httpErrors ?? []) {
+      const a = r.metric.application?.toLowerCase();
+      if (!a || !out.has(a)) continue;
+      const o = out.get(a)!;
+      if (/^client_error$/i.test(r.metric.outcome ?? "")) o.http4xx = round((o.http4xx ?? 0) + r.value);
+      else if (/^server_error$/i.test(r.metric.outcome ?? "")) o.http5xx = round((o.http5xx ?? 0) + r.value);
+    }
+  }
+  if (read.log) {
+    for (const r of raw.logApps ?? []) { const a = r.metric.application?.toLowerCase(); if (a) of(a).logErrors = 0; }
+    for (const r of raw.logErrors ?? []) {
+      const a = r.metric.application?.toLowerCase();
+      if (a && out.get(a)?.logErrors !== null && out.has(a)) out.get(a)!.logErrors = round((out.get(a)!.logErrors ?? 0) + r.value);
+    }
+  }
+  return out;
 }
 
 /** Pure: the bucket holding quantile q of cumulative counts by boundary (seconds; Infinity = +Inf) — null without requests */
@@ -201,11 +248,35 @@ async function collect(env: Env, bearerToken: string | undefined, clusterId: str
     if (scope === null) return base; // instrumented: false — the view explains what produces the series
     const C = scopeMatchers(scope, false);
     const ksm = scope.cluster !== null ? `cluster=${promString(scope.cluster)}` : "";
-    const run = await runAll(fetcher, target.endpoint, redQueries(C, ksm, minutes), 4, time, QUERY_TIMEOUT_MS);
+    // the other error sources' own scopes (a scope query that fails = that source failed — never "none")
+    const otherScopes = await runAll(fetcher, target.endpoint, {
+      http: "group by (cluster, collector) (http_server_requests_seconds_count)",
+      log: "group by (cluster, collector) (log4j2_events_total) or group by (cluster, collector) (logback_events_total)",
+    }, 2, time, QUERY_TIMEOUT_MS);
+    const aks = clusterId.split("/").pop() ?? "";
+    const otherScope = (k: "http" | "log"): { m: string | null; state: "ok" | "none" | "failed" } => {
+      if (otherScopes.gaps.some((g) => g.query === k)) return { m: null, state: "failed" };
+      const sc = pickScope((otherScopes.rows[k] ?? []).map((r) => ({ cluster: r.metric.cluster, collector: r.metric.collector })), aks);
+      if (sc === null) return { m: null, state: "none" };
+      if (sc === "ambiguous") return { m: null, state: "failed" };
+      return { m: scopeMatchers(sc, false), state: "ok" };
+    };
+    const hs = otherScope("http"), ls = otherScope("log");
+    const run = await runAll(fetcher, target.endpoint, { ...redQueries(C, ksm, minutes), ...otherErrorQueries(hs.m, ls.m, minutes) }, 4, time, QUERY_TIMEOUT_MS);
     const failed = new Set(run.gaps.map((g) => g.query));
     if (failed.has("calls")) throw run.firstError;
     const gaps: StackQueryGap[] = run.gaps;
-    return { ...base, instrumented: true, ...aggregateRed(run.rows, minutes, failed), ...(gaps.length ? { gaps } : {}) };
+    const otherSources = {
+      http: hs.state === "ok" && (failed.has("httpErrors") || failed.has("httpApps")) ? "failed" as const : hs.state,
+      log: ls.state === "ok" && (failed.has("logErrors") || failed.has("logApps")) ? "failed" as const : ls.state,
+    };
+    const other = otherErrorsOf(run.rows, { http: otherSources.http === "ok", log: otherSources.log === "ok" });
+    const red = aggregateRed(run.rows, minutes, failed);
+    const services = red.services.map((s) => {
+      const o = other.get(s.service.toLowerCase());
+      return { ...s, other: o ?? { http4xx: null, http5xx: null, logErrors: null } };
+    });
+    return { ...base, instrumented: true, ...red, services, otherSources, ...(gaps.length ? { gaps } : {}) };
   } catch (e) {
     if (e instanceof HttpError && e.code === "signin_required") throw e;
     const { state, message } = metricsStateOf(e);

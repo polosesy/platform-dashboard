@@ -14,7 +14,7 @@ import { dateLocale, useI18n } from "@/lib/i18n";
 import { Chip, EmptyState, ErrorNotice, LinkButton, LoadingState, Notice, Panel } from "@/components/ui";
 import { answersAt, atParam, fitWindow, type TimeRange } from "@/lib/timeRange";
 import { useRangeRefresh } from "@/lib/useTimeRange";
-import { RED_WINDOWS, countText, endpointLabel, errorRateText, quantileText, rateText, redTotals, splitByTraffic } from "@/lib/redView";
+import { RED_WINDOWS, countText, endpointLabel, errorRateText, errorsElsewhere, otherErrorParts, quantileText, rateText, redTotals, splitByTraffic } from "@/lib/redView";
 import { ratioText } from "@/lib/apmMoreView";
 import styles from "../styles.module.css";
 
@@ -63,6 +63,13 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
         <p className={styles.sloText}>
           {t("ob.red.summary", { n: tot.services, active: tot.active, req: countText(tot.requests, lc), w: win, err: countText(tot.errors, lc), sv: tot.withErrors })}
         </p>
+        {/* what "errors" means here, and the other sources beside it (a failure answered 4xx or only logged is not an ERROR span) */}
+        {d.otherSources ? (
+          <p className={styles.redDef} data-red-def>
+            {t("ob.red.errorsDef")}{" "}
+            {(["http", "log"] as const).map((k) => <span key={k}>{t(`ob.red.src.${k}.${d.otherSources![k]}`)} </span>)}
+          </p>
+        ) : null}
         {d.services.length === 0 ? <EmptyState title={t("ob.red.empty", { w: win })} /> : (
           <div className={styles.sloTableWrap}>
             <table className={styles.sloTable}>
@@ -97,6 +104,16 @@ export function RedView({ clusterId, range, nonce, report }: { clusterId: string
                         <span className={styles.sloCellMain}>{errorRateText(s.errorRate)}</span>
                         <span className={styles.sloCellSub}>{t("ob.red.errorsN", { n: countText(s.errors, lc) })}</span>
                         {s.weekAgo ? <span className={styles.sloCellSub} title={t("ob.red.weekAgoHint")}>{t("ob.red.weekAgoErr", { v: errorRateText(s.weekAgo.errorRate) })}</span> : null}
+                        {(() => {
+                          const o = otherErrorParts(s.other);
+                          if (!o.measured) return null;
+                          const hot = errorsElsewhere(s);
+                          return (
+                            <span className={styles.sloCellSub} data-other-errors data-hot={hot || undefined} title={t("ob.red.otherHint")}>
+                              {hot ? "▲ " : ""}{o.parts.map((p) => t(p.key, { n: countText(p.n, lc) })).join(" · ")}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className={styles.redNum}>{quantileText(s.p50, d.buckets)}</td>
                       <td className={styles.redNum}>

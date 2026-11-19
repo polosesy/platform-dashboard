@@ -56,7 +56,7 @@ test("reset plan: minutes since the reset = whole 3-day parts + the piece before
   assert.match(q["r0:coverage"]!, /\[1440m:1h\] offset 3d\)/);
   const all = sloQueries(C, C, 7, ["1.0"], resetPlans([reset("*", 1)], END, 7));
   assert.doesNotMatch(all["r0:n"]!, /application=/, "the cluster-wide reset reads every service");
-  assert.doesNotMatch(all["r0:n"]!, /offset/, "under 3 days: no offset");
+  assert.doesNotMatch(all["r0:n"]!, /] offset/, "under 3 days: the window is not offset (the only offset is the start-of-window presence check)");
 });
 
 test("merge: a reset service sums only the parts after the reset + its piece; others the whole window; a failed piece fails only its services", () => {
