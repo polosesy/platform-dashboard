@@ -230,6 +230,8 @@ export type ObservabilityLogsResponse = {
    * `limit` lines, the oldest at `from` (2026-11-16: 300 lines of a busy pod were 25 of 60 minutes, unsaid)
    */
   coverage?: { complete: boolean; from: string | null };
+  /** Loki, window ending now: it ends this many seconds ago — Loki is still taking the newest lines (lokiLogs SETTLE_MS) */
+  settledSeconds?: number;
 };
 
 // ── Namespace / Pod Discovery (for Logs tab dropdown) ──

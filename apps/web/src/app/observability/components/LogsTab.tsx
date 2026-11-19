@@ -43,7 +43,7 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
   const [scope, setScope] = useState<"pod" | "workload">("pod");
   const [pickedWorkload, setPickedWorkload] = useState("");
   // The answer's own words on what it holds: counts over the window, how much of it the lines cover
-  const [meta, setMeta] = useState<(Pick<ObservabilityLogsResponse, "counts" | "coverage" | "windowMinutes" | "scope" | "level" | "generatedAt" | "at"> & { key: string }) | null>(null);
+  const [meta, setMeta] = useState<(Pick<ObservabilityLogsResponse, "counts" | "coverage" | "windowMinutes" | "scope" | "level" | "generatedAt" | "at" | "settledSeconds"> & { key: string }) | null>(null);
 
   const [nsPodItems, setNsPodItems] = useState<NamespacePodItem[]>([]);
   const [logs, setLogs] = useState<PodLogEntry[]>([]);
@@ -216,6 +216,8 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
   const nums = levelNumbers(current?.counts);
   const windowRead = current?.windowMinutes ?? sinceMinutes;
   const coverage = current ? coverageOf(current.coverage, windowRead, current.at ?? current.generatedAt) : { kind: "unknown" as const };
+  // a Loki window ending now ends a few seconds ago — the newest lines are still arriving there (same end for numbers and lines)
+  const settled = current?.settledSeconds ? ` ${t("ob.pl.cov.settled", { s: current.settledSeconds })}` : "";
   const lvLabel = (k: "all" | "warn" | "error", n: number | null) => (n === null ? t(`ob.pl.lv.${k}Plain`) : t(`ob.pl.lv.${k}`, { n: n.toLocaleString() }));
 
   function formatTime(ts: string) {
@@ -282,9 +284,9 @@ export function LogsTab({ clusterId, range, nonce, report }: Props) {
           // How much of the window the lines are, then where they came from — and why the other sources gave none
           <span className={styles.plSources}>
             {coverage.kind === "complete" ? (
-              <Chip level="ok" glyph={false} title={t("ob.pl.cov.completeHint")}>{t("ob.pl.cov.complete", { n: windowRead })}</Chip>
+              <Chip level="ok" glyph={false} title={`${t("ob.pl.cov.completeHint")}${settled}`}>{t("ob.pl.cov.complete", { n: windowRead })}</Chip>
             ) : coverage.kind === "partial" ? (
-              <Chip level="warn" title={t("ob.pl.cov.partialHint", { lines: logs.length, n: windowRead })}>
+              <Chip level="warn" title={`${t("ob.pl.cov.partialHint", { lines: logs.length, n: windowRead })}${settled}`}>
                 {t("ob.pl.cov.partial", { lines: logs.length, from: formatTime(coverage.from), m: coverage.minutes, n: windowRead })}
               </Chip>
             ) : null}

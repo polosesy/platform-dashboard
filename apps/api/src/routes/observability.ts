@@ -26,7 +26,7 @@ import { getWorkloadHeatmap } from "../services/workloadHeatmap.js";
 import { getAppMetrics } from "../services/appRuntimes.js";
 import { listWarningEvents } from "../services/kubeEvents.js";
 import { getWorkloadVpa } from "../services/workloadVpa.js";
-import { CONTEXT_MAX_LINES, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs, passesLevelRule, type LogLevelFilter } from "../services/lokiLogs.js";
+import { CONTEXT_MAX_LINES, SETTLE_MS, getLogContext, getLogInsights, getPodLogsFromLoki, getWorkloadLogs, passesLevelRule, type LogLevelFilter } from "../services/lokiLogs.js";
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { getTrace, searchTraces } from "../services/grafanaTraces.js";
@@ -577,6 +577,7 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       windowMinutes,
       counts: picked?.source === "loki" ? counts : null,
       coverage: { complete: rawCount < limit, from: picked?.logs[0]?.timestamp ?? null },
+      ...(picked?.source === "loki" && at === undefined ? { settledSeconds: SETTLE_MS / 1000 } : {}),
     };
     res.json(data);
   });

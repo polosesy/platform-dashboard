@@ -1,7 +1,7 @@
 ---
 status: current
 owner: platform
-last-verified: 2026-11-18
+last-verified: 2026-11-19
 covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/infra/connectionCredentials.ts, apps/api/src/services/aksAccess.ts, apps/api/src/services/issueStateStore.ts, apps/api/src/services/securityPosture.ts, apps/api/src/services/notifyCheck.ts]
 ---
 # 에러 카탈로그
@@ -83,6 +83,12 @@ covers: [apps/api/src/middleware/sampleGuard.ts, apps/web/src/lib/sampleMode.ts,
 - **에러**: 범위 '워크로드 전체', 레벨 ERROR(또는 WARN 이상), 1시간·3시간 — 칩 'Loki · 실패', '어느 출처에서도 이 Pod의 로그를 찾지 못했습니다'. 같은 화면의 로그 지표는 ERROR 382, '이 파드'로 바꾸면 줄이 보임
 - **원인**: 줄 **크기**입니다(질의·권한·정규식이 아님). Java 서비스의 ERROR 줄은 스택 트레이스를 담아 한 줄이 최대 12,000자입니다. 2026-11-18 stg 실측(같은 LogQL을 클러스터 안 Loki에 직접): ERROR 424줄 한 번에(≈ 5 MB) = **61초 동안 답이 없다가 연결 끊김**(대시보드는 25초에 포기 → 실패), 200줄(2.5 MB) = 0.8초에 왔지만 대시보드의 본문 상한(2 MB)을 넘어 버려짐('읽기 한도보다 큼'), 50줄 = 0.3초. 같은 범위의 개수 세기(`count_over_time`)는 1.2초 — 숫자만 오가서 지표는 늘 됐음. 파드 하나(134줄, 1.67 MB)는 상한 바로 아래라 우연히 보였음. 정규식 모양(`pod=~"…-.*"`, `|= "ERROR"`)은 무관
 - **해결**: 줄을 **Loki 쪽에서 잘라**(`| line_format "{{ __line__ | trunc 4097 }}"` — 화면 상한 4,096자 + 1, 파서가 '…' 표시; 시각·구조화 메타데이터 그대로) **100줄씩 나눠** 읽음(`lokiLogs.ts` `lineCut`·`readLines`·`mergePage` — 다음 쪽 끝 = 앞 쪽 가장 오래된 줄 + 1 ns, 경계 줄 중복 제거, 쪽마다 1줄 더). 로그 뷰어·워크로드 로그 스트림·맥락 보기에 적용(Hubble 드롭 줄은 JSON 전체가 필요해 자르지 않음). stg 대조: 상한 500 → 6쪽·2~4.5초에 정확히 500줄, 상한을 넘게 잡으면 받은 줄 = Loki `count_over_time`(ERROR 526 = 526, WARN 이상 1,240 = 1,240; 3시간 WARN 이상은 1,322 / 1,323 — 한 줄 차이, 원인 미확정). 출처가 실패하면 그 이유(출처가 말한 문장)를 안내 상자에 보임(예전엔 칩 툴팁에만)
+
+### OBS-006: 로그 탭 숫자(ERROR·WARN 이상)와 목록 줄 수가 몇 줄 다름 (지금까지 범위)
+- **에러**: 범위가 '지금'까지일 때 레벨 숫자(예: WARN 이상 1,323)와 그 범위를 다 읽은 목록(1,322줄)이 한두 줄 다름. 같은 범위를 나중에 다시 읽으면 같음(2026-11-19 stg 재조회 1,338 = 1,338, 1,302 = 1,302 — 읽기 로직 결함 아님).
+- **원인**: ① Loki의 가장 최근 몇 초는 **아직 들어오는 중**입니다 — stg 실측(2026-11-19, 10개 창): 클러스터 '지금'에 끝나는 1분 창이 그 뒤 7–15초 동안 11–31줄 더 늘었고 15초 뒤엔 10개 모두 그대로. 숫자(`count_over_time`)와 줄 읽기(`query_range`)가 1–2초 차이로 답하면 그 사이 도착한 줄만큼 다릅니다. ② 경계가 다릅니다(실측): `query_range` = [start, end), `count_over_time`(t) = (t − 범위, t]. ③ (참고) 로그 지표는 '지금'을 분 시작으로 내려 뷰어와 끝이 달랐습니다.
+- **해결**: '지금' 창은 **15초 전에 끝남**(`lokiLogs.ts` `SETTLE_MS`·`windowEndNs`) — 숫자·줄·로그 지표·드롭이 같은 끝, 줄 읽기는 `rangeOf` = [E − m + 1 ns, E + 1 ns)(= count의 (E − m, E]). 응답 `settledSeconds` → 범위 칩 툴팁. stg 대조(살아 있는 2분 창, 20회): 예전 방식 5회 차이(최대 9줄) → 0회. 지난 범위(`at`)는 그대로. 개발 PC 시계가 클러스터보다 약 6초 늦어 PC 시각으로 잰 '지금' 시험은 이 현상을 숨김(측정 때 Loki `Date` 헤더로 보정).
+
 
 ---
 

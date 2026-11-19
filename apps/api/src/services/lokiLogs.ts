@@ -170,12 +170,21 @@ async function lokiGet<T>(cfg: { url: string; tenant?: string }, path: string, p
   return { body: JSON.parse(truncated ? "{}" : text) as T, truncated };
 }
 
-const nowNs = () => BigInt(Date.now()) * 1_000_000n;
-/** The last `minutes`, ending now or at `at` (epoch seconds — a range in the past, infra queryPastTime) */
-const range = (minutes: number, at?: number) => {
-  const end = at === undefined ? nowNs() : BigInt(at) * 1_000_000_000n;
-  return { start: String(end - BigInt(minutes) * 60_000_000_000n), end: String(end) };
-};
+/**
+ * A count and the lines of "the last n minutes" must be the same lines (2026-11-19 — the viewer's WARN+ 180 m read 1,322
+ * lines where Loki counted 1,323; the same windows read again later were equal, 1,338 = 1,338):
+ *  · Loki's newest seconds are still arriving — on stg a 1-minute window ending at the cluster's "now" took 11–31 more
+ *    lines over the next 7–15 s (10 windows, every one done by 15 s; with a 5 s margin a count and a read still differed
+ *    by 3 lines once in 10), so a count and a read that answer a moment apart differ by those lines. A "now" window
+ *    ends SETTLE_MS ago — its newest seconds are incomplete in Loki anyway; a past window (`at`) ends where it says.
+ *  · Loki's edges differ (measured on stg): query_range returns [start, end), count_over_time at t counts (t − range, t].
+ *    A log read of the window ending at E asks [E − m + 1 ns, E + 1 ns) — the lines count_over_time(…[m]) at E counts.
+ */
+export const SETTLE_MS = 15_000;
+/** The window's end in ns — `at` (epoch seconds, infra queryPastTime) or now − SETTLE_MS */
+export const windowEndNs = (at?: number) => (at === undefined ? BigInt(Date.now() - SETTLE_MS) * 1_000_000n : BigInt(at) * 1_000_000_000n);
+/** query_range start / end of the `minutes` ending at `endNs` — the lines count_over_time([minutes]) at endNs counts */
+export const rangeOf = (minutes: number, endNs: bigint) => ({ start: String(endNs - BigInt(minutes) * 60_000_000_000n + 1n), end: String(endNs + 1n) });
 
 /**
  * Log lines are cut on Loki's side to one character over what we show (the parser then marks the cut with "…") and
@@ -264,10 +273,10 @@ export async function getWorkloadLogs(
   if (wait) return { ...base, ...wait };
   const q = logQueries(selector, opts.errorsOnly, opts.minutes);
   // The exception count is evaluated at the window's end too (a past range counted "now" before)
-  const evalAt = opts.at === undefined ? nowNs() : BigInt(opts.at) * 1_000_000_000n;
+  const evalAt = windowEndNs(opts.at);
   try {
     const [lines, exc] = await Promise.all([
-      readLines(cfg, q.lines, range(opts.minutes, opts.at), MAX_LINES),
+      readLines(cfg, q.lines, rangeOf(opts.minutes, evalAt), MAX_LINES),
       lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: q.exceptions, time: String(evalAt) }, 15_000).catch(() => null),
     ]);
     let redactions = 0;
@@ -399,7 +408,8 @@ export async function getLogInsights(
   assertSignedInForCluster(env, bearerToken);
   if (!NAME.test(opts.namespace)) throw new HttpError(400, "invalid_name", "namespace is not a Kubernetes name");
   const selector = opts.workload ? workloadSelector(opts.namespace, opts.workload) : `{namespace="${opts.namespace}"}`;
-  const endMs = opts.at === undefined ? Math.floor(Date.now() / 60_000) * 60_000 : opts.at * 1000;
+  // the viewer's window end (SETTLE_MS) — ending at the start of the current minute, these counts differed from the viewer's
+  const endMs = Number(windowEndNs(opts.at) / 1_000_000n);
   const base: LogInsightsResponse = {
     clusterId, generatedAt: new Date().toISOString(), ...(opts.at !== undefined ? { at: new Date(opts.at * 1000).toISOString() } : {}),
     state: "ok", namespace: opts.namespace, ...(opts.workload ? { workload: opts.workload } : {}), windowMinutes: opts.minutes,
@@ -562,13 +572,15 @@ export async function getPodLogsFromLoki(
   // The scope's ERROR / WARN lines in the whole window — the insight rules, so the two panels can be compared; over
   // LEVEL_MAX_MINUTES there are no counts (null — never 0)
   const counted = minutes <= LEVEL_MAX_MINUTES;
-  const evalAt = String(opts.at === undefined ? nowNs() : BigInt(opts.at) * 1_000_000_000n);
+  // one end for the counts and the lines (see SETTLE_MS)
+  const endNs = windowEndNs(opts.at);
+  const evalAt = String(endNs);
   const count = (f: string) => !counted ? Promise.resolve(null)
     : lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time(${selector} ${f} [${minutes}m]))`, time: evalAt }, 15_000)
       .then((r) => Math.round(Number(r.body.data?.result?.[0]?.value?.[1] ?? 0)) || 0).catch(() => null);
   try {
     const [res, error, warn] = await Promise.all([
-      readLines(cfg, `${selector}${filter}`, range(minutes, opts.at), limit, CATEGORIZE),
+      readLines(cfg, `${selector}${filter}`, rangeOf(minutes, endNs), limit, CATEGORIZE),
       count(ERROR_FILTER), count(WARN_FILTER),
     ]);
     const { lines, redactions } = podEntries(res.body, opts.pod ?? "");
@@ -664,10 +676,11 @@ export async function getLokiDrops(
   if (hit) return hit;
   const wait = backingOff(cfg);
   if (wait) return { ...base, ...wait };
+  const endNs = windowEndNs(at);
   try {
     const [lines, relay, amw] = await Promise.all([
-      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...range(minutes, at), limit: String(DROP_LINE_LIMIT), direction: "backward" }),
-      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time({job="hubble-flows"} |= "NODE_ERROR" [${minutes}m]))`, time: String(at === undefined ? nowNs() : BigInt(at) * 1_000_000_000n) }).catch(() => null),
+      lokiGet<LokiStreams>(cfg, "/loki/api/v1/query_range", { query: '{job="hubble-flows"} |= "\\"flow\\":"', ...rangeOf(minutes, endNs), limit: String(DROP_LINE_LIMIT), direction: "backward" }),
+      lokiGet<LokiVector>(cfg, "/loki/api/v1/query", { query: `sum(count_over_time({job="hubble-flows"} |= "NODE_ERROR" [${minutes}m]))`, time: String(endNs) }).catch(() => null),
       at === undefined ? amwDrops().catch(() => null) : Promise.resolve(null),
     ]);
     // Over the body limit the answer is not parsed at all: that is "too much to read", not "no flow lines"

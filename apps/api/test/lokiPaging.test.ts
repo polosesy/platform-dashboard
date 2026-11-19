@@ -3,13 +3,13 @@
 // and 200 of them (2.5 MB) were thrown away over our 2 MB body limit. Lines are now cut on Loki's side and read in pages.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PAGE_LINES, lineCut, mergePage, newest, readLines } from "../src/services/lokiLogs.js";
+import { PAGE_LINES, SETTLE_MS, lineCut, mergePage, newest, rangeOf, readLines, windowEndNs } from "../src/services/lokiLogs.js";
 
 test("lines are cut on Loki's side to one over what is shown (the parser marks the cut)", () => {
   assert.equal(lineCut('{namespace="shop", pod="web-1"} |~ "ERROR"'), '{namespace="shop", pod="web-1"} |~ "ERROR" | line_format "{{ __line__ | trunc 4097 }}"');
 });
 
-/** A Loki that answers backward pages like the real one: `end` inclusive, newest first, at most `limit` lines */
+/** A Loki that answers backward pages like the real one (measured on stg): [start, end), newest first, at most `limit` lines */
 function fakeLoki(lines: Array<{ pod: string; ts: bigint; text: string }>) {
   const calls: Array<{ query: string; limit: number }> = [];
   const fetchFn = async (input: string | URL) => {
@@ -17,7 +17,7 @@ function fakeLoki(lines: Array<{ pod: string; ts: bigint; text: string }>) {
     const p = u.searchParams;
     const start = BigInt(p.get("start")!), end = BigInt(p.get("end")!), limit = Number(p.get("limit"));
     calls.push({ query: p.get("query")!, limit });
-    const page = lines.filter((l) => l.ts >= start && l.ts <= end).sort((a, b) => (b.ts > a.ts ? 1 : b.ts < a.ts ? -1 : 0)).slice(0, limit);
+    const page = lines.filter((l) => l.ts >= start && l.ts < end).sort((a, b) => (b.ts > a.ts ? 1 : b.ts < a.ts ? -1 : 0)).slice(0, limit);
     const byPod = new Map<string, Array<[string, string]>>();
     for (const l of page) (byPod.get(l.pod) ?? byPod.set(l.pod, []).get(l.pod)!).push([String(l.ts), l.text]);
     const body = JSON.stringify({ status: "success", data: { resultType: "streams", result: [...byPod].map(([pod, values]) => ({ stream: { pod }, values })) } });
@@ -63,4 +63,28 @@ test("mergePage stops on a short page, a page with nothing new, or the limit; ne
   assert.deepEqual(mergePage(h2, page([["5", "x"], ["5", "y"]]), 2, 10), { nextEnd: null }, "lines sharing one timestamp: nothing new — stop, no loop");
   const kept = newest([{ stream: { pod: "a" }, values: [["1", "old"], ["3", "new"]] }, { stream: { pod: "b" }, values: [["2", "mid"]] }], 2);
   assert.deepEqual(kept.flatMap((s) => s.values!.map((v) => v[1])).sort(), ["mid", "new"]);
+});
+
+test("a count and the lines are the same lines: one settled end, the read's edges = count_over_time's (t − m, t]", async () => {
+  // 2026-11-19: WARN+ 180 m read 1,322 lines where Loki counted 1,323 — a live window still taking lines (on stg a window
+  // ending at the cluster's now grew for 1–4 s after it), and query_range [start, end) vs count_over_time (t − m, t]
+  const before = Date.now();
+  const e = windowEndNs();
+  assert.ok(e <= BigInt(before - SETTLE_MS + 50) * 1_000_000n && e >= BigInt(before - SETTLE_MS) * 1_000_000n, "a now window ends SETTLE_MS ago");
+  assert.equal(windowEndNs(1_800_000_000), 1_800_000_000_000_000_000n, "a past window ends at `at`");
+  const E = 5_000_000_000_000n, m = 1;
+  const at = (dt: bigint) => ({ pod: "a", ts: E + dt, text: `line ${dt}` });
+  // exactly at the start edge (not counted), just inside it, at the end (counted), just after it
+  const lines = [at(-60_000_000_000n), at(-60_000_000_000n + 1n), at(0n), at(1n)];
+  const counted = lines.filter((l) => l.ts > E - 60_000_000_000n && l.ts <= E).map((l) => l.text);
+  const { fetchFn } = fakeLoki(lines);
+  const real = globalThis.fetch;
+  globalThis.fetch = fetchFn as typeof fetch;
+  try {
+    const r = await readLines({ url: "http://loki.test" }, "{q}", rangeOf(m, E), 100);
+    const read = (r.body.data?.result ?? []).flatMap((s) => (s.values ?? []).map((v) => v[1])).sort();
+    assert.deepEqual(read, counted.sort(), "the read holds exactly the lines count_over_time([1m]) at E counts");
+  } finally {
+    globalThis.fetch = real;
+  }
 });

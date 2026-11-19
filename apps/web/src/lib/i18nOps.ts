@@ -458,6 +458,7 @@ export const OPS_T: Translations = {
   "ob.pl.scope.workload": { ko: "워크로드 전체 · {w}", en: "Whole workload · {w}" },
   "ob.pl.cov.complete": { ko: "{n}분 전부", en: "All {n} min" },
   "ob.pl.cov.completeHint": { ko: "이 범위의 해당 줄을 모두 읽었습니다.", en: "Every matching line of this window is listed." },
+  "ob.pl.cov.settled": { ko: "범위는 {s}초 전에 끝납니다 — 가장 최근 몇 초의 줄은 Loki에 아직 들어오는 중이라, 숫자와 목록이 같은 줄을 보도록 빼고 셉니다.", en: "The window ends {s} s ago — Loki is still taking the newest seconds of lines, so they are left out and the numbers and the list see the same lines." },
   "ob.pl.cov.partial": { ko: "최근 {lines}줄 · {from}부터 ({m}/{n}분)", en: "Newest {lines} lines · from {from} ({m} of {n} min)" },
   "ob.pl.cov.partialHint": { ko: "줄이 많아 최근 {lines}줄만 읽었습니다 — 그보다 오래된 줄은 목록에 없습니다. 위 로그 지표는 {n}분 전체를 셉니다. ERROR·WARN 이상을 고르면 서버가 {n}분 전체에서 그 줄만 가져옵니다.", en: "Too many lines: only the newest {lines} were read — older lines are not listed. The insights above count all {n} minutes. Pick ERROR or WARN+ and the server fetches just those lines from all {n} minutes." },
   "ob.pl.levelWindow": { ko: "레벨 필터 = 최근 {n}분", en: "Level filter = last {n} min" },
