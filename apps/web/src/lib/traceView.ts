@@ -303,6 +303,6 @@ export function httpSummary(s: TraceSpan | null | undefined): { method: string; 
 }
 
 /** The address of one trace in this dashboard (the cluster stays the viewer's own — a trace ID is per cluster) */
-export const traceLink = (origin: string, traceId: string) => `${origin}/observability?trace=${encodeURIComponent(traceId)}`;
+export const traceLink = (origin: string, traceId: string) => `${origin}/observability/services?trace=${encodeURIComponent(traceId)}`;
 /** A trace ID as Tempo writes it (hex, 1–32) — anything else in ?trace= is ignored */
 export const TRACE_ID = /^[0-9a-f]{1,32}$/i;

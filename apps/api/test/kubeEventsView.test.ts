@@ -79,8 +79,8 @@ test("ago: seconds → minutes → hours → days; nothing for no time", () => {
 test("every explained reason has ko/en text; the section is on the 클러스터 · 워크로드 tab", () => {
   const ops = readFileSync(new URL("../../web/src/lib/i18nOps.ts", import.meta.url), "utf8");
   for (const r of V.KNOWN_REASONS) assert.match(ops, new RegExp(`"ob\\.ev\\.why\\.${r}": \\{ ko: "[^"]+", en: "[^"]+" \\}`), r);
-  const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /tab === "overview" && <EventsSection /);
+  const page = readFileSync(new URL("../../web/src/app/observability/ObservabilityView.tsx", import.meta.url), "utf8");
+  assert.match(page, /view === "overview" \? \(\s*<>[\s\S]*?<WorkloadHeatmap [^\n]+\n\s*<EventsSection /);
 });
 
 test("API: the reporter (kubectl SOURCE) is kept; matching counts all before the limit", () => {

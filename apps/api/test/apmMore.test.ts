@@ -115,9 +115,12 @@ test("RED a week earlier: the same window at offset 7d — a fact beside the num
 });
 
 test("links and tables: '신호 →' opens the workload panel from any tab; a table cell is never block-styled", () => {
-  const page = read("../../web/src/app/observability/page.tsx");
-  assert.match(page, /useEffect\(\(\) => \{ if \(wlParam\) setTabState\("overview"\); \}, \[wlParam\]\);/, "the link brings 클러스터 · 워크로드 forward");
-  assert.match(page, /q\.delete\("wl"\)/, "leaving the tab drops wl, so the same link works again");
+  // 2026-11-19: 클러스터 · 워크로드 is its own route (/observability) — a `?wl=` link lands on it from any view
+  const page = read("../../web/src/app/observability/ObservabilityView.tsx");
+  assert.match(page, /view === "overview" \? \(\s*<>[\s\S]*?<WorkloadHeatmap /, "the heatmap (whose panel `wl` opens) is the overview route's");
+  for (const f of ["ErrorsView", "RolloutsView", "RedView", "EndpointsView", "ServiceMapView"]) {
+    for (const m of read(`../../web/src/app/observability/components/${f}.tsx`).matchAll(/href=\{`([^`]*)\?wl=/g)) assert.equal(m[1], "/observability", f);
+  }
   const heat = read("../../web/src/app/observability/components/WorkloadHeatmap.tsx");
   assert.match(heat, /const wlParam = useSearchParams\(\)\.get\("wl"\);/);
   assert.match(heat, /\}, \[wlParam\]\);/, "re-read on every link, not only at mount");

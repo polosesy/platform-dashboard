@@ -126,6 +126,9 @@ const ConnectionSchema = z.object({
         // Read traces from the Tempo datasource THROUGH this Grafana (services/grafanaTraces.ts) with the connection's
         // identity (Grafana Viewer) — off by default; Tempo inside the cluster has no authentication and is never read
         traces: z.boolean().optional(),
+        // Read profiles from the Pyroscope datasource THROUGH this Grafana (services/grafanaProfiles.ts) — the same
+        // gate as traces: off by default, the connection's identity (Grafana Viewer), never Pyroscope in the cluster
+        profiles: z.boolean().optional(),
       }).strict().optional(),
       loki: z.object({
         // In-cluster only: <svc>.<ns>[.svc[.cluster.local]] or a private address — never a public endpoint

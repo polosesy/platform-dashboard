@@ -35,7 +35,7 @@ test("every page route appears in the menu exactly once (the sign-in page is the
   const hrefs = items.map((i) => i.href).sort();
   assert.deepEqual(hrefs, [...new Set(hrefs)], "no duplicate menu entries");
   assert.deepEqual(hrefs, routes);
-  assert.equal(routes.length, 23); // + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
+  assert.equal(routes.length, 29); // + 6 monitoring views of their own (2026-11-19 — they were tabs of /observability) · + /network-path (network path, 2026-11-18) · + /runbooks (사례·런북, 2026-11-13) + /security/explore (그래프 탐색, 2026-11-17)
 });
 
 test("each route activates exactly one item (longest match) and its group", () => {
@@ -59,9 +59,9 @@ test("each route activates exactly one item (longest match) and its group", () =
 });
 
 test("group order and shape: 7 slots, single-item groups are direct links", () => {
-  assert.deepEqual(NAV_GROUPS.map((g) => g.key), ["overview", "azure", "network", "kubernetes", "security", "cost", "notify", "settings"]);
+  assert.deepEqual(NAV_GROUPS.map((g) => g.key), ["overview", "azure", "network", "kubernetes", "monitoring", "security", "cost", "notify", "settings"]);
   // 알림·대응 = 알림 센터 + 사례·런북 (2026-11-13) — no longer a single link
-  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview", "cost"]);
+  assert.deepEqual(NAV_GROUPS.filter((g) => g.items.length === 1).map((g) => g.key), ["overview", "kubernetes", "cost"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "settings")!.items.map((i) => i.href), ["/settings/connections", "/settings/features"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "azure")!.items.map((i) => i.href), ["/architecture", "/live-diagram", "/health"]);
   assert.deepEqual(NAV_GROUPS.find((g) => g.key === "network")!.items.map((i) => i.href), ["/network", "/hubble", "/network-path"]);
@@ -74,6 +74,12 @@ test("group order and shape: 7 slots, single-item groups are direct links", () =
 test("sections: only in the security group, contiguous, translated, never repeating an item label", () => {
   for (const g of NAV_GROUPS) {
     const secs = g.items.map((i) => i.section);
+    if (g.key === "monitoring") {
+      // 2026-11-19: one item per monitoring view, in three sections — the cluster's state · the applications · logs and collection
+      assert.deepEqual(g.items.map((_, i) => sectionBefore(g.items, i)), ["nav.section.monState", null, null, "nav.section.monApp", null, "nav.section.monData", null]);
+      assert.deepEqual(g.items.map((i) => i.href), ["/observability", "/observability/signals", "/observability/nodes", "/observability/services", "/observability/profiles", "/observability/logs", "/observability/collection"]);
+      continue;
+    }
     if (g.key !== "security") { assert.ok(secs.every((s) => !s), `${g.key} has no sections`); continue; }
     assert.ok(secs.every(Boolean), "every security item has a section");
     const seen = new Set<string>();

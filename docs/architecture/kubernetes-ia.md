@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-observability
-last-verified: 2026-11-16
-covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/page.tsx, apps/web/src/lib/navConfig.ts]
+last-verified: 2026-11-19
+covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/ClusterConfig.tsx, apps/web/src/lib/aksConfigView.ts, apps/api/src/services/aksClusterConfig.ts, apps/web/src/app/observability/ObservabilityView.tsx, apps/web/src/lib/navConfig.ts, apps/web/src/components/Sidebar.tsx]
 ---
 # Kubernetes 메뉴 구조 검토 — AKS 클러스터 · AKS 모니터링
 
@@ -203,3 +203,31 @@ covers: [apps/web/src/app/kubernetes/page.tsx, apps/web/src/app/kubernetes/Clust
 - 권장 경고 29개 중 화면 조건 ✓가 10개에서 27개가 될 것. 남는 2개는 수집이 필요한 API 서버 5xx와 쿼터입니다.
 - 새 값마다 PromQL이 함께 나올 것.
 - stg에서 같은 PromQL을 작업 영역에 직접 물어 화면 숫자와 일치할 것.
+
+## 8. 모니터링 탭 → 메뉴 항목 분리 · 이름에서 'AKS' 빼기 (2026-11-19)
+
+**물음**: 모니터링의 하위 보기(클러스터·워크로드 · 경고 신호 · 서비스 · 노드 · 로그 …)를 왼쪽 메뉴로 나눌까, 탭으로 둘까. 통합 플랫폼이니 'AKS'를 빼고 '클러스터'·'모니터링'으로.
+
+**잰 것(바꾸기 전)**
+
+| 기준 | 탭(예전) | 메뉴 항목(지금) |
+|---|---|---|
+| 첫 보기 말고 다른 보기까지 클릭 | 2 (메뉴 + 탭) | 1 |
+| 보기마다 주소 | 없음 — 탭은 화면 상태(새로 고침 = 첫 탭, 뒤로 가기로 탭이 안 돌아옴, 공유 불가) | `/observability/<보기>` |
+| 중복 | 네트워크(Hubble) 탭 = 네트워크 › Pod 트래픽과 같은 컴포넌트 | 없음(탭 삭제) |
+| 보기 수 | 7(프로필을 넣으면 8) | 7, 소제목 3개 |
+| 시간 범위 | 탭 사이 유지 | 메뉴로 옮겨도 유지(`navHref` — 모니터링 보기끼리만 `range·to·refresh`를 가져감) |
+
+**결정**: 메뉴 항목으로 나눔 — 그룹 **모니터링**, 소제목 셋(Datadog의 Infrastructure · APM · Logs 구분):
+- 클러스터 상태: 클러스터 · 워크로드(`/observability`) · 경고 신호 · 노드
+- 애플리케이션: 서비스 (APM) · 프로필(새로)
+- 로그 · 수집: 로그 · 수집 상태
+
+그룹 **클러스터**(`/kubernetes` — 구성 · 리소스)는 항목 하나라 바로 가는 링크. '클러스터 보안 점검'(예전 AKS 보안 점검). 주소는 그대로(`/kubernetes`, `/observability`) — 북마크가 깨지지 않음.
+
+**예전 링크**: `?wl=`(워크로드 패널)는 `/observability`에 그대로, `?trace=`(복사한 트레이스 링크)는 `/observability`로 오면 `/observability/services?trace=`로 옮김, 새 트레이스 링크는 처음부터 `/observability/services`.
+
+**확인**:
+- 메뉴 테스트(`navConfig.test.ts` — 경로 ↔ 메뉴 1:1 = 29, 소제목 순서, 아이콘 중복 없음) · 화면 테스트(모든 보기가 같은 틀 `ObservabilityPage` = PageHeader).
+- 헤드리스 Chrome: 프로필에서 메뉴 '로그' → `/observability/logs?range=1h`(범위 유지), 1440·390px 가로 넘침 없음.
+- 하이드레이션 오류: 8번 불러 0.

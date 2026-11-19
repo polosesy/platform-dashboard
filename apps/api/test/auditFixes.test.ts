@@ -98,7 +98,7 @@ test("web: useApiQuery only ever returns the current key's data; panels are one 
   const hook = web("lib/useApiQuery.ts");
   assert.match(hook, /data: key !== null && state\.dataKey === key \? state\.data : undefined/);
   assert.match(hook, /setState\(\{ key: effectiveKey, data, dataKey: key \}\)/);
-  const page = web("app/observability/page.tsx");
+  const page = web("app/observability/ObservabilityView.tsx");
   for (const c of ["WorkloadHeatmap", "EventsSection", "SloTab", "NodeMaintenancePanel", "LogsTab", "StackTab"]) {
     const at = page.indexOf(`<${c} key={\``);
     assert.ok(at >= 0 && page.slice(at, at + 80).includes(":${clusterId}`} clusterId={clusterId}"), `${c}: another cluster starts clean (its own key — siblings must not share one)`);

@@ -1227,3 +1227,74 @@
 .trAttrLeaf > span:first-child { font-weight: 500; color: var(--muted); overflow-wrap: anywhere; }
 .trAttrLeaf > span:last-child { font-family: var(--font-mono); overflow-wrap: anywhere; color: var(--ink); }
 .trAttrRoot { padding-left: 0; }
+
+/* ── 모니터링 › 프로필 — timeline · flame graph · top functions · call graph · per-language coverage ── */
+.pfTools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.pfMeta { margin: 4px 0 0; font-size: var(--text-caption); color: var(--muted); }
+.pfWin { margin: 4px 0 8px; font-size: var(--text-small); color: var(--muted); }
+.pfTotal { margin: 8px 0; font-size: var(--text-small); font-weight: 600; }
+.pfTimeline { margin: 12px 0 0; display: grid; gap: 4px; min-width: 0; }
+.pfTimeline figcaption { font-size: var(--text-caption); color: var(--muted); }
+.pfTimelineBox { position: relative; min-width: 0; overflow: hidden; touch-action: none; }
+.pfTimelineBox svg { display: block; cursor: crosshair; }
+.pfAxis { stroke: rgba(var(--ink-rgb), 0.15); stroke-width: 1; }
+.pfAxisText { font-family: var(--font-sans); font-size: var(--text-caption); fill: var(--subtle); font-variant-numeric: tabular-nums; }
+.pfSel { fill: rgba(var(--accent-rgb), 0.12); stroke: rgba(var(--accent-rgb), 0.5); stroke-width: 1; }
+.pfLine { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.pfDot { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.pfTip {
+  position: absolute; z-index: 3; top: 4px; max-width: 320px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); box-shadow: var(--shadow-pop); font-size: var(--text-caption); pointer-events: none; overflow-wrap: anywhere;
+}
+.pfTip dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 4px 0 0; }
+.pfTip dt { color: var(--muted); }
+.pfTip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.pfFlameWrap { display: grid; gap: 6px; min-width: 0; margin-top: 8px; }
+.pfCrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: var(--text-caption); }
+.pfCrumbs > *:not(:last-child)::after { content: " ›"; color: var(--subtle); }
+.pfFlame { position: relative; min-width: 0; overflow: hidden; }
+.pfFrame {
+  position: absolute; height: 19px; box-sizing: border-box; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  border-radius: var(--radius-sm); font-size: var(--text-caption); line-height: 19px; color: var(--ink); cursor: pointer;
+  background: rgba(var(--accent-rgb), 0.22);
+}
+.pfFrame:hover { outline: 1px solid var(--ink); }
+.pfFrame[data-kind="runtime"] { background: rgba(var(--slate-rgb), 0.24); }
+.pfFrame[data-kind="native"] { background: rgba(var(--warning-rgb), 0.24); }
+.pfFrame[data-diff="3"] { background: rgba(var(--danger-rgb), 0.55); }
+.pfFrame[data-diff="2"] { background: rgba(var(--danger-rgb), 0.35); }
+.pfFrame[data-diff="1"] { background: rgba(var(--danger-rgb), 0.18); }
+.pfFrame[data-diff="0"] { background: rgba(var(--ink-rgb), 0.07); }
+.pfFrame[data-diff="-1"] { background: rgba(var(--success-rgb), 0.18); }
+.pfFrame[data-diff="-2"] { background: rgba(var(--success-rgb), 0.35); }
+.pfFrame[data-diff="-3"] { background: rgba(var(--success-rgb), 0.55); }
+.pfFrame[data-hit] { outline: 2px solid var(--accent-strong); font-weight: 600; }
+.pfFrame[data-dim] { opacity: 0.35; }
+.pfLegend { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--text-caption); color: var(--muted); }
+.pfKey { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: middle; border-radius: var(--radius-sm); background: rgba(var(--accent-rgb), 0.22); }
+.pfKey[data-kind="runtime"] { background: rgba(var(--slate-rgb), 0.24); }
+.pfKey[data-kind="native"] { background: rgba(var(--warning-rgb), 0.24); }
+.pfKey[data-diff="3"] { background: rgba(var(--danger-rgb), 0.55); }
+.pfKey[data-diff="1"] { background: rgba(var(--danger-rgb), 0.18); }
+.pfKey[data-diff="0"] { background: rgba(var(--ink-rgb), 0.07); }
+.pfKey[data-diff="-1"] { background: rgba(var(--success-rgb), 0.18); }
+.pfKey[data-diff="-3"] { background: rgba(var(--success-rgb), 0.55); }
+.pfFn { display: inline-block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--font-mono); font-size: var(--text-caption); }
+.pfCall { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr); gap: 16px; margin-top: 8px; align-items: start; }
+@media (max-width: 900px) { .pfCall { grid-template-columns: minmax(0, 1fr); } }
+.pfCall h4 { margin: 0 0 6px; font-size: var(--text-small); font-weight: 600; }
+.pfCall ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pfCall li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; min-width: 0; }
+.pfEdge { grid-column: 1 / -1; display: block; height: 6px; border-radius: var(--radius-pill); background: var(--accent); }
+.pfEdge[data-side="in"] { background: rgba(var(--accent-rgb), 0.55); }
+.pfEdgeV { grid-row: 1; grid-column: 2; font-size: var(--text-caption); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pfCallMe { padding: 12px; border: 2px solid var(--accent); border-radius: var(--radius-md); background: rgba(var(--accent-rgb), 0.04); min-width: 0; }
+.pfCallMe .pfFn { font-weight: 600; font-size: var(--text-small); white-space: normal; overflow-wrap: anywhere; }
+.pfCallMe dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: var(--text-caption); }
+.pfCallMe dt { color: var(--muted); }
+.pfCallMe dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.pfCov { margin-bottom: 12px; }
+.pfCov h4 { margin: 0 0 6px; font-size: var(--text-small); font-weight: 600; }
+.pfCov h4 span { font-weight: 400; color: var(--muted); font-size: var(--text-caption); }
+.pfCov ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pfCov li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--text-caption); color: var(--muted); }

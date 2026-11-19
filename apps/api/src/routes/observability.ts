@@ -30,6 +30,7 @@ import { CONTEXT_MAX_LINES, SETTLE_MS, getLogContext, getLogInsights, getPodLogs
 import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { getTrace, searchTraces } from "../services/grafanaTraces.js";
+import { getProfile, getProfileCatalog } from "../services/grafanaProfiles.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
@@ -187,6 +188,33 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getTrace(env, req.auth?.bearerToken, clusterId, traceId!));
     } catch (e: unknown) {
       sendError(res, e, "trace_failed", "observability");
+    }
+  });
+
+  // 모니터링 › 프로필: Pyroscope through the customer's Managed Grafana (connection opt-in `grafana.profiles`, Grafana
+  // Viewer) — operators only, the same door as traces (function names are the team's code)
+  router.get("/api/observability/profiles", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getProfileCatalog(env, req.auth?.bearerToken, clusterId, queryInt(req, "minutes", 60, 5, 43_200), queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "profiles_failed", "observability");
+    }
+  });
+
+  router.get("/api/observability/profile", requireRole(env, "operator"), async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      const [service, typeId] = requireQuery(req, ["service", "type"]);
+      const sec = (n: string) => queryInt(req, n, 0, 1_000_000_000, 9_999_999_999);
+      const cf = queryString(req, "compareFrom"), ct = queryString(req, "compareTo");
+      res.json(await getProfile(env, req.auth?.bearerToken, clusterId, {
+        service: service!, namespace: queryString(req, "namespace") ?? null, typeId: typeId!,
+        from: sec("from"), to: sec("to"), seriesFrom: sec("seriesFrom"), seriesTo: sec("seriesTo"),
+        ...(cf && ct ? { compareFrom: sec("compareFrom"), compareTo: sec("compareTo") } : {}),
+      }));
+    } catch (e: unknown) {
+      sendError(res, e, "profile_failed", "observability");
     }
   });
 

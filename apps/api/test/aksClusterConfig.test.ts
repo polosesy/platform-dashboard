@@ -124,5 +124,7 @@ test("wiring: the route answers ARM only for a cluster ID, the page has both sec
     ...["upToDate", "patch", "minor", "unknown"].flatMap((s) => [`k8s.cfg.up.${s}`, `k8s.cfg.upHint.${s}`]), "k8s.cfg.gap.upgrades", "k8s.cfg.gap.windows",
   ]) assert.ok(has(k), k);
   assert.match(msgs, /"nav\.desc\.aksClusters": \{ ko: "구성 · 리소스/);
-  assert.match(msgs, /"nav\.desc\.aksMonitoring": \{ ko: "상태 · 신호/);
+  // 2026-11-19: no product name in a category — 클러스터 (구성 · 리소스) and 모니터링 (상태 · 신호, one item per view)
+  assert.match(msgs, /"nav\.group\.kubernetes": \{ ko: "클러스터"/);
+  assert.match(msgs, /"nav\.group\.monitoring": \{ ko: "모니터링"/);
 });

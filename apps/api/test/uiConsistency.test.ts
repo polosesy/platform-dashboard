@@ -29,10 +29,11 @@ test("every page renders the shared PageHeader (title = menu label)", () => {
   assert.ok(pages.length >= 15);
   const missing = pages.filter((p) => {
     const s = read(p);
-    // /security/* pages use SecurityHeader, which wraps PageHeader
-    return !/<PageHeader\b/.test(s) && !/<SecurityHeader\b/.test(s);
+    // /security/* pages use SecurityHeader, which wraps PageHeader; the monitoring views share ObservabilityPage (2026-11-19)
+    return !/<PageHeader\b/.test(s) && !/<SecurityHeader\b/.test(s) && !/<ObservabilityPage\b/.test(s);
   });
   assert.deepEqual(missing.map(rel), []);
+  assert.match(read(join(appDir, "observability", "ObservabilityView.tsx")), /<PageHeader\b/);
   assert.match(read(join(appDir, "security", "components.tsx")), /<PageHeader\b/);
 });
 

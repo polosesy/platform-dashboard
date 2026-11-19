@@ -93,7 +93,7 @@ test("view: bars relative to the tallest bucket, the peak, which pod opens for a
 });
 
 test("regression: tab components are siblings — each has its own key (one shared key drew the heatmap twice and left it on other tabs)", () => {
-  const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../../web/src/app/observability/ObservabilityView.tsx", import.meta.url), "utf8");
   const keys = [...page.matchAll(/<(\w+) key=\{([^}]+)\}/g)].map((m) => m[2]!);
   assert.ok(keys.length >= 6);
   assert.equal(new Set(keys).size, keys.length, `duplicate keys among siblings: ${keys.join(" | ")}`);

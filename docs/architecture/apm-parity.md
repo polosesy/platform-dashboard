@@ -1,7 +1,7 @@
 ---
 status: draft
 owner: platform-observability
-last-verified: 2026-11-18
+last-verified: 2026-11-19
 covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
@@ -323,6 +323,33 @@ Datadog 'Map and monitor all your services automatically' 화면의 구성을 �
 - stg 원 데이터(PromQL — 서비스 그래프·spanmetrics 1시간, 내 토큰)로 셈한 값 = 라이브러리: 서비스 18 · 오류 3 · **오류율 위험 0**(가장 높은 스팬 오류율 0.37%) · 공유 의존 6 · 넓은 팬아웃 1.
 - 함께 고침: 목록 보기에서 맵이 아래에 그대로 남던 버그(`hidden` 속성이 클래스의 `display: grid`에 짐).
 - 좁은 화면(같은 날 고침): APM 보기 전환 막대(버튼 8개, 내용 폭 514px)가 칸을 넓혀 390px에서 틀이 화면 밖으로 잘렸음 → 칸 = `minmax(0, 1fr)`, 막대만 자기 상자에서 가로 스크롤(`.viewScroll`, 포커스 고리 여백), 고른 보기는 상자 가운데로. 측정: 390px 페이지 넘침 0 · 틀 오른쪽 374 ≤ 390 · 8개 모두 화면 안에서 눌림(요소 적중) · 실제 클릭으로 SLO 선택 후 보임 / 1440px 상자 스크롤 없음(520 = 520).
+
+## 4h. 프로필 — Datadog 프로필 시각화 (2026-11-19)
+
+**원시 데이터(stg, 내 Grafana Viewer 토큰)**:
+- 고객 Grafana에 Pyroscope 데이터 원본 2개. 하나는 Pyroscope에 닿지 못함(연결 시간 초과) — 연결 파일에 맞는 UID를 적어야 함.
+- 닿는 쪽: Java만(`pyroscope_spy=javaspy`, `jfr_event=itimer`, 서비스 16개), 종류 3개 — CPU(`process_cpu`) · 할당 바이트 · 할당 개수(`alloc_in_new_tlab_*`).
+- 라벨 `app_name · cluster · collector · jfr_event · namespace · pyroscope_spy · service_name` — **스레드 라벨 없음**.
+- 프로필 하나 = flamegraph 프레임 하나(`level · value · self · label` 열거, 5,187–6,503행).
+
+**구현**: `services/grafanaProfiles.ts`(Grafana 데이터 원본을 거쳐 읽음 — 트레이스와 같은 문: 연결 `grafana.profiles` + `datasources.pyroscope`, 운영자만) + 순수 `lib/profileView.ts` + `ProfilesView`.
+
+| Datadog 보기 | 여기 | 데이터 |
+|---|---|---|
+| 플레임 그래프 | 루트 위 아이시클, 폭 = 비율, 누르면 확대 + 경로, 찾기, 색 = 코드 · 언어 런타임(JDK …) · 네이티브(.so·JVM) — 이름에서 아는 사실만 | 중첩 집합 → 형제 끝에서 시작(`flameRects`) |
+| CPU time by Method | 상위 함수 — self(그 함수 안) · total(재귀는 한 번) | `topFunctions` — self 합 = 루트 |
+| 호출 그래프 | 함수 하나를 가운데 두고 부르는 함수 · 부르는 대상(선 = 그 호출로 쓴 값), 누르면 그 함수로 | `callEdges`·`butterfly` |
+| 단일 프로필 | 시간 그림의 점 하나 = 한 수집 구간(15초) — Pyroscope는 업로드 단위를 따로 주지 않음 | 시계열 한 칸 |
+| 비교 | 바로 앞 같은 길이 구간 — 경로별 전체 대비 비율 차이(%p), 함수별 차이 | `shareDiff`·`functionDiff` |
+| 스레드 타임라인 | **만들 수 없음** — 스레드 라벨·샘플 시각이 없음, 화면이 이유와 라벨 목록을 말함 | — |
+| 언어별 프로필 종류 | Datadog 표(Java 10 · Python 7 · Go 8 · Ruby 4 · Node.js 4 · .NET 6 · PHP 5 · 네이티브 3) × 이 클러스터: 수집 중 · 수집 안 함(Java는 Pyroscope 에이전트 설정) · Pyroscope에 없음 | `languageCoverage` |
+
+**시계열 단위(실측)**: Grafana가 CPU를 **코어**, 바이트를 **초당**, 개수를 **15초 칸마다**로 줌 → Σ × 칸(× 10⁹) ≈ 루트(CPU 6.56 s vs 6.54 s · 717.6 MB vs 716.5 MB · 1,359 vs 1,357 — 창 가장자리 차이).
+
+**확인**:
+- 중첩 집합 일관성(value = self + 자식) 0 / 6,503 위반 · self 합 = 루트(세 종류 모두).
+- 실제 트리 화면: 프레임 5,187 · 상위 함수 100행 · 호출 그래프 부르는 함수 12 / 대상 2 · 오류 0.
+- 테스트 `profiles.test.ts`(손으로 계산한 트리 — 폭·위치·재귀 total·호출 무게·비교 %p).
 
 ## 5. 다음 순서 (데이터가 이미 있는 것부터)
 

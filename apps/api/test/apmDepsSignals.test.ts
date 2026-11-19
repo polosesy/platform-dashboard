@@ -224,8 +224,9 @@ test("endpoints: every service's endpoints in one table, sorted by errors / requ
 test("wiring: routes, the 경고 신호 tab, the 서비스 (APM) views, every rule described in ko and en", () => {
   const routes = read("../src/routes/observability.ts");
   for (const r of ["/api/observability/dependencies", "/api/observability/recommended-alerts"]) assert.ok(routes.includes(`"${r}"`), r);
-  const page = read("../../web/src/app/observability/page.tsx");
-  assert.match(page, /const TABS: Tab\[\] = \["overview", "signals", "slo"/);
+  // 2026-11-19: the monitoring views are menu items of their own (one frame — ObservabilityView)
+  const page = read("../../web/src/app/observability/ObservabilityView.tsx");
+  assert.match(read("../../web/src/lib/navConfig.ts"), /item\("\/observability\/signals", "monSignals"/);
   assert.match(page, /key=\{`signals:\$\{clusterId\}`\}/);
   const tab = read("../../web/src/app/observability/components/SloTab.tsx");
   for (const v of ["map", "deps", "endpoints"]) assert.match(tab, new RegExp(`id: "${v}"`), v);

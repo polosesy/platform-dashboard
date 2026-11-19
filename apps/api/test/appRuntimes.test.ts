@@ -149,7 +149,7 @@ test("blocks: every runtime, block and guide step has ko / en strings; the route
   const routes = readFileSync(new URL("../src/routes/observability.ts", import.meta.url), "utf8");
   assert.match(routes, /\/api\/observability\/app-metrics/);
   // Not a view of its own: the blocks customise the heatmap (tile text) and its table (columns) — one screen, one request each
-  const page = readFileSync(new URL("../../web/src/app/observability/page.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../../web/src/app/observability/ObservabilityView.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /WorkloadBlocks|"blocks"/);
   const heat = readFileSync(new URL("../../web/src/app/observability/components/WorkloadHeatmap.tsx", import.meta.url), "utf8");
   assert.match(heat, /<BlockEditor /);

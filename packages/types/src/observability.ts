@@ -1355,3 +1355,62 @@ export type TraceDetailResponse = {
   redacted: number;
   exploreUrl?: string;
 };
+
+// ── 모니터링 › 프로필 (Pyroscope through the customer's Grafana — services/grafanaProfiles.ts) ──
+
+export type ProfileState = "ok" | "notConfigured" | "unsupportedMode" | "forbidden" | "notFound" | "failed";
+/** What a profile type measures (Datadog's per-language names map onto these — web lib/profileView.ts) */
+export type ProfileKind =
+  | "cpu" | "wall" | "allocBytes" | "allocCount" | "heapBytes" | "heapCount"
+  | "lockTime" | "lockCount" | "blockTime" | "blockCount" | "goroutines" | "exceptions" | "other";
+export type ProfileTypeInfo = {
+  /** Pyroscope's ID <name>:<sample type>:<unit>:<period type>:<period unit> */
+  id: string;
+  name: string;
+  sampleType: string;
+  unit: string;
+  kind: ProfileKind;
+};
+export type ProfileServiceRow = {
+  service: string;
+  namespace: string | null;
+  /** pyroscope_spy (javaspy, gospy, pyspy …) and the language it means (null = an unknown spy) */
+  spy: string | null;
+  language: string | null;
+  /** the types this service sent in the window, with the window's total (unit of the type) */
+  types: Array<{ id: string; total: number }>;
+};
+export type ProfileCatalogResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  windowMinutes: number;
+  state: ProfileState;
+  message?: string;
+  types: ProfileTypeInfo[];
+  services: ProfileServiceRow[];
+  /** the label names of the profiles — a thread timeline needs a thread label (and per-sample times) */
+  labels: string[];
+};
+/** A profile as Pyroscope merges it: a nested set (depth-first rows) — level, total, self and a name index per node */
+export type ProfileTree = { level: number[]; value: number[]; self: number[]; label: number[]; names: string[] };
+export type ProfileResponse = {
+  clusterId: string;
+  generatedAt: string;
+  state: ProfileState;
+  message?: string;
+  service: string;
+  typeId: string;
+  unit: string;
+  /** the window read (ISO) */
+  from: string;
+  to: string;
+  tree: ProfileTree | null;
+  /** the root's value — the whole window in the type's unit */
+  total: number | null;
+  /** the service's series of this type over the page's range (one point per step) — the timeline to pick a window on */
+  series: Array<{ t: number; v: number }> | null;
+  stepSeconds: number | null;
+  /** the comparison window's tree (same service and type) — `compareFrom` / `compareTo` */
+  compare?: { from: string; to: string; tree: ProfileTree | null; total: number | null };
+};

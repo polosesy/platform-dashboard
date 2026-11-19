@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { NAV_COLLAPSE_KEY, NAV_GROUPS, isCollapsible, isItemActive, parseCollapsed, sectionBefore, shownItems } from "@/lib/navConfig";
+import { NAV_COLLAPSE_KEY, NAV_GROUPS, isCollapsible, isItemActive, navHref, parseCollapsed, sectionBefore, shownItems } from "@/lib/navConfig";
 import { useI18n } from "@/lib/i18n";
 import { NavIcon } from "./navIcons";
 import { BrandMark } from "./BrandMark";
@@ -25,7 +25,14 @@ export type SidebarProps = {
  */
 export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { t, locale, setLocale } = useI18n();
+  // between two monitoring views the time range comes along (the URL keeps it — read at the click, not at render)
+  const go = (href: string) => (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const to = navHref(href, pathname, window.location.search);
+    if (to !== href && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) { e.preventDefault(); router.push(to); }
+    if (!docked) onClose();
+  };
   const closeRef = useRef<HTMLButtonElement>(null);
   const prefs = useDisplayPrefs();
   // Folded groups: everything open on the server render, the remembered folds right after (no storage = all open)
@@ -102,7 +109,7 @@ export function Sidebar({ open, docked = false, onClose }: SidebarProps) {
                         className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
                         aria-current={active ? "page" : undefined}
                         title={t(it.descKey)}
-                        onClick={docked ? undefined : onClose}
+                        onClick={go(it.href)}
                       >
                         <span className={styles.navIcon}><NavIcon name={it.icon} /></span>
                         {t(it.labelKey)}

@@ -102,7 +102,7 @@ test("request line: OpenTelemetry semantic conventions, new names before old; no
     { method: "GET", target: "/x", status: 500 });
   assert.equal(TV.httpSummary(span("n", null, "s", 0, 1)), null);
   assert.ok(TV.TRACE_ID.test("4bf92f3577b34da6a3ce929d0e0e4736") && !TV.TRACE_ID.test("x' or 1=1"));
-  assert.equal(TV.traceLink("https://aud.example", "abc"), "https://aud.example/observability?trace=abc");
+  assert.equal(TV.traceLink("https://aud.example", "abc"), "https://aud.example/observability/services?trace=abc");
 });
 
 test("colour by service: slots in order of first appearance (root first), the 6th on = other; one hue = accent", () => {

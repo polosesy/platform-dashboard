@@ -3,7 +3,10 @@
 // Pure data (no hooks, no "use client"), unit-tested in apps/api/test/navConfig.test.ts.
 //
 // Groups follow the scope a page works on: Azure resources, network (VNet and Pod
-// layers side by side), Kubernetes, security, cost.
+// layers side by side), cluster, monitoring, security, cost. No product name in a category (2026-11-19 — an integrated
+// platform: "클러스터" and "모니터링", not "AKS …"). Monitoring = one item per view (it was one page with seven tabs:
+// 2 clicks to every view but the first, no URL per view, a duplicate of 네트워크 › Pod 트래픽) in three sections — the
+// cluster's state, the applications, logs and collection (Datadog: Infrastructure · APM · Logs).
 // A group with one item renders as a direct link; two or more render as a dropdown.
 // Security is ordered by the question a person comes with (Wiz: Issues first, then domains) — what to fix first
 // (overview, issues) · vulnerabilities · configuration and exposure (cloud CSPM, cluster KSPM) · identity and threats ·
@@ -15,7 +18,8 @@ export type NavIcon =
   | "home" | "cloud" | "waypoints" | "helm" | "lock" | "coins"
   | "dashboard" | "heartPulse" | "activity" | "sitemap" | "arrows" | "share"
   | "boxes" | "gauge" | "shieldCheck" | "clipboardCheck" | "wallet" | "globe"
-  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph";
+  | "listChecks" | "fingerprint" | "siren" | "scale" | "radar" | "settings" | "plug" | "key" | "megaphone" | "bell" | "inbox" | "book" | "graph"
+  | "server" | "flame" | "scroll" | "pipeline" | "monitor" | "triangle" | "nodes";
 
 export type NavItem = { href: string; labelKey: string; descKey: string; icon: NavIcon; section?: string };
 export type NavGroup = { key: string; labelKey: string; icon: NavIcon; items: NavItem[] };
@@ -41,10 +45,16 @@ export const NAV_GROUPS: NavGroup[] = [
       item("/network-path", "networkPath", "globe"),
     ],
   },
+  { key: "kubernetes", labelKey: "nav.group.kubernetes", icon: "helm", items: [item("/kubernetes", "aksClusters", "boxes")] },
   {
-    key: "kubernetes", labelKey: "nav.group.kubernetes", icon: "helm", items: [
-      item("/kubernetes", "aksClusters", "boxes"),
-      item("/observability", "aksMonitoring", "gauge"),
+    key: "monitoring", labelKey: "nav.group.monitoring", icon: "monitor", items: [
+      item("/observability", "aksMonitoring", "gauge", "nav.section.monState"),
+      item("/observability/signals", "monSignals", "triangle", "nav.section.monState"),
+      item("/observability/nodes", "monNodes", "server", "nav.section.monState"),
+      item("/observability/services", "monServices", "nodes", "nav.section.monApp"),
+      item("/observability/profiles", "monProfiles", "flame", "nav.section.monApp"),
+      item("/observability/logs", "monLogs", "scroll", "nav.section.monData"),
+      item("/observability/collection", "monCollection", "pipeline", "nav.section.monData"),
     ],
   },
   {
@@ -86,6 +96,12 @@ export const PAGE_SCOPE: Record<string, ReadonlyArray<"subscription" | "cluster"
   "/hubble": ["cluster"],
   "/kubernetes": ["cluster"],
   "/observability": ["cluster"],
+  "/observability/signals": ["cluster"],
+  "/observability/nodes": ["cluster"],
+  "/observability/services": ["cluster"],
+  "/observability/profiles": ["cluster"],
+  "/observability/logs": ["cluster"],
+  "/observability/collection": ["cluster"],
   "/security/risk": ["subscription"],
   "/security/explore": ["cluster"],
   "/security/advisories": ["cluster"],
@@ -120,6 +136,25 @@ export function activeNavItem(pathname: string): NavItem | null {
 
 export function isItemActive(pathname: string, href: string): boolean {
   return activeNavItem(pathname)?.href === href;
+}
+
+/** The URL parameters that make one time range for a family of views (useTimeRange) */
+const TIME_PARAMS = ["range", "to", "refresh"] as const;
+/** Views that share one time range: the monitoring views (one frame — ObservabilityView) */
+const TIME_FAMILY = "/observability";
+const inFamily = (p: string) => p === TIME_FAMILY || p.startsWith(`${TIME_FAMILY}/`);
+
+/**
+ * Pure: where a menu link goes from the current page — between two monitoring views the time range comes along
+ * (`?range · to · refresh`); anywhere else the plain href (other pages keep their own range, or none).
+ */
+export function navHref(href: string, pathname: string, search: string): string {
+  if (!inFamily(href) || !inFamily(pathname)) return href;
+  const from = new URLSearchParams(search);
+  const keep = new URLSearchParams();
+  for (const k of TIME_PARAMS) { const v = from.get(k); if (v) keep.set(k, v); }
+  const q = keep.toString();
+  return q ? `${href}?${q}` : href;
 }
 
 /** Section heading to show before item `i` of a group (when the section changes), else null. */
