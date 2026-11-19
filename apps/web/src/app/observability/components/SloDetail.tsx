@@ -1,17 +1,18 @@
 "use client";
 
 // SLO › 서비스 상세 — Datadog's suite SLO page for one service (docs.datadoghq.com/synthetics/test_suites): the SLO over
-// its window and the error budget left; the SLI per bucket against the target; the global uptime bar (one segment per
-// bucket — ok · error (the bucket's SLI under the target) · no data); the primary contributors (the endpoints whose
+// its window and the error budget left; the SLI per bucket against the target; the global uptime bars (UptimeBars — a
+// status page's bars graded by burn rate: ok · minor · partial · major · no data); the primary contributors (the endpoints whose
 // failed requests spent the budget, with their share). API services/sloUptime.ts; numbers: lib/sloUptimeView.ts.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SloUptimeResponse } from "@aud/types";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { atParam, type TimeRange } from "@/lib/timeRange";
-import { budgetLeft, sliTicks, topShare, uptimeSegments, tickDecimals, tipLeft } from "@/lib/sloUptimeView";
+import { budgetLeft, gradeCounts, latestGrade, sliTicks, topShare, tickDecimals } from "@/lib/sloUptimeView";
+import { UptimeBars, UptimeLegend, useBars, useWidth } from "./UptimeBars";
 import { Button, Chip, ErrorNotice, LoadingState, Notice, Panel } from "@/components/ui";
 import styles from "../styles.module.css";
 
@@ -135,42 +136,24 @@ function SliChart({ d, fmt }: { d: SloUptimeResponse; fmt: (ms: number) => strin
 const bucketText = (t: (k: string, v?: Record<string, string | number>) => string, b: SloUptimeResponse["buckets"][number], minutes: number, fmt: (ms: number) => string) =>
   `${fmt(b.t - minutes * 60_000)} – ${fmt(b.t)} · ${b.state === "noData" ? t("ob.slo.ud.noData") : t("ob.slo.ud.bucket", { sli: `${((b.sli ?? 0) * 100).toFixed(2)}%`, bad: Math.round(b.bad), total: Math.round(b.total) })}`;
 
-/** Datadog's Global Uptime: one segment per bucket — ok · error · no data — over the window */
+/** The service's global uptime — a status page's bars (UptimeBars), graded by burn rate */
 function UptimeBar({ d, fmt }: { d: SloUptimeResponse; fmt: (ms: number) => string }) {
   const { t } = useI18n();
-  const [hover, setHover] = useState<number | null>(null);
-  const segs = uptimeSegments(d.buckets);
-  const hb = hover === null ? null : d.buckets[hover] ?? null;
-  const n = d.buckets.length;
-  const barRef = useRef<HTMLDivElement>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
-  const [left, setLeft] = useState(0);
-  // the tip stays inside the bar (a narrow screen clipped it): centred on the segment, pushed in at either end
-  useLayoutEffect(() => {
-    if (hover === null || !barRef.current || !tipRef.current) return;
-    const barW = barRef.current.clientWidth;
-    setLeft(tipLeft(((hover + 0.5) / n) * barW, tipRef.current.offsetWidth, barW));
-  }, [hover, n]);
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const bars = useBars(d.buckets, d.bucketMinutes, d.target, width);
+  const counts = gradeCounts(bars);
+  const m = d.bucketMinutes * (bars[bars.length - 1]?.buckets ?? 1);
   return (
     <section className={styles.sloUptime} aria-label={t("ob.slo.ud.uptime")}>
       <div className={styles.sloUptimeHead}>
         <h3>{t("ob.slo.ud.uptime")}</h3>
-        <span>{t("ob.slo.ud.uptimeSum", { p: d.totals.uptime === null ? "—" : `${(d.totals.uptime * 100).toFixed(1)}%`, ok: segs.ok, err: segs.error, none: segs.noData, m: d.bucketMinutes >= 60 ? t("ob.slo.ud.hours", { n: d.bucketMinutes / 60 }) : t("ob.slo.ud.minutes", { n: d.bucketMinutes }) })}</span>
+        <span>{t("ob.slo.ud.barSpan", { n: bars.length, m: m >= 60 ? t("ob.slo.ud.hours", { n: Math.round((m / 60) * 10) / 10 }) : t("ob.slo.ud.minutes", { n: m }) })}</span>
+        <span className={styles.upStatus} data-grade={latestGrade(bars)}><i aria-hidden="true" />{t(`ob.slo.ud.now.${latestGrade(bars)}`)}</span>
       </div>
-      <div className={styles.sloUptimeRow}>
-        <span className={styles.sloUptimeLabel}>{t("ob.slo.ud.global")}</span>
-        <div ref={barRef} className={styles.sloUptimeBar} data-uptime-bar onPointerLeave={() => setHover(null)}>
-          {d.buckets.map((b, i) => (
-            <span key={b.t} className={styles.sloUptimeSeg} data-state={b.state} style={{ width: `${100 / n}%` }} onPointerEnter={() => setHover(i)} />
-          ))}
-          {hb ? <div ref={tipRef} className={styles.sloTip} style={{ left, top: 34, maxWidth: "100%" }} role="status">{bucketText(t, hb, d.bucketMinutes, fmt)}</div> : null}
-        </div>
+      <div ref={ref}>
+        {width > 0 ? <UptimeBars bars={bars} minutes={d.bucketMinutes} from={d.from} to={d.to} fmt={fmt} label={t("ob.slo.ud.global")} /> : null}
       </div>
-      <div className={styles.sloUptimeAxis}><span>{fmt(Date.parse(d.from))}</span><span>{fmt(Date.parse(d.to))}</span></div>
-      <ul className={styles.sloUptimeLegend}>
-        {(["noData", "ok", "error"] as const).map((k) => <li key={k}><span className={styles.sloUptimeSeg} data-state={k} aria-hidden="true" />{t(`ob.slo.ud.state.${k}`)}</li>)}
-        <li>{t("ob.slo.ud.rule")}</li>
-      </ul>
+      <UptimeLegend counts={counts} />
     </section>
   );
 }

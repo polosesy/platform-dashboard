@@ -19,7 +19,7 @@ import {
   Button, Cell, Chip, Grid, LinkButton, Notice, Panel, SearchInput, Select, TextInput, Toggle, Toolbar,
 } from "@/components/ui";
 import {
-  EMPTY_SERVICE, TARGET_TIERS, WINDOW_DAYS, draftOf, inherited, inheritedWindow, localToIso, resetState, sameSettings, serviceRows, settingsOf,
+  EMPTY_SERVICE, TARGET_TIERS, UPTIME_MAX, WINDOW_DAYS, draftOf, toggleUptime, inherited, inheritedWindow, localToIso, resetState, sameSettings, serviceRows, settingsOf,
   spanLabel, type ServiceDraft, type SettingsDraft,
 } from "@/lib/sloSettingsView";
 import { msText, targetText } from "@/lib/sloView";
@@ -208,6 +208,12 @@ export function SloSettingsView({ clusterId, d, r, onChanged, onGuide }: {
                 options={targetOptions({ v: top.latency.v.target, source: top.latency.source }, draft.latencyTarget)} />
               <TextInput label={t("ob.slo.set.excludeUris")} rows={3} value={draft.excludeUris} disabled={ro} onChange={(v) => setTop({ excludeUris: v })}
                 placeholder="/public/{id}/webhooks" hint={bad.has("cluster.excludeUris") ? t("ob.slo.set.badUris") : t("ob.slo.set.excludeHint")} />
+              <Select label={t("ob.slo.set.uptimeWindow")} value={draft.uptimeWindow} disabled={ro} onChange={(v) => setTop({ uptimeWindow: v })}
+                options={[
+                  { value: "", label: t("ob.slo.set.uptimeWindowSame") },
+                  ...WINDOW_DAYS.map((x) => ({ value: String(x), label: t("ob.slo.set.days", { n: x }) })),
+                ]} />
+              <p className={styles.stackMuted}>{t("ob.slo.set.uptimeHint", { n: draft.uptime.length, max: UPTIME_MAX })}</p>
             </div>
           </Panel>
         </Cell>
@@ -259,6 +265,7 @@ export function SloSettingsView({ clusterId, d, r, onChanged, onGuide }: {
                     <th scope="col">{t("ob.slo.set.excludeUris")}</th>
                     <th scope="col" title={t("ob.slo.set.svcWindowHint")}>{t("ob.slo.set.svcWindow")}</th>
                     <th scope="col" title={t("ob.slo.set.onlyUrisHint")}>{t("ob.slo.set.onlyUris")}</th>
+                    <th scope="col" title={t("ob.slo.set.uptimeColHint")}>{t("ob.slo.set.uptimeCol")}</th>
                     <th scope="col">{t("ob.slo.set.leaveOut")}</th>
                   </tr>
                 </thead>
@@ -301,6 +308,12 @@ export function SloSettingsView({ clusterId, d, r, onChanged, onGuide }: {
                         <td>
                           <TextInput label={t("ob.slo.set.onlyUris")} hideLabel value={v.onlyUris ?? ""} disabled={ro} width={200} placeholder={t("ob.slo.set.onlyUrisPh")}
                             onChange={(x) => setSvc(key, { onlyUris: x })} hint={bad.has(`${key}.onlyUris`) ? t("ob.slo.set.badUris") : undefined} />
+                        </td>
+                        <td>
+                          <Toggle checked={draft.uptime.includes(key)} disabled={ro || (!draft.uptime.includes(key) && draft.uptime.length >= UPTIME_MAX)}
+                            onChange={(x) => setDraft((p) => ({ ...p, uptime: toggleUptime(p.uptime, key, x) }))}>
+                            {draft.uptime.includes(key) ? t("ob.slo.set.uptimeOn", { n: draft.uptime.indexOf(key) + 1 }) : t("ob.slo.set.uptimeOff")}
+                          </Toggle>
                         </td>
                         <td><Toggle checked={v.exclude} disabled={ro} onChange={(x) => setSvc(key, { exclude: x })}>{t("ob.slo.set.leaveOutShort")}</Toggle></td>
                       </tr>

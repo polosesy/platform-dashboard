@@ -48,6 +48,14 @@ export const VIZ = {
   series3: [27, 175, 122],
   series4: [98, 80, 214],
   series5: [232, 123, 164],
+  flameCode: [134, 178, 240], // profile flame graph: code (blue)
+  flameRuntime: [230, 232, 235], // profile flame graph: language runtime (light grey)
+  flameNative: [243, 169, 92], // profile flame graph: native (orange)
+  flameInk: [31, 35, 40], // text on the flame frames (both themes)
+  upOk: [16, 124, 16], // SLO uptime grades: ok
+  upMinor: [212, 174, 26], // minor (yellow)
+  upPartial: [217, 101, 11], // partial (orange)
+  upMajor: [164, 22, 26], // major (deep red)
 } as const satisfies Record<string, Rgb>;
 
 export type UiColor = keyof typeof UI;

@@ -63,7 +63,7 @@ export const SLO_QUERY_TIMEOUT_MS = 25_000;
 export const SLO_PART_DAYS = 3;
 
 export type SloTargets = { availability?: number; latency?: { thresholdMs: number; target: number }; excludeUris?: string[] };
-export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean; windowDays?: number; onlyUris?: string[] }> };
+export type SloConfig = SloTargets & { windowDays?: number; services?: Record<string, SloTargets & { exclude?: boolean; windowDays?: number; onlyUris?: string[] }>; uptime?: { services: string[]; windowDays?: number } };
 
 type Source = "platform" | "config" | "default";
 type Resolved = {

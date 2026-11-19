@@ -9,10 +9,16 @@
 //   · URIs: the service's core endpoints only (`onlyUris`, when set — Datadog's critical tests), never the excluded ones.
 // Counters through counterIncrease (a series created inside a bucket counts from its first value — promScope.ts).
 // The buckets and the window are read separately; the measured sums are compared in the test and on stg.
+//
+// 2026-11-19 (2nd — like a status page, status.claude.com: one bar per bucket, minor · partial · major): each bucket is
+// graded by its burn rate (failed share ÷ (1 − target)) against the SRE Workbook's alert thresholds — the same 14.4 and
+// 6 the SLO cards' burn alerts use (workloadSlo.ts): minor = over the budget's pace (> 1), partial ≥ 6, major ≥ 14.4.
+// The global uptime board = the key services the team designated (settings `uptime.services`, in that order) over one
+// window and one end, so their bars line up bucket by bucket.
 
 import type { Env } from "../env.js";
 import type { PromRow } from "./hubbleMetrics.js";
-import type { SloUptimeBucket, SloUptimeResponse } from "@aud/types";
+import type { SloUptimeBoardResponse, SloUptimeBoardRow, SloUptimeBucket, SloUptimeGrade, SloUptimeResponse } from "@aud/types";
 import { CacheManager, cachePrefix } from "../infra/cacheManager.js";
 import { clusterConnection, getPrometheusFetcherAuto } from "../infra/azureClientFactory.js";
 import { HttpError } from "../infra/requestParams.js";
@@ -39,15 +45,31 @@ export function uriAlternation(uris: string[]): string {
   return uris.map((u) => u.replace(/[\\.^$|?*+()[\]{}]/g, (c) => `\\${c}`)).join("|");
 }
 
+/** The SRE Workbook's burn-rate alert thresholds (the SLO cards' page alerts): 14.4 = 2 % of a 30-day budget in an hour, 6 = 5 % in 6 hours */
+export const BURN_GRADES = { partial: 6, major: 14.4 } as const;
+
+/**
+ * Pure: a bucket's grade and burn rate — fractions of increase() under half a request are not a request (noData) or not
+ * a failure (ok); a failure with the bucket's SLI under the target is graded by how fast it burns the budget
+ */
+export function gradeOf(total: number, bad: number, target: number): { grade: SloUptimeGrade; burn: number | null; sli: number | null } {
+  if (!(total >= 0.5)) return { grade: "noData", burn: null, sli: null };
+  const b = Math.min(bad, total), sli = 1 - b / total;
+  const burn = target < 1 ? (b / total) / (1 - target) : null;
+  const grade: SloUptimeGrade = b < 0.5 || sli >= target || burn === null ? "ok"
+    : burn >= BURN_GRADES.major - 1e-9 ? "major" : burn >= BURN_GRADES.partial - 1e-9 ? "partial" : "minor"; // 6 / 1000 / 0.001 = 5.999…
+  return { grade, burn: burn === null ? null : Math.round(burn * 100) / 100, sli: Math.round(sli * 100000) / 100000 };
+}
+
 /** Pure: the bucket states from the per-bucket requests and failed requests (aligned by time) */
 export function uptimeBuckets(total: Map<number, number>, bad: Map<number, number>, times: number[], target: number): SloUptimeBucket[] {
   return times.map((t) => {
     const n = total.get(t) ?? 0, b = Math.min(bad.get(t) ?? 0, n);
-    if (!(n >= 0.5)) return { t, total: Math.round(n * 100) / 100, bad: 0, sli: null, state: "noData" as const };
-    const sli = 1 - b / n;
-    // a failed request inside a bucket whose SLI is under the target = an error bucket; fractions of increase() under
-    // half a request are not a request
-    return { t, total: Math.round(n * 100) / 100, bad: Math.round(b * 100) / 100, sli: Math.round(sli * 100000) / 100000, state: b >= 0.5 && sli < target ? "error" as const : "ok" as const };
+    const g = gradeOf(n, b, target);
+    return {
+      t, total: Math.round(n * 100) / 100, bad: g.grade === "noData" ? 0 : Math.round(b * 100) / 100, sli: g.sli,
+      state: g.grade === "noData" ? "noData" as const : g.grade === "ok" ? "ok" as const : "error" as const, grade: g.grade, burn: g.burn,
+    };
   });
 }
 
@@ -85,32 +107,49 @@ export function contributorsOf(byUri: PromRow[], totals: PromRow[], limit = 5): 
 }
 
 const cache = new CacheManager<SloUptimeResponse>(50, 5 * 60_000);
+const boardCache = new CacheManager<SloUptimeBoardResponse>(20, 5 * 60_000);
+
+type Ctx = { cfg: SloConfig | undefined; platform: SloConfig; version: number; resets: Awaited<ReturnType<typeof readSloSettings>>["resets"]; clusterDays: number };
+async function contextOf(env: Env, clusterId: string): Promise<Ctx> {
+  const cfg = clusterConnection(env, clusterId).connection.aks?.observability?.slo as SloConfig | undefined;
+  const settings = await readSloSettings(sloSettingsDir(env), clusterId);
+  const platform = settings.settings as SloConfig;
+  return { cfg, platform, version: settings.version, resets: settings.resets, clusterDays: platform.windowDays ?? cfg?.windowDays ?? 30 };
+}
+
+/** One read's window — the service's own window and a later reset for the detail; the board's one window for the board */
+type Plan = { startMs: number; endMs: number; windowDays: number; windowSource: SloUptimeResponse["windowSource"]; reset?: { at: string; reason?: string }; contributors: boolean };
 
 export async function getSloUptime(env: Env, bearerToken: string | undefined, clusterId: string, namespace: string, application: string, at?: number): Promise<SloUptimeResponse> {
   if (!NS.test(namespace) || !APP.test(application)) throw new HttpError(400, "invalid_service", "namespace / application: Kubernetes and Micrometer names");
-  const obs = clusterConnection(env, clusterId).connection.aks?.observability;
-  const cfg = obs?.slo as SloConfig | undefined;
-  const settings = await readSloSettings(sloSettingsDir(env), clusterId);
-  const platform = settings.settings as SloConfig;
-  const clusterDays = platform.windowDays ?? cfg?.windowDays ?? 30;
-  const t = targetsFor(cfg, namespace, application, platform);
-  const windowDays = t.windowDays !== null && t.windowDays < clusterDays ? t.windowDays : clusterDays;
+  const ctx = await contextOf(env, clusterId);
+  const t = targetsFor(ctx.cfg, namespace, application, ctx.platform);
+  const windowDays = t.windowDays !== null && t.windowDays < ctx.clusterDays ? t.windowDays : ctx.clusterDays;
   const endMs = (at ?? Math.floor(Date.now() / 60_000) * 60) * 1000;
   // a later budget reset of this service (or of all) starts the window later — the card counts the same way
-  const reset = resetFor(settings.resets, namespace, application, endMs, windowDays);
+  const reset = resetFor(ctx.resets, namespace, application, endMs, windowDays);
   const startMs = reset ? Math.max(endMs - windowDays * 86_400_000, Date.parse(reset.at)) : endMs - windowDays * 86_400_000;
+  return readUptime(env, bearerToken, clusterId, namespace, application, at, ctx, {
+    startMs, endMs, windowDays, windowSource: t.windowDays !== null && t.windowDays < ctx.clusterDays ? "service" : "cluster",
+    ...(reset ? { reset: { at: reset.at, ...(reset.reason ? { reason: reset.reason } : {}) } } : {}), contributors: true,
+  });
+}
+
+async function readUptime(env: Env, bearerToken: string | undefined, clusterId: string, namespace: string, application: string, at: number | undefined, ctx: Ctx, plan: Plan): Promise<SloUptimeResponse> {
+  const t = targetsFor(ctx.cfg, namespace, application, ctx.platform);
+  const { startMs, endMs, windowDays, reset } = plan;
   const windowMin = Math.max(5, Math.floor((endMs - startMs) / 60_000));
   const step = bucketMinutes(windowMin);
   const base: SloUptimeResponse = {
     clusterId, generatedAt: new Date().toISOString(), ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
     metricsState: "ok", namespace, application, target: t.availability.target, targetSource: t.availability.source,
-    windowDays, windowSource: t.windowDays !== null && t.windowDays < clusterDays ? "service" : "cluster",
+    windowDays, windowSource: plan.windowSource,
     from: new Date(startMs).toISOString(), to: new Date(endMs).toISOString(), bucketMinutes: step, buckets: [],
     totals: { total: 0, bad: 0, sli: null, allowed: 0, budgetUsed: null, uptime: null }, contributors: [], consumedBy: 0,
-    only: t.only ? [...t.only] : [], excluded: [...t.exclude], ...(reset ? { reset: { at: reset.at, ...(reset.reason ? { reason: reset.reason } : {}) } } : {}),
+    only: t.only ? [...t.only] : [], excluded: [...t.exclude], ...(reset ? { reset } : {}),
     queries: { total: "", bad: "", byUri: "" },
   };
-  const key = `${cachePrefix(bearerToken)}:slo-uptime:${clusterId.toLowerCase()}:${namespace}/${application}:${settings.version}:${at ?? Math.floor(endMs / 60_000)}`;
+  const key = `${cachePrefix(bearerToken)}:slo-uptime:${clusterId.toLowerCase()}:${namespace}/${application}:${ctx.version}:${startMs}:${endMs}:${plan.contributors ? "c" : "-"}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const target = await resolvePrometheusTarget(env, bearerToken, clusterId);
@@ -149,13 +188,13 @@ export async function getSloUptime(env: Env, bearerToken: string | undefined, cl
       .map((x) => ({ metric: x.metric ?? {}, value: (x.values ?? []).reduce((a, v) => a + (Number.isFinite(Number(v[1])) ? Number(v[1]) : 0), 0) }));
     const [tot, bad, byUri, totUri] = await Promise.all([
       series(qTotal), series(qBad),
-      summed(qByUri),
-      summed(qTotalUri),
+      plan.contributors ? summed(qByUri) : Promise.resolve([]),
+      plan.contributors ? summed(qTotalUri) : Promise.resolve([]),
     ]);
     const buckets = uptimeBuckets(tot, bad, times, t.availability.target);
     const out: SloUptimeResponse = {
       ...base, buckets, totals: uptimeTotals(buckets, t.availability.target), ...contributorsOf(byUri, totUri),
-      queries: { total: qTotal, bad: qBad, byUri: qByUri },
+      queries: { total: qTotal, bad: qBad, byUri: plan.contributors ? qByUri : "" },
     };
     cache.set(key, out);
     return out;
@@ -166,3 +205,48 @@ export async function getSloUptime(env: Env, bearerToken: string | undefined, cl
   }
 }
 
+/** at most this many key services on the board (the settings schema's limit) */
+export const BOARD_MAX = 12;
+
+/** Pure: the board's list — the platform's settings, else the connection file's; none designated = none */
+export function boardServices(platform: SloConfig, file: SloConfig | undefined): { services: string[]; windowDays: number | null; source: SloUptimeBoardResponse["source"] } {
+  const pick = platform.uptime?.services.length ? { u: platform.uptime, source: "platform" as const }
+    : file?.uptime?.services.length ? { u: file.uptime, source: "config" as const } : null;
+  const windowDays = platform.uptime?.windowDays ?? file?.uptime?.windowDays ?? null;
+  return pick ? { services: pick.u.services.slice(0, BOARD_MAX), windowDays, source: pick.source } : { services: [], windowDays, source: "none" };
+}
+
+const EMPTY_TOTALS: SloUptimeResponse["totals"] = { total: 0, bad: 0, sli: null, allowed: 0, budgetUsed: null, uptime: null };
+
+/**
+ * The global uptime board: every designated key service over the board's window, one end and one step — rows line up
+ * bucket by bucket. A budget reset is not applied here (the board shows what happened; the detail counts the budget).
+ */
+export async function getSloUptimeBoard(env: Env, bearerToken: string | undefined, clusterId: string, at?: number): Promise<SloUptimeBoardResponse> {
+  const ctx = await contextOf(env, clusterId);
+  const list = boardServices(ctx.platform, ctx.cfg);
+  const windowDays = list.windowDays ?? ctx.clusterDays;
+  const endMs = (at ?? Math.floor(Date.now() / 60_000) * 60) * 1000;
+  const startMs = endMs - windowDays * 86_400_000;
+  const base: SloUptimeBoardResponse = {
+    clusterId, generatedAt: new Date().toISOString(), ...(at !== undefined ? { at: new Date(at * 1000).toISOString() } : {}),
+    metricsState: "ok", windowDays, windowSource: list.windowDays !== null ? "board" : "cluster",
+    from: new Date(startMs).toISOString(), to: new Date(endMs).toISOString(), bucketMinutes: bucketMinutes(windowDays * 1440), source: list.source, services: [],
+  };
+  if (!list.services.length) return base;
+  const key = `${cachePrefix(bearerToken)}:slo-board:${clusterId.toLowerCase()}:${ctx.version}:${at ?? Math.floor(endMs / 60_000)}`;
+  const hit = boardCache.get(key);
+  if (hit) return hit;
+  const rows = await Promise.all(list.services.map(async (k): Promise<SloUptimeBoardRow> => {
+    const i = k.indexOf("/");
+    const ns = k.slice(0, i), app = k.slice(i + 1);
+    if (!NS.test(ns) || !APP.test(app)) return { namespace: ns, application: app, target: 0, targetSource: "default", buckets: [], totals: EMPTY_TOTALS, only: [], metricsState: "failed", message: "invalid service key" };
+    const r = await readUptime(env, bearerToken, clusterId, ns, app, at, ctx, { startMs, endMs, windowDays, windowSource: "cluster", contributors: false });
+    return { namespace: r.namespace, application: r.application, target: r.target, targetSource: r.targetSource, buckets: r.buckets, totals: r.totals, only: r.only, metricsState: r.metricsState, ...(r.message ? { message: r.message } : {}) };
+  }));
+  // every row failed the same way (no workspace, no permission …) = the board's state; a row's own failure stays its own
+  const states = new Set(rows.map((r) => r.metricsState));
+  const out: SloUptimeBoardResponse = { ...base, services: rows, ...(states.size === 1 && !states.has("ok") ? { metricsState: rows[0]!.metricsState, ...(rows[0]!.message ? { message: rows[0]!.message } : {}) } : {}) };
+  if (rows.every((r) => r.metricsState === "ok")) boardCache.set(key, out);
+  return out;
+}

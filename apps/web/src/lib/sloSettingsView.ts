@@ -16,7 +16,16 @@ const SERVICE_KEY = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\/[\w.-]{1,128}$/;
 export type TargetsDraft = { availability: string; thresholdMs: string; latencyTarget: string; excludeUris: string };
 /** per service also (2026-11-19): its own window ("" = the cluster's) and its core endpoints (one URI per line — only these count) */
 export type ServiceDraft = TargetsDraft & { exclude: boolean; windowDays: string; onlyUris: string };
-export type SettingsDraft = TargetsDraft & { windowDays: string; services: Record<string, ServiceDraft> };
+/** the global uptime board (2026-11-19): the key services in the order they were marked, and its window ("" = the SLO window) */
+export type SettingsDraft = TargetsDraft & { windowDays: string; services: Record<string, ServiceDraft>; uptime: string[]; uptimeWindow: string };
+/** at most this many key services on the board (the API schema's limit) */
+export const UPTIME_MAX = 12;
+
+/** Pure: mark / unmark a key service — marked ones go to the end (the board's order); never over UPTIME_MAX */
+export function toggleUptime(list: string[], key: string, on: boolean): string[] {
+  if (!on) return list.filter((k) => k !== key);
+  return list.includes(key) || list.length >= UPTIME_MAX ? list : [...list, key];
+}
 
 export const EMPTY_TARGETS: TargetsDraft = { availability: "", thresholdMs: "", latencyTarget: "", excludeUris: "" };
 export const EMPTY_SERVICE: ServiceDraft = { ...EMPTY_TARGETS, exclude: false, windowDays: "", onlyUris: "" };
@@ -33,7 +42,7 @@ const targetsDraft = (t: SloTargetsSetting | undefined): TargetsDraft => ({
 export function draftOf(s: SloSettings): SettingsDraft {
   const services: Record<string, ServiceDraft> = {};
   for (const [k, v] of Object.entries(s.services ?? {})) services[k] = { ...targetsDraft(v), exclude: v.exclude === true, windowDays: num(v.windowDays), onlyUris: (v.onlyUris ?? []).join("\n") };
-  return { ...targetsDraft(s), windowDays: num(s.windowDays), services };
+  return { ...targetsDraft(s), windowDays: num(s.windowDays), services, uptime: [...(s.uptime?.services ?? [])], uptimeWindow: num(s.uptime?.windowDays) };
 }
 
 type Source = "platform" | "config" | "default";
@@ -60,7 +69,7 @@ export function inheritedWindow(r: Pick<SloSettingsResponse, "file" | "defaults"
   return r.file?.windowDays ? { v: r.file.windowDays, source: "config" } : { v: r.defaults.windowDays, source: "default" };
 }
 
-export type DraftError = { field: string; code: "threshold" | "target" | "uri" | "serviceKey" };
+export type DraftError = { field: string; code: "threshold" | "target" | "uri" | "serviceKey" | "uptimeMax" };
 
 const parseTarget = (v: string): number | null | undefined => {
   if (!v.trim()) return undefined;
@@ -120,6 +129,15 @@ export function settingsOf(d: SettingsDraft, r: Pick<SloSettingsResponse, "file"
     if (Object.keys(e).length) services[k] = e;
   }
   if (Object.keys(services).length) settings.services = services;
+  const board = (d.uptime ?? []).filter((k) => {
+    if (SERVICE_KEY.test(k)) return true;
+    errors.push({ field: `uptime.${k}`, code: "serviceKey" });
+    return false;
+  });
+  if (board.length > UPTIME_MAX) errors.push({ field: "uptime", code: "uptimeMax" });
+  const uw = Number(d.uptimeWindow);
+  const uwOk = !!d.uptimeWindow && (WINDOW_DAYS as readonly number[]).includes(uw);
+  if (board.length || uwOk) settings.uptime = { services: [...new Set(board)].slice(0, UPTIME_MAX), ...(uwOk ? { windowDays: uw as 7 | 14 | 28 | 30 } : {}) };
   return { settings, errors };
 }
 
@@ -141,7 +159,7 @@ export function serviceRows(measured: SloService[], r: Pick<SloSettingsResponse,
     seen.add(key);
     out.push({ key, measured: s });
   }
-  const extra = [...Object.keys(r.settings.services ?? {}), ...Object.keys(r.file?.services ?? {})].filter((k) => !seen.has(k));
+  const extra = [...Object.keys(r.settings.services ?? {}), ...Object.keys(r.file?.services ?? {}), ...(r.settings.uptime?.services ?? [])].filter((k) => !seen.has(k));
   for (const key of [...new Set(extra)].sort()) out.push({ key, measured: null });
   return out;
 }

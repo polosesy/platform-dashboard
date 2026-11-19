@@ -34,6 +34,7 @@ import { EndpointsView } from "./EndpointsView";
 import { ErrorsView } from "./ErrorsView";
 import { RolloutsView } from "./RolloutsView";
 import { TracesView, type TraceSeed } from "./TracesView";
+import { UptimeBoard } from "./UptimeBoard";
 import { SloDetail } from "./SloDetail";
 import {
   SLO_GLYPH, alertLevel, bucketHints, budgetBar, budgetOf, burnText, exploreUrl, filterServices, msText, pctText, serviceLevel, sliLabelParams, sliLevel,
@@ -220,6 +221,9 @@ function ServicesView({ d, clusterId, range, canWrite, onChanged, onGuide, onSet
       <Cell span={3}><Stat label={<><span aria-hidden="true">{SLO_GLYPH.warn}</span> {t("ob.slo.stat.warn")}</>} value={counts.warn} tone={counts.warn ? "medium" : undefined} hint={t("ob.slo.stat.warnHint")} /></Cell>
       <Cell span={3}><Stat label={<><span aria-hidden="true">{SLO_GLYPH.ok}</span> {t("ob.slo.stat.ok")}</>} value={counts.ok} tone="success" hint={t("ob.slo.stat.notJudged", { n: notJudged })} /></Cell>
 
+      <Cell span={12}>
+        <UptimeBoard clusterId={clusterId} range={range} onSettings={onSettings} onOpen={(namespace, application) => setDetail({ namespace, application })} />
+      </Cell>
       {detail ? (
         <Cell span={12}>
           <SloDetail key={`${detail.namespace}/${detail.application}`} clusterId={clusterId} namespace={detail.namespace} application={detail.application} range={range}

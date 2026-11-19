@@ -852,6 +852,8 @@ export type SloSettings = SloTargetsSetting & {
   windowDays?: 7 | 14 | 28 | 30;
   /** per service: its targets, and (2026-11-19) its own window (≤ the cluster's) and core endpoints (only these URIs count) */
   services?: Record<string, SloTargetsSetting & { exclude?: boolean; windowDays?: 7 | 14 | 28 | 30; onlyUris?: string[] }>;
+  /** the global uptime board (2026-11-19): the key services, in this order, and the board's window (else the SLO window) */
+  uptime?: { services: string[]; windowDays?: 7 | 14 | 28 | 30 };
 };
 export type SloBudgetReset = {
   /** a service window's start, made by the API (never stored) — counted like a reset, said as the window */
@@ -1424,8 +1426,14 @@ export type ProfileResponse = {
 
 // ── SLO › 서비스 상세 (Datadog suite SLO: the SLO over its window, the global uptime bar, primary contributors) ──
 
+/**
+ * A bucket's grade (2026-11-19, like a status page's minor · partial · major outage): its burn rate = failed share ÷
+ * (1 − target) against the SRE Workbook's alert thresholds — ok (SLI at or over the target, or no failed request) ·
+ * minor (burn over 1) · partial (≥ 6) · major (≥ 14.4) · noData (no request)
+ */
+export type SloUptimeGrade = "ok" | "minor" | "partial" | "major" | "noData";
 /** One bucket of the uptime bar: requests, failed (5xx) and its state against the target — noData = no request */
-export type SloUptimeBucket = { t: number; total: number; bad: number; sli: number | null; state: "ok" | "error" | "noData" };
+export type SloUptimeBucket = { t: number; total: number; bad: number; sli: number | null; state: "ok" | "error" | "noData"; grade: SloUptimeGrade; burn: number | null };
 export type SloContributor = { method: string; uri: string; bad: number; total: number; share: number };
 export type SloUptimeResponse = {
   clusterId: string;
@@ -1455,4 +1463,24 @@ export type SloUptimeResponse = {
   excluded: string[];
   reset?: { at: string; reason?: string };
   queries: { total: string; bad: string; byUri: string };
+};
+
+/** One designated key service on the uptime board — the same buckets as every other row (one end, one step) */
+export type SloUptimeBoardRow = Pick<SloUptimeResponse, "namespace" | "application" | "target" | "targetSource" | "buckets" | "totals" | "only" | "metricsState" | "message">;
+/** SLO › 글로벌 업타임 — the services the team designated (settings `uptime.services`, in that order) over one window */
+export type SloUptimeBoardResponse = {
+  clusterId: string;
+  generatedAt: string;
+  at?: string;
+  metricsState: WorkloadSloResponse["metricsState"];
+  message?: string;
+  /** the board's window (settings `uptime.windowDays`, else the cluster's SLO window) */
+  windowDays: number;
+  windowSource: "board" | "cluster";
+  from: string;
+  to: string;
+  bucketMinutes: number;
+  /** where the list came from — the platform's settings, the connection file, or none designated */
+  source: "platform" | "config" | "none";
+  services: SloUptimeBoardRow[];
 };

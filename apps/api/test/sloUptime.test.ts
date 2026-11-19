@@ -8,7 +8,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PromRow } from "../src/services/hubbleMetrics.js";
-import { bucketMinutes, contributorsOf, uptimeBuckets, uptimeTotals, uriAlternation, UPTIME_BUCKETS } from "../src/services/sloUptime.js";
+import { BURN_GRADES, boardServices, bucketMinutes, contributorsOf, gradeOf, uptimeBuckets, uptimeTotals, uriAlternation, UPTIME_BUCKETS } from "../src/services/sloUptime.js";
+import { cleanSettings } from "../src/services/sloSettingsStore.js";
 import { aggregateSlo, resetPlans, serviceWindowStarts, targetsFor, type SloConfig } from "../src/services/workloadSlo.js";
 import { SloSchema } from "../src/infra/connectionRegistry.js";
 import * as vNs from "../../web/src/lib/sloUptimeView.ts";
@@ -104,4 +105,81 @@ test("view helpers: budget left never below 0; the SLI axis shows the target and
   // the uptime tip stays inside the bar (a 390 px screen clipped it at the right)
   assert.deepEqual([V.tipLeft(10, 200, 290), V.tipLeft(150, 200, 290), V.tipLeft(285, 200, 290), V.tipLeft(100, 300, 290)], [0, 50, 90, 0]);
   assert.deepEqual(V.uptimeSegments([b(1), { ...b(null), state: "noData" }, { ...b(0.5), state: "error" }]), { ok: 1, error: 1, noData: 1 });
+});
+
+// ── 2026-11-19 (2nd): status-page bars — grades by burn rate, merged bars on narrow screens, the key-services board ──
+
+test("grades: burn = failed share ÷ (1 − target) against the SRE Workbook's 14.4 and 6 — the API's and the web's are one rule", () => {
+  assert.deepEqual(BURN_GRADES, { partial: 6, major: 14.4 });
+  assert.deepEqual(V.BURN_GRADES, BURN_GRADES, "web thresholds = API thresholds");
+  // target 99.9 %: 1 of 1000 = the target exactly (ok) · 2 = ×2 (minor) · 6 = ×6 (partial) · 15 = ×15 (major)
+  const g = (bad: number, total = 1000) => gradeOf(total, bad, 0.999);
+  assert.deepEqual([g(0).grade, g(0.4).grade, g(1).grade, g(2).grade, g(6).grade, g(14).grade, g(15).grade, g(0, 0.3).grade],
+    ["ok", "ok", "ok", "minor", "partial", "partial", "major", "noData"]);
+  assert.equal(g(15).burn, 15);
+  for (const total of [0, 0.4, 1, 3, 50, 1000, 12345]) for (const bad of [0, 0.3, 1, 2, 7, 40, 900]) for (const target of [0.9, 0.99, 0.999, 0.9999]) {
+    assert.deepEqual(V.gradeOf(total, bad, target), gradeOf(total, bad, target), `${total}/${bad}/${target}`);
+  }
+  // a bucket carries its grade; state stays the two-way answer (error = any grade under ok)
+  const b = uptimeBuckets(new Map([[1, 1000], [2, 1000]]), new Map([[1, 2], [2, 20]]), [1, 2], 0.999);
+  assert.deepEqual(b.map((x) => [x.state, x.grade, x.burn]), [["error", "minor", 2], ["error", "major", 20]]);
+});
+
+test("bars: a narrow row merges neighbouring buckets (counts summed, the worst bucket's grade, newest bar whole) — never under MIN_BAR", () => {
+  assert.equal(V.mergeFactor(168, 1300), 1, "a wide row: one bucket per bar");
+  assert.equal(V.mergeFactor(168, 290), 3, "a phone: 290 px fits 58 bars of 3 px + 2 px gap");
+  assert.ok(168 / 3 * (V.MIN_BAR + V.BAR_GAP) - V.BAR_GAP <= 290);
+  const mk = (t: number, total: number, bad: number) => {
+    const x = gradeOf(total, bad, 0.999);
+    return { t, total, bad, sli: x.sli, burn: x.burn, grade: x.grade, state: x.grade === "noData" ? "noData" as const : x.grade === "ok" ? "ok" as const : "error" as const };
+  };
+  const buckets = [mk(1, 0, 0), mk(2, 1000, 0), mk(3, 1000, 0), mk(4, 1000, 20), mk(5, 1000, 0), mk(6, 1000, 0), mk(7, 1000, 1)];
+  const bars = V.mergeBuckets(buckets, 3, 60, 0.999);
+  assert.deepEqual(bars.map((x) => x.buckets), [1, 3, 3], "the oldest bar holds what is left");
+  assert.deepEqual(bars.map((x) => x.t), [1, 4, 7]);
+  assert.equal(bars.reduce((a, x) => a + x.bad, 0), 21, "failed requests kept");
+  assert.equal(bars.reduce((a, x) => a + x.total, 0), 6000, "requests kept");
+  // the bar's grade = its worst bucket (the hour with 20 failed was major); the burn is the merged hours' (20 / 3000 = ×6.67)
+  assert.deepEqual(bars.map((x) => x.grade), ["noData", "major", "ok"]);
+  assert.equal(bars[1]!.burn, 6.67);
+  assert.deepEqual(V.mergeBuckets(buckets, 1, 60, 0.999).map((x) => x.grade), buckets.map((x) => x.grade), "k = 1 keeps the API's grades");
+  assert.equal(V.uptimeShare(bars), 0.5);
+  assert.equal(V.latestGrade(bars), "ok");
+  assert.deepEqual(V.gradeCounts(bars), { noData: 1, ok: 1, minor: 0, partial: 0, major: 1 });
+});
+
+test("board: the overall row = the worst service per bar (no data only when none had requests); its tip lists the services below ok", () => {
+  const bar = (t: number, grade: "ok" | "minor" | "partial" | "major" | "noData", total = 100, bad = 0) => ({ t, from: t - 1, total, bad, sli: null, grade, burn: null, buckets: 1 });
+  const o = V.overallBars([
+    { key: "shop/a", bars: [bar(1, "ok"), bar(2, "minor", 100, 1), bar(3, "noData", 0)] },
+    { key: "shop/b", bars: [bar(1, "noData", 0), bar(2, "major", 100, 9), bar(3, "noData", 0)] },
+    { key: "shop/c", bars: [bar(1, "ok")] },
+  ]);
+  assert.deepEqual(o.map((x) => x.grade), ["ok", "major", "noData"]);
+  assert.deepEqual(o[1]!.worst, [{ key: "shop/b", grade: "major" }, { key: "shop/a", grade: "minor" }]);
+  assert.deepEqual([o[1]!.total, o[1]!.bad], [200, 10]);
+  assert.deepEqual(V.overallBars([]), []);
+});
+
+test("board list: the platform's settings › the connection file's; at most 12, each once; the settings form keeps the marked order", () => {
+  assert.deepEqual(boardServices({ uptime: { services: ["shop/a", "shop/b"], windowDays: 7 } }, { uptime: { services: ["x/y"] } }), { services: ["shop/a", "shop/b"], windowDays: 7, source: "platform" });
+  assert.deepEqual(boardServices({}, { uptime: { services: ["x/y"], windowDays: 14 } }), { services: ["x/y"], windowDays: 14, source: "config" });
+  assert.deepEqual(boardServices({ uptime: { services: [], windowDays: 28 } }, undefined), { services: [], windowDays: 28, source: "none" });
+  assert.ok(SloSchema.safeParse({ uptime: { services: ["shop/a"], windowDays: 30 } }).success);
+  assert.ok(!SloSchema.safeParse({ uptime: { services: ["shop/a", "shop/a"] } }).success, "a service once");
+  assert.ok(!SloSchema.safeParse({ uptime: { services: Array.from({ length: 13 }, (_, i) => `shop/s${i}`) } }).success, "at most 12");
+  assert.ok(!SloSchema.safeParse({ uptime: { services: ["Not A Key"] } }).success);
+  // the form: marked = appended, unmarked = removed, never over 12; an empty board saves nothing
+  let list: string[] = [];
+  for (const k of ["shop/c", "shop/a", "shop/b"]) list = S.toggleUptime(list, k, true);
+  list = S.toggleUptime(list, "shop/a", false);
+  assert.deepEqual(list, ["shop/c", "shop/b"]);
+  assert.equal(S.toggleUptime(Array.from({ length: 12 }, (_, i) => `shop/s${i}`), "shop/x", true).length, 12);
+  const r = { file: undefined, defaults: { availability: 0.999, latency: { thresholdMs: 1000, target: 0.99 } } } as unknown as Parameters<typeof S.settingsOf>[1];
+  const d = S.draftOf({ uptime: { services: ["shop/c", "shop/b"], windowDays: 7 } });
+  assert.deepEqual(S.settingsOf(d, r).settings.uptime, { services: ["shop/c", "shop/b"], windowDays: 7 });
+  assert.equal(S.settingsOf({ ...d, uptime: [], uptimeWindow: "" }, r).settings.uptime, undefined);
+  assert.deepEqual(cleanSettings({ uptime: { services: [] } }), {}, "an emptied board is not stored");
+  // a key service with no other setting still gets a row in the settings table
+  assert.ok(S.serviceRows([], { file: null, settings: { uptime: { services: ["shop/only-board"] } } } as never).some((x) => x.key === "shop/only-board"));
 });

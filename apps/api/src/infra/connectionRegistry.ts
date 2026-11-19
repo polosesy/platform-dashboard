@@ -44,6 +44,12 @@ export const SloSchema = z.object({
       onlyUris: z.array(z.string().min(1).max(300)).max(50).optional(),
     }).strict(),
   ).optional(),
+  // 2026-11-19: the global uptime board — the key services (in this order, at most 12) and its window
+  uptime: z.object({
+    services: z.array(z.string().regex(SLO_SERVICE_KEY, "\"<namespace>/<application>\"")).max(12)
+      .refine((l) => new Set(l).size === l.length, "a service once"),
+    windowDays: z.union([z.literal(7), z.literal(14), z.literal(28), z.literal(30)]).optional(),
+  }).strict().optional(),
 }).strict();
 
 const ConnectionSchema = z.object({

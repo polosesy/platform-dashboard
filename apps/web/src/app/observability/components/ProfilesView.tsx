@@ -236,6 +236,13 @@ function Flame({ tree, prev, unit, focus, onFocus, q, onFn }: { tree: ProfileTre
   const v = (n: number) => { const x = valueText(n, unit); return `${x.n} ${x.unit}`.trim(); };
   return (
     <div className={styles.pfFlameWrap}>
+      <div className={styles.pfLegendBar}>
+        <ul className={styles.pfLegend} aria-label={t("ob.pf.legend")}>
+          {diff ? (["3", "1", "0", "-1", "-3"] as const).map((b) => <li key={b}><span className={styles.pfKey} data-diff={b} aria-hidden="true" />{t(`ob.pf.diff.${b}`)}</li>)
+            : (["code", "runtime", "native"] as const).map((k) => <li key={k}><span className={styles.pfKey} data-kind={k} aria-hidden="true" />{t(`ob.pf.frame.${k}`)}</li>)}
+        </ul>
+        <p className={styles.pfLegendHint}>{t("ob.pf.flameHint")}</p>
+      </div>
       {ancestors.length ? (
         <nav className={styles.pfCrumbs} aria-label={t("ob.pf.crumbs")}>
           {ancestors.map((a) => <LinkButton key={a} onClick={() => onFocus(a)}>{shortName(tree.names[tree.label[a]!] ?? "")}</LinkButton>)}
@@ -267,11 +274,6 @@ function Flame({ tree, prev, unit, focus, onFocus, q, onFn }: { tree: ProfileTre
           </div>
         ) : null}
       </div>
-      <ul className={styles.pfLegend}>
-        {diff ? (["3", "1", "0", "-1", "-3"] as const).map((b) => <li key={b}><span className={styles.pfKey} data-diff={b} aria-hidden="true" />{t(`ob.pf.diff.${b}`)}</li>)
-          : (["code", "runtime", "native"] as const).map((k) => <li key={k}><span className={styles.pfKey} data-kind={k} aria-hidden="true" />{t(`ob.pf.frame.${k}`)}</li>)}
-        <li>{t("ob.pf.flameHint")}</li>
-      </ul>
     </div>
   );
 }

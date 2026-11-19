@@ -31,7 +31,7 @@ import { redactLogLine } from "../services/logRedaction.js";
 import { podLogNamespaceAllowed } from "../services/aksAccess.js";
 import { getTrace, searchTraces } from "../services/grafanaTraces.js";
 import { getProfile, getProfileCatalog } from "../services/grafanaProfiles.js";
-import { getSloUptime } from "../services/sloUptime.js";
+import { getSloUptime, getSloUptimeBoard } from "../services/sloUptime.js";
 import { callerOf, roleAtLeast } from "../infra/platformAccess.js";
 import { listAllNamespacePods, readPodLogs, getWorkloadDetail } from "../services/kubernetes.js";
 import type {
@@ -280,6 +280,16 @@ export function registerObservabilityRoutes(router: Router, env: Env) {
       res.json(await getSloUptime(env, req.auth?.bearerToken, clusterId, namespace!, queryString(req, "application") ?? "", queryPastTime(req, "at")));
     } catch (e: unknown) {
       sendError(res, e, "observability_slo_uptime_failed", "observability");
+    }
+  });
+
+  // SLO › 글로벌 업타임: the key services the team designated (settings `uptime`), one window, bars that line up
+  router.get("/api/observability/slo/uptime-board", async (req: Request, res: Response) => {
+    try {
+      const clusterId = queryArmResourceId(req, env, "clusterId");
+      res.json(await getSloUptimeBoard(env, req.auth?.bearerToken, clusterId, queryPastTime(req, "at")));
+    } catch (e: unknown) {
+      sendError(res, e, "observability_slo_uptime_board_failed", "observability");
     }
   });
 

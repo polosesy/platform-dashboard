@@ -31,6 +31,19 @@
      (warning fill 3.0:1 is never used for text) */
   --warning-strong-rgb: 138, 83, 0;
   --danger-strong-rgb: 176, 48, 31;
+  /* SLO uptime grades (status-page bars: ok · minor · partial · major) — one ordinal warm ramp after green, checked as a
+     palette (CVD ΔE ≥ 9 between neighbours, normal vision ≥ 15); minor's 2:1 on paper is relieved by labels + tips */
+  /* Profile flame graph frames (2026-11-19 — the old pale tints were ΔE 4.2 apart, under the 15 a reader can tell):
+     code blue · runtime grey · native orange, checked as a palette (normal vision ΔE 19.2, CVD 17.8); light fills that
+     carry text — --flame-ink on them is 7:1 or more, in both themes (the frames keep their light paper) */
+  --flame-code-rgb: 134, 178, 240;
+  --flame-runtime-rgb: 230, 232, 235;
+  --flame-native-rgb: 243, 169, 92;
+  --flame-ink-rgb: 31, 35, 40;
+  --up-ok-rgb: 16, 124, 16;
+  --up-minor-rgb: 212, 174, 26;
+  --up-partial-rgb: 217, 101, 11;
+  --up-major-rgb: 164, 22, 26;
   --success-strong-rgb: 11, 106, 48;
   --integration-rgb: 14, 116, 144;
   --workload-rgb: 37, 99, 235;

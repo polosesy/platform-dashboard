@@ -2,7 +2,7 @@
 status: draft
 owner: platform-observability
 last-verified: 2026-11-19
-covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx, apps/api/src/services/sloUptime.ts, apps/web/src/lib/sloUptimeView.ts, apps/web/src/app/observability/components/SloDetail.tsx]
+covers: [apps/api/src/services/serviceGraph.ts, apps/api/src/services/appErrors.ts, apps/api/src/services/rollouts.ts, apps/api/src/services/appDependencies.ts, apps/api/src/services/k8sRecommendedAlerts.ts, apps/api/src/services/msRecommendedAlerts.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/ServiceMapView.tsx, apps/api/src/services/workloadRed.ts, apps/api/src/services/workloadSlo.ts, apps/api/src/services/promScope.ts, apps/web/src/lib/traceView.ts, apps/web/src/lib/apmSignals.ts, apps/web/src/lib/apmDiscovery.ts, apps/web/src/lib/apmServiceMap.ts, apps/web/src/app/observability/components/TracesView.tsx, apps/api/src/services/sloUptime.ts, apps/web/src/lib/sloUptimeView.ts, apps/web/src/app/observability/components/SloDetail.tsx, apps/web/src/app/observability/components/UptimeBars.tsx, apps/web/src/app/observability/components/UptimeBoard.tsx]
 ---
 # Kubernetes APM — 글로벌 APM(Datadog · New Relic · Dynatrace · AppDynamics) 대비 검토와 구현 순서
 
@@ -384,6 +384,26 @@ stg 앱은 이 변수들을 사내 라이브러리의 다른 이름으로 설정
 - 30일 = 4시간 칸 180개: 실패 164 vs 기간 전체 168. **기간 전체를 엔드포인트별로 묻는 질의는 Azure 질의 비용 상한에 거부**(시계열 4,857개, 비용 18,930 > 15,000 → 429 — OBS-004와 같은 상한) → 엔드포인트별 **칸 질의**를 더하는 방식으로 바꿈(164 = 164 · 241,017 = 241,017), 약 2.5초.
 
 **확인**: 테스트 `sloUptime.test.ts`(칸 판정·합계·기여자·기간/핵심 엔드포인트 상속·카드에서 빠지는 URI·설정 왕복·축 눈금·툴팁 위치). 헤드리스 Chrome(합성 응답, 1440·390px): 상세 열림 · 칸 168(정상 146 · 오류 3 · 데이터 없음 19) · 툴팁 · 기여자 2행 · 설정 칸 2개(기간 7 · `/orders`) · 가로 넘침 0 · 콘솔 오류 0. 처음 화면에서 축 눈금이 '100% · 100% · 99%'로 겹쳐 → 값을 정확히 말하는 자릿수(`tickDecimals`), 좁은 화면에서 툴팁이 오른쪽으로 잘려 → 막대 안에 고정(`tipLeft`).
+
+### 4i-2. 글로벌 업타임 — 상태 페이지 막대 · 등급 · 주요 서비스 보드 (2026-11-19, 2차)
+
+참고: status.claude.com의 구성 요소 줄(막대 하나 = 하루, 사이 간격, 초록 · 노랑 · 주황 · 빨강, 툴팁, '90일 전 —— n% uptime —— 오늘').
+
+| 무엇 | 규칙 | 근거 |
+|---|---|---|
+| 막대 | 칸 하나 = 막대 하나, 사이 2px. 좁은 화면은 이웃 칸을 합침(`mergeFactor` — 막대 ≥ 3px) | 1440px 168개 · 390px 56개(3시간) — DOM 측정 최소 폭 4.5 / 3.8px · 간격 2px |
+| 등급 | 소진 속도 = 실패 비율 ÷ (1 − 목표): 실패가 있고 SLI < 목표면 경미(×1 초과) · 부분(×6 이상) · 심각(×14.4 이상) | SRE Workbook 경보 임계값 = SLO 카드 소진 경보와 같은 수(`BURN_GRADES`, API·웹 같은 값 — 테스트) |
+| 합친 막대 | 개수는 더함, 등급은 **안의 가장 나쁜 칸**, 소진 속도는 합친 값 | 처음엔 합을 다시 판정 → stg에서 4시간 '경미' 3칸이 12시간 막대에서 '정상'으로 사라짐(상태 페이지는 하루를 가장 나쁜 사건으로 칠함) |
+| 주요 서비스 보드 | SLO › 설정 서비스 행 '업타임 보드'(켠 순서, 최대 12) + 보드 기간 → SLO 화면 맨 위 한 줄씩 + '전체' 줄(막대마다 가장 나쁜 서비스, 툴팁에 그 서비스들) | 모든 줄이 같은 끝 · 같은 간격(`getSloUptimeBoard`) — 위아래 막대가 같은 시간. 예산 초기화는 적용 안 함(일어난 일 그대로) |
+| 색 | 초록 · 노랑 · 주황 · 진한 빨강(`--up-*`) — 순서 있는 따뜻한 단계 | 팔레트 검증(밝은 바탕): 색각 이상 ΔE ≥ 9 · 정상 시력 ≥ 15 통과. 노랑의 바탕 대비 2:1은 라벨·개수·툴팁으로 보완 |
+
+**API**: `GET /api/observability/slo/uptime-board?clusterId[&at]` — 설정 `uptime.services`(플랫폼 › 연결 파일 `slo.uptime`), 서비스마다 요청·실패 칸 질의 2개(기여자 질의 없음), 5분 캐시. 칸 응답에 `grade`·`burn`.
+
+**stg 실측(내 토큰, 개수만)**: 요청이 많은 서비스 4개 × 30일 × 4시간 칸 180 = 720칸 — 모듈 등급과 원시 개수로 손으로 계산한 등급 **불일치 0**, 3칸씩 합친 막대의 요청·실패 합 = 칸 합(4개 모두). 등급 분포 예: 경미 11 · 부분 1 · 심각 5(한 서비스), 전체 줄 장애 막대 21 = 서비스별 장애 칸의 시간 합집합.
+
+**확인**: `sloUptime.test.ts`(경계 1/1000 = 목표 → 정상, 2 → 경미, 6 → 부분 — 부동소수점 5.999…에서 '경미'로 떨어지던 것을 테스트가 잡음, 15 → 심각 · API = 웹 등급 196조합 · 합친 막대 · 전체 줄 · 보드 목록 우선순위 · 스키마 12개·중복 금지 · 설정 왕복). 헤드리스 Chrome(합성, 1440·390px): 보드 4줄 · 등급별 막대 · 전체 줄 툴팁에 서비스 · 설정 '업타임 보드' 칸 '1번째 · 2번째' · 가로 넘침 0 · 콘솔 오류 0.
+
+**프로필 색 범례**(같은 날): 플레임 그래프 아래에 있던 범례(코드 · 언어 런타임 · 네이티브)를 **그래프 위**로, 색을 옅은 파랑 · 회색 · 노랑(이웃 ΔE 4.2 — 정상 시력으로도 구분 어려움)에서 파랑 · 밝은 회색 · 주황(`--flame-*`, ΔE 19.2 · 색각 이상 17.8, 글자 대비 7:1 이상)으로.
 
 **서비스 (APM) 보기 → 메뉴 항목**(같은 날, kubernetes-ia 8.2): 서비스 맵 · RED · 엔드포인트 · 트레이스 · 의존성 · 오류 · 배포 · SLO가 '애플리케이션 (APM)' 분류의 메뉴 항목(`/observability/services/<보기>`)이 됨 — 화면 위 8개 버튼 삭제, SLO 안의 [서비스 SLO | 설정 | 가이드]만 남김.
 

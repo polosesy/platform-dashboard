@@ -114,7 +114,7 @@ export function validateReset(body: SloResetBody, now: Date): { ok: true; at: Da
 export function settingsDiff(before: SloSettings, after: SloSettings): string {
   const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   const out: string[] = [];
-  for (const k of ["windowDays", "availability", "latency", "excludeUris"] as const) if (!same(before[k], after[k])) out.push(k);
+  for (const k of ["windowDays", "availability", "latency", "excludeUris", "uptime"] as const) if (!same(before[k], after[k])) out.push(k);
   const keys = new Set([...Object.keys(before.services ?? {}), ...Object.keys(after.services ?? {})]);
   const svc = [...keys].filter((k) => !same(before.services?.[k], after.services?.[k])).sort();
   if (svc.length) out.push(`services: ${svc.slice(0, 5).join(", ")}${svc.length > 5 ? ` +${svc.length - 5}` : ""}`);
@@ -132,6 +132,7 @@ export function cleanSettings(s: SloSettings): SloSettings {
   const out: SloSettings = { ...s, services };
   if (!s.excludeUris?.length) delete out.excludeUris;
   if (!Object.keys(services).length) delete out.services;
+  if (out.uptime && !out.uptime.services.length && !out.uptime.windowDays) delete out.uptime;
   for (const k of Object.keys(out) as (keyof SloSettings)[]) if (out[k] === undefined) delete out[k];
   return out;
 }
