@@ -178,3 +178,9 @@ test("issue list: every source gives its attack-path type (cluster combo kinds, 
   const by = Object.fromEntries(q.items.map((i) => [i.title, i.pathType]));
   assert.deepEqual(by, { vnet: "exposure", exfil: "exfiltration", takeover: "privilege", standing: "privilege", local: "privilege", exposedHigh: "exposure", highIdentity: "privilege" });
 });
+
+test("accessibility: a row's tooltip is on its name, never on the <li> (a title on the item became its accessible name — Playwright MCP snapshot)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../../web/src/app/security/exposure/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /<li key=\{[^}]+\}[^>]*\stitle=/);
+});

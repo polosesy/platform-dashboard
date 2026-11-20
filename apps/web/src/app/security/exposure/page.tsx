@@ -70,8 +70,9 @@ export default function ExposurePage() {
           {!d ? (q.loading ? <LoadingState /> : null) : (
             <ul className={s.rows}>
               {d.assets.map((a) => (
-                <li key={a.id} title={a.plans.length ? t("exp.planHint", { plans: a.plans.join(", ") }) : t("exp.noPlanHint")}>
-                  <span>{t(`exp.asset.${a.id}`)}</span>
+                // the tooltip on the name, not the <li> — a title on the item became its accessible name (Playwright MCP snapshot)
+                <li key={a.id}>
+                  <span title={a.plans.length ? t("exp.planHint", { plans: a.plans.join(", ") }) : t("exp.noPlanHint")}>{t(`exp.asset.${a.id}`)}</span>
                   <span className={s.count}>{num(a.total)}{a.covered !== null && a.coverable ? <small className={s.cov}>{t("exp.cov", { c: a.covered, n: a.coverable })}</small> : null}</span>
                 </li>
               ))}
@@ -131,8 +132,8 @@ export default function ExposurePage() {
           {!d ? (q.loading ? <LoadingState /> : null) : (
             <ul className={s.rows}>
               {d.controls.map((c) => (
-                <li key={c.id} title={t(`exp.ctlHint.${c.id}`)}>
-                  <span>{t(`exp.ctl.${c.id}`)}</span>
+                <li key={c.id}>
+                  <span title={t(`exp.ctlHint.${c.id}`)}>{t(`exp.ctl.${c.id}`)}</span>
                   <span className={s.count}>{num(c.count)}{c.of !== undefined && c.of !== null ? <small className={s.cov}>/ {nf.format(c.of)}</small> : null}</span>
                 </li>
               ))}
