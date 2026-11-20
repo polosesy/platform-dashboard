@@ -103,12 +103,14 @@
   flex: 1;
   min-width: 0;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.72), rgba(var(--accent-rgb), 0.32));
+  /* one flat fill (the old top-to-bottom fade made equal days look unequal); hover = the full colour */
+  background: rgba(var(--accent-rgb), 0.62);
   position: relative;
+  transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 .trendBar:hover {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.92), rgba(var(--accent-rgb), 0.50));
+  background: var(--accent);
 }
 
 .trendBarLabel {
@@ -183,19 +185,19 @@
 .budgetFillSafe {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, rgba(var(--success-rgb), 0.60), rgba(var(--success-rgb), 0.40));
+  background: var(--success);
 }
 
 .budgetFillWarn {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, rgba(var(--warning-rgb), 0.60), rgba(var(--warning-rgb), 0.40));
+  background: var(--warning);
 }
 
 .budgetFillDanger {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, rgba(var(--danger-rgb), 0.60), rgba(var(--danger-rgb), 0.40));
+  background: var(--danger);
 }
 
 .budgetMeta {

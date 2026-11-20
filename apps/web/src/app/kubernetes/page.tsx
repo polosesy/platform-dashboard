@@ -174,7 +174,7 @@ export default function KubernetesPage() {
                     <SearchInput label={t("k8s.search")} value={f.query} onChange={(v) => set({ query: v })} placeholder={t("k8s.searchPh")} />
                     {filtered ? <LinkButton onClick={() => { setF(NO_OBJECT_FILTER); setAll(false); }}>{t("k8s.clear")}</LinkButton> : null}
                   </div>
-                  <div className={styles.tableWrap}>
+                  <div className={styles.tableWrap} tabIndex={0}>
                     <table className={styles.table}>
                       <thead>
                         <tr>

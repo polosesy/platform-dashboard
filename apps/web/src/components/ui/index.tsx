@@ -155,7 +155,7 @@ export function CodeBlock({ code, label, copyLabel, copiedLabel, maxHeight }: { 
         <CopyButton text={code} label={copyLabel} copiedLabel={copiedLabel} />
       </div>
       {/* A long snippet scrolls inside its box — the copy button always takes all of it */}
-      <pre className={s.codePre} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined} tabIndex={maxHeight ? 0 : undefined}>{code}</pre>
+      <pre className={s.codePre} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined} tabIndex={0}>{code}</pre>
     </div>
   );
 }
@@ -486,9 +486,13 @@ export function SampleDataNotice({ note }: { note?: string | null }) {
 export function LoadingState({ label }: { label?: string }) {
   const { t } = useI18n();
   return (
-    <div className={s.state} role="status" aria-live="polite">
-      <span className={s.spinner} aria-hidden="true" />
-      <span>{label ?? t("common.loading")}</span>
+    // Skeleton lines in place of a spinner: the space the content will take, calm (a slow pulse, still on reduced
+    // motion), and no dashed box — dashed means "empty", not "on its way"
+    <div className={s.loading} role="status" aria-live="polite">
+      <span className={s.skeleton} aria-hidden="true" />
+      <span className={s.skeleton} aria-hidden="true" />
+      <span className={s.skeleton} aria-hidden="true" />
+      <span className={s.loadingLabel}>{label ?? t("common.loading")}</span>
     </div>
   );
 }

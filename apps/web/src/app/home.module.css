@@ -88,11 +88,14 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--panel);
-  transition: border-color 0.15s, transform 0.15s;
+  box-shadow: var(--shadow-hairline);
+  transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .card:hover {
-  border-color: rgba(var(--accent-rgb), 0.4);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-raise);
   transform: translateY(-1px);
 }
 
@@ -230,10 +233,20 @@
   background: var(--panel-solid);
   color: var(--ink);
   text-decoration: none;
+  box-shadow: var(--shadow-hairline);
+  transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .feature:hover {
-  border-color: rgba(var(--accent-rgb), 0.4);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-raise);
+  transform: translateY(-1px);
+}
+
+/* the arrow leads: it steps right when the card is hovered */
+.feature:hover .featureGo {
+  transform: translateX(2px);
 }
 
 .feature:focus-visible {
@@ -251,6 +264,8 @@
   font-size: var(--text-small);
   font-weight: 600;
   color: var(--accent-strong);
+  justify-self: start;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .allTitle {

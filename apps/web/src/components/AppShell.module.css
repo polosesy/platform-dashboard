@@ -31,14 +31,16 @@
    canvases, clicks pass through) — a cropped card or a screenshot still says "sample" */
 .sampleRibbon {
   position: sticky;
-  top: var(--sticky-top);
+  /* right under the top bar (the chrome line + its border) — at --sticky-top it hung 15px below, a see-through gap */
+  top: calc(var(--chrome-h) + 1px);
   z-index: 30;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
   padding: 8px 16px;
-  background: var(--warning-soft);
+  /* the soft tint over the page ground — opaque, so content scrolling under the sticky ribbon never shows through */
+  background: linear-gradient(var(--warning-soft), var(--warning-soft)), var(--bg);
   border-bottom: 1px solid var(--warning);
   color: var(--ink);
   font-size: var(--text-small);

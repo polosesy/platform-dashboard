@@ -1,4 +1,4 @@
-/* The platform's mark (BrandMark.tsx) — the tile in the two brand tokens, the glyph white (the one literal colour kept:
+/* The platform's mark (BrandMark.tsx) — the tile in the brand blue (one flat colour), the glyph white (the one literal colour kept:
    it is drawn on the brand colour in both themes) */
 .mark {
   display: inline-flex;
@@ -6,7 +6,7 @@
   width: 32px;
   height: 32px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  background: var(--accent);
 }
 
 .sm {

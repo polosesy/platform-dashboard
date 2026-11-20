@@ -53,7 +53,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px 14px;
+  /* the top bar's height + its border, so the two bottom lines meet across the frame */
+  height: calc(var(--chrome-h) + 1px);
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   flex: none;
 }
@@ -200,13 +202,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 36px;
+  min-height: 34px;
   padding: 0 12px;
   border-radius: var(--radius-sm);
   font-size: var(--text-small);
   font-weight: 500;
   color: var(--muted);
-  transition: background 120ms ease, color 120ms ease;
+  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
   cursor: pointer;
   text-decoration: none;
 }
@@ -217,14 +219,16 @@
 }
 
 .navItemActive {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  /* where you are: a quiet tint + a 2px rail on the leading edge (the strong blue fill shouted over the content) */
+  background: rgba(var(--accent-rgb), 0.07);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--ink);
   font-weight: 600;
 }
 
 .navItemActive:hover {
-  background: rgba(var(--accent-rgb), 0.14);
-  color: var(--accent-strong);
+  background: rgba(var(--accent-rgb), 0.11);
+  color: var(--ink);
 }
 
 .navIcon {
@@ -232,7 +236,12 @@
   display: inline-flex;
   justify-content: center;
   flex: none;
-  opacity: 0.7;
+  color: var(--subtle);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+
+.navItem:hover .navIcon {
+  color: var(--muted);
 }
 
 .navItem:focus-visible,
@@ -242,7 +251,7 @@
 }
 
 .navItemActive .navIcon {
-  opacity: 1;
+  color: var(--accent);
 }
 
 /* ── Settings Row ── */

@@ -1,8 +1,8 @@
 ---
 status: current
 owner: platform-web
-last-verified: 2026-11-18
-covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, scripts/gen-icons.mjs, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
+last-verified: 2026-11-20
+covers: [apps/web/src/app/globals.css, apps/web/src/components/AppShell.tsx, apps/web/src/components/Sidebar.module.css, apps/web/src/components/BrandMark.tsx, scripts/gen-icons.mjs, apps/web/src/components/ui/index.tsx, apps/web/src/components/ui/ui.module.css, apps/web/src/app/observability/components/SloTab.tsx, apps/web/src/app/layout.tsx, apps/web/src/lib/palette.ts, apps/api/test/designTokens.test.ts]
 ---
 # 디자인 시스템 — 원칙 v1과 토큰
 
@@ -73,7 +73,7 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 ## 5. 모서리 · 그림자 · 움직임
 
 - **모서리** — 제어기 `--radius-sm` 6, 면 `--radius-md` 10, 알약 `--radius-pill`. 이 밖에는 0과 원(50%)만 씁니다.
-- **그림자** — 면은 평평하게 두고 1px 테두리로 구분합니다. 떠 있는 것만 `--shadow-raise`(호버·끌기)와 `--shadow-pop`(메뉴·서랍·대화 상자)을 씁니다. 선택은 빛번짐 대신 고리 `--ring-accent`로 표시합니다.
+- **그림자** — 면은 1px 테두리로 구분하고, 쉬는 면(패널·숫자 카드·홈 카드)은 머리카락 그림자 `--shadow-hairline`(1px·옅음)만 둡니다(2026-11-20, 9절). 떠 있는 것만 `--shadow-raise`(호버·끌기)와 `--shadow-pop`(메뉴·서랍·대화 상자)을 씁니다. 선택은 빛번짐 대신 고리 `--ring-accent`로 표시합니다.
 - **움직임** — `--motion-fast` 150ms(눌림·호버), `--motion-base` 200ms(펼침·탭), `--motion-slow` 250ms(서랍)이고 모두 `--ease-out`입니다. 상태가 바뀔 때만 움직이고, `prefers-reduced-motion`이면 0입니다.
 - **포커스** — 키보드 포커스는 공통으로 2px 파란 테두리(`:focus-visible`)입니다.
 
@@ -83,7 +83,7 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 
 | 무엇 | 규칙 |
 |------|------|
-| 그림 | 둥근 정사각형(파랑 `--accent` → 청록 `--accent-2`, 135°) 위 흰 선 하나가 점 4개를 지남 — **연결된 리소스**(구성도)이자 **시간에 따른 신호**(모니터링). 플랫폼의 두 축(구성·상태)을 한 그림에 |
+| 그림 | 둥근 정사각형(파랑 `--accent` 한 색 — 2026-11-20 전에는 파랑 → 청록 그라데이션) 위 흰 선 하나가 점 4개를 지남 — **연결된 리소스**(구성도)이자 **시간에 따른 신호**(모니터링). 플랫폼의 두 축(구성·상태)을 한 그림에 |
 | 피한 것 | Azure·Kubernetes·Grafana 같은 다른 제품의 로고 모양(상표), 글자 'AUD'(16px에서 안 읽힘), 3색 이상 |
 | 한 원본 | `scripts/gen-icons.mjs`가 `app/icon.svg`·`favicon.ico`(16/32/48)·`apple-icon.png`(180, iOS가 모서리를 깎으므로 네모)를 만들고, 화면은 `components/BrandMark.tsx`(같은 점 `MARK_POINTS`, 색은 토큰) — `brandIcons.test.ts`가 일치·Next 기본 파비콘 아님을 검사 |
 | 바꿀 때 | 생성기의 `MARK`와 `BrandMark`의 점을 함께 바꾸고 `node scripts/gen-icons.mjs` |
@@ -159,7 +159,7 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 
 | 부품 | 규칙 |
 |------|------|
-| `Panel` | 머리 56(제목 16/600 + 메타 13 · 오른쪽 컨트롤 ≤ 32) · 본문 · 선택 꼬리 `footer` 44. 불투명·그림자 없음. `level` = 위쪽 2px 상태 선(조용하게 — 상태는 머리의 칩이 글로 말함). `scroll` = 화면이 높이를 제한하면(`className`의 max-height) 머리·꼬리는 그대로, 본문만 스크롤(키보드 포커스 가능) — 목록 \| 상세 두 칸(사례·런북) |
+| `Panel` | 머리 56(제목 16/600 + 메타 13 · 오른쪽 컨트롤 ≤ 32) · 본문 · 선택 꼬리 `footer` 44. 불투명, 그림자는 `--shadow-hairline`만(뜨지 않음). `level` = 위쪽 2px 상태 선(조용하게 — 상태는 머리의 칩이 글로 말함). `scroll` = 화면이 높이를 제한하면(`className`의 max-height) 머리·꼬리는 그대로, 본문만 스크롤(키보드 포커스 가능) — 목록 \| 상세 두 칸(사례·런북) |
 | `Grid` · `Cell span` | 12칸, 간격 16. 3·4·6·8·9·12칸만. 1100px 아래 3·4 → 6, 6·8·9 → 12 · 640px 아래 모두 12. 같은 줄 칸은 높이가 같음 |
 | `Chip` | 24px 알약, 테두리 1px 항상, 색 + 기호(● ▲ ■ ○ ?). `plain` = 판정 없는 사실(값·태그·안 울린 경보) |
 | `Badge` | 기호 없는 태그 — Chip과 같은 24px |
@@ -186,3 +186,38 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/BrandMark.tsx, sc
 - 글자 크기·굵기·모서리·그림자는 토큰만 씁니다. 숫자를 쓰면 `designTokens.test.ts`가 실패합니다.
 - 색은 토큰 또는 `rgba(var(--x-rgb), a)`로 씁니다(`palette.test.ts`).
 - 새 캔버스(확대·축소되는 그림)를 만들면 그 파일을 테스트의 `CANVAS_CSS`·`CANVAS_TS`에 이유와 함께 넣습니다.
+
+## 9. 리뉴얼 — 'AI가 만든 티'를 지우고 상태를 다듬기 (2026-11-20)
+
+모양을 새로 칠하지 않고, 모든 화면이 함께 쓰는 층(토큰 → UI 키트 → 앱 틀)을 고쳤습니다. 기준선과 결과는 같은 측정으로 냈습니다: Playwright MCP가 메뉴 경로 40개를 돌며 axe-core 4.11(대비·이름·스크롤 영역 포커스) + 계산된 스타일을 셉니다. 조건은 밝게 1440 · 어둡게 1440 · 밝게 390이고, 로컬 `next build`/`start` + 익명 예시 데이터입니다.
+
+**금지 목록**('생성된 화면'처럼 읽히는 것) — 장식 그라데이션(두 색 사이를 꾸밈으로 잇는 것), 흐림(블러) 패널, 모든 카드에 같은 큰 떠오른 그림자, 이모지 아이콘, 뜻 없는 반짝임·튀는 애니메이션, 회색 위 회색 글자. 그라데이션은 무늬(빗금 `repeating-*`·점 `radial`)·같은 색 겹침·로딩 반짝임에만 씁니다 — `designTokens.test.ts` 'no decorative gradients'가 검사합니다.
+
+| 무엇 | 바꾼 것 |
+|------|---------|
+| 상태 전환 | `:where(a, button, [role=button], [role=tab], select, input, textarea, summary, label)`에 색 계열만 150ms `--ease-out` — 명시도 0이라 화면 규칙이 이김, 아무것도 움직이지 않음 |
+| 버튼 | 호버 = 옅은 바탕, 누름 = 1px 내려앉음, 주 버튼 호버 = 어둡게(밝게 아님) |
+| 면 | 패널·숫자 카드·홈 카드에 `--shadow-hairline`(어둡게는 더 진하게). 홈 카드 호버 = 테두리 진하게 + `--shadow-raise` + 1px 위로, '→'가 2px 앞으로 |
+| 틀 | 상단 막대와 왼쪽 메뉴 머리를 한 높이 `--chrome-h` 56(+1 테두리) — 두 아래 선이 한 줄. 예시 리본은 그 선 바로 아래에 붙고(예전엔 15px 떠서 내용이 비쳤음) 불투명 |
+| 메뉴 | 지금 화면 = 옅은 파랑 + 왼쪽 2px 선 + 진한 글자(꽉 찬 파랑 알약은 내용보다 시끄러웠음), 아이콘은 `--subtle` → 호버 `--muted` → 지금 `--accent` |
+| 로딩 | 회전 원 → 내용 자리의 뼈대 줄 3개(느린 맥박, 움직임 줄이기면 멈춤). 점선 상자는 '비었음'의 뜻이라 로딩에 안 씀 |
+| 화면 전환 | 경로가 바뀌면 내용이 200ms 동안 4px 올라오며 나타남(Web Animations — 다시 마운트하지 않아 보안 레이아웃의 공유 상태 유지), 움직임 줄이기면 없음 |
+| 스크롤 막대 · 선택 | 얇고 옅은 막대(`scrollbar-width: thin`), 글자 선택 = 옅은 파랑 |
+| 마크 · 비용 | 브랜드 타일 한 색 `--accent`(아이콘 재생성), 비용 추이 막대·예산 막대 = 한 색 칠(위→아래 흐림은 같은 날을 다르게 보이게 했음) |
+| 보안 개요 | 숫자 카드 7개 = 넓으면 한 줄 7칸, 아니면 4 + 3, 좁으면 2칸(auto-fit이 1440px에서 일곱째를 혼자 둘째 줄에 둠) |
+
+**결과**(경로 40개 합계)
+
+| 지표 | 전 | 후 |
+|------|----|----|
+| 대비 실패(axe, 밝게 · 어둡게) | 2 · — | 0 · 0 |
+| 그 밖 접근성(이름 없는 버튼·링크·레이블·스크롤 영역 포커스) | 3(1440) | 0(1440 · 390) |
+| 전환 없는 제어기 | 824 / 3,095 (27%) | 0 / 3,095 |
+| 장식 그라데이션이 칠해진 요소 | 비용 36 + 모든 화면의 마크 | 0 |
+| 가로 넘침(1440 · 390) | 0 | 0 |
+| 상단 막대 ↔ 메뉴 머리 아래 선 차이 | 2px | 0 |
+
+접근성 수정 내용: 고른 탭의 글자 `--accent` → `--accent-strong`(바탕 위 4.22:1 → 통과, 키트라 모든 `Tabs`), `CodeBlock`의 `pre` = 항상 `tabIndex=0`(가로로 넘치는 명령), AKS 클러스터 표 스크롤 상자 `tabIndex=0`, 기능·권한의 등급 링크 청록 3.1:1 → `--accent-strong`.
+
+측정 못 한 것: 로그인한 실데이터 화면(익명 예시만), 그림(캔버스) 안의 카드, 실제 화면 낭독기, 사람의 눈으로 본 '고급스러움' 평가.
+

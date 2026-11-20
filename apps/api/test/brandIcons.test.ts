@@ -28,9 +28,11 @@ test("one drawing: icon.svg, the generator and BrandMark share the points", () =
   assert.match(svg, new RegExp(`<polyline points="${points}"`));
   const genPoints = /points: (\[\[.*\]\]),/.exec(gen)?.[1];
   assert.equal(JSON.parse(genPoints!).map((p: number[]) => p.join(",")).join(" "), points);
-  assert.match(svg, /stop-color="#0078d4"/, "--accent");
-  assert.match(svg, /stop-color="#00a3a3"/, "--accent-2");
+  // one flat colour = --accent (2026-11-20 renewal — no gradient tile)
+  assert.match(svg, /<rect [^>]*fill="#0078d4"/, "--accent");
+  assert.doesNotMatch(svg, /Gradient/);
   const css = readFileSync(new URL("../../web/src/app/globals.css", import.meta.url), "utf8");
   assert.match(css, /--accent-rgb: 0, 120, 212;/);
-  assert.match(css, /--accent-2-rgb: 0, 163, 163;/);
+  const markCss = readFileSync(new URL("../../web/src/components/BrandMark.module.css", import.meta.url), "utf8");
+  assert.match(markCss, /background: var\(--accent\);/);
 });

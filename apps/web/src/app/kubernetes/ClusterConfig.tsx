@@ -93,7 +93,7 @@ export function ClusterConfig({ c }: { c: AksClusterConfigResponse }) {
         <Panel title={t("k8s.cfg.poolsTitle")} flush
           sub={totals.max === null ? t("k8s.cfg.poolsSub", { pools: c.pools.length, nodes: totals.nodes }) : t("k8s.cfg.poolsSubMax", { pools: c.pools.length, nodes: totals.nodes, max: totals.max })}
           footer={<span>{behind.size ? t("k8s.cfg.poolsBehind", { n: behind.size }) : t("k8s.cfg.poolsFoot")}</span>}>
-          <div className={styles.tableWrap}>
+          <div className={styles.tableWrap} tabIndex={0}>
             <table className={styles.table}>
               <thead>
                 <tr>

@@ -16,6 +16,20 @@
   gap: 12px;
 }
 
+/* The overview's seven KPIs: one row when wide, else 4 + 3, else 2 per row — auto-fit left the seventh card alone on a
+   row of its own at 1440px (2026-11-20 renewal) */
+.stats7 {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+@media (max-width: 1399px) {
+  .stats7 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .stats7 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .statLink {
   display: grid; /* the Stat inside fills the cell: every KPI card in the row has the same height */
   border-radius: var(--radius-md);

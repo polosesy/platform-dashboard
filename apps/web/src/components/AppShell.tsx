@@ -34,6 +34,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // so a crop or a screenshot of one card still says it. A new path starts clean.
   const sample = useSyncExternalStore(sampleModeStore.subscribe, sampleModeStore.get, sampleModeStore.getServer);
   useEffect(() => clearSampleMode, [pathname]);
+  // A new screen rises in (200 ms, opacity + 4 px) — the Web Animations API on the same element, so nothing remounts
+  // (the security layout keeps its shared state between its pages); skipped on reduced motion.
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof el.animate !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+  }, [pathname]);
 
   // Ctrl+K / ⌘K anywhere opens quick open (Esc closes it — inside the dialog)
   useEffect(() => {
@@ -68,7 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         ) : null}
         <main className={styles.main} data-sample={sample || undefined}>
-          <div className={styles.container}>
+          <div className={styles.container} ref={contentRef}>
             <ScopeBar />
             {children}
           </div>

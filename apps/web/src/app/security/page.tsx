@@ -61,7 +61,7 @@ export default function SecurityOverviewPage() {
       ) : (
         <>
           {/* KPI standard: the value line is a number or "—"; why there is no number goes on the hint line */}
-          <div className={s.stats}>
+          <div className={`${s.stats} ${s.stats7}`}>
             <div className={s.statLink}>
               <Stat
                 label={t("sec.score")}

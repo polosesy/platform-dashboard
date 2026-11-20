@@ -14,7 +14,8 @@
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 16px;
-  padding: 10px 18px;
+  min-height: var(--chrome-h);
+  padding: 0 18px;
 }
 
 /* ── Brand Group (hamburger + logo) ── */

@@ -6,8 +6,8 @@
 // square — iOS rounds the corners itself). The on-screen mark is components/BrandMark.tsx with the same points
 // (apps/api/test/brandIcons.test.ts checks they agree).
 //
-// The drawing: a tile in the platform's two colours (Azure blue → teal, tokens --accent / --accent-2) and one white line
-// through four nodes — read as connected resources (the diagrams) and as a signal over time (the monitoring).
+// The drawing: a tile in the platform's blue (token --accent — one flat colour since the 2026-11-20 renewal; the old
+// blue → teal fade was the most generic thing on the screen) and one white line through four nodes — read as connected resources (the diagrams) and as a signal over time (the monitoring).
 
 import { writeFileSync } from "node:fs";
 import { deflateSync, crc32 } from "node:zlib";
@@ -16,8 +16,7 @@ const OUT = new URL("../apps/web/src/app/", import.meta.url);
 export const MARK = {
   view: 32,
   radius: 7,
-  from: [0x00, 0x78, 0xd4], // --accent
-  to: [0x00, 0xa3, 0xa3],   // --accent-2
+  fill: [0x00, 0x78, 0xd4], // --accent
   points: [[7, 22], [13, 14], [19, 19], [25, 10]],
   stroke: 2.4,
   node: 2.6,
@@ -27,8 +26,7 @@ const pts = MARK.points.map((p) => p.join(",")).join(" ");
 
 // ---------- SVG ----------
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MARK.view} ${MARK.view}">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${hex(MARK.from)}"/><stop offset="1" stop-color="${hex(MARK.to)}"/></linearGradient></defs>
-  <rect width="${MARK.view}" height="${MARK.view}" rx="${MARK.radius}" fill="url(#g)"/>
+  <rect width="${MARK.view}" height="${MARK.view}" rx="${MARK.radius}" fill="${hex(MARK.fill)}"/>
   <polyline points="${pts}" fill="none" stroke="#fff" stroke-width="${MARK.stroke}" stroke-linecap="round" stroke-linejoin="round"/>
   <g fill="#fff">${MARK.points.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${MARK.node}"/>`).join("")}</g>
 </svg>
@@ -54,8 +52,7 @@ function render(size, square = false) {
       if (!square && !inRounded(x, y, MARK.view, MARK.radius)) continue;
       const white = MARK.points.some(([cx, cy]) => Math.hypot(x - cx, y - cy) <= MARK.node)
         || MARK.points.slice(1).some((p, n) => segDist(x, y, MARK.points[n], p) <= MARK.stroke / 2);
-      const t = Math.max(0, Math.min(1, (x + y) / (2 * MARK.view)));
-      const c = white ? [255, 255, 255] : MARK.from.map((v, n) => v + (MARK.to[n] - v) * t);
+      const c = white ? [255, 255, 255] : MARK.fill;
       r += c[0]; g += c[1]; b += c[2]; a += 1;
     }
     const o = (j * size + i) * 4;

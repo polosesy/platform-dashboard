@@ -128,7 +128,7 @@ test("shadows: surfaces are flat — a blurred shadow only through var(--shadow-
       }),
   );
   assert.deepEqual(bad.map((d) => `${d.file}:${d.line} ${d.value}`), []);
-  for (const t of ["--shadow-raise", "--shadow-pop", "--ring-accent", "--motion-fast", "--motion-base", "--motion-slow"]) assert.match(globals, new RegExp(`${t}:`), t);
+  for (const t of ["--shadow-raise", "--shadow-pop", "--shadow-hairline", "--ring-accent", "--motion-fast", "--motion-base", "--motion-slow"]) assert.match(globals, new RegExp(`${t}:`), t);
   assert.match(globals, /prefers-reduced-motion: reduce/);
 });
 
@@ -152,7 +152,10 @@ test("UI kit: panel head 56 · foot 44 · flat · stretches in a row; 12-column 
   assert.match(globals, /:root\[data-theme="dark"\] \{/);
   assert.match(globals, /@media \(prefers-color-scheme: dark\) \{\s*:root\[data-theme="system"\]/);
   assert.match(rule(".panel"), /height: 100%/);
-  assert.doesNotMatch(rule(".panel"), /backdrop-filter|box-shadow/, "panels are flat and opaque");
+  // 2026-11-20 renewal: a resting surface may carry only the hairline token (paper on the ground) — never a float shadow
+  assert.doesNotMatch(rule(".panel"), /backdrop-filter/, "panels are opaque");
+  assert.match(rule(".panel"), /box-shadow: var\(--shadow-hairline\);/);
+  assert.doesNotMatch(rule(".panel"), /shadow-raise|shadow-pop/, "a resting panel does not float");
   assert.match(rule(".panelTitle"), /font-size: var\(--text-heading\)/);
   assert.match(rule(".grid"), /grid-template-columns: repeat\(12, minmax\(0, 1fr\)\)/);
   for (const n of [3, 4, 6, 8, 9, 12]) assert.ok(kitCss.includes(`.span${n} { grid-column: span ${n}; }`), `span ${n}`);
@@ -246,9 +249,58 @@ test("no blur: surfaces are opaque (a blurred, see-through panel made small numb
   assert.deepEqual(bad, []);
 });
 
+// 2026-11-20 renewal — the look that reads as generated: a fade between two colours as decoration (the cost bars, the
+// budget fills, the brand tile were blue → lighter blue / blue → teal). A gradient may only draw a pattern or a flat
+// overlay: hatching (repeating-*), dots (radial), a layer whose stops are all the same colour, or a loading shimmer.
+const GRADIENT_OK = new Set([
+  "app/health/styles.module.css", // loading shimmer bar (moves; not a fill)
+]);
+function gradientStops(args: string): string[] {
+  const parts: string[] = []; let depth = 0, cur = "";
+  for (const ch of args) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { parts.push(cur.trim()); cur = ""; } else cur += ch;
+  }
+  parts.push(cur.trim());
+  return parts
+    .filter((p) => !/^(to |-?[\d.]+(deg|turn|rad))/.test(p))
+    .map((p) => p.replace(/\s+-?[\d.]+(%|px)(\s+-?[\d.]+(%|px))?$/, "").trim());
+}
+test("no decorative gradients: a linear-gradient between two different colours only where it is a pattern", () => {
+  const bad: string[] = [];
+  for (const f of cssModules) {
+    if (GRADIENT_OK.has(rel(f))) continue;
+    const text = readFileSync(f, "utf8");
+    for (const m of text.matchAll(/(?<!repeating-)linear-gradient\(/g)) {
+      let i = m.index! + m[0].length, depth = 1;
+      const start = i;
+      while (i < text.length && depth > 0) { if (text[i] === "(") depth++; if (text[i] === ")") depth--; i++; }
+      const stops = gradientStops(text.slice(start, i - 1));
+      if (new Set(stops).size > 1) bad.push(`${rel(f)}:${text.slice(0, m.index).split("\n").length} ${stops.join(" → ")}`);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
 test("text colours come from the text tokens (see-through ink failed contrast), and labels are not all-caps", () => {
   const bad = decls("color").filter(({ value }) => /^rgba\(var\(--ink-rgb\)/.test(value)).map((d) => `${d.file}:${d.line} color: ${d.value}`);
   assert.deepEqual(bad, [], "use var(--ink) · var(--muted) (7.6:1) · var(--subtle) (4.8:1)");
   const caps = decls("text-transform").filter(({ value }) => value === "uppercase").map((d) => `${d.file}:${d.line}`);
   assert.deepEqual(caps, []);
+});
+
+// 2026-11-20 renewal — measured on every menu route with Playwright + axe (design-system.md 9절)
+test("renewal: state changes ease by default, quiet scrollbars, contrast-safe selected tab, focusable code blocks", () => {
+  // zero-specificity baseline: colour-like properties only (nothing moves unless a module says so)
+  assert.match(globals, /:where\(a, button, \[role="button"\][^)]*\) \{\s*transition-property: color, background-color, border-color, box-shadow, opacity/);
+  assert.match(globals, /scrollbar-width: thin;/);
+  assert.match(globals, /--chrome-h: 56px;/);
+  // --accent on the page ground was 4.22:1 (axe) — the selected tab's words use the strong shade
+  assert.match(rule('.tab[aria-selected="true"]'), /color: var\(--accent-strong\);/);
+  // a command longer than the box scrolls sideways — the keyboard must reach it (axe scrollable-region-focusable)
+  assert.match(kitTsx, /<pre className=\{s\.codePre\}[^>]*tabIndex=\{0\}>/);
+  // loading = skeleton lines, not a dashed "empty" box
+  assert.match(kitTsx, /className=\{s\.loading\} role="status"/);
+  assert.match(rule(".stat"), /box-shadow: var\(--shadow-hairline\);/);
 });

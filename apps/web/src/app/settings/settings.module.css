@@ -50,7 +50,8 @@
   justify-self: start;
   font-size: var(--text-caption);
   font-weight: 600;
-  color: rgb(var(--tier-rgb));
+  /* link text in the strong blue: the tier colour (teal 3.1:1) stays on the block's rail, not on words */
+  color: var(--accent-strong);
 }
 
 .includes {
