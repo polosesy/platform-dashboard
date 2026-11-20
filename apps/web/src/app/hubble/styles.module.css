@@ -1072,15 +1072,22 @@
 /* Card = the live diagram / heatmap tile: white, status strip on the left, glyph + name, kind, two cells */
 .nmCard {
   position: relative; width: 100%; height: 100%; box-sizing: border-box; padding: 7px 10px 6px 14px; border-radius: var(--radius-sm); line-height: 1.25; overflow: hidden;
-  background: var(--surface); border: 1px solid rgba(var(--ink-rgb), 0.12); box-shadow: var(--shadow-sm);
-  display: grid; grid-template-rows: auto auto 1fr; gap: 2px; cursor: pointer; transition: opacity 0.15s, box-shadow 0.15s;
+  background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-hairline);
+  display: grid; grid-template-rows: auto auto 1fr; gap: 2px; cursor: pointer;
+  /* canvas card grammar (design-system.md 9.2) */
+  transition: opacity var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out);
 }
+.nmCard:not([data-selected]):not([data-dim]):not([data-status="stale"]):hover { box-shadow: var(--shadow-raise); }
+/* the hover border is the accent only where no status border speaks (danger / warn keep theirs) */
+.nmCard:not([data-selected]):not([data-dim]):not([data-status]):hover,
+.nmCard[data-status="ok"]:not([data-selected]):not([data-dim]):hover { border-color: rgba(var(--accent-rgb), 0.45); }
 .nmCard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--status); }
 .nmCard[data-status="danger"], .nmCard[data-status="warn"] { border-color: rgba(var(--status-rgb), 0.45); }
 .nmCard[data-status="stale"] { border-style: dashed; background: rgba(var(--ink-rgb), 0.02); }
 .nmCard[data-status="stale"] .nmCardName, .nmCard[data-status="stale"] .nmCells { opacity: 0.6; }
 .nmCard[data-dim] { opacity: 0.25; }
-.nmCard[data-selected] { box-shadow: 0 0 0 2px rgba(var(--status-rgb), 0.55), var(--shadow-sm); }
+/* chosen = the one accent ring of every canvas (it was the status colour here — a red ring read as "worse") */
+.nmCard[data-selected] { box-shadow: var(--ring-accent), var(--shadow-raise); }
 .nmCard[data-kind="internetIn"], .nmCard[data-kind="internetOut"] { background: rgba(var(--violet-rgb), 0.04); }
 .nmCardTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .nmGlyph { color: var(--status); font-weight: 700; font-size: var(--canvas-text-sm); line-height: 1; }

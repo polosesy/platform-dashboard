@@ -479,17 +479,24 @@
   align-items: center;
   padding: 6px 8px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  /* canvas card grammar (design-system.md 9.2) — see the live diagram card */
+  border: 1px solid var(--border-strong);
   background: var(--panel-solid);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-hairline);
   text-align: left;
   font: inherit;
   color: var(--ink);
   cursor: pointer;
+  transition: border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out);
 }
 
 .tile:hover {
-  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+/* the raise only on plain tiles: a stack keeps its paper edges, a fold tile stays quiet */
+.tile:not(.tile_stack):not(.tile_fold):hover {
+  box-shadow: var(--shadow-raise);
 }
 
 .tile:focus-visible {
@@ -534,7 +541,7 @@
 }
 
 .tile_stack {
-  box-shadow: 3px 3px 0 -1px var(--panel-solid), 3px 3px 0 0 var(--border), 6px 6px 0 -1px var(--panel-solid), 6px 6px 0 0 var(--border);
+  box-shadow: 3px 3px 0 -1px var(--panel-solid), 3px 3px 0 0 var(--border-strong), 6px 6px 0 -1px var(--panel-solid), 6px 6px 0 0 var(--border-strong);
 }
 
 /* An expanded stack's slot: a group header that folds it back — dashed and quiet, so it never reads as a resource */
@@ -589,7 +596,7 @@
 /* Focus / selection — applied on the React Flow node wrapper */
 .dimmed {
   opacity: 0.18;
-  transition: opacity 0.15s;
+  transition: opacity var(--motion-base) var(--ease-out);
 }
 
 .dimmedEdge {
@@ -598,7 +605,7 @@
 
 .selected .tile {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+  box-shadow: var(--ring-accent), var(--shadow-raise);
 }
 
 .selected .box {

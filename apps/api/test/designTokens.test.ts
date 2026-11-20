@@ -332,3 +332,27 @@ test("renewal step 2: page rhythm 16 on the screens that had 0 / 12 / 14, placeh
   for (const p of ["app/runbooks/page.tsx", "app/notifications/page.tsx", "app/security/explore/page.tsx"]) assert.match(read(p), /<div className=\{s\.page\}>/, p);
   assert.match(kitCss, /\.textarea::placeholder \{\s*font-family: var\(--font-sans\);/);
 });
+
+// Renewal step 3 (2026-11-20): one canvas card grammar — the cards keep their sizes (layout + tests depend on them);
+// rest = token border + hairline, hover = raise, chosen = the accent ring, changes ease over --motion-base
+test("canvas card grammar: live card · AKS node card · diagram tile · service map card", () => {
+  const css = (p: string) => readFileSync(join(webSrc, p), "utf8");
+  const block = (text: string, sel: string) => {
+    const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = text.match(new RegExp(`(^|\\n)${esc} \\{([^}]*)\\}`));
+    assert.ok(m, sel); return m![2]!;
+  };
+  const live = css("app/live-diagram/styles.module.css"), arch = css("app/architecture/styles.module.css"), net = css("app/hubble/styles.module.css");
+  for (const [text, sel] of [[live, ".card"], [arch, ".tile"], [net, ".nmCard"]] as const) {
+    const b = block(text, sel);
+    assert.match(b, /border: 1px solid var\(--border-strong\)/, `${sel} border`);
+    assert.match(b, /box-shadow: var\(--shadow-hairline\)/, `${sel} hairline`);
+    assert.match(b, /var\(--motion-base\) var\(--ease-out\)/, `${sel} eases`);
+  }
+  assert.match(block(live, ".card"), /width: 220px;\s*height: 100px;/, "the live card keeps 220 × 100");
+  assert.match(live, /\.card\[data-focused\] \{ box-shadow: var\(--ring-accent\), var\(--shadow-raise\); \}/);
+  assert.match(arch, /\.selected \.tile \{\s*border-color: var\(--accent\);\s*box-shadow: var\(--ring-accent\), var\(--shadow-raise\);/);
+  assert.match(net, /\.nmCard\[data-selected\] \{ box-shadow: var\(--ring-accent\), var\(--shadow-raise\); \}/);
+  for (const text of [live, arch, net]) assert.match(text, /:hover \{?[^}]*box-shadow: var\(--shadow-raise\)/);
+  assert.match(block(live, ".cardName"), /font-weight: 600/);
+});

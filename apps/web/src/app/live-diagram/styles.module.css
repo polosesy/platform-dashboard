@@ -1193,7 +1193,7 @@
 
 /* Instance card: the resource card at 58 px (name row + description row, no metric row) */
 .cardInstance { height: 58px; cursor: pointer; }
-.cardInstance:hover { border-color: rgba(var(--accent-rgb), 0.45); }
+.cardInstance:hover { border-color: rgba(var(--accent-rgb), 0.45); box-shadow: var(--shadow-raise); }
 .instDetail { grid-template-rows: 20px 16px; }
 
 /* WAF "+k" sub-card: a fold toggle in its own slot (dashed, so it never reads as a policy) — ▾ shows the others
@@ -1700,11 +1700,19 @@
   height: 100px;
   box-sizing: border-box;
   border-radius: var(--radius-md);
-  border: 1.5px solid rgba(var(--ink-rgb), 0.1);
+  /* canvas card grammar (design-system.md 9.2): token border + hairline at rest, raise on hover, accent ring when
+     chosen — the size never changes (the layout and its tests are built on 220 × 100) */
+  border: 1px solid var(--border-strong);
   background: var(--panel-solid);
-  box-shadow: none;
+  box-shadow: var(--shadow-hairline);
   overflow: hidden;
-  transition: border-color 300ms ease, opacity 300ms ease;
+  transition: border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out);
+}
+
+.card:not([data-ghost]):not([data-impact]):not([data-focused]):hover {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: var(--shadow-raise);
 }
 
 .cardStrip {
@@ -1755,7 +1763,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-size: var(--text-body);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
@@ -2240,7 +2248,7 @@
 }
 
 /* Selected card: a ring (box-shadow) so a fault-impact red / orange border stays */
-.card[data-focused] { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.22), var(--shadow-raise); }
+.card[data-focused] { box-shadow: var(--ring-accent), var(--shadow-raise); }
 .card[data-focused]:not([data-impact]) { border-color: rgba(var(--accent-rgb), 0.75); }
 .canvasWrap[data-lod="summary"] .card[data-focused] { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.28); }
 .canvasWrap[data-lod="glance"] .card[data-focused] { box-shadow: 0 0 0 9px rgba(var(--accent-rgb), 0.32); }

@@ -284,8 +284,11 @@
 .apgEdge[data-danger] { stroke: var(--danger); }
 .apgEdge[data-kind="stop"] { stroke: var(--subtle); stroke-dasharray: 2 4; }
 .apgEdge[data-dim] { opacity: 0.15; }
-.apgNode { cursor: default; outline: none; transition: opacity var(--motion-fast); }
+.apgNode { cursor: default; outline: none; transition: opacity var(--motion-base) var(--ease-out); }
 .apgNode[role="button"] { cursor: pointer; }
+/* canvas card grammar (design-system.md 9.2) in SVG: the pressable node's ring thickens on hover */
+.apgNode > circle { transition: stroke-width var(--motion-fast) var(--ease-out); }
+.apgNode[role="button"]:hover > circle { stroke-width: 3; }
 .apgNode[data-dim] { opacity: 0.3; }
 .apgNode > circle { fill: var(--panel-solid); stroke-width: 2; stroke: var(--border-strong, var(--subtle)); }
 .apgNode[data-tone="info"] > circle { stroke: rgb(var(--series1-rgb)); fill: rgba(var(--series1-rgb), 0.08); }
