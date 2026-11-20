@@ -258,3 +258,7 @@ covers: [apps/web/src/app/globals.css, apps/web/src/components/AppShell.tsx, app
 
 APM 메트릭·수집기 신호(`MetricChart`)에서 한 차트에 마우스를 올리면 다른 차트 머리에 시각이 붙어 줄이 바뀌고 **같은 줄 카드 높이가 바뀌었음**. 자리를 미리 비우는 대신 시각을 **x축의 십자선 아래**(Grafana·Datadog 방식, `colAt` — 종이색 테두리 글자, 가까운 축 끝 시각은 숨김)로 옮김. 머리 = 제목 20px · 값 18px 두 줄 고정(줄바꿈 없음·숫자 폭 고정), 카드 `align-content: start`(줄 높이에 맞춰 늘어난 카드가 머리를 키우던 것 — 51px). 실측(합성 데이터, 차트 15개): 머리 높이 40px 하나(1440 · 390), 포인터 처음·가운데·끝에서 카드 높이 변화 0, x축 시각 14개 · 머리 시각 0. 테스트 `crosshair.test.ts`.
 
+### 9.5 숫자 열은 오른쪽 (2026-11-20)
+
+표를 55개 파일이 각자 그려서 열마다 손으로 표시하지 않고 **규칙 하나**로: 본문의 **채워진 칸이 모두 숫자인 열**(단위·통화·부호·K/M/만 — `1,234` `12.5%` `US$1,129` `320 ms` `1.5/s` `700 MiB` `×3` `4 / 8`, '—'·'-'·빈칸은 셈에서 뺌)은 머리까지 오른쪽 정렬 — 자릿수가 줄을 맞춤(9.1의 숫자 폭 고정과 함께). 숫자가 아닌 것: 버전 `1.32.6`, IP·CIDR, 날짜 `2026-11-20`·`11/20`(그래서 비율은 띄어 쓴 `4 / 8`만), 시각, `3 고정`처럼 글이 섞인 칸, `1, 2, 3`. 순수 판정 `lib/numericColumns.ts`(`isNumericText`·`numericColumns` — colspan 칸은 판단에서 빼고 뒤 열 위치는 유지) → 앱 틀 `AppShell`의 `useNumericColumns`가 내용 영역의 표를 MutationObserver(자식·글자 변화만 — 자기가 쓰는 속성 변화는 안 봄, 프레임마다 한 번)로 따라가며 `data-num`을 붙임 → `globals.css` `:is(td, th)[data-num][data-num] { text-align: right }`(화면의 `th { text-align: left }`보다 셈). 표가 왼쪽이어야 하면 `data-align="left"`. 실측(예시): AKS 객체 '재시작'·'경과', 비용 표 '비용' = 오른쪽 · 버전·가용 영역·VM 크기·'3 고정' = 그대로, 경로 40개 회귀 0. 테스트 `numericColumns.test.ts`.
+

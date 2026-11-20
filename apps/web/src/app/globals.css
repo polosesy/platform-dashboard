@@ -296,6 +296,13 @@ button {
   background-color: rgba(var(--accent-rgb), 0.04);
 }
 
+/* Number columns (lib/numericColumns.ts marks the cells — every filled body cell of the column is a number): right
+   aligned, header included, so the digits line up by place. The attribute twice outranks a page's own "th { text-align:
+   left }" (0,1,1); a table that must stay left says data-align="left". */
+:is(td, th)[data-num][data-num] {
+  text-align: right;
+}
+
 /* Scrollbars: thin and quiet (Windows' default 17px bars were the loudest thing on dense screens) */
 * {
   scrollbar-width: thin;

@@ -57,7 +57,9 @@ const TRANSLATED = ["app/", "components/", "lib/"];
 // Deliberate Korean literals: API values matched in code (a risk label, the "인터넷" token of live-diagram
 // specs saved before the "Internet" token), and the "한" (Korean) button of the event translation toggle —
 // a language name, shown as is in both locales like "KO"
-const ALLOWED = [/r === "익명 접근"/, /const INTERNET = \/\^\(Internet\|인터넷\)\$\//, /^\s*한\s*$/];
+const ALLOWED = [/r === "익명 접근"/, /const INTERNET = \/\^\(Internet\|인터넷\)\$\//, /^\s*한\s*$/,
+  // lib/numericColumns.ts reads table cells: Korean unit / magnitude words in the data (분 · 개 · 건 · 천 · 만 …) — patterns, not screen text
+  /^const UNIT = String\.raw`\(\?:%\|‰\|ms\|/, /\(\?:K\|M\|B\|G\|T\|천\|만\|억\)/];
 
 test("translated areas have no hard-coded Korean text", () => {
   const found: string[] = [];

@@ -13,6 +13,7 @@ import { DOCK_QUERY, useMediaQuery } from "@/lib/useMediaQuery";
 import { NAV_EXEMPT_ROUTES } from "@/lib/navConfig";
 import { clearSampleMode, sampleModeStore } from "@/lib/sampleMode";
 import { useI18n } from "@/lib/i18n";
+import { useNumericColumns } from "@/lib/useNumericColumns";
 
 /**
  * The page frame (design draft ⑦): on wide screens (≥ 1100 px) the menu is docked on the left and the top bar keeps
@@ -42,6 +43,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (!el || typeof el.animate !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     el.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
   }, [pathname]);
+  // number columns of every table on the screen align right (lib/numericColumns.ts — one rule, not per table)
+  useNumericColumns(contentRef, pathname);
 
   // Ctrl+K / ⌘K anywhere opens quick open (Esc closes it — inside the dialog)
   useEffect(() => {
