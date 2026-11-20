@@ -174,7 +174,7 @@
 .table th {
   text-align: left;
   font-size: var(--text-caption);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -463,7 +463,7 @@
 .mgTable thead th { text-align: left; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .mgTable tbody th, .mgTable tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; font-weight: 400; vertical-align: top; }
 .mgTable tbody tr[data-open] > * { background: rgba(var(--accent-rgb), 0.05); }
-.mgFamily th { background: var(--panel-sunken); font-weight: 700 !important; }
+.mgFamily th { background: var(--panel-sunken); font-weight: 600 !important; }
 .mgFamily th > * { margin-left: 8px; }
 .mgNotes { font-weight: 400; font-size: var(--text-caption); }
 .mgName { all: unset; cursor: pointer; white-space: nowrap; }

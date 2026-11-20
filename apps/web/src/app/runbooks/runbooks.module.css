@@ -1,3 +1,7 @@
+/* page rhythm: every block 16px apart (renewal step 2 — the header touched the first notice; design-system.md 9절) */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.page > .stack { margin-top: 0; }
+
 /* 사례·런북 — docs/architecture/ops-knowledge.md
    Every one-column grid says `minmax(0, 1fr)`: an implicit `auto` column is as wide as its widest unbreakable line, so a
    long command (white-space: pre) widened the step, its title and its text past the panel (2026-11-18: 28 of 31 runbooks,

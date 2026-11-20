@@ -91,7 +91,7 @@
   text-align: left;
   padding: 8px 12px;
   font-size: var(--text-caption);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--subtle);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;

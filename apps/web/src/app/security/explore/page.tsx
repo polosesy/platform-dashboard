@@ -10,6 +10,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { PolicyInsightsResponse, WorkloadIdentityResponse } from "@aud/types";
 import { EmptyState, ErrorNotice, LoadingState, PageHeader } from "@/components/ui";
+import s from "../security.module.css";
 import { apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { useAksClusters } from "@/lib/useAksClusters";
@@ -59,7 +60,7 @@ function ExploreInner() {
   };
 
   return (
-    <div>
+    <div className={s.page}>
       <PageHeader meta={insights ? <span>{t("ex.page.meta", { at: new Date(insights.generatedAt).toLocaleString(dateLocale(locale)), n: insights.rows.length })}</span> : undefined} />
       <ErrorNotice error={clustersError ?? insightsQuery.error} />
       {!clusterId && !clustersLoading ? <EmptyState title={t("ex.page.noCluster")}>{t("ex.page.noClusterHint")}</EmptyState>

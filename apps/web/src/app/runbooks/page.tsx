@@ -74,7 +74,7 @@ function RunbooksInner() {
   };
 
   return (
-    <div>
+    <div className={s.page}>
       <PageHeader actions={canWrite ? (
         <div className={s.actions}>
           <Button onClick={() => newCase()}>{t("ops.kb.case.new")}</Button>

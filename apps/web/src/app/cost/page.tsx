@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import styles from "./styles.module.css";
 import type { CostSummary, CostTrendResponse, BudgetsResponse } from "@aud/types";
 import { ApiError, apiUrl, fetchJsonWithBearer } from "@/lib/api";
 import { budgetCard } from "@/lib/costView";
 import { useApiQuery } from "@/lib/useApiQuery";
 import { useSubscriptions } from "@/lib/useSubscriptions";
-import { Cell, EmptyState, ErrorNotice, Grid, LoadingState, PageHeader, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
+import { Cell, EmptyState, ErrorNotice, Grid, LinkButton, LoadingState, PageHeader, Panel, SampleDataNotice, Segmented, Stat } from "@/components/ui";
 import { dateLocale, useI18n } from "@/lib/i18n";
 import { ReservationsPanel } from "./ReservationsPanel";
+import { CostTrendChart } from "./CostTrendChart";
 
 function fmtCurrency(n: number, currency: string): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
@@ -50,10 +51,8 @@ export default function CostPage() {
   const budgets = data?.budgets ?? null;
   const card = budgetCard(budgets?.budgets, data?.budgetsFailed ?? null, loading);
 
-  const trendMax = useMemo(() => {
-    const max = Math.max(0, ...(trend?.data ?? []).map((p) => p.cost));
-    return max <= 0 ? 1 : max;
-  }, [trend?.data]);
+  // 표로 보기 — the trend's numbers as a table (the chart's accessible twin)
+  const [trendTable, setTrendTable] = useState(false);
 
   return (
     <div className={styles.page}>
@@ -101,18 +100,12 @@ export default function CostPage() {
         </Cell>
 
         <Cell span={12}>
-          <Panel title={t("cost.trend")} sub={t(`cost.ri.${granularity}`)}>
+          <Panel title={t("cost.trend")} sub={t(`cost.ri.${granularity}`)}
+            actions={trend && trend.data.length > 0 ? (
+              <LinkButton onClick={() => setTrendTable((v) => !v)} ariaPressed={trendTable}>{t(trendTable ? "cost.chart.showChart" : "cost.chart.showTable")}</LinkButton>
+            ) : undefined}>
             {trend && trend.data.length > 0 ? (
-              <div className={styles.trendWrap}>
-                {trend.data.map((p) => {
-                  const h = Math.max(2, (p.cost / trendMax) * 100);
-                  return (
-                    <div key={p.date} className={styles.trendBar} style={{ height: `${h}%` }} title={`${p.date} · ${fmtCurrency(p.cost, p.currency)}`}>
-                      <div className={styles.trendBarLabel}>{fmtCurrency(p.cost, p.currency)}</div>
-                    </div>
-                  );
-                })}
-              </div>
+              <CostTrendChart points={trend.data} granularity={trend.granularity} table={trendTable} fmtMoney={fmtCurrency} />
             ) : loading ? <LoadingState /> : <EmptyState title={t("cost.noTrend")} />}
           </Panel>
         </Cell>

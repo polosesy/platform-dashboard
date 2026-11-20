@@ -281,6 +281,21 @@ button {
   transition-timing-function: var(--ease-out);
 }
 
+/* Tables (renewal step 2, 2026-11-20 — 55 files, 20+ table classes): a zero-specificity baseline every table gets and
+   any module rule overrides — digits in columns line up (tabular), and the row under the pointer is tinted so a long
+   row is easy to follow. Header weight is 600 everywhere (designTokens.test.ts). */
+:where(table) {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(tbody > tr) > :where(td, th) {
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+:where(tbody > tr:hover) > :where(td, th) {
+  background-color: rgba(var(--accent-rgb), 0.04);
+}
+
 /* Scrollbars: thin and quiet (Windows' default 17px bars were the loudest thing on dense screens) */
 * {
   scrollbar-width: thin;

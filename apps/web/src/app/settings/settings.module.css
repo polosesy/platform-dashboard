@@ -1,7 +1,8 @@
 /* Shared by /settings/features and /settings/connections: package cards, feature rows, permission table */
 .page {
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px; /* the page rhythm (design-system.md 9절) */
 }
 
 .muted {

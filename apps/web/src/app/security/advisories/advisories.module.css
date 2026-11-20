@@ -67,7 +67,7 @@
 .tableWrap { min-width: 0; overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
 .table th, .table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.table th { font-size: var(--text-caption); color: var(--muted); font-weight: 700; }
+.table th { font-size: var(--text-caption); color: var(--muted); font-weight: 600; }
 .table tr[data-status="affected"] td:first-child, .table tr[data-status="eol"] td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .targetMain { font-weight: 600; overflow-wrap: anywhere; }
 

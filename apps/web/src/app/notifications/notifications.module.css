@@ -1,3 +1,7 @@
+/* page rhythm: every block 16px apart (renewal step 2 — the header touched the first notice; design-system.md 9절) */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.page > .stack { margin-top: 0; }
+
 /* 알림 센터 */
 .stack { display: grid; gap: 14px; margin-top: 14px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); grid-auto-rows: 1fr; gap: 10px; }

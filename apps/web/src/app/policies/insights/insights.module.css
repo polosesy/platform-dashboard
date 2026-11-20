@@ -307,7 +307,7 @@
 .tableWrap { overflow-x: auto; position: relative; }
 .matrix { border-collapse: collapse; font-size: var(--text-small); table-layout: fixed; width: 1180px; }
 .matrix th, .matrix td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
-.matrix th { font-size: var(--text-caption); font-weight: 700; color: var(--muted); }
+.matrix th { font-size: var(--text-caption); font-weight: 600; color: var(--muted); }
 .matrix th[data-risk="true"] { text-align: center; vertical-align: bottom; word-break: keep-all; line-height: 1.25; padding: 6px 4px; }
 .matrix th[data-grp="true"] { text-align: center; font-size: var(--text-caption); color: var(--faint); padding: 4px; }
 .matrix td[data-c="true"] { text-align: center; }
@@ -331,7 +331,7 @@
 .kbPlat .v { font-family: var(--font-mono); font-weight: 600; overflow-wrap: anywhere; }
 .kbPlat .s { color: var(--ok); font-size: var(--text-caption); }
 .tbl { width: 100%; border-collapse: collapse; font-size: var(--text-small); min-width: 760px; }
-.tbl th { text-align: left; font-size: var(--text-caption); font-weight: 700; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl th { text-align: left; font-size: var(--text-caption); font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .tbl td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .catRow td { font-weight: 700; font-size: var(--text-caption); background: var(--surface-2); }
 .ver { font-family: var(--font-mono); font-size: var(--text-caption); padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line); margin-right: 3px; white-space: nowrap; }

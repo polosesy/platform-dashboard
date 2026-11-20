@@ -1,5 +1,6 @@
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
 }
@@ -465,7 +466,7 @@
 .table th {
   text-align: left;
   font-size: var(--text-caption);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
@@ -597,7 +598,7 @@
 
 .teamTable tfoot th,
 .teamTable tfoot td {
-  font-weight: 700;
+  font-weight: 600;
   border-bottom: 0;
 }
 

@@ -418,6 +418,12 @@
   font-weight: 400;
 }
 
+/* The hint is words, not code: Korean in the code face spread every syllable apart (사례·런북, 네트워크 경로 —
+   renewal step 2). What is pasted stays in the code face. */
+.textarea::placeholder {
+  font-family: var(--font-sans);
+}
+
 .fieldHint {
   color: var(--subtle);
   font-size: var(--text-caption);

@@ -89,45 +89,189 @@
   padding: 14px;
 }
 
-/* ---------- Trend chart (simple bar) ---------- */
-
-.trendWrap {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 120px;
-  padding: 14px 14px 10px;
+/* ---------- Trend chart (CostTrendChart — renewal step 2, 2026-11-20) ----------
+   [y-axis | plot] over [· | x-axis]: recessive grid and labels, bars from a zero baseline with a 2px gap, the
+   average as one dashed line, the hovered / focused column at full colour and the rest dimmed. */
+.chart {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-rows: 200px 24px;
+  padding: 12px 4px 0 0;
 }
 
-.trendBar {
+.yAxis,
+.xAxis {
+  position: relative;
+  font-size: var(--text-caption);
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.yAxis > span {
+  position: absolute;
+  right: 10px;
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
+.xAxis > span {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.plot {
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+
+.plot:focus-visible {
+  outline-offset: 4px;
+}
+
+.gridLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--border);
+}
+
+.gridLine[data-zero] {
+  border-top-color: var(--border-strong);
+}
+
+.avgLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--muted);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.avgLabel {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--text-caption);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bars {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/* the whole column is the hit target; the bar sits at its bottom, at most 40px wide */
+.col {
   flex: 1;
   min-width: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  /* one flat fill (the old top-to-bottom fade made equal days look unequal); hover = the full colour */
-  background: rgba(var(--accent-rgb), 0.62);
-  position: relative;
-  transition: background-color var(--motion-fast) var(--ease-out);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 1px;
+  cursor: default;
 }
 
-.trendBar:hover {
+.bar {
+  display: block;
+  width: min(100%, 40px);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: rgba(var(--accent-rgb), 0.72);
+  transition: background-color var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
+}
+
+.plot[data-active] .bar {
+  opacity: 0.4;
+}
+
+.plot[data-active] .col[data-active] .bar {
+  opacity: 1;
   background: var(--accent);
 }
 
-.trendBarLabel {
+.tip {
   position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  color: rgba(var(--accent-rgb), 0.90);
-  white-space: nowrap;
-  display: none;
-  padding-bottom: 2px;
+  top: 8px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-pop);
+  transform: translateX(8px);
+  pointer-events: none;
 }
 
-.trendBar:hover .trendBarLabel {
-  display: block;
+.tip[data-side="left"] { transform: translateX(calc(-100% - 8px)); }
+
+.tipDate {
+  font-size: var(--text-caption);
+  color: var(--subtle);
+  white-space: nowrap;
+}
+
+.tipValue {
+  font-size: var(--text-heading);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.tipMeta {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* the same numbers as a table (표로 보기) */
+.trendTableWrap {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.trendTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+.trendTable th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-solid);
+  text-align: left;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trendTable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trendTable th:last-child,
+.trendTable td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Budget gauge ---------- */

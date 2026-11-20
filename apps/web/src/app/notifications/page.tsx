@@ -41,7 +41,7 @@ function NotificationsInner() {
   usePolling(useCallback(async () => { reload(); }, [reload]), 30_000);
 
   return (
-    <>
+    <div className={s.page}>
       <PageHeader meta={q.data ? <DesktopToggle /> : null} />
       <Tabs label={t("nav.item.notifications")} idPrefix="notify-tab" value={tab} onChange={setTab}
         items={TABS.map((id) => ({ id, label: t(`notify.tab.${id}`), count: id === "inbox" ? q.data?.counts.firingUnacked : undefined }))} />
@@ -49,7 +49,7 @@ function NotificationsInner() {
       {tab === "inbox" && (q.data ? <Inbox data={q.data} reload={reload} /> : q.error ? null : <LoadingState />)}
       {tab === "mapping" && <Mapping />}
       {tab === "setup" && <Setup data={q.data ?? null} reload={reload} />}
-    </>
+    </div>
   );
 }
 

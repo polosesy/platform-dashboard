@@ -1,6 +1,7 @@
 .page {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px; /* the page rhythm (design-system.md 9절) */
 }
 
 .header {
@@ -1618,7 +1619,7 @@ button.heatTileSelected:focus-visible {
 
 .coverageTable th {
   text-align: left;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);

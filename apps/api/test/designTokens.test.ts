@@ -304,3 +304,31 @@ test("renewal: state changes ease by default, quiet scrollbars, contrast-safe se
   assert.match(kitTsx, /className=\{s\.loading\} role="status"/);
   assert.match(rule(".stat"), /box-shadow: var\(--shadow-hairline\);/);
 });
+
+// Renewal step 2 (2026-11-20): one table grammar under 20+ page-made table classes — column headers 600 (they were
+// 600 × 17 and 700 × 11), digits line up, the hovered row is tinted (2 of 6 measured tables did it)
+test("tables: header weight 600 everywhere, tabular digits and a row hover from the global baseline", () => {
+  const bad: string[] = [];
+  for (const f of cssModules) {
+    const text = readFileSync(f, "utf8");
+    for (const m of text.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+      const toks = m[1]!.split(/[\s,>.:[\]()]+/);
+      if (toks.includes("th") && /font-weight:\s*700/.test(m[2]!)) bad.push(`${rel(f)} ${m[1]!.trim()}`);
+    }
+  }
+  assert.deepEqual(bad, []);
+  assert.match(globals, /:where\(table\) \{\s*font-variant-numeric: tabular-nums;/);
+  assert.match(globals, /:where\(tbody > tr:hover\) > :where\(td, th\) \{\s*background-color:/);
+});
+
+test("renewal step 2: page rhythm 16 on the screens that had 0 / 12 / 14, placeholder words in the text face", () => {
+  const read = (p: string) => readFileSync(join(webSrc, p), "utf8");
+  for (const p of ["app/runbooks/runbooks.module.css", "app/notifications/notifications.module.css"]) {
+    assert.match(read(p), /\.page \{ display: grid; grid-template-columns: minmax\(0, 1fr\); gap: 16px; \}/, p);
+  }
+  for (const p of ["app/health/styles.module.css", "app/settings/settings.module.css", "app/security/security.module.css"]) {
+    assert.match(read(p), /^\.page \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1fr\);\s*gap: 16px;/m, p);
+  }
+  for (const p of ["app/runbooks/page.tsx", "app/notifications/page.tsx", "app/security/explore/page.tsx"]) assert.match(read(p), /<div className=\{s\.page\}>/, p);
+  assert.match(kitCss, /\.textarea::placeholder \{\s*font-family: var\(--font-sans\);/);
+});
