@@ -125,10 +125,10 @@ export function FilterChip({
 /* ── Link button ── an action that reads as text: a name in a table that opens its row, "show all", "clear" —
    accent text, no box (the row or sentence around it is the target's frame) */
 export function LinkButton({
-  children, onClick, title, ariaLabel, ariaExpanded, tone = "accent", disabled,
-}: { children: ReactNode; onClick: () => void; title?: string; ariaLabel?: string; ariaExpanded?: boolean; tone?: "accent" | "muted"; disabled?: boolean }) {
+  children, onClick, title, ariaLabel, ariaExpanded, ariaPressed, tone = "accent", disabled,
+}: { children: ReactNode; onClick: () => void; title?: string; ariaLabel?: string; ariaExpanded?: boolean; ariaPressed?: boolean; tone?: "accent" | "muted"; disabled?: boolean }) {
   return (
-    <button type="button" className={cx(s.linkButton, tone === "muted" && s.linkMuted)} title={title} aria-label={ariaLabel} aria-expanded={ariaExpanded} disabled={disabled} onClick={onClick}>
+    <button type="button" className={cx(s.linkButton, tone === "muted" && s.linkMuted)} title={title} aria-label={ariaLabel} aria-expanded={ariaExpanded} aria-pressed={ariaPressed} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );

@@ -1,8 +1,8 @@
 ---
 status: draft
 owner: platform-security
-last-verified: 2026-11-19
-covers: [apps/api/src/services/exposure.ts, apps/api/src/services/issueSightingStore.ts, apps/web/src/lib/exposureView.ts, apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts, apps/web/src/app/security, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
+last-verified: 2026-11-20
+covers: [apps/web/src/lib/attackPathGraph.ts, apps/web/src/app/security/risk/AttackPathGraph.tsx, apps/api/src/services/azureRiskCombos.ts, apps/api/src/services/exposure.ts, apps/api/src/services/issueSightingStore.ts, apps/web/src/lib/exposureView.ts, apps/api/src/services/securityPosture.ts, apps/web/src/lib/navConfig.ts, apps/web/src/app/security, apps/api/src/services/gitopsSource.ts, apps/api/src/services/workloadIdentityCollector.ts, apps/api/src/services/issueStateStore.ts, apps/web/src/lib/issueQueue.ts, apps/web/src/app/security/risk/IssueQueue.tsx, apps/api/src/services/imageVulns.ts, apps/api/src/services/policyInsights.ts, apps/api/src/services/policyInsightsCollector.ts, apps/web/src/app/policies/insights/KbomPanel.tsx, apps/web/src/app/policies/insights/RiskCombos.tsx]
 ---
 # 보안 기능 고도화 계획 — CNAPP(Wiz) 데모와 비교
 
@@ -416,7 +416,18 @@ covers: [apps/api/src/services/exposure.ts, apps/api/src/services/issueSightingS
 
 ### 6.5 다음
 
-- 공격 경로 그림(Wiz Attack Path Visualization — 인터넷 → 엔드포인트 → 컴퓨트(발견 묶음 펼침) → ID → 데이터 저장소): 지금 Azure 경로는 목록(`AzurePathsPanel`) — 같은 레인 그림(정책 인사이트 공격 경로)으로.
+- ~~공격 경로 그림~~ — **2026-11-20 구현**(6.6).
 - 조치 자동화(Wiz Workflows): 알림 센터 중계로 '치명 이슈 → 담당 팀 채널' 규칙.
 - 외부 검증: 공용 엔드포인트의 TLS·포트 점검(대시보드가 밖에서 직접 연결)은 보안 승인 뒤.
+
+### 6.6 공격 경로 그림 (2026-11-20 — Wiz Attack Path Visualization)
+
+통합 위험 › Azure 공격 경로가 [그림 | 목록] 두 보기. 그림 = 왼쪽 경로 목록(위험순) + 고른 경로를 왼→오 다섯 열로: **인터넷 → 진입점(노출) → 관리 ID → 역할(권한 @ 범위) → 데이터 저장소**. 순수 `lib/attackPathGraph.ts`(`pathGraph`) → `AttackPathGraph.tsx`(SVG).
+
+- 그리는 것은 경로에 있는 사실뿐: 역할은 **그 역할을 가진 관리 ID에만** 이어짐 — API가 경로에 관리 ID 목록(`identity.list` — 시스템 할당 = 리소스 이름, 사용자 할당 = 그 ID 리소스 이름)과 역할 보유자(`holders`)를 새로 실음(예전엔 역할을 ID끼리 합쳐 누가 가졌는지 없었음). 이름이 없으면 '관리 ID n개' 노드 하나.
+- 두 역할이 닿는 저장소는 노드 하나에 선 둘; API가 이름을 준 것보다 많으면(종류당 5) '외 n개' 노드 — 이름을 지어내지 않음.
+- 끊긴 곳 = '여기서 끝남' 노드 + 이유(관리 ID 없음 · 특권·데이터 역할 없음 · 못 읽음 · 구독 수준 할당 안 보임).
+- 진입점의 높음 권고는 배지(개수), 누르면 진입점 위 상자로 펼침(Wiz 'Click to expand') — 그래프를 아래로 밀고 겹치지 않음.
+- 노드에 마우스·초점 = 그 노드를 지나는 사슬(인터넷까지 위로, 데이터까지 아래로)만 밝게. 확대·축소·맞춤. 선: 주황 = 인터넷 노출(점선 = 허용 목록으로 제한), 파랑 = 관리 ID·읽기 역할, 빨강 = 특권·쓰기 역할과 닿는 데이터.
+- Wiz와 다른 점: 데이터 저장소의 '데이터 발견'(민감 데이터 분류)은 없음 — 그 데이터원이 없어서 그리지 않음. 테스트 `attackPathGraph.test.ts`·`azureRiskCombos.test.ts`(보유자).
 

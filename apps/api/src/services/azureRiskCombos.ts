@@ -30,7 +30,7 @@ export type CombosInput = {
   /** lower-case top-level resource id → High unhealthy assessments (own + its child entities'); null = not read */
   high: Map<string, { count: number; names: string[]; name: string; type: string; resourceGroup: string; children?: number }> | null;
   /** lower-case resource id → its managed identity principals; null = not read */
-  identities: Map<string, { principals: string[]; name: string; type: string; resourceGroup: string }> | null;
+  identities: Map<string, { principals: string[]; name: string; type: string; resourceGroup: string; named?: Array<{ principalId: string; kind: "system" | "user"; name: string }> }> | null;
   /** role assignments of those principals; null = not read */
   roles: RoleIn[] | null;
   /** a part of the exposure read failed: VMs (the diagram) or PaaS (publicNetworkAccess) — missing ones are unknown, not n/a */
@@ -241,6 +241,8 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
     const id = lc(e.id);
     const h = input.high?.get(id);
     const principals = input.identities?.get(id)?.principals ?? [];
+    const named = input.identities?.get(id)?.named ?? [];
+    const nameOf = (p: string) => named.find((n) => lc(n.principalId) === lc(p))?.name;
     const identityUnknown = input.identities === null || (principals.length > 0 && (input.roles === null || !!input.rolesAboveHidden));
     const roles: AzurePathRole[] = [];
     let otherRoles = 0;
@@ -258,7 +260,10 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
           ...(scopeName ? { scopeName } : {}),
           reaches: JEWEL_ORDER.map((k) => { const l = inside.filter((j) => j.kind === k); return { kind: k, count: l.length, names: l.slice(0, 5).map((j) => j.name) }; }).filter((x) => x.count > 0),
         };
-        if (!roles.some((x) => x.kind === role.kind && x.role === role.role && x.scope === role.scope && x.scopeName === role.scopeName && x.write === role.write && x.viaKeys === role.viaKeys)) roles.push(role);
+        const holder = nameOf(p);
+        const same = roles.find((x) => x.kind === role.kind && x.role === role.role && x.scope === role.scope && x.scopeName === role.scopeName && x.write === role.write && x.viaKeys === role.viaKeys);
+        if (same) { if (holder && !(same.holders ?? []).includes(holder)) same.holders = [...(same.holders ?? []), holder]; }
+        else roles.push(holder ? { ...role, holders: [holder] } : role);
       }
     }
     const reachesData = roles.some((r) => r.reaches.length > 0);
@@ -271,7 +276,8 @@ export function attackPaths(input: CombosInput): AzureAttackPath[] {
       key: azureRiskKey(e.resourceGroup, e.type, e.name).replace(/^azure:/, "path:"),
       entry: { name: e.name, type: e.type, resourceGroup: e.resourceGroup, ...(e.detail ? { detail: e.detail } : {}), ...(e.limited ? { limited: true } : {}), resourceId: id },
       vuln: h ? { count: h.count, names: h.names } : null,
-      roles, ends, sev, ...(identityUnknown ? { identityUnknown: true } : {}), identity: { principals: principals.length, otherRoles },
+      roles, ends, sev, ...(identityUnknown ? { identityUnknown: true } : {}),
+      identity: { principals: principals.length, otherRoles, ...(named.length ? { list: named.map(({ kind, name }) => ({ kind, name })) } : {}) },
     });
   }
   const rank = { critical: 0, high: 1, medium: 2 } as const;
@@ -349,6 +355,11 @@ export async function getAzureRiskCombos(env: Env, bearerToken: string, subscrip
   const identities = idRows && uamis ? new Map(idRows.map((r) => [r.id, {
     name: r.name, type: r.type, resourceGroup: r.resourceGroup,
     principals: [...new Set([r.sp, ...(r.ua ?? []).map((u) => uamiPrincipal.get(lc(u)))].filter((x): x is string => !!x && /^[0-9a-f-]{36}$/i.test(x)))],
+    // the graph names them: system-assigned = the resource's own identity, user-assigned = the identity resource's name
+    named: [
+      ...(r.sp && /^[0-9a-f-]{36}$/i.test(r.sp) ? [{ principalId: r.sp, kind: "system" as const, name: r.name }] : []),
+      ...(r.ua ?? []).flatMap((u) => { const pid = uamiPrincipal.get(lc(u)); return pid ? [{ principalId: pid, kind: "user" as const, name: u.split("/").pop() ?? u }] : []; }),
+    ],
   }])) : null;
   const principals = [...new Set([...(identities?.values() ?? [])].flatMap((i) => i.principals))];
   let roles: RoleIn[] | null = identities ? [] : null;

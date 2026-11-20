@@ -57,6 +57,8 @@ export type AzurePathRole = {
   scopeName?: string;
   /** data stores of this subscription inside the scope the role reaches (data roles: their service only) */
   reaches: Array<{ kind: AzureJewelKind; count: number; names: string[] }>;
+  /** the entry's managed identities that hold this role (names of `identity.list`) — the graph draws identity → role */
+  holders?: string[];
 };
 
 /**
@@ -74,8 +76,11 @@ export type AzureAttackPath = {
   /** the identity could not be judged (identities / roles unread) — the path may go further than shown */
   identityUnknown?: boolean;
   /** why it stops where it does: the entry's managed identities, and its roles that are neither privileged nor data roles */
-  identity: { principals: number; otherRoles: number };
+  identity: { principals: number; otherRoles: number; list?: AzurePathIdentity[] };
 };
+
+/** One managed identity of a path's entry: system-assigned (named after the resource) or user-assigned (its own name) */
+export type AzurePathIdentity = { kind: "system" | "user"; name: string };
 
 export type AzureRiskResponse = {
   subscriptionId: string;

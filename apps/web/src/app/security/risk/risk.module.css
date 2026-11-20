@@ -262,3 +262,49 @@
 .azChain > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: var(--text-small); overflow-wrap: anywhere; min-width: 0; }
 .azChain > li + li::before { content: "↓"; color: var(--subtle); width: 100%; line-height: 1; }
 .azPending { margin: 0 0 12px; padding-left: 18px; display: grid; gap: 2px; font-size: var(--text-small); }
+
+/* Azure 공격 경로 그림 (AttackPathGraph — Wiz Attack Path Visualization) */
+.apgWrap { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 16px; min-width: 0; }
+@media (max-width: 900px) { .apgWrap { grid-template-columns: minmax(0, 1fr); } }
+.apgPaths { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; align-content: start; max-height: 520px; overflow: auto; }
+.apgPaths li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); font-size: var(--text-small); min-width: 0; }
+.apgPaths li[data-on] { background: rgba(var(--accent-rgb), 0.08); box-shadow: inset 2px 0 0 var(--accent); }
+.apgPaths li button { text-align: left; overflow-wrap: anywhere; }
+.apgMain { display: grid; gap: 8px; min-width: 0; scroll-margin-top: var(--sticky-top); }
+.apg { display: grid; gap: 6px; min-width: 0; }
+.apgTools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.apgZoom { display: inline-flex; align-items: center; gap: 4px; }
+.apgScale { min-width: 44px; text-align: center; font-size: var(--text-caption); color: var(--muted); font-variant-numeric: tabular-nums; }
+.apgCanvas { min-width: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid);
+  background-image: radial-gradient(rgba(var(--ink-rgb), 0.08) 1px, transparent 1px); background-size: 16px 16px; }
+.apgCanvas svg { display: block; }
+.apgEdge { fill: none; stroke: rgba(var(--series1-rgb), 0.55); stroke-width: 1.75; transition: opacity var(--motion-fast); }
+.apgEdge[data-kind="exposure"] { stroke: var(--warning-strong); }
+.apgEdge[data-limited] { stroke-dasharray: 5 4; }
+.apgEdge[data-danger] { stroke: var(--danger); }
+.apgEdge[data-kind="stop"] { stroke: var(--subtle); stroke-dasharray: 2 4; }
+.apgEdge[data-dim] { opacity: 0.15; }
+.apgNode { cursor: default; outline: none; transition: opacity var(--motion-fast); }
+.apgNode[role="button"] { cursor: pointer; }
+.apgNode[data-dim] { opacity: 0.3; }
+.apgNode > circle { fill: var(--panel-solid); stroke-width: 2; stroke: var(--border-strong, var(--subtle)); }
+.apgNode[data-tone="info"] > circle { stroke: rgb(var(--series1-rgb)); fill: rgba(var(--series1-rgb), 0.08); }
+.apgNode[data-tone="warn"] > circle { stroke: var(--warning-strong); fill: rgba(var(--warning-rgb), 0.12); }
+.apgNode[data-tone="danger"] > circle { stroke: var(--danger); fill: rgba(var(--danger-rgb), 0.08); }
+.apgNode:focus-visible > circle { stroke-width: 3; stroke: var(--accent); }
+.apgIcon { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.apgNode[data-kind="stop"] .apgIcon { stroke: var(--subtle); }
+.apgCount > circle { fill: var(--danger); stroke: var(--panel-solid); stroke-width: 2; }
+.apgCount > text { fill: #fff; /* white on the red count badge — legible in both themes */ font-size: var(--text-caption); font-weight: 700; text-anchor: middle; }
+.apgLabel { fill: var(--ink); font-size: var(--text-caption); font-weight: 600; text-anchor: middle; }
+.apgSub { fill: var(--subtle); font-size: var(--text-caption); text-anchor: middle; }
+.apgBox > rect { fill: rgba(var(--danger-rgb), 0.05); stroke: var(--danger); stroke-width: 1.5; }
+.apgBoxHead { fill: var(--danger-strong); font-size: var(--text-caption); font-weight: 600; }
+.apgBoxItem { fill: var(--ink); font-size: var(--text-caption); }
+.apgBoxLink { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.apgLegend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--text-caption); color: var(--muted); }
+.apgLegend li { display: inline-flex; align-items: center; gap: 6px; }
+.apgLegend i { width: 18px; height: 0; border-top: 2px solid rgba(var(--series1-rgb), 0.55); }
+.apgLegend [data-k="exposure"] i { border-top-color: var(--warning-strong); }
+.apgLegend [data-k="limited"] i { border-top: 2px dashed var(--warning-strong); }
+.apgLegend [data-k="danger"] i { border-top-color: var(--danger); }

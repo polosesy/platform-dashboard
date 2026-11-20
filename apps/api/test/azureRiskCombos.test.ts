@@ -295,3 +295,18 @@ test("undetermined is listed with the factor and the reason — and the child-ru
   assert.match(svc, /readChildRules\(fetcher as never, f\.id, f\.type\)/, "PostgreSQL / MySQL / SQL firewall rules read for resources with a finding or identity");
   assert.doesNotMatch(svc, /await Promise\.all\(\[\s*vmExpo,/, "the reads go one after another (quota)");
 });
+
+test("paths name their identities and who holds each role (the graph draws identity → role → data)", () => {
+  const blobReader = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1";
+  const rg = `/subscriptions/${SUB}/resourceGroups/rg`;
+  const named = [{ principalId: "pw", kind: "system" as const, name: "web" }, { principalId: "pu", kind: "user" as const, name: "id-app" }];
+  const [p] = attackPaths(pathInput([
+    { principalId: "pw", roleDefGuid: blobReader, scope: rg }, { principalId: "pu", roleDefGuid: blobReader, scope: rg }, // the same role twice → one role, two holders
+    { principalId: "pu", roleDefGuid: P_OWNER, scope: rg },
+  ], { identities: new Map([[id("rg", VM, "web"), { principals: ["pw", "pu"], named, ...res("rg", VM, "web") }]]) }));
+  assert.deepEqual(p!.identity.list, [{ kind: "system", name: "web" }, { kind: "user", name: "id-app" }]);
+  assert.deepEqual(p!.roles.map((r) => [r.kind, r.holders]), [["data", ["web", "id-app"]], ["privileged", ["id-app"]]]);
+  // identities read without names (older input) — no list, no holders: the graph draws one "managed identity" node
+  const [q] = attackPaths(pathInput([{ principalId: "pw", roleDefGuid: blobReader, scope: rg }]));
+  assert.deepEqual([q!.identity.list, q!.roles[0]!.holders], [undefined, undefined]);
+});
