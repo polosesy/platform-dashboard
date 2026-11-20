@@ -431,8 +431,6 @@
 .exGroupH { font-size: var(--text-caption); font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 .exQuery { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0 8px; font-size: var(--text-small); }
 .exSave { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
-.exWatch { display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-caption); }
-.exWatch input { width: auto; }
 .exSave select { font: inherit; font-size: var(--text-caption); padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: inherit; }
 .exSave > input { font: inherit; font-size: var(--text-caption); padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: inherit; width: 160px; }
 .exResult { display: grid; gap: 8px; }

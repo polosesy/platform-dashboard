@@ -15,7 +15,7 @@ import { EvidenceChip, Inspector, Pill, type InspectorModel, type InspectorRow }
 import type { InsightsNav } from "./model";
 import { COND_GROUPS, CONDITIONS, PRESETS, buildGraph, decodeQuery, encodeQuery, runQuery, type CondKey, type GraphPaas, type GraphWorkload } from "@/lib/securityGraph";
 import styles from "./insights.module.css";
-import { FilterChip, LinkButton } from "@/components/ui";
+import { FilterChip, LinkButton, Toggle } from "@/components/ui";
 
 const SAVED_KEY = "aud.explore.saved";
 type Saved = { name: string; q: string };
@@ -214,7 +214,7 @@ export function ExplorePanel({ clusterId, insights, wi, wiState, nav }: {
               <FilterChip disabled={!name.trim()} onClick={save}>{t("ex.save")}</FilterChip>
               {canWrite ? (
                 <>
-                  <label className={styles.exWatch}><input type="checkbox" checked={watch} onChange={(e) => setWatch(e.target.checked)} /> {t("ex.team.watchLabel")}</label>
+                  <Toggle checked={watch} onChange={setWatch}>{t("ex.team.watchLabel")}</Toggle>
                   {watch ? (
                     <select value={sev} onChange={(e) => setSev(e.target.value as SavedQuery["sev"])} aria-label={t("ex.team.sev")}>
                       {(["critical", "high", "medium"] as const).map((v) => <option key={v} value={v}>{t(`ex.sev.${v}`)}</option>)}

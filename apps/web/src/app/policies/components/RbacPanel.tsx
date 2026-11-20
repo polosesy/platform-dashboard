@@ -5,6 +5,7 @@ import type { RbacBindingInfo, RbacRoleInfo } from "@aud/types";
 import styles from "../styles.module.css";
 import { useI18n } from "@/lib/i18n";
 import { Badge, Empty } from "./shared";
+import { Toggle } from "@/components/ui";
 
 function subjectText(b: RbacBindingInfo): string {
   return b.subjects.map((s) => `${s.kind}:${s.namespace ? `${s.namespace}/` : ""}${s.name}`).join(", ") || "-";
@@ -47,10 +48,7 @@ export function RbacPanel({ roles, bindings, showSystem }: { roles: RbacRoleInfo
         </div>
       )}
       <div className={styles.controls}>
-        <label className={styles.toggle}>
-          <input type="checkbox" checked={riskyOnly} onChange={(e) => setRiskyOnly(e.target.checked)} />
-          {t("polc.rbac.riskyOnly")}
-        </label>
+        <Toggle checked={riskyOnly} onChange={setRiskyOnly}>{t("polc.rbac.riskyOnly")}</Toggle>
         <input className={styles.search} placeholder={t("polc.rbac.search")} value={query} onChange={(e) => setQuery(e.target.value)} />
         <a className={styles.refLink} href="https://kubernetes.io/docs/concepts/security/rbac-good-practices/" target="_blank" rel="noreferrer">
           RBAC Good Practices

@@ -319,8 +319,11 @@ export function Button({
 /** On/off switch. When `disabled`, `title` should say why (e.g. no measured data). */
 export function Toggle({ checked, onChange, children, title, disabled }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; title?: string; disabled?: boolean }) {
   return (
+    // A switch (track + knob) over the native checkbox — the keyboard, the label click and screen readers keep the
+    // real input; role="switch" says on / off instead of checked (renewal 2026-11-20, design-system.md 9.3)
     <label className={s.toggle} title={title} data-disabled={disabled || undefined}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" role="switch" className={s.toggleInput} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span className={s.switch} aria-hidden="true" />
       {children}
     </label>
   );

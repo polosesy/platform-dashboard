@@ -30,16 +30,6 @@
   min-width: 200px;
 }
 
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-small);
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-}
-
 .error {
   padding: 10px 12px;
   border: 1px solid rgba(var(--danger-rgb), 0.26);

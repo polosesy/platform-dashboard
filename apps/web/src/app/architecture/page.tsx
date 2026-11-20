@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MarkerType, type Edge, type Node } from "reactflow";
 import type { ArchitectureGraph } from "@aud/types";
-import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Segmented, Select, LinkButton } from "@/components/ui";
+import { Button, EmptyState, ErrorNotice, LoadingState, Notice, PageHeader, SampleDataNotice, Segmented, Select, LinkButton, Toggle } from "@/components/ui";
 import { applyBand, applyManualLines, arrangementStatus, bandPlan, cellPlan, compactBox, dropPlan, moveInOrder, parseArrangement, relationBetween, relationIndex, resetBand, resetBox, samePair, serializeArrangement, setCols, stepBand, stepCell, stepInOrder, type Arrangement, type LineStyle, type ManualLine, type MoveResult } from "@/lib/archArrange";
 import { maskGuids } from "@/lib/mask";
 import { useArrangement } from "./hooks/useArrangement";
@@ -619,10 +619,7 @@ function Diagram({ graph, subscriptionId }: { graph: ArchitectureGraph; subscrip
         <section className={s.editBar} aria-label={t("arch.edit.title")}>
           <span className={s.editBadge}>{t("arch.edit.badge", { n: editStatus.reordered, m: editStatus.lines })}</span>
           {editMode === "auto" ? (
-            <label className={s.layerItem}>
-              <input type="checkbox" checked={applyEdits} onChange={(e) => setApplyEdits(e.target.checked)} />
-              {t("arch.edit.apply")}
-            </label>
+            <Toggle checked={applyEdits} onChange={setApplyEdits}>{t("arch.edit.apply")}</Toggle>
           ) : null}
           {editMode === "connect" ? (
             <Segmented

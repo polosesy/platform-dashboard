@@ -356,3 +356,27 @@ test("canvas card grammar: live card · AKS node card · diagram tile · service
   for (const text of [live, arch, net]) assert.match(text, /:hover \{?[^}]*box-shadow: var\(--shadow-raise\)/);
   assert.match(block(live, ".cardName"), /font-weight: 600/);
 });
+
+// Renewal step 4 (2026-11-20): an on/off control is the kit Toggle — a switch (track + knob over the native checkbox,
+// role="switch"); a raw checkbox outside the kit is left only where it picks items from a list
+test("Toggle is a switch; raw checkboxes outside the kit only in pick-from-a-list menus (ratchet)", () => {
+  assert.match(kitTsx, /<input type="checkbox" role="switch" className=\{s\.toggleInput\}/);
+  assert.match(kitTsx, /<span className=\{s\.switch\} aria-hidden="true" \/>/);
+  assert.match(rule(".switch"), /background: var\(--subtle\);/, "off track 3:1+ (WCAG 1.4.11), not a pale grey");
+  assert.match(kitCss, /\.toggleInput:checked \+ \.switch \{\s*background: var\(--accent\);/);
+  assert.match(kitCss, /\.toggleInput:focus-visible \+ \.switch \{\s*outline: 2px solid var\(--accent\);/);
+  const ALLOWED: Record<string, number> = {
+    "app/architecture/components/CategoryFilter.tsx": 1, // category multi-pick
+    "app/architecture/page.tsx": 3, // line-layer menu (layers · all lines · traffic layer)
+    "app/live-diagram/page.tsx": 2, // multi-select dropdown · line-layer menu
+    "app/policies/components/NetpolSimPanel.tsx": 1, // policies to switch off in the simulation (list)
+    "app/policies/insights/RiskCombos.tsx": 1, // remediation actions to tick (list)
+    "app/settings/preferences/page.tsx": 1, // subscription filter (list)
+  };
+  const found: Record<string, number> = {};
+  for (const f of sources.filter((p) => p.endsWith(".tsx") && !rel(p).startsWith("components/ui/"))) {
+    const n = (readFileSync(f, "utf8").match(/type="checkbox"/g) ?? []).length;
+    if (n) found[rel(f)] = n;
+  }
+  assert.deepEqual(found, ALLOWED);
+});
