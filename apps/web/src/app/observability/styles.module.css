@@ -1394,9 +1394,13 @@
 .colVerdictWhy { font-size: var(--text-caption); color: var(--muted); }
 .colCharts { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 @media (max-width: 640px) { .colCharts { grid-template-columns: minmax(0, 1fr); } }
-.colChart { margin: 0; display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
-.colChartHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; font-size: var(--text-small); font-weight: 600; }
-.colChartNow { display: inline-flex; flex-wrap: wrap; gap: 8px; font-size: var(--text-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+.colChart { margin: 0; display: grid; align-content: start; /* a card stretched to its row's height keeps its head and plot at the top (the head grew to 51px) */ gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-solid); }
+/* head = two fixed lines (title · current values): the height never depends on how long a value or a time is */
+.colChartHead { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 2px; font-size: var(--text-small); font-weight: 600; }
+.colChartTitle { min-width: 0; height: 20px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* a fixed line: a title with a fallback glyph (·, %, …) was 25px, the rest 20 */
+.colChartNow { display: flex; flex-wrap: nowrap; gap: 8px; min-width: 0; height: 18px; line-height: 18px; overflow: hidden; white-space: nowrap; font-size: var(--text-caption); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* the crosshair's time on the x-axis: a halo of the card's paper so it reads over the grid */
+.colAt { font-size: var(--text-caption); font-weight: 600; fill: var(--ink); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--panel-solid); stroke-width: 6px; stroke-linejoin: round; }
 .colChartNow [data-limit] { color: var(--subtle); font-weight: 500; }
 .colPlot { position: relative; min-width: 0; min-height: 132px; }
 .colEmpty { margin: 0; display: grid; place-items: center; height: 132px; font-size: var(--text-caption); color: var(--subtle); border: 1px dashed var(--border); border-radius: var(--radius-sm); }
@@ -1412,7 +1416,6 @@
 .colDot { stroke: var(--panel-solid); stroke-width: 2; fill: rgb(var(--series1-rgb)); }
 .colDot[data-i="1"] { fill: rgb(var(--series2-rgb)); }
 .colDot[data-i="2"] { fill: rgb(var(--series3-rgb)); }
-.colChartNow [data-at] { color: var(--muted); font-weight: 500; }
 .colLegend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: var(--text-caption); color: var(--muted); }
 .colLegend li, .colTipRow { display: inline-flex; align-items: center; gap: 6px; }
 .colLegend i, .colTipRow i { width: 12px; height: 2px; background: rgb(var(--series1-rgb)); }

@@ -18,6 +18,8 @@ import { useWidth } from "./UptimeBars";
 import styles from "../styles.module.css";
 
 const H = 132, PAD = { l: 52, r: 10, t: 10, b: 20 };
+/** The axis time label: half its width (kept inside the plot) and how near an axis end it hides that end's label */
+const AT_HALF = 44, AT_CLEAR = 150;
 
 export type ChartLine = { signal: CollectorSignal | undefined; label: string };
 
@@ -91,9 +93,10 @@ export function MetricChart({ id, title, promql, lines, limit, limitLabel, thres
   return (
     <figure className={styles.colChart} data-chart={id}>
       <figcaption className={styles.colChartHead}>
-        <span title={promql}>{title}</span>
+        {/* two fixed rows (title · values): the time of a synced crosshair sits on the x-axis, not here — a time in
+            this row wrapped it onto a second line and every card in the row changed height (2026-11-20) */}
+        <span className={styles.colChartTitle} title={promql}>{title}</span>
         <span className={styles.colChartNow}>
-          {synced ? <span data-at>{fmt(at ?? cross!.ms)}</span> : null}
           {present.map((l, i) => (!l.signal.series ? null : synced
             ? <span key={l.signal.id} data-i={i}>{valAt(l.signal) === null ? "—" : text(l.signal, valAt(l.signal), at)}</span>
             : <span key={l.signal.id} data-i={i}>{text(l.signal, l.signal.now, lastT(l.signal))}</span>))}
@@ -127,9 +130,13 @@ export function MetricChart({ id, title, promql, lines, limit, limitLabel, thres
               {drawLimit ? <path className={styles.colLimit} d={path(limit!.series!)} /> : null}
               {measured.map((l) => <path key={l.signal.id} className={styles.colLine} data-i={present.indexOf(l)} d={path(l.signal.series!)} />)}
               {crossX !== null ? <line className={styles.colCross} data-mine={mine || undefined} x1={crossX} x2={crossX} y1={PAD.t} y2={PAD.t + ih} /> : null}
+              {/* the crosshair's time on the axis (this chart and every synced one) — the axis ends step aside under it */}
+              {crossX !== null && (mine || synced) ? (
+                <text className={styles.colAt} x={Math.min(Math.max(crossX, PAD.l + AT_HALF), w - PAD.r - AT_HALF)} y={H - 4} textAnchor="middle" data-at>{fmt(at ?? cross!.ms)}</text>
+              ) : null}
               {at !== null ? measured.map((l) => { const v = valAt(l.signal); return v === null ? null : <circle key={l.signal.id} className={styles.colDot} data-i={present.indexOf(l)} cx={x(at)} cy={y(v)} r={4} />; }) : null}
-              <text className={styles.colAxis} x={PAD.l} y={H - 4}>{fmt(from)}</text>
-              <text className={styles.colAxis} x={w - PAD.r} y={H - 4} textAnchor="end">{fmt(to)}</text>
+              {crossX !== null && (mine || synced) && crossX - PAD.l < AT_CLEAR ? null : <text className={styles.colAxis} x={PAD.l} y={H - 4}>{fmt(from)}</text>}
+              {crossX !== null && (mine || synced) && w - PAD.r - crossX < AT_CLEAR ? null : <text className={styles.colAxis} x={w - PAD.r} y={H - 4} textAnchor="end">{fmt(to)}</text>}
             </svg>
           ) : null}
         {mine && crossX !== null ? (

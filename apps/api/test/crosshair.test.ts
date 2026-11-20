@@ -70,3 +70,17 @@ test("both metric screens wrap their charts in one CrosshairGroup", () => {
     assert.match(src, /<CrosshairGroup>/, f);
   }
 });
+
+// 2026-11-20: hovering one chart put a time into every other chart's head, the head wrapped onto a second line and
+// the cards of the row changed height — the time now sits on the x-axis (inside the fixed-height plot)
+test("a synced crosshair never changes a card's height: no time in the head, the time on the axis, a two-line head", () => {
+  const chart = readFileSync(new URL("../../web/src/app/observability/components/MetricChart.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../web/src/app/observability/styles.module.css", import.meta.url), "utf8");
+  const head = chart.slice(chart.indexOf("<figcaption"), chart.indexOf("</figcaption>"));
+  assert.doesNotMatch(head, /data-at/, "no time in the head");
+  assert.match(chart, /<text className=\{styles\.colAt\}[^>]*data-at>/, "the time on the x-axis");
+  assert.match(css, /\.colChartHead \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.colChart \{ margin: 0; display: grid; align-content: start;/, "a stretched card does not grow its head");
+  assert.match(css, /\.colChartNow \{[^}]*flex-wrap: nowrap;[^}]*height: 18px;[^}]*white-space: nowrap;/);
+  assert.match(css, /\.colChartTitle \{[^}]*height: 20px; line-height: 20px;[^}]*white-space: nowrap;/);
+});
